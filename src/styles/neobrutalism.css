@@ -1,0 +1,687 @@
+/* Neobrutalism Theme Overrides - Tarab Neo design system */
+
+:root[data-theme="neobrutalism"] {
+  color-scheme: light;
+
+  --surface-shell: #f2f0e9;
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-muted: #e5e5e5;
+  --surface-interactive: #facc15;
+  --surface-highlight: #84cc16;
+
+  --type-primary: #000000;
+  --type-secondary: #1a1a1a;
+  --type-subdued: #6b7280;
+
+  --signal-play: #84cc16;
+  --signal-play-ink: #000000;
+  --signal-active: #facc15;
+  --signal-active-ink: #000000;
+  --signal-secondary: #a855f7;
+  --signal-secondary-ink: #ffffff;
+  --signal-danger: #f87171;
+  --signal-danger-ink: #ffffff;
+
+  --stroke-subtle: #000000;
+  --field-surface: #ffffff;
+  --focus-ring: #000000;
+
+  --lucide-stroke-width: 3;
+
+  --background: var(--surface-shell);
+  --foreground: var(--type-primary);
+  --card: var(--surface-raised);
+  --card-foreground: var(--type-primary);
+  --popover: var(--surface-overlay);
+  --popover-foreground: var(--type-primary);
+  --primary: var(--signal-secondary);
+  --primary-foreground: var(--signal-secondary-ink);
+  --secondary: var(--signal-active);
+  --secondary-foreground: var(--signal-active-ink);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--type-secondary);
+  --accent: var(--signal-play);
+  --accent-foreground: var(--signal-play-ink);
+  --destructive: var(--signal-danger);
+  --destructive-foreground: var(--signal-danger-ink);
+  --border: var(--stroke-subtle);
+  --input: var(--field-surface);
+  --ring: var(--focus-ring);
+
+  --radius-r1: 0px;
+  --radius-r2: 0px;
+  --radius-r3: 0px;
+  --radius-r4: 0px;
+  --radius: 0px;
+
+  --glass: #ffffff;
+  --glass-border: #000000;
+  --glass-highlight: transparent;
+  --glass-shadow: #000000;
+
+  --text: var(--type-primary);
+  --muted-text: #000000;
+  --dim: #000000;
+  --faint: #000000;
+  --text-contrast-bias: 1;
+
+  --transition-d1: 80ms;
+  --transition-d2: 100ms;
+  --transition-d3: 120ms;
+  --transition-d4: 150ms;
+  --transition-easing: ease-out;
+  --transition-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Root canvas — dot matrix (spec) */
+[data-theme="neobrutalism"] {
+  background-color: #e9e9e9 !important;
+  background-image: radial-gradient(circle, #b0b0b0 1px, transparent 1px) !important;
+  background-size: 18px 18px !important;
+  background-attachment: fixed !important;
+  color: var(--type-primary) !important;
+}
+
+[data-theme="neobrutalism"].dark {
+  background-color: #1a1a1a !important;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px) !important;
+  background-size: 18px 18px !important;
+}
+
+[data-theme="neobrutalism"] * {
+  border-color: #000000 !important;
+  outline-color: #000000 !important;
+}
+
+/* Four-level typography — apply via class in neo views */
+[data-theme="neobrutalism"] .neo-type-level-1 {
+  font-size: clamp(40px, 8vw, 64px) !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  letter-spacing: -0.02em !important;
+}
+
+[data-theme="neobrutalism"] .neo-type-level-2 {
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+}
+
+[data-theme="neobrutalism"] .neo-type-level-3 {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.12em !important;
+  color: #888888 !important;
+}
+
+[data-theme="neobrutalism"] .neo-type-level-4 {
+  font-size: 28px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* Radius: square neo chrome (artist circles use .neo-artist-avatar in pointy.css) */
+[data-theme="neobrutalism"] .radius-r1,
+[data-theme="neobrutalism"] .radius-r2,
+[data-theme="neobrutalism"] .card,
+[data-theme="neobrutalism"] input,
+[data-theme="neobrutalism"] .radius-r3,
+[data-theme="neobrutalism"] .glass-panel,
+[data-theme="neobrutalism"] [role="dialog"],
+[data-theme="neobrutalism"] .radius-r4,
+[data-theme="neobrutalism"] .hero-container,
+[data-theme="neobrutalism"] .rounded-xl,
+[data-theme="neobrutalism"] .rounded-lg,
+[data-theme="neobrutalism"] .rounded-md {
+  border-radius: 0px !important;
+}
+
+/* Surfaces — no blur / filter */
+[data-theme="neobrutalism"] .glass-panel,
+[data-theme="neobrutalism"] .glass-panel-subtle,
+[data-theme="neobrutalism"] .glass-panel-strong,
+[data-theme="neobrutalism"] .panel,
+[data-theme="neobrutalism"] .panel-strong,
+[data-theme="neobrutalism"] .card,
+[data-theme="neobrutalism"] header,
+[data-theme="neobrutalism"] aside,
+[data-theme="neobrutalism"] [data-slot="card"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+  background-color: #ffffff !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  color: #000000 !important;
+}
+
+[data-theme="neobrutalism"] header {
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  border-radius: 0px !important;
+  border-width: 0 0 2px 0 !important;
+}
+
+/* Default buttons — hard 4px shadow only */
+[data-theme="neobrutalism"] .glass-button,
+[data-theme="neobrutalism"] .adl-liquid-button,
+[data-theme="neobrutalism"]
+  button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(.neo-card-action) {
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  text-transform: uppercase;
+  font-weight: 800;
+  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+  background-color: #ffffff;
+  color: #000000;
+}
+
+[data-theme="neobrutalism"] button.primary {
+  background-color: var(--signal-secondary) !important;
+  color: var(--signal-secondary-ink) !important;
+}
+
+[data-theme="neobrutalism"] .glass-button:hover,
+[data-theme="neobrutalism"] button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(.neo-card-action):hover {
+  transform: translate(-2px, -2px) !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  background-color: var(--signal-play) !important;
+  color: #000000 !important;
+}
+
+[data-theme="neobrutalism"] button.primary:hover {
+  background-color: var(--signal-secondary) !important;
+}
+
+[data-theme="neobrutalism"] .glass-button:active,
+[data-theme="neobrutalism"] button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(.neo-card-action):active {
+  transform: translate(4px, 4px) !important;
+  box-shadow: none !important;
+}
+
+[data-theme="neobrutalism"] [data-slot="popover-content"],
+[data-theme="neobrutalism"] .popover-content {
+  background-color: #ffffff !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  border-radius: 0px !important;
+  opacity: 1 !important;
+  animation: none !important;
+}
+
+[data-theme="neobrutalism"] [data-slot="slider-track"] {
+  background-color: #ffffff !important;
+  border: 2px solid #000000 !important;
+  height: 12px !important;
+  border-radius: 0px !important;
+  overflow: visible !important;
+}
+
+[data-theme="neobrutalism"] [data-slot="slider-range"] {
+  background: var(--signal-secondary) !important;
+  border-right: 2px solid #000000 !important;
+  border-radius: 0px !important;
+}
+
+[data-theme="neobrutalism"] [data-slot="slider-thumb"] {
+  width: 20px !important;
+  height: 28px !important;
+  background-color: var(--signal-active) !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  border-radius: 0px !important;
+  transform: translateY(-4px) !important;
+  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+}
+
+[data-theme="neobrutalism"] [data-slot="slider-thumb"]:hover {
+  background-color: #ffffff !important;
+  transform: translateY(-4px) !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+}
+
+[data-theme="neobrutalism"] input:not([type="range"]),
+[data-theme="neobrutalism"] .glass-input,
+[data-theme="neobrutalism"] .group:has(input) {
+  background: #ffffff !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  border-radius: 0px !important;
+  padding: 12px 16px !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="neobrutalism"] input:focus,
+[data-theme="neobrutalism"] .glass-input:focus-visible {
+  background: var(--signal-active) !important;
+  transform: translate(-2px, -2px) !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+}
+
+[data-theme="neobrutalism"] .track-row {
+  border-bottom: 2px solid #000000 !important;
+  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+}
+
+[data-theme="neobrutalism"] .track-row:hover {
+  background-color: var(--surface-interactive) !important;
+  transform: translate(-4px, -4px) !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+  z-index: 10;
+}
+
+[data-theme="neobrutalism"] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #000000 !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 0px !important;
+}
+
+[data-theme="neobrutalism"] .custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--surface-shell) !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tarab Neo — spec utility classes                                           */
+/* -------------------------------------------------------------------------- */
+
+[data-theme="neobrutalism"] .neo-context-badge {
+  border: 2px solid #000000;
+  background: #f5c518;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  position: absolute;
+  right: 16px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: none;
+  filter: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+[data-theme="neobrutalism"] .neo-seek-track {
+  position: relative;
+  height: 14px;
+  background: #e0e0e0;
+  border: 2px solid #000000;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-seek-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: #7cc61f;
+  pointer-events: none;
+  transition: width 0.1s linear;
+}
+
+[data-theme="neobrutalism"] .neo-seek-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 8px;
+  background: #888888;
+  pointer-events: none;
+}
+
+[data-theme="neobrutalism"] .neo-seek-badge {
+  position: absolute;
+  top: -28px;
+  transform: translateX(-50%);
+  background: #000000;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border: 2px solid #000000;
+  white-space: nowrap;
+  pointer-events: none;
+  font-family: monospace;
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-volume-wrap {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+[data-theme="neobrutalism"] .neo-volume-segment {
+  width: 16px;
+  height: 10px;
+  border: 1px solid #000000;
+  background: #e0e0e0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+[data-theme="neobrutalism"] .neo-volume-segment.active {
+  background: #7cc61f;
+}
+
+[data-theme="neobrutalism"] .neo-toggle {
+  display: flex;
+  width: 80px;
+  height: 28px;
+  border: 2px solid #000000;
+  overflow: hidden;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  user-select: none;
+  box-shadow: 4px 4px 0px 0px #000000;
+}
+
+[data-theme="neobrutalism"] .neo-toggle-on {
+  width: 50%;
+  background: #7cc61f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000000;
+}
+
+[data-theme="neobrutalism"] .neo-toggle-off {
+  width: 50%;
+  background: #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888888;
+}
+
+[data-theme="neobrutalism"] .neo-toggle[data-active="true"] .neo-toggle-on {
+  background: #7cc61f;
+}
+
+[data-theme="neobrutalism"] .neo-toggle[data-active="false"] .neo-toggle-on {
+  background: #e0e0e0;
+}
+
+[data-theme="neobrutalism"] .neo-toggle[data-active="false"] .neo-toggle-off {
+  color: #000000;
+}
+
+[data-theme="neobrutalism"] .neo-empty-state {
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
+  background: #ffffff;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+[data-theme="neobrutalism"] .neo-empty-state-primary {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #000000;
+}
+
+[data-theme="neobrutalism"] .neo-empty-state-secondary {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #888888;
+  margin-top: 4px;
+}
+
+[data-theme="neobrutalism"] .neo-danger-zone {
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+}
+
+[data-theme="neobrutalism"] .neo-danger-zone-label {
+  color: #e53935;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+[data-theme="neobrutalism"] .neo-danger-action {
+  background: #e53935;
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+[data-theme="neobrutalism"] .neo-danger-action:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-card-action {
+  border: 2px solid #000000;
+  box-shadow: 2px 2px 0px 0px #000000;
+  background: #ffffff;
+  padding: 5px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  display: inline-block;
+  margin-top: 8px;
+}
+
+[data-theme="neobrutalism"] .neo-card-action:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-album-card {
+  background: #ffffff;
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
+  padding: 8px;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+[data-theme="neobrutalism"] .neo-album-card:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-album-art-wrap {
+  border: 2px solid #000000;
+  overflow: hidden;
+}
+
+[data-theme="neobrutalism"] .neo-album-card.playing {
+  background: #7cc61f;
+}
+
+[data-theme="neobrutalism"] .neo-play-pause {
+  width: 64px;
+  height: 64px;
+  background: #000000;
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px 0px #f5c518;
+  position: relative;
+  top: -16px;
+  margin-bottom: -16px;
+  border-radius: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+
+[data-theme="neobrutalism"] .neo-play-pause:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .neo-version-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #888888;
+  position: absolute;
+  right: 16px;
+  top: 20px;
+}
+
+[data-theme="neobrutalism"] .neo-cover-album {
+  border-radius: 0 !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 4px 4px 0px 0px #000000 !important;
+}
+
+[data-theme="neobrutalism"] .neo-artist-avatar,
+[data-theme="neobrutalism"] .neo-artist-avatar img {
+  border-radius: 50% !important;
+  border: 2px solid #000000 !important;
+  box-shadow: 3px 3px 0px 0px #000000 !important;
+}
+
+/* Settings / forms: native range rail (home uses segmented volume) */
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"] {
+  --range-fill: #000000;
+  --range-track: #ffffff;
+  height: 12px;
+  border-radius: 0;
+  border: 2px solid #000000;
+  background: linear-gradient(
+    to right,
+    var(--range-fill) 0 var(--range-progress),
+    var(--range-track) var(--range-progress) 100%
+  );
+  box-shadow: 4px 4px 0 0 #000000;
+}
+
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"]::-webkit-slider-track {
+  height: 12px;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 20px;
+  margin-top: -7px;
+  border-radius: 0;
+  border: 2px solid #000000;
+  background: #a4b680;
+  box-shadow: 4px 4px 0 0 #000000;
+}
+
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"]::-moz-range-track {
+  height: 12px;
+  border-radius: 0;
+  background: var(--range-track);
+}
+
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"]::-moz-range-progress {
+  height: 12px;
+  border-radius: 0;
+  background: var(--range-fill);
+}
+
+[data-theme="neobrutalism"] .settings-neo-volume input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 20px;
+  border-radius: 0;
+  border: 2px solid #000000;
+  background: #a4b680;
+  box-shadow: 4px 4px 0 0 #000000;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tarab Neo — Animations                                                     */
+/* -------------------------------------------------------------------------- */
+
+@keyframes neo-pop {
+  0% { transform: scale(0.95) translate(2px, 2px); box-shadow: none; opacity: 0; }
+  60% { transform: scale(1.02) translate(-2px, -2px); box-shadow: 4px 4px 0px 0px #000000; opacity: 1; }
+  100% { transform: scale(1) translate(0, 0); box-shadow: 4px 4px 0px 0px #000000; opacity: 1; }
+}
+
+@keyframes neo-wiggle {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+  75% { transform: rotate(-1deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes neo-slide-up-pop {
+  0% { transform: translateY(20px) scale(0.95); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes neo-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+[data-theme="neobrutalism"] .animate-neo-pop {
+  animation: neo-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+[data-theme="neobrutalism"] .animate-neo-slide-up {
+  animation: neo-slide-up-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+[data-theme="neobrutalism"] .animate-neo-wiggle {
+  animation: neo-wiggle 0.4s ease-in-out;
+}
+
+[data-theme="neobrutalism"] .hover-neo-wiggle:hover {
+  animation: neo-wiggle 0.3s ease-in-out;
+}
+
+/* Stagger utilities for list items */
+[data-theme="neobrutalism"] .neo-stagger-1 { animation-delay: 50ms; }
+[data-theme="neobrutalism"] .neo-stagger-2 { animation-delay: 100ms; }
+[data-theme="neobrutalism"] .neo-stagger-3 { animation-delay: 150ms; }
+[data-theme="neobrutalism"] .neo-stagger-4 { animation-delay: 200ms; }
+[data-theme="neobrutalism"] .neo-stagger-5 { animation-delay: 250ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="neobrutalism"] *,
+  [data-theme="neobrutalism"] *::before,
+  [data-theme="neobrutalism"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  [data-theme="neobrutalism"] button:hover,
+  [data-theme="neobrutalism"] [role="button"]:hover,
+  [data-theme="neobrutalism"] .library-card:hover,
+  [data-theme="neobrutalism"] .album-card:hover,
+  [data-theme="neobrutalism"] .track-row:hover {
+    transform: none !important;
+  }
+}

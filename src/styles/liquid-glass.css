@@ -1,0 +1,255 @@
+/* ============================================
+   LIQUID GLASS BUTTON EFFECT
+   Opt-in class: .liquid-btn
+   ============================================ */
+
+/* CSS Custom Properties for tuning */
+:root {
+  --liquid-blur: 12px;
+  --liquid-saturation: 1.8;
+  --liquid-bg: rgba(255, 255, 255, 0.08);
+  --liquid-bg-hover: rgba(255, 255, 255, 0.12);
+  --liquid-border: rgba(255, 255, 255, 0.18);
+  --liquid-border-hover: rgba(255, 255, 255, 0.28);
+  --liquid-glow-rgb: 255, 255, 255;
+  --liquid-glow-opacity: 0.2;
+  --liquid-glow-opacity-hover: 0.35;
+  --liquid-inner-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.2), inset 0 -1px 1px rgba(0, 0, 0, 0.15);
+  --liquid-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   BASE LIQUID GLASS BUTTON
+   Works on all WebKit (macOS WKWebView)
+   ============================================ */
+
+.liquid-btn {
+  position: relative;
+  overflow: visible; /* Allow glow to extend beyond button bounds */
+  isolation: isolate; /* Create stacking context for pseudo-elements */
+
+  /* Glass background with blur */
+  background: var(--liquid-bg);
+  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-saturation));
+  -webkit-backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-saturation));
+
+  /* Semi-transparent border */
+  border: 1px solid var(--liquid-border) !important;
+
+  /* Depth: inner shadow */
+  box-shadow:
+    var(--liquid-inner-shadow),
+    0 0 20px rgba(var(--liquid-glow-rgb), var(--liquid-glow-opacity)),
+    0 4px 12px rgba(0, 0, 0, 0.25);
+
+  /* Smooth transitions for hover/active */
+  transition:
+    transform var(--liquid-transition),
+    box-shadow var(--liquid-transition),
+    background var(--liquid-transition),
+    border-color var(--liquid-transition);
+}
+
+/* Rim lighting / Fresnel edge glow */
+.liquid-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+
+  /* Radial gradient: brighter at edges, darker center */
+  background: radial-gradient(
+    ellipse 100% 100% at 50% 50%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.08) 70%,
+    rgba(255, 255, 255, 0.15) 100%
+  );
+
+  /* Additional rim highlight at top */
+  mask: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+  -webkit-mask: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+
+  opacity: 1;
+  transition: opacity var(--liquid-transition);
+  z-index: 1;
+}
+
+/* Specular highlight streak + noise overlay */
+.liquid-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+
+  /* Diagonal specular highlight */
+  /* Crisp diagonal highlight streak */
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.25) 0%,
+      rgba(255, 255, 255, 0.08) 25%,
+      transparent 50%,
+      transparent 100%
+    ),
+    /* Noise texture - very subtle grain */
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+
+  background-size:
+    100% 100%,
+    128px 128px;
+  background-repeat: no-repeat, repeat;
+
+  opacity: 1;
+  transition: opacity var(--liquid-transition);
+  z-index: 2;
+}
+
+/* Ensure button content is above pseudo-elements */
+.liquid-btn > * {
+  position: relative;
+  z-index: 3;
+}
+
+/* ============================================
+   HOVER STATE
+   ============================================ */
+
+.liquid-btn:hover {
+  transform: scale(1.02);
+  background: var(--liquid-bg-hover);
+  border-color: var(--liquid-border-hover) !important;
+
+  box-shadow:
+    var(--liquid-inner-shadow),
+    0 0 28px rgba(var(--liquid-glow-rgb), var(--liquid-glow-opacity-hover)),
+    0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.liquid-btn:hover::before {
+  opacity: 1.2;
+}
+
+.liquid-btn:hover::after {
+  /* Slightly brighter highlight on hover */
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.35) 0%,
+      rgba(255, 255, 255, 0.12) 25%,
+      transparent 50%,
+      transparent 100%
+    ),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size:
+    100% 100%,
+    128px 128px;
+  background-repeat: no-repeat, repeat;
+}
+
+/* ============================================
+   ACTIVE/PRESSED STATE
+   ============================================ */
+
+.liquid-btn:active {
+  transform: scale(0.98);
+
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.2),
+    0 0 16px rgba(var(--liquid-glow-rgb), 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ============================================
+   PRIMARY VARIANT (white/light buttons)
+   ============================================ */
+
+.liquid-btn--primary {
+  --liquid-bg: rgba(255, 255, 255, 0.85);
+  --liquid-bg-hover: rgba(255, 255, 255, 0.95);
+  --liquid-border: rgba(255, 255, 255, 0.6);
+  --liquid-border-hover: rgba(255, 255, 255, 0.8);
+  --liquid-glow-opacity: 0.35;
+  --liquid-glow-opacity-hover: 0.5;
+  --liquid-inner-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.4), inset 0 -1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.liquid-btn--primary::before {
+  background: radial-gradient(
+    ellipse 100% 100% at 50% 50%,
+    transparent 30%,
+    rgba(255, 255, 255, 0.2) 60%,
+    rgba(255, 255, 255, 0.4) 100%
+  );
+}
+
+.liquid-btn--primary::after {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.5) 0%,
+      rgba(255, 255, 255, 0.2) 20%,
+      transparent 45%,
+      transparent 100%
+    ),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-size:
+    100% 100%,
+    128px 128px;
+  background-repeat: no-repeat, repeat;
+}
+
+/* ============================================
+   ICON BUTTON VARIANT (smaller, circular)
+   ============================================ */
+
+.liquid-btn--icon {
+  --liquid-blur: 10px;
+  --liquid-glow-opacity: 0.15;
+  --liquid-glow-opacity-hover: 0.25;
+}
+
+/* ============================================
+   PROGRESSIVE ENHANCEMENT
+   SVG Displacement Filter (Chromium/WebView2 only)
+   ============================================ */
+
+/* 
+   Note: SVG displacement-based refraction is unreliable on WebKit/WKWebView.
+   We gate it behind @supports to only enable on browsers that properly support it.
+   The base liquid glass effect works everywhere without this enhancement.
+*/
+
+@supports (filter: url(#liquid-refraction)) and (backdrop-filter: blur(1px)) {
+  /* 
+     This would apply SVG filter for true glass distortion/refraction.
+     Currently disabled as it requires the SVG defs to be in the DOM.
+     To enable: add the SVG filter defs to index.html or a top-level component,
+     then uncomment the line below:
+  */
+  /* .liquid-btn { filter: url(#liquid-refraction); } */
+}
+
+/* ============================================
+   OVERFLOW FIX
+   Ensure glow is not clipped by parent containers
+   ============================================ */
+
+/* Apply to direct parent of liquid buttons if glow is being clipped */
+.liquid-btn-wrapper {
+  overflow: visible;
+  position: relative;
+}

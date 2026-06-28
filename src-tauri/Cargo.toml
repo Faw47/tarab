@@ -1,0 +1,97 @@
+[package]
+name = "TARAB"
+version = "0.1.0"
+description = "A fast local music player with enhanced lyrics"
+edition = "2021"
+
+[lib]
+name = "tarab_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-liquid-glass = { git = "https://github.com/hkandala/tauri-plugin-liquid-glass" }
+tauri-plugin-global-shortcut = "2.3.1"
+tauri-plugin-media = "0.1.1"
+souvlaki = "0.7"
+notify = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+window-vibrancy = "0.5"
+
+# Audio playback
+cpal = "0.15.3"
+rodio = { version = "0.19", features = ["symphonia-all"] }
+symphonia = { version = "0.5", features = ["aac", "flac", "mp3", "vorbis", "wav", "isomp4"] }
+
+# Metadata extraction
+lofty = "0.21"
+
+# File system
+walkdir = "2"
+
+# Parallel processing
+rayon = "1.10"
+
+# Base64 encoding for cover art
+base64 = "0.22"
+
+# Thread-safe state
+parking_lot = "0.12"
+
+# SQLite database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Image processing for thumbnails
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# Hashing for cache keys
+sha2 = "0.10"
+hex = "0.4"
+
+# Directory paths
+dirs = "5"
+tauri-plugin-window-state = "2.4.1"
+tauri-plugin-single-instance = "2.4.0"
+tauri-plugin-store = "2.4.2"
+tauri-plugin-log = "2.8.0"
+tauri-plugin-fs = { version = "2.4.5", features = ["watch"] }
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-positioner = { version = "2.3.1", features = ["tray-icon"] }
+tauri-plugin-os = "2.3.2"
+tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-updater = "2.10.0"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-clipboard-manager = "2.3.1"
+rubato = "0.16"
+sentry = { version = "0.36", features = ["reqwest", "rustls"] }
+blurhash = "0.2.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rand = "0.8"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-process = "2"
+
+[patch.crates-io]
+tauri-plugin-media = { path = "vendor/tauri-plugin-media" }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

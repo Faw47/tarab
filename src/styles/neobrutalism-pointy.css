@@ -1,0 +1,38 @@
+/* Neo square corners — .neo-artist-avatar restored to circle after universal reset */
+
+:root[data-theme="neobrutalism"] {
+  --radius-r1: 0px;
+  --radius-r2: 0px;
+  --radius-r3: 0px;
+  --radius-r4: 0px;
+  --radius: 0px;
+}
+
+[data-theme="neobrutalism"] *,
+[data-theme="neobrutalism"] *::before,
+[data-theme="neobrutalism"] *::after {
+  border-radius: 0 !important;
+}
+
+[data-theme="neobrutalism"] .neo-artist-avatar,
+[data-theme="neobrutalism"] .neo-artist-avatar img {
+  border-radius: 50% !important;
+}
+
+[data-theme="neobrutalism"] .rounded-full,
+[data-theme="neobrutalism"] .pill,
+[data-theme="neobrutalism"] .radius-r1,
+[data-theme="neobrutalism"] .radius-r2,
+[data-theme="neobrutalism"] .radius-r3,
+[data-theme="neobrutalism"] .radius-r4 {
+  border-radius: 0 !important;
+}
+
+[data-theme="neobrutalism"] input[type="range"]::-webkit-slider-thumb,
+[data-theme="neobrutalism"] input[type="range"]::-webkit-slider-runnable-track,
+[data-theme="neobrutalism"] input[type="range"]::-moz-range-thumb,
+[data-theme="neobrutalism"] input[type="range"]::-moz-range-track,
+[data-theme="neobrutalism"] input[type="range"]::-ms-thumb,
+[data-theme="neobrutalism"] input[type="range"]::-ms-track {
+  border-radius: 0 !important;
+}

@@ -1,0 +1,1279 @@
+/* ─── Base layout ─────────────────────────────────────────────────────────── */
+
+.library-v2-root {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  padding: 2rem 3rem calc(var(--safe-bottom) + 7.75rem);
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Liquid + icon rail: tuck content slightly; keep left edges visually continuous with the rail (no accent border). */
+.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) {
+  padding-left: 1.5rem;
+}
+
+.library-v2-root.library-neo-shell {
+  padding: 0;
+  overflow: hidden;
+  /* Match root neo dot matrix (neobrutalism.css): 18px, #e9e9e9 / #b0b0b0 */
+  background-color: #e9e9e9;
+  background-image: radial-gradient(#b0b0b0 1.2px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+
+/* Neo polaroid + tape styling for grid tiles lives in LibraryResultsOrchestrator (isNeo). */
+
+.library-v2-content.neo-layout-active {
+  max-width: 100%;
+}
+
+/* ─── Atmosphere / ambient background ────────────────────────────────────── */
+
+.library-v2-atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -20;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.library-v2-atmosphere-base {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+}
+
+.library-v2-atmosphere-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /*
+   * FIX [AMBIENT_SCALE]: Old view used scale(1.5) opacity-15 for a wide,
+   * diffuse ambient wash. New was scale(1.2) which produced a tighter, more
+   * identifiable image bleed. Matched to old values.
+   */
+  transform: scale(1.5);
+  opacity: 0.15;
+  filter: blur(50px) saturate(1.2);
+}
+
+.library-v2-atmosphere-glow,
+.library-v2-atmosphere-vignette {
+  position: absolute;
+  inset: 0;
+}
+
+.library-v2-atmosphere-vignette {
+  background: linear-gradient(
+    180deg,
+    rgba(13, 11, 9, 0.08) 0%,
+    rgba(13, 11, 9, 0.36) 52%,
+    rgba(13, 11, 9, 0.64) 100%
+  );
+}
+
+.library-v2-atmosphere-glow {
+  background: transparent;
+}
+
+.library-v2-atmosphere-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP8z/CfAQgwYGBgAQA0VQO1Z4qV1wAAAABJRU5ErkJggg==");
+  background-size: 4px 4px;
+  background-repeat: repeat;
+}
+
+/* ─── Page structure ─────────────────────────────────────────────────────── */
+
+.library-v2-content {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.library-v2-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+  min-height: 100%;
+}
+
+/* ─── Shared glass surface ───────────────────────────────────────────────── */
+/*
+ * FIX [GLASS_BLUR]: Reduced blur from 20px → 15px. At 20px the frosted
+ * surface reads as shower-door opacity, not polished glass. 15px hits the
+ * physical sweet spot while saturate(1.3) (was 1.26) compensates.
+ *
+ * FIX [GLASS_HIGHLIGHT]: Inner highlight nudged from rgba(255,255,255,0.08)
+ * → 0.10. The 0.02 delta is the specular edge-refraction that makes glass
+ * feel like a real material vs. a blurred box.
+ *
+ * FIX [SHADOW_HUE]: Drop shadows changed from pure rgba(0,0,0,x) to
+ * rgba(8,6,4,x) — matches the #0d0b09 base hue so shadows read as depth,
+ * not a pasted-on black layer.
+ */
+
+.library-v2-command-deck,
+.library-v2-detail-header,
+.library-v2-selection,
+.library-v2-track-tile,
+.library-v2-loading-shell,
+.library-v2-error-shell,
+.library-v2-empty-wrap {
+  border-radius: 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 18px 34px -28px rgba(8, 6, 4, 0.78);
+  backdrop-filter: blur(15px) saturate(1.3);
+  -webkit-backdrop-filter: blur(15px) saturate(1.3);
+}
+
+/* ─── Command deck ───────────────────────────────────────────────────────── */
+
+.library-v2-command-deck {
+  padding: 0.1rem 0;
+  position: sticky;
+  top: 0.25rem;
+  z-index: 30;
+  border: 1px solid rgba(255, 255, 255, 0);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition:
+    border-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    backdrop-filter 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/*
+ * FIX [SCROLL_GLASS]: Previously is-scrolled removed all glass treatment,
+ * making tab labels unreadable when content scrolled underneath them.
+ * Flipped: glass is APPLIED on scroll, not stripped.
+ */
+.library-v2-command-deck.is-scrolled {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(8, 6, 4, 0.55);
+  backdrop-filter: blur(28px) saturate(1.35);
+  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 12px -4px rgba(8, 6, 4, 0.45);
+}
+
+.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-command-deck,
+.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-command-deck.is-scrolled {
+  border-left-color: transparent;
+}
+
+.library-v2-detail-header.is-scrolled {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(8, 6, 4, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 22px 40px -30px rgba(8, 6, 4, 0.85);
+}
+
+.library-v2-command-bottom {
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.library-v2-command-bottom > * {
+  min-width: 0;
+}
+
+/* ─── Tab bar (TopBar-themed segmented controls) ────────────────────────── */
+
+.library-v2-tablist {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.22rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.library-v2-tabs-pill {
+  position: absolute;
+  bottom: 0.22rem;
+  top: 0.22rem;
+  border-radius: 9999px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+    0 0 14px -6px rgb(var(--hero-accent-rgb, 255 255 255) / 0.4),
+    0 2px 8px -4px rgba(8, 6, 4, 0.25);
+  transition:
+    left 200ms ease-out,
+    width 200ms ease-out,
+    opacity 200ms ease-out;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-v2-tabs-pill {
+    transition: none;
+  }
+}
+
+.library-v2-tabs-pill.is-dragging {
+  transition: none;
+}
+
+.library-v2-tabs-pill::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0.5rem;
+  top: 0;
+  height: 1px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+  opacity: 0.7;
+}
+
+.library-v2-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.library-v2-tab {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  min-height: 1.82rem;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.82rem;
+  text-align: left;
+  font-size: 0.81rem;
+  font-weight: 540;
+  cursor: pointer;
+  transition:
+    color 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.library-v2-tab.is-icon-only {
+  width: 1.82rem;
+  padding: 0;
+  justify-content: center;
+}
+
+.library-v2-tab.is-active {
+  color: #fff;
+  background: transparent;
+  box-shadow: none;
+}
+
+.library-v2-tab.is-active:hover {
+  background-color: transparent;
+}
+
+.library-v2-tab.is-active::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0.52rem;
+  top: 0;
+  height: 1px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+  opacity: 0.72;
+}
+
+.library-v2-tab-icon {
+  color: currentColor;
+  transition: color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-tab.is-active .library-v2-tab-icon {
+  color: #fff;
+}
+
+.library-v2-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/*
+ * FIX [TAB_COUNT_SIZE]: Bumped from 0.62rem → 0.68rem and padding increased.
+ * At 0.62rem on 1x DPI screens these were sub-9px — below comfortable legibility.
+ */
+.library-v2-tab-count {
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  transition:
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-tab.is-active .library-v2-tab-count {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.library-view-mode-selector {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.22rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+.library-v2-tablist.overflow-visible {
+  overflow: visible;
+}
+
+.library-v2-sort-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.5rem;
+  width: 10rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 16, 15, 0.85);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 12px 30px -10px rgba(8, 6, 4, 0.8);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  z-index: 100;
+}
+
+.library-v2-sort-option {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  border: none;
+  font-size: 0.81rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.library-v2-sort-option:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.library-v2-sort-option.is-selected {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--hero-accent, #fff);
+  font-weight: 600;
+}
+
+
+/* ─── Toolbar ────────────────────────────────────────────────────────────── */
+
+.library-v2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.library-v2-detail-back,
+.library-v2-detail-play,
+.library-v2-selection-actions button,
+.library-v2-error-shell button {
+  --library-v2-control-bg: rgba(255, 255, 255, 0.03);
+  --library-v2-control-bg-hover: rgba(255, 255, 255, 0.12);
+  --library-v2-control-bg-active: rgba(255, 255, 255, 0.06);
+  --library-v2-control-border: rgba(255, 255, 255, 0.06);
+  --library-v2-control-border-hover: rgba(255, 255, 255, 0.12);
+  min-height: 2rem;
+  border-radius: 9999px;
+  border: 1px solid var(--library-v2-control-border);
+  background: var(--library-v2-control-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  padding: 0 0.76rem;
+  cursor: pointer;
+  transition:
+    border-color 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    color 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-detail-back:hover,
+.library-v2-detail-play:hover,
+.library-v2-selection-actions button:hover,
+.library-v2-error-shell button:hover {
+  border-color: var(--library-v2-control-border-hover);
+  background: var(--library-v2-control-bg-hover);
+  color: #fff;
+}
+
+.library-v2-detail-back:active,
+.library-v2-detail-play:active,
+.library-v2-selection-actions button:active,
+.library-v2-error-shell button:active {
+  background: var(--library-v2-control-bg-active);
+  transform: translateY(1px);
+}
+
+
+
+
+
+/* ─── Detail header ──────────────────────────────────────────────────────── */
+
+.library-v2-detail-header {
+  padding: 0.86rem 0.94rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  position: sticky;
+  top: 0.25rem;
+  z-index: 30;
+}
+
+.library-v2-detail-copy {
+  min-width: 0;
+}
+
+.library-v2-detail-title {
+  font-size: clamp(1.2rem, 2.2vw, 1.82rem);
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  font-weight: 740;
+  color: var(--type-primary);
+}
+
+.library-v2-detail-subtitle {
+  margin-top: 0.1rem;
+  font-size: 0.78rem;
+  color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
+}
+
+.library-v2-detail-kicker {
+  margin-top: 0.2rem;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: color-mix(in oklch, var(--type-secondary) 72%, transparent);
+}
+
+.library-v2-detail-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.46rem;
+}
+
+.library-v2-detail-play {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ─── Results pane ───────────────────────────────────────────────────────── */
+/*
+ * FIX [RESULTS_GLASS]: Added ambient glass container to the results pane so
+ * the atmosphere/ambient cover art bleeds through inter-tile gaps instead of
+ * exposing raw #0d0b09. The shell is intentionally whisper-thin so it reads
+ * as a surface, not a box.
+ *
+ * The ::before mesh overlay matches library-v2-empty-wrap's radial pattern
+ * for atmospheric consistency across partial and empty states. The ::after
+ * radial glow pools accent light below the grid to fill the dead space in
+ * partial libraries without a CTA.
+ */
+.library-v2-results-pane {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 0.82rem;
+  border-radius: 1.4rem;
+  padding: 0.6rem;
+  background: rgba(255, 255, 255, 0.012);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-results-pane {
+  border-left-color: transparent;
+}
+
+/* Radial mesh matching the empty-wrap pattern for atmospheric continuity */
+.library-v2-results-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.01) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.008) 0%, transparent 30%);
+  z-index: 0;
+}
+
+/* Accent glow pools below the grid - softens dead space in partial libraries */
+.library-v2-results-pane::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 0;
+  height: 40%;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 100%,
+    rgb(var(--hero-accent-rgb, 255 255 255) / 0.035) 0%,
+    transparent 70%
+  );
+  z-index: 0;
+}
+
+/* Ensure grid content sits above the pseudo-element layers */
+.library-v2-results-pane > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Section label ──────────────────────────────────────────────────────── */
+/*
+ * NEW: Thin section label used above the grid to give album/song/artist count
+ * context. Intentional lowercase to break the all-caps label monotony.
+ */
+.library-v2-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.4rem 0.2rem;
+}
+
+.library-v2-section-label-text {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--type-secondary) 56%, transparent);
+}
+
+.library-v2-section-label-count {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklch, var(--type-secondary) 42%, transparent);
+}
+
+/* ─── Selection bar ──────────────────────────────────────────────────────── */
+
+.library-v2-selection {
+  border-radius: 9999px;
+  padding: 0.45rem 0.56rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.library-v2-selection-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.library-v2-selection-copy span {
+  font-size: 0.7rem;
+  color: color-mix(in oklch, var(--type-secondary) 78%, transparent);
+}
+
+.library-v2-selection-copy strong {
+  font-size: 0.75rem;
+  color: var(--type-primary);
+}
+
+.library-v2-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+}
+
+.library-v2-selection-actions button {
+  min-height: 1.88rem;
+  border-radius: 9999px;
+  font-size: 0.71rem;
+}
+
+/* ─── Grid layouts ───────────────────────────────────────────────────────── */
+
+.library-v2-grid {
+  display: grid;
+  /*
+   * FIX [GRID_GAP]: Increased from 0.95rem → 1.25rem. The glass surfaces
+   * were shoulder-to-shoulder; the extra space lets each tile breathe and
+   * the frosted backing to read as distinct material.
+   */
+  gap: 1.25rem;
+}
+
+.library-v2-track-grid {
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+.library-v2-album-featured-layout {
+  display: flex;
+  min-height: 160px;
+}
+
+.library-v2-album-featured-media {
+  flex: 0 0 160px;
+  width: 160px;
+}
+
+/* ─── Track & album tiles ─────────────────────────────────────────────────
+ *
+ * FIX [CARD_HOVER]: Old view had three hover properties working together:
+ *   scale(1.02) + translateY(-4px) + shadow-[0_20px_40px_rgba(0,0,0,0.5)]
+ * New CSS only did translateY(-2px) — noticeably flatter. Matched old values.
+ *
+ * FIX [CARD_SHINE]: Old view used a `card-shine` pseudo-element that produced
+ * a top-edge specular gradient (linear-gradient from rgba(255,255,255,0.12)
+ * to transparent). Added ::before equivalent here.
+ *
+ * FIX [CARD_SHADOW_HUE]: Hover drop shadow changed from pure rgba(0,0,0,0.5)
+ * to rgba(8,6,4,0.5) — warm-tinted to match the #0d0b09 background hue.
+ *
+ * FIX [CURSOR]: Added cursor: pointer explicitly. Some browsers won't infer
+ * it on interactive div elements without a role or tabindex.
+ */
+
+.library-v2-track-tile,
+.library-v2-album-tile {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Card shine: top-edge specular highlight matching old card-shine class */
+.library-v2-track-tile::before,
+.library-v2-album-tile::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 30%,
+    rgba(255, 255, 255, 0.12) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.library-v2-track-tile:hover,
+.library-v2-album-tile:hover {
+  transform: scale(1.02) translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 20px 40px rgba(8, 6, 4, 0.5);
+}
+
+.library-v2-track-tile:active,
+.library-v2-album-tile:active {
+  transform: scale(0.96);
+  transition-duration: 100ms;
+}
+
+.library-v2-track-tile.is-selected {
+  border-color: color-mix(in oklch, var(--ring) 62%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--ring) 36%, transparent),
+    0 20px 42px -30px color-mix(in oklch, var(--glass-shadow) 90%, transparent);
+}
+
+/*
+ * FIX [NOW_PLAYING_TILE]: Album tiles previously had no now-playing visual.
+ * The is-playing class only targeted the track title text inside list rows.
+ * This adds an accent-tinted inset ring + a warm outer glow on the tile
+ * itself so the currently playing album is always identifiable in grid view.
+ */
+.library-v2-album-tile.is-playing {
+  border-color: rgb(var(--hero-accent-rgb, 255 255 255) / 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--hero-accent-rgb, 255 255 255) / 0.28),
+    0 0 0 2px rgb(var(--hero-accent-rgb, 255 255 255) / 0.18),
+    0 18px 34px -28px rgba(8, 6, 4, 0.78);
+}
+
+.library-v2-track-tile.is-playing {
+  border-color: rgb(var(--hero-accent-rgb, 255 255 255) / 0.42);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--hero-accent-rgb, 255 255 255) / 0.22),
+    0 18px 34px -28px rgba(8, 6, 4, 0.78);
+}
+
+/* ─── Track tile media / album tile media ────────────────────────────────── */
+
+.library-v2-track-media,
+.library-v2-album-media {
+  position: relative;
+  aspect-ratio: 1;
+}
+
+/* ─── Play overlay ───────────────────────────────────────────────────────── */
+
+.library-v2-play-overlay {
+  position: absolute;
+  right: 0.64rem;
+  bottom: 0.64rem;
+  width: 2.08rem;
+  height: 2.08rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  background: rgb(255 255 255 / 95%);
+  color: #060606;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(4px);
+  cursor: pointer;
+  transition:
+    opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-track-tile:hover .library-v2-play-overlay,
+.library-v2-album-tile:hover .library-v2-play-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* When a tile is actively playing, always show the overlay (with a pause icon) */
+.library-v2-album-tile.is-playing .library-v2-play-overlay,
+.library-v2-track-tile.is-playing .library-v2-play-overlay {
+  opacity: 1;
+  transform: translateY(0);
+  background: rgb(var(--hero-accent-rgb, 255 255 255) / 0.95);
+}
+
+/* ─── Select dot ─────────────────────────────────────────────────────────── */
+
+.library-v2-select-dot {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-track-tile:hover .library-v2-select-dot,
+.library-v2-select-dot.is-selected {
+  opacity: 1;
+}
+
+/*
+ * FIX [SELECT_DOT_INNER]: Replaced 0.4rem dot with a scaled checkmark SVG
+ * via clip-path trick. The 0.4rem circle was essentially invisible — you
+ * couldn't tell selected vs. unselected at a glance. This inlines a checkmark
+ * via the border/transform approach used in many design systems.
+ */
+.library-v2-select-inner {
+  width: 0.55rem;
+  height: 0.32rem;
+  border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-48deg) translateY(-0.05rem);
+  opacity: 0;
+  transition: opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-v2-select-dot.is-selected .library-v2-select-inner {
+  opacity: 1;
+}
+
+/* ─── Track meta panel ───────────────────────────────────────────────────── */
+
+.library-v2-track-meta {
+  padding: 0.68rem;
+  border-top: 1px solid color-mix(in oklch, var(--glass-border) 56%, transparent);
+  /*
+   * FIX [META_BLUR]: Old view used `bg-black/40 backdrop-blur-xl` on the
+   * track info panel at the bottom of each card. This is that equivalent —
+   * gives the text area a dark, frosted backing so it's legible over any
+   * cover art regardless of brightness.
+   */
+  background: rgba(8, 6, 4, 0.44);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.library-v2-track-title {
+  font-size: 0.83rem;
+  color: var(--type-primary);
+  font-weight: 640;
+  font-synthesis: none;
+}
+
+.library-v2-track-title.is-playing {
+  color: var(--hero-accent);
+}
+
+.library-v2-track-subtitle {
+  margin-top: 0.18rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+/*
+ * FIX [TRACK_TERTIARY]: Bumped from 0.64rem → 0.68rem and opacity 0.58 → 0.64.
+ * At 0.64rem on 1x DPI screens the text was borderline illegible against the
+ * frosted meta panel, especially with vibrant cover art bleeding through.
+ */
+.library-v2-track-tertiary {
+  margin-top: 0.12rem;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.library-v2-lyrics-match {
+  margin-top: 0.22rem;
+  font-size: 0.62rem;
+  color: color-mix(in oklch, var(--hero-accent) 82%, white);
+  font-style: italic;
+}
+
+/* ─── Artist views ───────────────────────────────────────────────────────── */
+
+.library-v2-artist-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 20, 20, 0.65);
+  color: rgba(255, 255, 255, 0.52);
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────────
+ *
+ * FIX [EMPTY_STATE]: Old view rendered a full glassmorphic 400px panel with
+ * a radial gradient mesh overlay and a large icon. This container mirrors
+ * that structure and hosts the title/message copy directly.
+ */
+
+.library-v2-empty-wrap {
+  position: relative;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 2.5rem;
+  border-radius: 2.25rem;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(20, 15, 11, 0.72) 0%, rgba(10, 10, 10, 0.66) 100%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--glass-highlight) 86%, transparent),
+    0 28px 72px rgba(8, 6, 4, 0.38);
+}
+
+/* Radial mesh overlay matching old empty-state-mesh */
+.library-v2-empty-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      var(--surface-tint, rgba(255, 255, 255, 0.03)) 0%,
+      transparent 40%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+}
+
+.library-v2-empty-icon {
+  position: relative;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--hero-accent) 20%, transparent);
+  box-shadow: 0 0 32px color-mix(in oklch, var(--hero-accent) 34%, transparent);
+  z-index: 1;
+}
+
+.library-v2-empty-copy {
+  position: relative;
+  text-align: center;
+  z-index: 1;
+}
+
+.library-v2-empty-copy h3 {
+  font-size: 1.5rem;
+  font-weight: 740;
+  color: var(--type-primary);
+}
+
+.library-v2-empty-copy p {
+  margin-top: 0.75rem;
+  max-width: 45ch;
+  font-size: 1rem;
+  color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
+}
+
+/* ─── Loading / error states ─────────────────────────────────────────────── */
+
+.library-v2-loading-more {
+  padding: 0.56rem;
+  text-align: center;
+  font-size: 0.74rem;
+  color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
+}
+
+.library-v2-state-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.library-v2-loading-shell,
+.library-v2-error-shell {
+  width: min(100%, 38rem);
+  padding: 1rem;
+}
+
+.library-v2-loading-shell {
+  display: grid;
+  gap: 0.52rem;
+}
+
+.library-v2-loading-line {
+  height: 3.4rem;
+  border-radius: 0.75rem;
+  background: color-mix(in oklch, var(--surface-muted) 76%, transparent);
+  animation: library-v2-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes library-v2-pulse {
+  0% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.55;
+  }
+}
+
+.library-v2-error-shell {
+  text-align: center;
+}
+
+.library-v2-error-shell h2 {
+  font-size: 1.12rem;
+  color: var(--type-primary);
+  margin-bottom: 0.46rem;
+}
+
+.library-v2-error-shell p {
+  font-size: 0.82rem;
+  color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
+  margin-bottom: 1rem;
+}
+
+.library-v2-error-shell button {
+  margin-inline: auto;
+  min-width: 6.4rem;
+}
+
+/* ─── Focus rings ────────────────────────────────────────────────────────── */
+
+.library-v2-sort:focus-within,
+.library-v2-utility:focus-visible,
+.library-v2-detail-play:focus-visible,
+.library-v2-detail-back:focus-visible,
+.library-v2-tab:focus-visible,
+.library-v2-track-tile:focus-visible,
+.library-v2-album-tile:focus-visible,
+.library-v2-selection-actions button:focus-visible,
+.library-v2-view-mode button:focus-visible,
+.library-v2-play-overlay:focus-visible,
+.library-v2-select-dot:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 1200px) {
+  .library-v2-root {
+    padding-inline: 2rem;
+  }
+
+  .library-v2-command-bottom {
+    justify-content: flex-start;
+  }
+
+  .library-v2-toolbar {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 960px) {
+  .library-v2-root {
+    padding: 1.5rem 1.35rem calc(var(--safe-bottom) + 8.35rem);
+  }
+
+  .library-v2-track-grid {
+    grid-template-columns: repeat(auto-fill, minmax(9.7rem, 1fr));
+  }
+
+  .library-v2-detail-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.62rem;
+  }
+
+  .library-v2-detail-actions {
+    justify-content: flex-start;
+  }
+
+  .library-v2-selection {
+    border-radius: 0.9rem;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .library-v2-toolbar {
+    width: 100%;
+  }
+
+  .library-v2-sort {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .library-v2-sort select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .library-v2-view-mode {
+    margin-left: auto;
+  }
+}
+
+/* ─── Compatibility surfaces for shared list components ─────────────────── */
+/*
+ * FIX [LIST_SHELL_BLACK_BLOCK]: Stripped the dark opaque shell background.
+ * --surface-overlay resolves to a near-opaque dark value which painted a
+ * solid black rectangle over the ambient atmosphere. The individual list rows
+ * carry their own frosted backing so the shell container is purely structural.
+ */
+
+.library-list-shell {
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: hidden;
+}
+
+.library-list-head {
+  display: grid;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in oklch, var(--glass-border) 46%, transparent);
+  padding: 0.66rem 0.95rem;
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--type-secondary) 70%, transparent);
+}
+
+.library-list-row {
+  display: grid;
+  align-items: center;
+  min-height: 4.1rem;
+  padding: 0.44rem 0.72rem;
+  border-radius: 0.82rem;
+  border: 1px solid transparent;
+  background: color-mix(in oklch, var(--surface-overlay) 55%, transparent);
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-list-row:hover {
+  border-color: color-mix(in oklch, var(--glass-border) 72%, transparent);
+  background: color-mix(in oklch, var(--surface-overlay) 72%, transparent);
+}
+
+.library-list-row.is-active {
+  border-color: color-mix(in oklch, var(--hero-accent) 56%, transparent);
+  background: color-mix(in oklch, var(--hero-accent) 13%, var(--surface-overlay));
+}
+
+.library-list-row.is-selected {
+  border-color: color-mix(in oklch, var(--ring) 62%, transparent);
+  background: color-mix(in oklch, var(--ring) 12%, var(--surface-overlay));
+}
+
+.library-card-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--surface-shell) 45%, transparent);
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-card-overlay.is-visible {
+  opacity: 1;
+}
+
+.library-lyrics-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in oklch, var(--hero-accent) 35%, transparent);
+  background: color-mix(in oklch, var(--hero-accent) 18%, transparent);
+  color: color-mix(in oklch, var(--hero-accent) 90%, white);
+  padding: 0.1rem 0.36rem;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.library-icon-action {
+  width: 1.86rem;
+  height: 1.86rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in oklch, var(--glass-border) 62%, transparent);
+  background: color-mix(in oklch, var(--surface-overlay) 62%, transparent);
+  color: color-mix(in oklch, var(--type-secondary) 82%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.library-icon-action:hover {
+  transform: scale(1.03);
+  color: var(--type-primary);
+}

@@ -1,0 +1,26 @@
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  min-height: 92px;
+  background: transparent;
+}
+
+/* Frameless window: Tauri + Chromium need both the attribute and webkit region */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+[data-mini-no-drag],
+[data-mini-no-drag] button,
+[data-mini-no-drag] input,
+[data-mini-no-drag] a {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}

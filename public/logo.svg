@@ -1,0 +1,138 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 1. SHAPE: Authentic iOS Superellipse -->
+    <path id="ios-squircle" d="M256 0C58 0 0 58 0 256C0 454 58 512 256 512C454 512 512 454 512 256C512 58 454 0 256 0Z"/>
+    <clipPath id="container-clip">
+      <use href="#ios-squircle"/>
+    </clipPath>
+
+    <!-- 2. GRADIENTS -->
+    
+    <!-- Background: "Void" (Deep Graphite to Obsidian) -->
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#27272a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+
+    <!-- Glass Body: Concave depth (Clear center, Milky rim) -->
+    <radialGradient id="glass-body" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 256) rotate(90) scale(170)">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="80%" stop-color="#e0f2fe" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#cffafe" stop-opacity="0.12"/>
+    </radialGradient>
+
+    <!-- Rim Stroke: Sharp Highlight (Top-Left) to Fade (Bottom-Right) -->
+    <linearGradient id="rim-stroke" x1="100" y1="100" x2="412" y2="412" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="30%" stop-color="#ffffff" stop-opacity="0.4"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.2"/> <!-- Slight bounce return -->
+    </linearGradient>
+
+    <!-- Refraction/Prism Band: "Dispersion" Effect -->
+    <linearGradient id="prism-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="20%" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="42%" stop-color="#06b6d4" stop-opacity="0.15"/> <!-- Cyan dispersion -->
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.4"/> <!-- Core light -->
+      <stop offset="58%" stop-color="#d946ef" stop-opacity="0.1"/> <!-- Magenta dispersion -->
+      <stop offset="80%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Specular Gloss: Studio Light Reflection -->
+    <linearGradient id="gloss-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- 3. FILTERS -->
+
+    <!-- Deep Caustic Glow (Light bleeding through the disc) -->
+    <filter id="caustic-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="24"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+
+    <!-- "Hover" Shadow -->
+    <filter id="shadow-lift" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+      <feOffset dx="0" dy="16"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.5"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Premium Noise Grain -->
+    <filter id="noise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.035"/></feComponentTransfer>
+    </filter>
+  </defs>
+
+  <!-- BACKGROUND COMPOSITION -->
+  <g clip-path="url(#container-clip)">
+    <!-- 1. Base Dark Tile -->
+    <rect width="512" height="512" fill="url(#bg-grad)"/>
+
+    <!-- 2. Noise Texture (Applied globally for material feel) -->
+    <rect width="512" height="512" filter="url(#noise)" style="mix-blend-mode: overlay;"/>
+
+    <!-- 3. Caustic Backlight (The light passing *through* the glass) -->
+    <!-- Positioned slightly lower-right to match light direction -->
+    <g filter="url(#caustic-glow)" opacity="0.6" style="mix-blend-mode: screen;">
+      <circle cx="270" cy="280" r="130" fill="#0891b2"/> <!-- Cyan core -->
+      <circle cx="280" cy="290" r="100" fill="#4f46e5" opacity="0.6"/> <!-- Indigo depth -->
+    </g>
+
+    <!-- 4. THE GLASS DISC -->
+    <g transform="translate(256 256)" filter="url(#shadow-lift)">
+      
+      <!-- A. Main Glass Body -->
+      <circle r="170" fill="url(#glass-body)"/>
+      
+      <!-- B. Dispersion Band (The rainbow prism effect) -->
+      <!-- Clipped to disc, blended screen for light additive -->
+      <circle r="170" fill="url(#prism-grad)" style="mix-blend-mode: screen;"/>
+
+      <!-- C. Outer Rim Bevel -->
+      <!-- Outer stroke: Bright white -->
+      <circle r="169" stroke="url(#rim-stroke)" stroke-width="2"/>
+      <!-- Inner stroke: Subtle thickness simulation -->
+      <circle r="166" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1"/>
+
+      <!-- D. Audio Details (Precise & Minimal) -->
+      
+      <!-- Track Groove (The "Music" cue) -->
+      <!-- Fine hairline, varying opacity to simulate metal/vinyl shine -->
+      <circle r="100" stroke="#ffffff" stroke-width="0.75" stroke-opacity="0.15"/>
+      <circle r="105" stroke="#ffffff" stroke-width="0.5" stroke-opacity="0.05"/> <!-- Faint echo ring -->
+      
+      <!-- Hub Area -->
+      <circle r="50" stroke="url(#rim-stroke)" stroke-width="1.5" stroke-opacity="0.5"/>
+      
+      <!-- Spindle (Center Dot) -->
+      <circle r="10" fill="#ffffff" fill-opacity="0.2"/>
+      <circle r="10" stroke="#ffffff" stroke-width="1" stroke-opacity="0.4"/>
+
+      <!-- E. Surface Reflections -->
+
+      <!-- Primary Specular Highlight (Top Left) -->
+      <!-- Sharp, geometric arc reflecting a softbox light -->
+      <path d="M-110 -120 Q-55 -165 0 -165 T 110 -120 L 100 -110 Q 0 -150 -55 -150 T -100 -110 Z" fill="url(#gloss-grad)" opacity="0.8"/>
+      
+      <!-- Secondary Bounce Light (Bottom Right) -->
+      <!-- Simulating light bouncing off the floor back onto the glass -->
+      <path d="M 60 145 Q 110 135 145 80" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.1"/>
+
+    </g>
+  </g>
+  
+  <!-- Final Container Polish -->
+  <!-- Subtle metallic edge on the squircle itself -->
+  <use href="#ios-squircle" stroke="white" stroke-opacity="0.08" stroke-width="2" pointer-events="none"/>
+  
+</svg>
