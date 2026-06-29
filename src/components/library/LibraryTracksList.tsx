@@ -380,7 +380,6 @@ export const LibraryTracksList = memo(function LibraryTracksList({
         getItemKey={(track) => track.id}
         onRangeChange={handleRangeChange}
         onScrollNearEnd={onLoadMore}
-        enableRovingFocus
         renderItem={(track, idx) => (
           <TrackRow
             key={track.id}

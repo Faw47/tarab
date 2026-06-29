@@ -25,5 +25,13 @@ export const DbTrackSchema = z.object({
 export const DbTrackArraySchema = z.array(DbTrackSchema);
 export const TrackCountSchema = z.number().int().nonnegative();
 export const AffectedRowCountSchema = z.number().int().nonnegative();
+export const LibraryStatsSchema = z.object({
+  trackCount: z.number().int().nonnegative(),
+  totalDuration: z.number().nonnegative(),
+  artistCount: z.number().int().nonnegative(),
+  albumCount: z.number().int().nonnegative(),
+  totalPlays: z.number().int().nonnegative(),
+});
 
 export type ValidatedDbTrack = z.infer<typeof DbTrackSchema>;
+export type ValidatedLibraryStats = z.infer<typeof LibraryStatsSchema>;

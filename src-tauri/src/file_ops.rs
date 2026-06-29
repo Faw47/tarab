@@ -139,6 +139,19 @@ pub(crate) fn collect_deletable_paths(
     Ok(deletable_paths)
 }
 
+fn create_destination_parent_dir(target: &Path) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create destination directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_library_roots(
     roots: Vec<String>,
@@ -243,9 +256,7 @@ pub async fn move_file(
             return Err("Target file already exists".into());
         }
         let _target_canonical = ensure_target_path_allowed(&target, &roots, "move destination file")?;
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).ok();
-        }
+        create_destination_parent_dir(&target)?;
         fs::rename(&source, &target).map_err(|e| format!("Failed to move file: {}", e))?;
         let target_str = target.to_string_lossy().to_string();
         if let Err(err) = db.rename_track_path(&old_path, &target_str) {
@@ -404,6 +415,23 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn destination_parent_creation_reports_directory_error() {
+        let allowed_root = temp_dir("parent-error");
+        let file_parent = allowed_root.join("not-a-dir");
+        fs::write(&file_parent, b"file").expect("write file parent");
+        let target = file_parent.join("song.mp3");
+
+        let result = create_destination_parent_dir(&target);
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Failed to create destination directory"));
+
+        let _ = fs::remove_dir_all(allowed_root);
     }
 }
 

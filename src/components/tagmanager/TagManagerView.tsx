@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchLibraryTracksPage } from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { formatTime } from '../../lib/format-time';
 import { normalizePath } from '../../lib/path-utils';
@@ -40,6 +41,7 @@ import type { ContextMenuPosition, TagInfo, TagUpdate, Track } from '../../types
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { GlassCard } from '../shared/GlassCard';
+import { VirtualizedList } from '../shared/VirtualizedList';
 import { InputDialog, type InputDialogProps } from '../ui/InputDialog';
 
 interface TagManagerViewProps {
@@ -165,8 +167,47 @@ export const TagManagerView = ({
   onScrollChange,
 }: TagManagerViewProps) => {
   useRenderLog('TagManagerView');
-  const { tracks: allTracks } = useLibraryData();
+  const { trackCount, tracks: loadedTracks } = useLibraryData();
+  const [allTracks, setAllTracks] = useState<Track[]>(loadedTracks);
 
+  useEffect(() => {
+    setAllTracks((current) => (current.length > loadedTracks.length ? current : loadedTracks));
+  }, [loadedTracks]);
+
+  useEffect(() => {
+    if (loadedTracks.length >= trackCount) return;
+
+    let cancelled = false;
+
+    async function loadRemainingTracks() {
+      const pageSize = 500;
+      const pages: Track[] = [];
+      for (let offset = loadedTracks.length; offset < trackCount; offset += pageSize) {
+        const page = await fetchLibraryTracksPage({
+          offset,
+          limit: pageSize,
+          sortBy: 'dateAdded',
+          sortOrder: 'desc',
+        });
+        if (cancelled || page.length === 0) return;
+        pages.push(...page);
+        setAllTracks([...loadedTracks, ...pages]);
+        if (page.length < pageSize) return;
+      }
+    }
+
+    // Tag Manager needs complete track scope for folder filters and bulk selection.
+    void loadRemainingTracks().catch((error) => {
+      reportError('Failed to load full library for tag manager', {
+        source: 'tag-manager',
+        error,
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedTracks, trackCount]);
   // Toolbar UI
   const [showSourceDropdown, setShowSourceDropdown] = useState(false);
   const [queryInput, setQueryInput] = useState('');
@@ -210,9 +251,9 @@ export const TagManagerView = ({
 
   // Virtual list
   const ROW_H = 52;
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const [listScrollTop, setListScrollTop] = useState(0);
-  const [listHeight, setListHeight] = useState(600);
+  const scrollToIndexRef = useRef<
+    ((index: number, align?: 'auto' | 'start' | 'center' | 'end') => void) | null
+  >(null);
 
   // Debounce query
   useEffect(() => {
@@ -257,17 +298,6 @@ export const TagManagerView = ({
     return () => window.clearTimeout(t);
   }, [undo]);
 
-  // Resize observer for virtualization
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => setListHeight(el.clientHeight || 600));
-    ro.observe(el);
-    setListHeight(el.clientHeight || 600);
-
-    return () => ro.disconnect();
-  }, []);
 
   // Folder tree (Windows + macOS safe)
   const folderTree = useMemo(() => {
@@ -369,16 +399,7 @@ export const TagManagerView = ({
   }, [filteredTracks.length]);
 
   const scrollToIndexNearest = useCallback((index: number) => {
-    const el = listRef.current;
-    if (!el) return;
-
-    const top = index * ROW_H;
-    const bottom = top + ROW_H;
-    const viewTop = el.scrollTop;
-    const viewBottom = el.scrollTop + el.clientHeight;
-
-    if (top < viewTop) el.scrollTop = top;
-    else if (bottom > viewBottom) el.scrollTop = bottom - el.clientHeight;
+    scrollToIndexRef.current?.(index);
   }, []);
 
   // Load tags when selection changes
@@ -971,20 +992,6 @@ export const TagManagerView = ({
     });
   };
 
-  // Virtual list calculations
-  const totalCount = filteredTracks.length;
-  const overscan = 8;
-  const startIndex = clamp(
-    Math.floor(listScrollTop / ROW_H) - overscan,
-    0,
-    Math.max(0, totalCount - 1),
-  );
-  const visibleCount = Math.ceil(listHeight / ROW_H) + overscan * 2;
-  const endIndex = clamp(startIndex + visibleCount, 0, totalCount);
-
-  const topPad = startIndex * ROW_H;
-  const bottomPad = (totalCount - endIndex) * ROW_H;
-  const visibleTracks = filteredTracks.slice(startIndex, endIndex);
 
   // Render helpers
   const FieldLabel = ({ label, k }: { label: string; k: TagEditKey }) => {
@@ -1027,24 +1034,6 @@ export const TagManagerView = ({
       />
     );
   };
-
-  // const NumberInput = ({ k }: { k: TagEditKey }) => {
-  //   const applied = !isMulti ? true : !!applyFields[k];
-  //   return (
-  //     <input
-  //       type="number"
-  //       value={typeof edited[k] === 'number' ? edited[k] : edited[k] ?? ''}
-  //       onChange={(e) => setField(k, parseNumberOrUndef(e.target.value))}
-  //       onFocus={() => {
-  //         if (isMulti && !applied) setApplyField(k, true);
-  //       }}
-  //       disabled={isMulti && !applied}
-  //       className="w-full bg-white/5 border border-white/5 rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:bg-black focus:border-primary/50 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-  //       placeholder={isMulti ? '(Multiple)' : placeholder}
-  //     />
-  //   );
-  // };
-
   const showTotalDiscs = useMemo(() => {
     if ((originalTags as any)?.totalDiscs != null) return true;
     if (edited.totalDiscs != null) return true;
@@ -1275,100 +1264,96 @@ export const TagManagerView = ({
             </button>
           </div>
 
-          <div
-            ref={listRef}
-            className="flex-1 overflow-y-auto custom-scrollbar outline-none"
-            tabIndex={0}
-            onKeyDown={handleTableKeyDown}
-            onScroll={(e) => {
-              setListScrollTop(e.currentTarget.scrollTop);
-              onScrollChange?.(e.currentTarget.scrollTop > 8);
-            }}
-            title="Keyboard: Up/Down to move, Space toggle, Enter select, Cmd/Ctrl+A select all"
-          >
-            {filteredTracks.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-text-muted gap-4">
-                <div className="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center">
-                  <Search className="w-8 h-8 opacity-20" />
-                </div>
-                <p>No tracks match your filters</p>
+          {filteredTracks.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-4">
+              <div className="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center">
+                <Search className="w-8 h-8 opacity-20" />
               </div>
-            ) : (
-              <div className="relative">
-                <div style={{ height: topPad }} />
-                {visibleTracks.map((track, i) => {
-                  const index = startIndex + i;
-                  const isSelected = selectedSet.has(track.id);
-                  const isFocused = index === focusedIndex;
-                  const { format, isLossless } = formatQuality(track);
+              <p>No tracks match your filters</p>
+            </div>
+          ) : (
+            <VirtualizedList
+              items={filteredTracks}
+              itemHeight={ROW_H}
+              overscan={8}
+              className="flex-1 overflow-y-auto custom-scrollbar outline-none"
+              getItemKey={(track) => track.id}
+              scrollToIndexRef={scrollToIndexRef}
+              containerProps={{
+                tabIndex: 0,
+                onKeyDown: handleTableKeyDown,
+                title: 'Keyboard: Up/Down to move, Space toggle, Enter select, Cmd/Ctrl+A select all',
+              }}
+              onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
+              renderItem={(track, index) => {
+                const isSelected = selectedSet.has(track.id);
+                const isFocused = index === focusedIndex;
+                const { format, isLossless } = formatQuality(track);
 
-                  return (
-                    <div
-                      key={track.id}
-                      onClick={(e) => handleRowClick(track, e, index)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        if (!selectedSet.has(track.id)) onSelectionChange([track]);
-                        onTrackContextMenu?.(track, { x: e.clientX, y: e.clientY });
-                      }}
-                      className={clsx(
-                        'grid grid-cols-[40px_48px_1.5fr_1fr_1fr_60px_70px] gap-2 px-4 border-b border-white/[0.02] cursor-pointer items-center group transition-colors text-sm',
-                        isSelected ? 'bg-primary/10' : 'hover:bg-white/5',
-                        isFocused && 'ring-1 ring-primary/40',
-                      )}
-                      style={{ height: ROW_H }}
-                    >
-                      <span className="text-xs text-text-subtle text-center font-mono">
-                        {index + 1}
-                      </span>
+                return (
+                  <div
+                    onClick={(e) => handleRowClick(track, e, index)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (!selectedSet.has(track.id)) onSelectionChange([track]);
+                      onTrackContextMenu?.(track, { x: e.clientX, y: e.clientY });
+                    }}
+                    className={clsx(
+                      'grid grid-cols-[40px_48px_1.5fr_1fr_1fr_60px_70px] gap-2 px-4 border-b border-white/[0.02] cursor-pointer items-center group transition-colors text-sm',
+                      isSelected ? 'bg-primary/10' : 'hover:bg-white/5',
+                      isFocused && 'ring-1 ring-primary/40',
+                    )}
+                    style={{ height: ROW_H }}
+                  >
+                    <span className="text-xs text-text-subtle text-center font-mono">
+                      {index + 1}
+                    </span>
 
-                      <div className="w-9 h-9 rounded bg-white/5 overflow-hidden border border-white/5">
-                        <CoverArtImage
-                          track={track}
-                          className="w-full h-full"
-                          imgClassName="w-full h-full object-cover"
-                          roundedClassName=""
-                          iconClassName="w-4 h-4"
-                          alt={track.album}
-                        />
+                    <div className="w-9 h-9 rounded bg-white/5 overflow-hidden border border-white/5">
+                      <CoverArtImage
+                        track={track}
+                        className="w-full h-full"
+                        imgClassName="w-full h-full object-cover"
+                        roundedClassName=""
+                        iconClassName="w-4 h-4"
+                        alt={track.album}
+                      />
+                    </div>
+
+                    <div className="min-w-0 pr-4">
+                      <div
+                        className={clsx(
+                          'font-medium truncate',
+                          isSelected ? 'text-primary' : 'text-text-primary',
+                        )}
+                      >
+                        {track.title}
                       </div>
-
-                      <div className="min-w-0 pr-4">
-                        <div
-                          className={clsx(
-                            'font-medium truncate',
-                            isSelected ? 'text-primary' : 'text-text-primary',
-                          )}
-                        >
-                          {track.title}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {isLossless && (
-                            <span className="text-[9px] text-primary font-bold uppercase">
-                              {format}
-                            </span>
-                          )}
-                          {!track.hasCoverArt && (
-                            <span className="text-[9px] text-amber-400 font-bold uppercase flex items-center gap-1">
-                              <ImageOff className="w-3 h-3" /> no cover
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="text-text-secondary truncate pr-4">{track.artist}</div>
-                      <div className="text-text-muted truncate pr-4">{track.album}</div>
-                      <div className="text-text-muted text-right">{track.year || '-'}</div>
-                      <div className="text-text-muted text-right font-mono text-xs">
-                        {formatTime(track.duration)}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {isLossless && (
+                          <span className="text-[9px] text-primary font-bold uppercase">
+                            {format}
+                          </span>
+                        )}
+                        {!track.hasCoverArt && (
+                          <span className="text-[9px] text-amber-400 font-bold uppercase flex items-center gap-1">
+                            <ImageOff className="w-3 h-3" /> no cover
+                          </span>
+                        )}
                       </div>
                     </div>
-                  );
-                })}
-                <div style={{ height: bottomPad }} />
-              </div>
-            )}
-          </div>
+
+                    <div className="text-text-secondary truncate pr-4">{track.artist}</div>
+                    <div className="text-text-muted truncate pr-4">{track.album}</div>
+                    <div className="text-text-muted text-right">{track.year || '-'}</div>
+                    <div className="text-text-muted text-right font-mono text-xs">
+                      {formatTime(track.duration)}
+                    </div>
+                  </div>
+                );
+              }}
+            />
+          )}
         </div>
 
         {/* Right Editor Panel */}

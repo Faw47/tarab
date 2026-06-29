@@ -1,7 +1,7 @@
 /**
  * Multi-pass liquid shell rendering inside the single R3F Canvas (WebGL2 + Three.js).
  * Layer 0 → RT (metaballs), separable Gaussian blur (existing GLSL, TS-built kernel),
- * blit sharp bg to screen, layer 1 (aurora/particles), then optional glass pill composite.
+ * blit sharp bg to screen, then layer 1 (aurora/particles).
  * WebGPU could mirror this graph later; v1 stays on WebGL2.
  */
 import { useLayoutEffect, useRef } from 'react';
@@ -10,10 +10,7 @@ import * as THREE from 'three';
 
 import blurFragY from '@/graphics/glass/shaders/fragment-bg-hblur.glsl?raw';
 import blurFragX from '@/graphics/glass/shaders/fragment-bg-vblur.glsl?raw';
-import pillFrag from '@/graphics/glass/shaders/liquid-control-pill.frag.glsl?raw';
 import { buildGaussianKernel, gaussianKernelToUniformArray } from '@/lib/gaussian-kernel';
-import { useLiquidControlGlassStore } from '@/store/liquid-control-glass-store';
-
 const GLSL_MAX_BLUR_RADIUS = 200;
 const BLUR_RADIUS = 12;
 const BLUR_SIGMA = 4;
@@ -41,21 +38,6 @@ void main() {
 }
 `;
 
-function phaseToInt(phase: string): number {
-  switch (phase) {
-    case 'hover':
-      return 1;
-    case 'press':
-      return 2;
-    case 'drag':
-      return 3;
-    case 'settle':
-      return 4;
-    default:
-      return 0;
-  }
-}
-
 class LiquidShellPipeline {
   private readonly renderer: THREE.WebGLRenderer;
   private bgRT: THREE.WebGLRenderTarget;
@@ -68,11 +50,9 @@ class LiquidShellPipeline {
   private readonly blitScene: THREE.Scene;
   private readonly blurSceneX: THREE.Scene;
   private readonly blurSceneY: THREE.Scene;
-  private readonly pillScene: THREE.Scene;
   private readonly blitMat: THREE.ShaderMaterial;
   private readonly blurXMat: THREE.ShaderMaterial;
   private readonly blurYMat: THREE.ShaderMaterial;
-  private readonly pillMat: THREE.ShaderMaterial;
   private readonly quadGeo: THREE.PlaneGeometry;
   private readonly blurWeights: Float32Array;
 
@@ -127,27 +107,6 @@ class LiquidShellPipeline {
       depthTest: false,
       depthWrite: false,
     });
-
-    this.pillMat = new THREE.RawShaderMaterial({
-      vertexShader: POST_VERT,
-      fragmentShader: pillFrag,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.NormalBlending,
-      uniforms: {
-        u_bg: { value: null as unknown as THREE.Texture },
-        u_blurredBg: { value: null as unknown as THREE.Texture },
-        u_resolution: { value: new THREE.Vector2(w, h) },
-        u_center: { value: new THREE.Vector2() },
-        u_halfSize: { value: new THREE.Vector2() },
-        u_radius: { value: 8 },
-        u_phase: { value: 0 },
-        u_debug: { value: 0 },
-        u_morphT: { value: 1 },
-      },
-    });
-
     const blitMesh = new THREE.Mesh(this.quadGeo, this.blitMat);
     this.blitScene = new THREE.Scene();
     this.blitScene.add(blitMesh);
@@ -159,11 +118,6 @@ class LiquidShellPipeline {
     const blurMeshY = new THREE.Mesh(this.quadGeo, this.blurYMat);
     this.blurSceneY = new THREE.Scene();
     this.blurSceneY.add(blurMeshY);
-
-    const pillMesh = new THREE.Mesh(this.quadGeo, this.pillMat);
-    pillMesh.renderOrder = 1000;
-    this.pillScene = new THREE.Scene();
-    this.pillScene.add(pillMesh);
   }
 
   dispose() {
@@ -174,7 +128,6 @@ class LiquidShellPipeline {
     this.blitMat.dispose();
     this.blurXMat.dispose();
     this.blurYMat.dispose();
-    this.pillMat.dispose();
   }
 
   ensureSize() {
@@ -189,7 +142,6 @@ class LiquidShellPipeline {
     this.blurB.setSize(w, h);
     this.blurXMat.uniforms.u_resolution.value.set(w, h);
     this.blurYMat.uniforms.u_resolution.value.set(w, h);
-    this.pillMat.uniforms.u_resolution.value.set(w, h);
   }
 
   render(
@@ -231,23 +183,6 @@ class LiquidShellPipeline {
     camera.layers.disableAll();
     camera.layers.enable(1);
     nativeRender(scene, camera);
-
-    // Pill is drawn in the same framebuffer as the shell (fixed z-0). TopBar sits in a higher
-    // stacking context (e.g. z-10), so this pass is mostly occluded; SlidingTabGroup keeps a CSS pill
-    // for visible chrome. Composite remains for future see-through chrome / secondary surfaces.
-    const { tabStripActive, pill, debugExaggerated } = useLiquidControlGlassStore.getState();
-    if (tabStripActive && pill.visible && pill.halfSizePx[0] > 2 && pill.halfSizePx[1] > 2) {
-      this.pillMat.uniforms.u_bg.value = this.bgRT.texture;
-      this.pillMat.uniforms.u_blurredBg.value = this.blurB.texture;
-      this.pillMat.uniforms.u_center.value.set(pill.centerPx[0], pill.centerPx[1]);
-      this.pillMat.uniforms.u_halfSize.value.set(pill.halfSizePx[0], pill.halfSizePx[1]);
-      this.pillMat.uniforms.u_radius.value = pill.radiusPx;
-      this.pillMat.uniforms.u_phase.value = phaseToInt(pill.phase);
-      this.pillMat.uniforms.u_debug.value = debugExaggerated ? 1 : 0;
-      this.pillMat.uniforms.u_morphT.value = pill.morphT;
-      nativeRender(this.pillScene, this.postCamera);
-    }
-
     camera.layers.mask = prevMask;
   }
 }

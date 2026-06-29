@@ -1,7 +1,28 @@
 import { useHotkeys } from 'react-hotkeys-hook';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 
-export function HotkeysBootstrap() {
+interface HotkeysBootstrapProps {
+  onSearch?: () => void;
+}
+
+function isTextEntryTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable]') !== null;
+}
+
+export function HotkeysBootstrap({ onSearch }: HotkeysBootstrapProps) {
+  useHotkeys(
+    '/',
+    (e) => {
+      if (isTextEntryTarget(e.target)) return;
+      e.preventDefault();
+      onSearch?.();
+    },
+    {
+      scopes: ['global'],
+    },
+    [onSearch],
+  );
+
   // Global Player Shortcuts
   useHotkeys(
     'space',

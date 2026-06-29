@@ -11,6 +11,13 @@ import { usePlaylistsQuery } from '../../features/playlists/queries';
 import { reportError } from '../../lib/report-error';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from '../ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
 import { PlaylistEditorDialog } from './PlaylistEditorDialog';
 
@@ -53,31 +60,21 @@ export const PlaylistPickerDialog = memo(
       }
     };
 
-    if (!open) return null;
-
     return (
       <>
-        <div
-          className={clsx(
-            'fixed inset-0 z-[120] flex items-center justify-center p-4 transition-all duration-200',
-            isNeobrutalism ? 'bg-black/50' : 'bg-black/70 backdrop-blur-sm',
-          )}
-          onClick={onClose}
-        >
-          <section
+        <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+          <DialogContent
+            showCloseButton={false}
             className={clsx(
               'w-full max-w-lg p-6',
               isNeobrutalism
                 ? 'bg-white border-3 border-black shadow-[12px_12px_0_0_#000] radius-r3'
                 : 'rounded-2xl border border-zinc-800 bg-surface shadow-2xl',
             )}
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
           >
-            <header className="flex items-center justify-between gap-3 mb-4">
+            <DialogHeader className="mb-4 flex-row items-center justify-between gap-3 space-y-0 text-left">
               <div>
-                <h3
+                <DialogTitle
                   className={clsx(
                     'text-lg',
                     isNeobrutalism
@@ -86,15 +83,15 @@ export const PlaylistPickerDialog = memo(
                   )}
                 >
                   Add to playlist
-                </h3>
-                <p
+                </DialogTitle>
+                <DialogDescription
                   className={clsx(
                     'text-xs mt-1',
                     isNeobrutalism ? 'font-bold text-black/60' : 'text-text-muted',
                   )}
                 >
                   {trackIds.length} track{trackIds.length === 1 ? '' : 's'} selected
-                </p>
+                </DialogDescription>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -115,7 +112,7 @@ export const PlaylistPickerDialog = memo(
                   <X className="w-4 h-4" />
                 </IconButton>
               </div>
-            </header>
+            </DialogHeader>
 
             <div className="relative mb-3">
               <Search
@@ -129,6 +126,7 @@ export const PlaylistPickerDialog = memo(
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search playlists"
+                aria-label="Search playlists"
                 className={clsx(
                   'w-full pl-9 pr-3 py-2 outline-none transition-all duration-200',
                   isNeobrutalism
@@ -158,6 +156,7 @@ export const PlaylistPickerDialog = memo(
                   {filteredPlaylists.map((playlist) => (
                     <button
                       key={playlist.id}
+                      type="button"
                       onClick={() => handleAdd(playlist.id)}
                       disabled={isSaving}
                       className={clsx(
@@ -184,15 +183,15 @@ export const PlaylistPickerDialog = memo(
                         )}
                       >
                         {playlist.trackCount} tracks
-                        {playlist.missingCount > 0 ? ` • ${playlist.missingCount} unavailable` : ''}
+                        {playlist.missingCount > 0 ? ` - ${playlist.missingCount} unavailable` : ''}
                       </p>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-          </section>
-        </div>
+          </DialogContent>
+        </Dialog>
 
         <PlaylistEditorDialog
           open={showCreateDialog}

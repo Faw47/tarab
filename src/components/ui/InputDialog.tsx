@@ -1,9 +1,16 @@
 import { clsx } from 'clsx';
 import { X } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from './button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './dialog';
 import { IconButton } from './IconButton';
 
 export interface InputDialogProps {
@@ -32,78 +39,16 @@ export const InputDialog = memo(
     const isNeobrutalism = theme === 'neobrutalism';
     const [value, setValue] = useState(initialValue);
     const inputId = useId();
-    const dialogRef = useRef<HTMLDivElement>(null);
-    const previousFocusRef = useRef<HTMLElement | null>(null);
 
-    // Reset value when initialValue changes
     useEffect(() => {
       setValue(initialValue);
     }, [initialValue]);
-
-    useEffect(() => {
-      previousFocusRef.current = document.activeElement as HTMLElement | null;
-      const dialogNode = dialogRef.current;
-      if (!dialogNode) {
-        return;
-      }
-
-      const getFocusable = () =>
-        Array.from(
-          dialogNode.querySelectorAll<HTMLElement>(
-            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-          ),
-        ).filter((el) => !el.hasAttribute('disabled') && !el.getAttribute('aria-hidden'));
-
-      const focusable = getFocusable();
-      (focusable[0] ?? dialogNode).focus();
-
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          onCancel();
-          return;
-        }
-
-        if (event.key !== 'Tab') {
-          return;
-        }
-
-        const nodes = getFocusable();
-        if (nodes.length === 0) {
-          event.preventDefault();
-          dialogNode.focus();
-          return;
-        }
-
-        const first = nodes[0];
-        const last = nodes[nodes.length - 1];
-        const active = document.activeElement;
-
-        if (event.shiftKey && active === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && active === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      };
-
-      const previousOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      document.addEventListener('keydown', handleKeyDown);
-
-      return () => {
-        document.removeEventListener('keydown', handleKeyDown);
-        document.body.style.overflow = previousOverflow;
-        previousFocusRef.current?.focus();
-      };
-    }, [onCancel]);
 
     const handleSubmit = useCallback(() => {
       const trimmed = value.trim();
       if (!trimmed) return;
       onSubmit(trimmed);
-      onCancel(); // Close dialog after submit
+      onCancel();
     }, [value, onSubmit, onCancel]);
 
     const handleKeyDown = useCallback(
@@ -117,31 +62,18 @@ export const InputDialog = memo(
     );
 
     return (
-      <div
-        className={clsx(
-          'fixed inset-0 z-[100] flex items-center justify-center transition-all duration-200',
-          isNeobrutalism ? 'bg-black/50' : 'bg-black/70 backdrop-blur-sm',
-        )}
-        onClick={onCancel}
-      >
-        <div
-          ref={dialogRef}
-          tabIndex={-1}
+      <Dialog open onOpenChange={(open) => !open && onCancel()}>
+        <DialogContent
+          showCloseButton={false}
           className={clsx(
             'w-full max-w-md p-6',
             isNeobrutalism
               ? 'bg-white border-3 border-black shadow-[12px_12px_0_0_#000] rounded-none'
               : 'rounded-2xl border border-zinc-800 bg-surface shadow-2xl',
           )}
-          onClick={(e) => e.stopPropagation()}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="input-dialog-title"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <h3
-              id="input-dialog-title"
+          <DialogHeader className="mb-4 flex-row items-center justify-between space-y-0 text-left">
+            <DialogTitle
               className={clsx(
                 'text-lg',
                 isNeobrutalism
@@ -150,7 +82,7 @@ export const InputDialog = memo(
               )}
             >
               {title}
-            </h3>
+            </DialogTitle>
             <IconButton
               size="sm"
               variant={isNeobrutalism ? 'default' : 'ghost'}
@@ -159,9 +91,8 @@ export const InputDialog = memo(
             >
               <X className="w-4 h-4" />
             </IconButton>
-          </div>
+          </DialogHeader>
 
-          {/* Content */}
           <div className="space-y-3 mb-6">
             {label && (
               <label
@@ -192,17 +123,16 @@ export const InputDialog = memo(
             />
           </div>
 
-          {/* Actions */}
-          <div className="flex justify-end gap-3">
+          <DialogFooter>
             <Button variant={isNeobrutalism ? 'default' : 'ghost'} onClick={onCancel}>
               {cancelLabel}
             </Button>
             <Button onClick={handleSubmit} disabled={!value.trim()} variant="default">
               {submitLabel}
             </Button>
-          </div>
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     );
   },
 );

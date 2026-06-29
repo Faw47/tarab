@@ -345,6 +345,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           {/* Close Button */}
           <IconButton
             onClick={onClose}
+            title="Collapse player"
             className="w-10 h-10 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white backdrop-blur-md"
           >
             <ChevronDown className="w-5 h-5" />
@@ -353,6 +354,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           {/* More Actions */}
           <IconButton
             onClick={() => setShowActions(!showActions)}
+            title="More actions"
             ref={actionsRef}
             className="w-10 h-10 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white backdrop-blur-md"
           >
@@ -414,6 +416,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 <div className="relative">
                   <IconButton
                     onClick={toggleShuffle}
+                    title={shuffleEnabled ? 'Turn shuffle off' : 'Turn shuffle on'}
                     className={clsx(
                       'w-10 h-10',
                       shuffleEnabled
@@ -431,6 +434,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 {/* Previous */}
                 <IconButton
                   onClick={handlePrevious}
+                  title="Previous track"
                   className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
                 >
                   <SkipBack className="w-5 h-5" fill="currentColor" />
@@ -439,6 +443,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 {/* Play/Pause - Main Button */}
                 <IconButton
                   onClick={handleTogglePlay}
+                  title={isPlaying ? 'Pause' : 'Play'}
                   className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/30"
                 >
                   {isPlaying ? (
@@ -451,6 +456,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 {/* Next */}
                 <IconButton
                   onClick={handleNext}
+                  title="Next track"
                   className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
                 >
                   <SkipForward className="w-5 h-5" fill="currentColor" />
@@ -460,6 +466,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 <div className="relative">
                   <IconButton
                     onClick={toggleLoop}
+                    title={loopMode === 'off' ? 'Turn repeat on' : 'Change repeat mode'}
                     className={clsx(
                       'w-10 h-10',
                       loopMode !== 'off'
@@ -769,6 +776,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       {/* Back / Close Button */}
       <IconButton
         onClick={onClose}
+        title="Collapse player"
         className="absolute top-6 left-6 z-40 p-2 text-white/70 hover:text-white transition-colors"
       >
         <ChevronDown className="w-5 h-5" />
@@ -830,12 +838,14 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               <div className="flex items-center gap-4">
                 <IconButton
                   onClick={handlePrevious}
+                  title="Previous track"
                   className="w-10 h-10 p-2 text-white hover:bg-white/10"
                 >
                   <SkipBack className="w-5 h-5" fill="currentColor" />
                 </IconButton>
                 <IconButton
                   onClick={handleTogglePlay}
+                  title={isPlaying ? 'Pause' : 'Play'}
                   className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/10 p-0"
                 >
                   {isPlaying ? (
@@ -846,6 +856,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 </IconButton>
                 <IconButton
                   onClick={handleNext}
+                  title="Next track"
                   className="w-10 h-10 p-2 text-white hover:bg-white/10"
                 >
                   <SkipForward className="w-5 h-5" fill="currentColor" />
@@ -859,6 +870,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 {hasLyrics && (
                   <IconButton
                     onClick={() => setViewMode((v) => (v === 'lyrics' ? 'card' : 'lyrics'))}
+                    title={viewMode === 'lyrics' ? 'Hide lyrics' : 'Show lyrics'}
                     className={clsx(
                       'w-10 h-10 p-2 transition-all',
                       viewMode === 'lyrics' ? 'text-primary' : 'text-text-muted hover:text-white',
@@ -869,6 +881,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 )}
                 <IconButton
                   onClick={() => setShowActions(!showActions)}
+                  title="More actions"
                   ref={actionsRef}
                   className="w-10 h-10 p-2 text-text-muted hover:text-white transition-all"
                 >
@@ -962,6 +975,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-3xl flex items-center justify-center p-8 animate-fade-in">
             <IconButton
               onClick={() => setViewMode('card')}
+              title="Back to player"
               className="absolute top-6 right-6 p-2 text-white hover:text-white"
             >
               <ChevronDown className="w-6 h-6 rotate-180" />

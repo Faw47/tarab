@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, FolderPlus, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { LibraryIcon } from '../ui/Icons';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { useLibraryData } from '../../features/library/useLibraryData';
@@ -14,7 +14,7 @@ import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../store/settings-store';
 import type { SettingsPage } from '../../types';
 import { IconButton } from '../ui';
-import { Dialog, DialogClose, DialogContent } from '../ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { CacheSettings } from './CacheSettings';
 import {
@@ -90,15 +90,15 @@ export const UnifiedSettingsView = memo(({ onScrollChange, libraryScan }: Unifie
   const setFollowSymlinks = useSettingsStore((s) => s.setFollowSymlinks);
   const setDownloadArtwork = useSettingsStore((s) => s.setDownloadArtwork);
 
-  const { tracks, setTracks, setTrackCount } = useLibraryData();
+  const { libraryStats, tracks, setTracks, setTrackCount } = useLibraryData();
   const { isScanning, folderStatuses, scanFolder, rescanAll } = libraryScan;
 
   const [showAddInput, setShowAddInput] = useState(false);
   const [manualPath, setManualPath] = useState('');
   const [folderToRemove, setFolderToRemove] = useState<string | null>(null);
 
-  const trackCount = tracks.length;
-  const albumsCount = useMemo(() => new Set(tracks.map((t) => t.album)).size, [tracks]);
+  const trackCount = libraryStats?.trackCount ?? tracks.length;
+  const albumsCount = libraryStats?.albumCount ?? 0;
 
   const getTrackCountForFolder = useCallback(
     (folderPath: string) => tracks.filter((t) => isSameOrSubPath(t.filePath, folderPath)).length,
@@ -298,7 +298,7 @@ export const UnifiedSettingsView = memo(({ onScrollChange, libraryScan }: Unifie
               : 'rounded-2xl border border-white/[0.06] bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-xl',
           )}
         >
-          <h3 className="mb-4 text-lg font-bold">Add Folder Path</h3>
+          <DialogTitle className="mb-4 text-lg font-bold">Add Folder Path</DialogTitle>
           <input
             autoFocus
             type="text"

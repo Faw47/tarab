@@ -8,6 +8,8 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use walkdir::WalkDir;
 
+const UNSUPPORTED_GENRE_RULE_MESSAGE: &str =
+    "ByGenre rules are not supported by the current track schema.";
 pub struct PlaylistGuard {
     lock: Mutex<()>,
 }
@@ -324,6 +326,18 @@ fn deserialize_rules(raw: &Option<String>) -> Option<Vec<SmartPlaylistRule>> {
         .and_then(|value| serde_json::from_str::<Vec<SmartPlaylistRule>>(value).ok())
 }
 
+fn validate_supported_smart_rules(rules: &Option<Vec<SmartPlaylistRule>>) -> Result<(), String> {
+    if rules.as_ref().is_some_and(|rules| {
+        rules
+            .iter()
+            .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }))
+    }) {
+        Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
+    } else {
+        Ok(())
+    }
+}
+
 fn to_entry(track: &DbTrack, position: usize) -> PlaylistEntry {
     PlaylistEntry {
         track_id: track.id.clone(),
@@ -377,7 +391,7 @@ fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) ->
             let needle = album.trim().to_lowercase();
             !needle.is_empty() && track.album.to_lowercase().contains(&needle)
         }
-        SmartPlaylistRule::ByGenre { .. } => true,
+        SmartPlaylistRule::ByGenre { .. } => false,
         SmartPlaylistRule::ByYear {
             start_year,
             end_year,
@@ -410,7 +424,7 @@ fn resolve_smart_tracks(
         .collect::<Vec<_>>();
 
     let sync_error = if has_unsupported_genre {
-        Some("ByGenre rules are not supported by the current track schema.".to_string())
+        Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
     } else {
         None
     };
@@ -707,6 +721,7 @@ pub fn create_playlist(
     if trimmed_name.is_empty() {
         return Err("Playlist name is required".to_string());
     }
+    validate_supported_smart_rules(&smart_rules)?;
 
     let now = now_millis_u64()?;
     let db_row = DbPlaylist {
@@ -754,6 +769,7 @@ pub fn update_playlist(
     }
 
     if let Some(next_rules) = smart_rules {
+        validate_supported_smart_rules(&Some(next_rules.clone()))?;
         playlist.smart_rules = serialize_rules(&Some(next_rules));
     }
 
@@ -908,9 +924,7 @@ pub fn sync_playlist(
                 .iter()
                 .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }));
             if has_unsupported_genre {
-                sync_error = Some(
-                    "ByGenre rules are not supported by the current track schema.".to_string(),
-                );
+                sync_error = Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string());
             }
         }
     }
@@ -1076,7 +1090,7 @@ mod tests {
     }
 
     #[test]
-    fn by_genre_rule_is_non_blocking_but_returns_sync_error() {
+    fn by_genre_rule_returns_sync_error_without_matching_every_track() {
         let tracks = vec![sample_track(
             "a",
             "Artist",
@@ -1091,8 +1105,19 @@ mod tests {
         }];
 
         let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
-        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved.len(), 0);
         assert!(sync_error.is_some());
+    }
+
+    #[test]
+    fn genre_rule_validation_rejects_new_rules() {
+        let rules = Some(vec![SmartPlaylistRule::ByGenre {
+            genre: "Classical".to_string(),
+        }]);
+
+        let result = validate_supported_smart_rules(&rules);
+
+        assert_eq!(result, Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string()));
     }
 
     #[test]

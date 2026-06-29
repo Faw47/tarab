@@ -2,10 +2,16 @@ import { clsx } from 'clsx';
 import { forwardRef } from 'react';
 import { Button, type ButtonProps } from './button';
 
-interface IconButtonProps extends Omit<ButtonProps, 'size' | 'variant'> {
+type IconButtonLabelProps =
+  | { 'aria-label': string; title?: string }
+  | { 'aria-label'?: string; title: string };
+
+interface IconButtonBaseProps extends Omit<ButtonProps, 'size' | 'variant'> {
   size?: 'sm' | 'md' | 'lg';
   variant?: 'default' | 'primary' | 'secondary' | 'ghost' | 'outline' | 'destructive' | 'danger';
 }
+
+type IconButtonProps = IconButtonBaseProps & IconButtonLabelProps;
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ className, size = 'md', variant = 'default', ...props }, ref) => {
@@ -19,13 +25,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       if (v === 'default') return 'secondary';
       return v;
     };
-
     const explicitAria = props['aria-label'];
     const title = props.title;
-    const fallbackAriaLabel =
-      explicitAria ??
-      (typeof title === 'string' && title.trim().length > 0 ? title : undefined) ??
-      'Icon action';
+    const ariaLabel = explicitAria ?? (typeof title === 'string' && title.trim().length > 0 ? title : undefined);
 
     return (
       <Button
@@ -37,7 +39,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
           variant === 'ghost' && 'text-text-muted hover:text-white',
           className,
         )}
-        aria-label={fallbackAriaLabel}
+        aria-label={ariaLabel}
         {...props}
       />
     );

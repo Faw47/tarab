@@ -1,4 +1,4 @@
-use crate::database::{LyricsIndexEntry, SharedDatabase};
+use crate::database::{LyricsIndexEntry, SharedDatabase, TrackPathRow};
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -156,7 +156,8 @@ pub async fn get_lyrics_for_track(
 ) -> Result<Option<String>, String> {
     let path = std::path::Path::new(&track_path);
     let roots = roots_state.read().roots.clone();
-    if crate::file_ops::ensure_existing_path_allowed(path, &roots, "read lyrics for track").is_err() {
+    if crate::file_ops::ensure_existing_path_allowed(path, &roots, "read lyrics for track").is_err()
+    {
         return Ok(None);
     }
     if let Some(local) = load_local_lyrics_for_track(&track_path) {
@@ -393,9 +394,8 @@ fn find_first_match_line(content: &str, query_lower: &str) -> Option<(String, us
 }
 
 fn sync_lyrics_index_blocking(db: &SharedDatabase) -> Result<u32, String> {
-    let tracks = db
-        .get_all_tracks()
-        .map_err(|e| format!("Failed to get tracks for lyrics sync: {}", e))?;
+    const TRACK_PAGE_SIZE: u32 = 1000;
+
     let existing = db
         .get_lyrics_index_meta()
         .map_err(|e| format!("Failed to get existing lyrics index: {}", e))?;
@@ -413,48 +413,60 @@ fn sync_lyrics_index_blocking(db: &SharedDatabase) -> Result<u32, String> {
     let mut upserts: Vec<LyricsIndexEntry> = Vec::new();
     let mut deletes: Vec<String> = Vec::new();
     let mut track_ids = HashSet::new();
+    let mut offset = 0;
 
-    for track in tracks {
-        track_ids.insert(track.id.clone());
-        let existing_meta = existing_by_track.get(&track.id);
-        let lyrics_file = find_lyrics_file(&track.file_path);
+    loop {
+        let tracks = db
+            .get_track_paths_page(offset, TRACK_PAGE_SIZE)
+            .map_err(|e| format!("Failed to get tracks for lyrics sync: {}", e))?;
+        if tracks.is_empty() {
+            break;
+        }
 
-        match lyrics_file {
-            Some(path) => {
-                let mtime = file_mtime_millis(&path);
-                let normalized_path = path.to_string_lossy().replace('\\', "/");
-                let unchanged = existing_meta
-                    .map(|(p, t)| p == &normalized_path && *t == mtime)
-                    .unwrap_or(false);
+        for TrackPathRow { id, file_path } in tracks {
+            track_ids.insert(id.clone());
+            let existing_meta = existing_by_track.get(&id);
+            let lyrics_file = find_lyrics_file(&file_path);
 
-                if unchanged {
-                    continue;
-                }
+            match lyrics_file {
+                Some(path) => {
+                    let mtime = file_mtime_millis(&path);
+                    let normalized_path = path.to_string_lossy().replace('\\', "/");
+                    let unchanged = existing_meta
+                        .map(|(p, t)| p == &normalized_path && *t == mtime)
+                        .unwrap_or(false);
 
-                match std::fs::read_to_string(&path) {
-                    Ok(content) => {
-                        if content.trim().is_empty() {
-                            deletes.push(track.id.clone());
-                        } else {
-                            upserts.push(LyricsIndexEntry {
-                                track_id: track.id.clone(),
-                                lyrics_path: normalized_path,
-                                lyrics_mtime: mtime,
-                                content,
-                            });
+                    if unchanged {
+                        continue;
+                    }
+
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            if content.trim().is_empty() {
+                                deletes.push(id.clone());
+                            } else {
+                                upserts.push(LyricsIndexEntry {
+                                    track_id: id.clone(),
+                                    lyrics_path: normalized_path,
+                                    lyrics_mtime: mtime,
+                                    content,
+                                });
+                            }
+                        }
+                        Err(_) => {
+                            deletes.push(id.clone());
                         }
                     }
-                    Err(_) => {
-                        deletes.push(track.id.clone());
-                    }
                 }
-            }
-            None => {
-                if existing_meta.is_some() {
-                    deletes.push(track.id.clone());
+                None => {
+                    if existing_meta.is_some() {
+                        deletes.push(id.clone());
+                    }
                 }
             }
         }
+
+        offset += TRACK_PAGE_SIZE;
     }
 
     for orphan in existing_by_track.keys() {
@@ -482,13 +494,15 @@ fn sync_lyrics_index_blocking(db: &SharedDatabase) -> Result<u32, String> {
         .cleanup_lyrics_index_orphans()
         .map_err(|e| format!("Failed to cleanup orphan lyrics rows: {}", e))?;
 
-    Ok(changed as u32)
+    u32::try_from(changed).map_err(|_| "Lyrics sync changed row count overflowed".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::{Database, DbTrack};
     use std::fs;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -540,6 +554,53 @@ mod tests {
         let _ = fs::remove_dir_all(allowed_root);
     }
 
+    fn sample_track(id: &str, file_path: String) -> DbTrack {
+        DbTrack {
+            id: id.to_string(),
+            title: id.to_string(),
+            artist: "Artist".to_string(),
+            album_artist: None,
+            album: "Album".to_string(),
+            year: Some(2024),
+            duration: 180.0,
+            file_path,
+            has_cover_art: false,
+            cover_art_hash: None,
+            blurhash: None,
+            date_added: 1,
+            play_count: 0,
+            last_played: None,
+            rating: None,
+        }
+    }
+
+    #[test]
+    fn sync_lyrics_index_paginates_tracks_and_cleans_orphans() {
+        let db = Arc::new(Database::in_memory_for_tests().expect("create db"));
+        let dir = temp_dir("sync-pages");
+        let tracks: Vec<DbTrack> = (0..1001)
+            .map(|i| {
+                let path = dir.join(format!("track-{i:04}.mp3"));
+                fs::write(path.with_extension("lrc"), "[00:01]Line").expect("write lrc");
+                sample_track(&format!("track-{i:04}"), path.to_string_lossy().to_string())
+            })
+            .collect();
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+        db.insert_lyrics_index_orphan_for_tests(&LyricsIndexEntry {
+            track_id: "orphan".to_string(),
+            lyrics_path: dir.join("orphan.lrc").to_string_lossy().to_string(),
+            lyrics_mtime: 1,
+            content: "orphan".to_string(),
+        })
+        .expect("seed orphan");
+
+        let changed = sync_lyrics_index_blocking(&db).expect("sync lyrics");
+
+        assert_eq!(changed, 1002);
+        assert_eq!(db.lyrics_index_count().expect("lyrics count"), 1001);
+
+        let _ = fs::remove_dir_all(dir);
+    }
     #[test]
     fn clean_lrc_line_removes_millisecond_line_and_word_timestamps() {
         let line = "[00:01.234]<00:01.250>Hello <00:02.000>world";

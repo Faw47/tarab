@@ -182,4 +182,70 @@ describe('usePlaybackLifecycle', () => {
     await listeners.get('playback-position')?.({ payload: 120 });
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledTimes(1);
   });
+  it('reports play stats update failures after crossing 50%', async () => {
+    const error = new Error('stats failed');
+    dbUpdatePlayStatsMock.mockRejectedValueOnce(error);
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-position')).toBe(true);
+    });
+
+    await listeners.get('playback-position')?.({ payload: 95 });
+
+    await waitFor(() => {
+      expect(reportErrorMock).toHaveBeenCalledWith('Failed to update play stats', {
+        source: 'app',
+        error,
+      });
+    });
+  });
+
+  it('reports gapless preload failures', async () => {
+    const error = new Error('preload failed');
+    preloadNextTrackMock.mockRejectedValueOnce(error);
+    useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+    });
+
+    await listeners.get('playback-near-end')?.({ payload: 0.2 });
+
+    await waitFor(() => {
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        'Failed to preload next track for gapless playback',
+        { source: 'app', error },
+      );
+    });
+  });
+
+  it('reports fallback playback failures after unrecoverable playback errors', async () => {
+    const error = new Error('next failed');
+    playAdjacentTrackMock.mockRejectedValueOnce(error);
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-error')).toBe(true);
+    });
+
+    await listeners.get('playback-error')?.({
+      payload: {
+        filePath: '/music/track-1.mp3',
+        stage: 'stream',
+        message: 'stream failed',
+        recoverable: false,
+      },
+    });
+
+    await waitFor(() => {
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        'Failed to play next track after playback error',
+        { source: 'app', error },
+      );
+    });
+    expect(usePlayerStore.getState().isPlaying).toBe(false);
+    expect(usePlayerStore.getState().hasActivePlayback).toBe(false);
+  });
 });

@@ -58,7 +58,9 @@ export function usePlaybackLifecycle() {
         return;
       }
       halfPlayRecordedForTrackIdRef.current = currentTrack.id;
-      void dbUpdatePlayStats(currentTrack.id).catch(() => undefined);
+      void dbUpdatePlayStats(currentTrack.id).catch((error) =>
+        reportError('Failed to update play stats', { source: 'app', error }),
+      );
     },
     [],
     (error) => reportError('Failed to setup playback position listener', { source: 'app', error }),
@@ -76,7 +78,12 @@ export function usePlaybackLifecycle() {
             const playerState = usePlayerStore.getState();
             const next = playerState.previewNext();
             if (next) {
-              void preloadNextTrack(next.track.filePath).catch(() => undefined);
+              void preloadNextTrack(next.track.filePath).catch((error) =>
+                reportError('Failed to preload next track for gapless playback', {
+                  source: 'app',
+                  error,
+                }),
+              );
             }
           }
           return;
@@ -201,8 +208,8 @@ export function usePlaybackLifecycle() {
               }
               await playAdjacentTrack('next');
               return;
-            } catch {
-              // Ignore and stop playback below.
+            } catch (error) {
+              reportError('Failed to play next track after playback error', { source: 'app', error });
             }
           }
         }

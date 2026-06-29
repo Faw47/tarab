@@ -4,8 +4,11 @@ import { useLibraryStore } from '../../store/library-store';
 import type { SortBy, Track } from '../../types';
 import {
   fetchLibrarySearch,
+  fetchLibraryStats,
   fetchLibraryTrackCount,
   fetchLibraryTracksPage,
+  fetchMostPlayedTracks,
+  fetchRecentlyAddedTracks,
   mapSearchResultToTrack,
 } from './api';
 import { libraryKeys } from './queryKeys';
@@ -68,7 +71,7 @@ const toSerializedTrack = (track: Track) => ({
   dateAdded: track.dateAdded,
 });
 
-export function useLibraryData() {
+export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}) {
   const queryClient = useQueryClient();
 
   const searchQuery = useLibraryStore((s) => s.searchQuery);
@@ -105,8 +108,31 @@ export function useLibraryData() {
     staleTime: 60_000,
   });
 
+  const statsQuery = useQuery({
+    queryKey: libraryKeys.stats(),
+    queryFn: fetchLibraryStats,
+    staleTime: 60_000,
+  });
+
+  const recentTracksQuery = useQuery({
+    queryKey: libraryKeys.recent(30, 50),
+    queryFn: () => fetchRecentlyAddedTracks(30, 50),
+    enabled: options.includeLibraryShelves === true,
+    staleTime: 60_000,
+  });
+
+  const mostPlayedTracksQuery = useQuery({
+    queryKey: libraryKeys.mostPlayed(100),
+    queryFn: () => fetchMostPlayedTracks(100),
+    enabled: options.includeLibraryShelves === true,
+    staleTime: 60_000,
+  });
+
   const tracks = tracksQuery.data ?? [];
-  const trackCount = trackCountQuery.data ?? tracks.length;
+  const libraryStats = statsQuery.data ?? null;
+  const recentTracks = recentTracksQuery.data ?? [];
+  const mostPlayedTracks = mostPlayedTracksQuery.data ?? [];
+  const trackCount = libraryStats?.trackCount ?? trackCountQuery.data ?? tracks.length;
 
   const trimmedSearch = debouncedSearchQuery.trim();
   const shouldSearchMetadata = trimmedSearch.length > 0 && searchScope !== 'lyrics';
@@ -271,6 +297,9 @@ export function useLibraryData() {
 
   return {
     tracks,
+    libraryStats,
+    recentTracks,
+    mostPlayedTracks,
     trackCount,
     searchQuery,
     searchScope,

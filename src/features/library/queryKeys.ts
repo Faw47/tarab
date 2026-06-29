@@ -5,6 +5,9 @@ const root = ['library'] as const;
 export const libraryKeys = {
   all: root,
   tracks: () => [...root, 'tracks'] as const,
+  stats: () => [...root, 'stats'] as const,
+  recent: (days: number, limit: number) => [...root, 'recent', days, limit] as const,
+  mostPlayed: (limit: number) => [...root, 'most-played', limit] as const,
   trackCount: () => [...root, 'track-count'] as const,
   searchRoot: () => [...root, 'search'] as const,
   search: (query: string, scope: LibrarySearchScope = 'all') =>

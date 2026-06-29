@@ -601,13 +601,16 @@ export const LibraryView = memo(function LibraryView({
     sortBy,
     setSortBy,
     getFilteredTracks,
+    libraryStats,
+    recentTracks = [],
+    mostPlayedTracks = [],
     trackCount,
     tracks: allTracks,
     appendTracks,
     applyCoverArtHashes,
     isLyricsMatch,
     getLyricsMatchLine,
-  } = useLibraryData();
+  } = useLibraryData({ includeLibraryShelves: true });
 
   const { downloadArtwork, theme } = useSettingsStore(
     useShallow((state) => ({
@@ -687,11 +690,33 @@ export const LibraryView = memo(function LibraryView({
     () => buildDetailTracks(allTracks, detailScope), [allTracks, detailScope],
   );
 
-  const facetCounts = useMemo(() => buildFacetCounts(visibleTracks), [visibleTracks]);
+  const usesFullLibraryFacetData = searchQuery.trim().length === 0 && smartFilter === null;
+
+  const facetCounts = useMemo(() => {
+    const counts = buildFacetCounts(visibleTracks);
+    if (!usesFullLibraryFacetData) return counts;
+
+    return {
+      ...counts,
+      all: trackCount,
+      albums: libraryStats?.albumCount ?? counts.albums,
+      artists: libraryStats?.artistCount ?? counts.artists,
+      recent: recentTracks.length,
+      mostPlayed: mostPlayedTracks.length,
+      duration: libraryStats?.totalDuration ?? counts.duration,
+    } satisfies FacetCounts;
+  }, [libraryStats, mostPlayedTracks.length, recentTracks.length, trackCount, usesFullLibraryFacetData, visibleTracks]);
+
+  const facetTracks = useMemo(() => {
+    if (!usesFullLibraryFacetData) return visibleTracks;
+    if (activeFacet === 'recent') return recentTracks;
+    if (activeFacet === 'mostPlayed') return mostPlayedTracks;
+    return visibleTracks;
+  }, [activeFacet, mostPlayedTracks, recentTracks, usesFullLibraryFacetData, visibleTracks]);
 
   const groupedData = useMemo(
-    () => buildFacetPayload(activeFacet, visibleTracks, coverUrlFromHash),
-    [activeFacet, coverUrlFromHash, visibleTracks],
+    () => buildFacetPayload(activeFacet, facetTracks, coverUrlFromHash),
+    [activeFacet, coverUrlFromHash, facetTracks],
   );
 
   const resultFacet: LibraryFacet = detailScope ? 'all' : activeFacet;

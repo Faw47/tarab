@@ -29,14 +29,8 @@ class PerformanceMonitor {
   private enabled: boolean;
   private renderCounts: Map<string, number> = new Map();
   private activeTimers: Map<string, number> = new Map();
-  private rafCount: number = 0;
-  private activeRafLoops: Set<number> = new Set();
   private ipcCalls: Array<{ cmd: string; time: number }> = [];
   private renderTimes: Map<string, Array<number>> = new Map();
-  private timerLeaks: Map<
-    number,
-    { type: 'interval' | 'timeout'; created: number; handler: string }
-  > = new Map();
   private lastMetricsReport: number = 0;
   private metricsIntervalId: ReturnType<typeof setInterval> | null = null;
   private budgetSamples: Map<PerfBudgetKey, number[]> = new Map();
@@ -46,7 +40,6 @@ class PerformanceMonitor {
     if (__DEV__ && this.enabled) {
       console.log('🚀 Performance Monitor Enabled');
       (window as any).perfMonitor = this;
-      this.monitorTimers();
       this.startMetricsReporting();
     }
   }
@@ -157,74 +150,6 @@ class PerformanceMonitor {
       throw err;
     }
   }
-  // Timer Monitoring
-  monitorTimers() {
-    if (!this.enabled || (window as any).__timersMonitored) return;
-    (window as any).__timersMonitored = true;
-
-    const originalRaf = window.requestAnimationFrame;
-    const originalCaf = window.cancelAnimationFrame;
-    const originalSetInterval = window.setInterval;
-    const originalClearInterval = window.clearInterval;
-    const originalSetTimeout = window.setTimeout;
-    const originalClearTimeout = window.clearTimeout;
-
-    window.requestAnimationFrame = (cb) => {
-      const id = originalRaf((time) => {
-        this.rafCount++;
-        this.activeRafLoops.add(id);
-        cb(time);
-        // Remove after a frame (loops will re-add themselves)
-        setTimeout(() => this.activeRafLoops.delete(id), 0);
-      });
-      return id;
-    };
-
-    window.cancelAnimationFrame = (id) => {
-      this.activeRafLoops.delete(id);
-      originalCaf(id);
-    };
-
-    (window as any).setInterval = (handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-      const id = originalSetInterval(handler as (...args: unknown[]) => void, timeout, ...args);
-      this.timerLeaks.set(id as number, {
-        type: 'interval',
-        created: Date.now(),
-        handler: String(handler).substring(0, 100),
-      });
-      console.log(`%c[Timer] Interval Started (${id}) - ${timeout}ms`, 'color: #aa00ff');
-      return id;
-    };
-
-    (window as any).clearInterval = (id: unknown) => {
-      if (id != null) {
-        this.timerLeaks.delete(id as number);
-        console.log(`%c[Timer] Interval Cleared (${id})`, 'color: #aa00ff');
-      }
-      originalClearInterval(id as Parameters<typeof clearInterval>[0]);
-    };
-
-    (window as any).setTimeout = (handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-      const id = originalSetTimeout(handler as (...args: unknown[]) => void, timeout, ...args);
-      this.timerLeaks.set(id as number, {
-        type: 'timeout',
-        created: Date.now(),
-        handler: String(handler).substring(0, 100),
-      });
-      if (timeout !== undefined) {
-        setTimeout(() => this.timerLeaks.delete(id as number), timeout + 1000);
-      }
-      return id;
-    };
-
-    (window as any).clearTimeout = (id: unknown) => {
-      if (id != null) {
-        this.timerLeaks.delete(id as number);
-      }
-      originalClearTimeout(id as Parameters<typeof clearTimeout>[0]);
-    };
-  }
-
   startMetricsReporting() {
     if (!this.enabled) return;
     if (this.metricsIntervalId !== null) return;
@@ -232,15 +157,6 @@ class PerformanceMonitor {
       const now = Date.now();
       if (now - this.lastMetricsReport < 5000) return; // Report every 5s
       this.lastMetricsReport = now;
-
-      // RAF metrics
-      const activeRafCount = this.activeRafLoops.size;
-      if (activeRafCount > 0) {
-        console.log(
-          `%c[RAF] Active loops: ${activeRafCount}, Total calls: ${this.rafCount}`,
-          'color: #00ff00',
-        );
-      }
 
       // IPC frequency (calls per second)
       const oneSecondAgo = now - 1000;
@@ -271,21 +187,6 @@ class PerformanceMonitor {
         }
       });
 
-      // Timer leak detection
-      const leaks = Array.from(this.timerLeaks.entries()).filter(
-        ([_id, info]) => now - info.created > 30000,
-      ); // Older than 30s
-      if (leaks.length > 0) {
-        console.warn(
-          `%c[Timer Leak] ${leaks.length} timers not cleaned up:`,
-          'color: orange; font-weight: bold',
-        );
-        leaks.forEach(([id, info]) => {
-          console.warn(
-            `  ${info.type}(${id}) created ${Math.round((now - info.created) / 1000)}s ago`,
-          );
-        });
-      }
     }, 5000);
   }
 }

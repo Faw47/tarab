@@ -7,6 +7,7 @@ import { usePlayerStore } from '../../store/player-store';
 import { getContextMenuPosition } from '../../lib/context-menu-position';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
+import { VirtualizedGrid } from '../shared/VirtualizedGrid';
 import { Button } from '../ui/button';
 import { LibraryTracksList } from './LibraryTracksList';
 import { LibraryAlbumsList } from './LibraryAlbumsList';
@@ -680,6 +681,9 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
   onArtistOpen,
   onDragStart,
   onRangeChange,
+  onTrackGridRangeChange,
+  onAlbumGridRangeChange,
+  onArtistGridRangeChange,
   onLoadMore,
   hasMore,
   formatSize,
@@ -722,16 +726,16 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     }
 
     return (
-      <div
-        className={cn(
-          isNeo
-            ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 px-1 pt-4 pb-8'
-            : 'library-v2-grid library-v2-track-grid',
-        )}
-      >
-        {tracks.map((track, index) => (
+      <VirtualizedGrid
+        items={tracks}
+        minColumnWidth={isNeo ? 150 : 160}
+        rowHeight={isNeo ? 250 : 245}
+        className={cn(isNeo ? 'px-1 pt-4 pb-8' : 'pb-8')}
+        getItemKey={(track) => track.id}
+        onRangeChange={(start, end) => onTrackGridRangeChange(tracks, start, end)}
+        onScrollNearEnd={hasMore ? onLoadMore : undefined}
+        renderItem={(track, index) => (
           <TrackTile
-            key={track.id}
             track={track}
             index={index}
             searchQuery={searchQuery}
@@ -745,8 +749,8 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
             matchedLyricLine={getLyricsMatchLine(track.id)}
             isNeo={isNeo}
           />
-        ))}
-      </div>
+        )}
+      />
     );
   }
 
@@ -769,49 +773,33 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     }
 
     return (
-      <div
-        className={cn(
-          isNeo
-            ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6 px-1 pt-6 pb-12'
-            : 'space-y-4',
+      <VirtualizedGrid
+        items={albums}
+        minColumnWidth={isNeo ? 165 : 155}
+        rowHeight={isNeo ? 270 : 245}
+        className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
+        getItemKey={(album) => `${album.track.album}-${album.track.artist}`}
+        onRangeChange={(start, end) => onAlbumGridRangeChange(albums, start, end)}
+        onScrollNearEnd={hasMore ? onLoadMore : undefined}
+        renderItem={(album, index) => (
+          <AlbumTile
+            album={album}
+            index={index}
+            searchQuery={searchQuery}
+            onOpen={onAlbumOpen}
+            onPlay={onPlayAlbum}
+            isNeo={isNeo}
+            isPlayingAlbum={
+              Boolean(
+                isPlaying &&
+                currentTrack &&
+                currentTrack.album === album.track.album &&
+                currentTrack.artist === album.track.artist,
+              )
+            }
+          />
         )}
-      >
-        {isNeo ? (
-          albums.map((album, index) => (
-            <AlbumTile
-              key={`${album.track.album}-${album.track.artist}`}
-              album={album}
-              index={index}
-              searchQuery={searchQuery}
-              onOpen={onAlbumOpen}
-              onPlay={onPlayAlbum}
-              isNeo={true}
-              isPlayingAlbum={
-                Boolean(
-                  isPlaying &&
-                  currentTrack &&
-                  currentTrack.album === album.track.album &&
-                  currentTrack.artist === album.track.artist,
-                )
-              }
-            />
-          ))
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
-            {albums.map((album, index) => (
-              <AlbumTile
-                key={`${album.track.album}-${album.track.artist}`}
-                album={album}
-                index={index}
-                searchQuery={searchQuery}
-                onOpen={onAlbumOpen}
-                onPlay={onPlayAlbum}
-                isFeatured={index === 0 && albums.length >= 4}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      />
     );
   }
 
@@ -835,28 +823,26 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     }
 
     return (
-        <div
-          className={cn(
-            isNeo
-              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6 px-1 pt-6 pb-12'
-              : 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4',
-          )}
-        >
-          {artists.map((artist, index) => (
-            <ArtistTile
-              key={artist.artist}
-              artist={artist}
-              index={index}
-              searchQuery={searchQuery}
-              onOpen={onArtistOpen}
-              onPlay={onPlayTrack}
-              isNeo={isNeo}
-              isPlayingArtist={
-                Boolean(isPlaying && currentTrack && currentTrack.artist === artist.artist)
-              }
-            />
-          ))}
-        </div>
+      <VirtualizedGrid
+        items={artists}
+        minColumnWidth={isNeo ? 165 : 155}
+        rowHeight={isNeo ? 270 : 245}
+        className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
+        getItemKey={(artist) => artist.artist}
+        onRangeChange={(start, end) => onArtistGridRangeChange(artists, start, end)}
+        onScrollNearEnd={hasMore ? onLoadMore : undefined}
+        renderItem={(artist, index) => (
+          <ArtistTile
+            artist={artist}
+            index={index}
+            searchQuery={searchQuery}
+            onOpen={onArtistOpen}
+            onPlay={onPlayTrack}
+            isNeo={isNeo}
+            isPlayingArtist={Boolean(isPlaying && currentTrack && currentTrack.artist === artist.artist)}
+          />
+        )}
+      />
     );
   }
 

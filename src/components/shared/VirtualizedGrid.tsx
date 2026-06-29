@@ -44,10 +44,12 @@ export function VirtualizedGrid<T>({
   className,
   style,
   renderItem,
+  getItemKey,
   onRangeChange,
   onScrollNearEnd,
 }: VirtualizedGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
   useEffect(() => {
@@ -97,12 +99,20 @@ export function VirtualizedGrid<T>({
       const { scrollTop, clientHeight, scrollHeight } = node;
       if (scrollHeight <= 0) return;
       if (scrollTop + clientHeight >= 0.9 * scrollHeight) {
+        if (throttleRef.current) return;
         onScrollNearEnd();
+        throttleRef.current = setTimeout(() => {
+          throttleRef.current = null;
+        }, 400);
       }
     };
 
+    check();
     node.addEventListener('scroll', check, { passive: true });
-    return () => node.removeEventListener('scroll', check);
+    return () => {
+      node.removeEventListener('scroll', check);
+      if (throttleRef.current) clearTimeout(throttleRef.current);
+    };
   }, [onScrollNearEnd, items.length]);
 
   return (
@@ -150,7 +160,7 @@ export function VirtualizedGrid<T>({
             >
               {rowItems.map(({ item, index }) => (
                 <MemoVirtualizedGridCell
-                  key={index}
+                  key={getItemKey ? getItemKey(item, index) : index}
                   item={item}
                   index={index}
                   renderItem={renderItem}

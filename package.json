@@ -9,6 +9,7 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
+    "doctor": "node scripts/dev-doctor.mjs",
     "dev": "vite",
     "dev:app": "tauri dev",
     "build": "tsc && vite build",

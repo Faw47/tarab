@@ -115,6 +115,12 @@ pub struct LyricsSearchCandidate {
     pub content: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct TrackPathRow {
+    pub id: String,
+    pub file_path: String,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -149,6 +155,15 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
+    pub(crate) fn in_memory_for_tests() -> SqliteResult<Self> {
+        let conn = Connection::open_in_memory()?;
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
+        db.run_migrations()?;
+        Ok(db)
+    }
     fn run_migrations(&self) -> SqliteResult<()> {
         let mut conn = self.conn.lock();
 
@@ -836,6 +851,23 @@ impl Database {
         Ok(tracks)
     }
 
+    pub fn get_track_paths_page(&self, offset: u32, limit: u32) -> SqliteResult<Vec<TrackPathRow>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, file_path FROM tracks ORDER BY id COLLATE NOCASE ASC LIMIT ?1 OFFSET ?2",
+        )?;
+        let tracks = stmt
+            .query_map(params![limit, offset], |row| {
+                Ok(TrackPathRow {
+                    id: row.get(0)?,
+                    file_path: row.get(1)?,
+                })
+            })?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
+        Ok(tracks)
+    }
+
     pub fn get_tracks_by_ids(&self, ids: &[String]) -> SqliteResult<Vec<DbTrack>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -998,6 +1030,26 @@ impl Database {
         Ok(existing)
     }
 
+    #[cfg(test)]
+    pub(crate) fn insert_lyrics_index_orphan_for_tests(
+        &self,
+        entry: &LyricsIndexEntry,
+    ) -> SqliteResult<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        let result = conn.execute(
+            "INSERT OR REPLACE INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                entry.track_id,
+                entry.lyrics_path,
+                entry.lyrics_mtime,
+                entry.content
+            ],
+        );
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        result.map(|_| ())
+    }
     pub fn get_lyrics_index_meta(&self) -> SqliteResult<Vec<LyricsIndexMeta>> {
         let conn = self.conn.lock();
         let mut stmt =
@@ -1193,7 +1245,10 @@ impl Database {
             format!("{}/", normalized_folder)
         };
         // Escape special LIKE characters with a backslash
-        let escaped = normalized.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let escaped = normalized
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         // Query using normalized paths only (database should have normalized paths)
         let count = conn.execute(
             "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
@@ -1740,25 +1795,36 @@ impl Database {
         }
 
         let conn = self.conn.lock();
+        let normalized_ids: Vec<String> = track_ids
+            .iter()
+            .map(|id| Self::normalize_path(id))
+            .collect();
         let mut weighted: Vec<(String, String, f64)> = Vec::new();
-        for raw_id in &track_ids {
-            let normalized_id = Self::normalize_path(raw_id);
-            let row = conn.query_row(
-                "SELECT id, artist, play_count, last_played FROM tracks WHERE id = ?1",
-                params![normalized_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i32>(2)?,
-                        row.get::<_, Option<i64>>(3)?,
-                    ))
-                },
+        let now = now_unix_secs_i64();
+        let seven_days_secs: i64 = 7 * 24 * 3600;
+
+        for chunk in normalized_ids.chunks(900) {
+            let placeholders = (0..chunk.len())
+                .map(|i| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let query = format!(
+                "SELECT id, artist, play_count, last_played FROM tracks WHERE id IN ({})",
+                placeholders
             );
-            if let Ok((id, artist, play_count, last_played)) = row {
+            let mut stmt = conn.prepare(&query)?;
+            let rows = stmt.query_map(params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i32>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })?;
+
+            for row in rows {
+                let (id, artist, play_count, last_played) = row?;
                 let base = 1.0 / (play_count as f64 + 1.0);
-                let now = now_unix_secs_i64();
-                let seven_days_secs: i64 = 7 * 24 * 3600;
                 let recency = match last_played {
                     None => 2.0,
                     Some(ts) if now.saturating_sub(ts) > seven_days_secs => 2.0,
@@ -2357,6 +2423,35 @@ mod tests {
         assert_eq!(playlists[0].id, "pl_a");
         assert!(playlists[0].is_pinned);
         assert_eq!(playlists[0].pinned_at, Some(now));
+    }
+
+    #[test]
+    fn smart_shuffle_fetches_requested_tracks_in_batch() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
+            .expect("seed tracks");
+
+        let result = db
+            .get_smart_shuffle_queue(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+            .expect("smart shuffle");
+
+        assert_eq!(result.len(), 3);
+        assert!(result.contains(&"a".to_string()));
+        assert!(result.contains(&"b".to_string()));
+        assert!(result.contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn track_path_pages_return_only_requested_window() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
+            .expect("seed tracks");
+
+        let page = db.get_track_paths_page(1, 1).expect("track path page");
+
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, "b");
+        assert_eq!(page[0].file_path, "/tmp/b.mp3");
     }
 
     #[test]

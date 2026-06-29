@@ -1,17 +1,24 @@
 import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
+import type { CSSProperties, HTMLAttributes, ReactNode, UIEvent } from 'react';
+
+type ScrollToIndexAlign = 'auto' | 'start' | 'center' | 'end';
 
 interface VirtualizedListProps<T> {
   items: T[];
   itemHeight: number;
   overscan?: number;
   className?: string;
-  style?: React.CSSProperties;
-  renderItem: (item: T, index: number) => React.ReactNode;
+  style?: CSSProperties;
+  containerProps?: Omit<
+    HTMLAttributes<HTMLDivElement>,
+    'children' | 'className' | 'style' | 'ref' | 'onScroll'
+  >;
+  renderItem: (item: T, index: number) => ReactNode;
   getItemKey?: (item: T, index: number) => string | number;
   onRangeChange?: (start: number, end: number) => void;
-  /** When true, only one row is focusable; arrow keys move focus (roving tabindex). */
-  enableRovingFocus?: boolean;
+  onScroll?: (event: UIEvent<HTMLDivElement>) => void;
+  scrollToIndexRef?: { current: ((index: number, align?: ScrollToIndexAlign) => void) | null };
   /** Called when scroll position passes 90% of content (for load more). Throttled. */
   onScrollNearEnd?: () => void;
 }
@@ -25,6 +32,9 @@ export function VirtualizedList<T>({
   renderItem,
   getItemKey,
   onRangeChange,
+  onScroll,
+  scrollToIndexRef,
+  containerProps,
   onScrollNearEnd,
 }: VirtualizedListProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,6 +49,15 @@ export function VirtualizedList<T>({
   });
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    if (!scrollToIndexRef) return;
+    scrollToIndexRef.current = (index, align = 'auto') =>
+      virtualizer.scrollToIndex(index, { align });
+    return () => {
+      scrollToIndexRef.current = null;
+    };
+  }, [scrollToIndexRef, virtualizer]);
 
   useEffect(() => {
     if (onRangeChange && virtualItems.length > 0) {
@@ -72,7 +91,13 @@ export function VirtualizedList<T>({
   }, [onScrollNearEnd, items.length]);
 
   return (
-    <div ref={containerRef} className={className} style={{ ...style, position: 'relative' }}>
+    <div
+      ref={containerRef}
+      {...containerProps}
+      onScroll={onScroll}
+      className={className}
+      style={{ ...style, position: 'relative' }}
+    >
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,

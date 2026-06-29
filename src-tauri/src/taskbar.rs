@@ -75,6 +75,3 @@ pub fn clear_progress<R: Runtime>(window: Window<R>) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
     unsafe { clear_taskbar_progress(hwnd) }
 }
-
-// TODO: Implement Thumbnail Toolbar Buttons (ITaskbarList3::ThumbBarAddButtons/ThumbBarUpdateButtons)
-// This will require WM_COMMAND message handling in the window procedure to respond to button clicks.

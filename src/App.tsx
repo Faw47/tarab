@@ -37,11 +37,12 @@ import { useMetadataClipboardStore } from './store/metadata-clipboard-store';
 import { usePlayerStore } from './store/player-store';
 import { useSettingsStore } from './store/settings-store';
 
-// import { usePlaylistStore } from './store/playlist-store';
 
 import { useQueryClient } from '@tanstack/react-query';
 import { SmoothTimeProvider } from './contexts/smooth-time';
 import { loadPlayerStateFromStore } from './features/app/player-state-store';
+import { useSleepTimer } from './features/app/useSleepTimer';
+import { useDroppedAudioImport } from './features/library/useDroppedAudioImport';
 import { invalidateLibraryForMutation } from './features/library/mutations';
 import { libraryKeys } from './features/library/queryKeys';
 import { playlistKeys } from './features/playlists/queryKeys';
@@ -55,7 +56,7 @@ import { useSessionPersistence } from './hooks/useSessionPersistence';
 import { useContextMenuBuilder } from './hooks/useContextMenuBuilder';
 // Utils
 import { normalizeLyricsTiming, parseLyrics } from './lib/lyrics-parser';
-import { getPathBaseName, normalizePath } from './lib/path-utils';
+import { normalizePath } from './lib/path-utils';
 import { recordPerfBudget, useRenderLog } from './lib/performance';
 import { playAdjacentTrack, startPlayback, toggleCurrentPlayback } from './lib/playback-actions';
 import { APP_ERROR_EVENT, type AppErrorPayload, reportError } from './lib/report-error';
@@ -64,15 +65,12 @@ import {
   cacheEnforceLimit,
   dbDeleteTracks,
   dbGetAllTracks,
-  dbGetExistingPaths,
   dbGetTrackCount,
   dbGetTracksByAlbumArtist,
   dbGetTracksByIds,
   dbGetTracksPaginated,
-  dbUpsertTracks,
   deleteFiles,
   generateCoverArtHashes,
-  getBatchMetadata,
   getCoverArtData,
   getLyricsForTrack,
   getPlaylistsDataPath,
@@ -83,10 +81,7 @@ import {
   renameFile,
   resetPlaylistsData,
   revealInFileManager,
-  scanLibrary,
-  scanLibraryParallel,
   setAudioOutputDevice,
-  // getPlaybackPosition unused
   setPlaybackSpeed as setAudioPlaybackSpeed,
   setVolume as setAudioVolume,
   setCrossfadeDuration,
@@ -96,15 +91,11 @@ import {
   writeTagsBatch,
 } from './lib/tauri-commands';
 import { refreshTracksByFilePaths } from './lib/track-refresh';
-import { runBatches } from './lib/batch-utils';
 
 // Types
 import type { ContextMenuPosition, TagUpdate, Track } from './types';
 
 const LAST_SCAN_KEY = 'tarab-last-scan-v1';
-const SCAN_STALE_MS = 1000 * 60 * 60 * 24 * 7;
-const METADATA_BATCH_SIZE = 200;
-const ART_BATCH_SIZE = 120;
 const UnifiedSettingsView = lazy(() =>
   import('./components/settings/UnifiedSettingsView').then((mod) => ({
     default: mod.UnifiedSettingsView,
@@ -134,9 +125,6 @@ const viewFallback = (
   </div>
 );
 
-interface FileWithPath extends File {
-  path?: string;
-}
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLibraryScan } from './components/settings/useLibraryScan';
@@ -197,23 +185,11 @@ const App = () => {
     setSearchFocusNonce((n) => n + 1);
   }, []);
 
-  // Global search shortcut (ensures '/' works even when TopBar is hidden)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        const target = e.target instanceof HTMLElement ? e.target : null;
-        const isTextEntry = target?.closest('input, textarea, select, [contenteditable]') !== null;
-        if (isTextEntry) return;
-
-        e.preventDefault();
-        setCurrentView('library');
-        setShowSearchShell(true);
-        setSearchFocusNonce((n) => n + 1);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const openGlobalSearch = useCallback(() => {
+    setCurrentView('library');
+    setShowSearchShell(true);
+    bumpSearchFocus();
+  }, [bumpSearchFocus]);
   const globalShortcutsEnabled = useSettingsStore((s) => s.globalShortcutsEnabled);
   const shortcuts = useSettingsStore((s) => s.shortcuts);
 
@@ -265,16 +241,13 @@ const App = () => {
   );
   const [inputDialog, setInputDialog] = useState<Omit<InputDialogProps, 'onCancel'> | null>(null);
   const sessionRestored = useRef(false);
-  const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasScanning = useRef(false);
   const headerPointerNormRef = useRef<{ x: number; y: number } | null>(null);
   const [shellSearchFocused, setShellSearchFocused] = useState(false);
   const [shellScanBurstKey, setShellScanBurstKey] = useState(0);
   const [showConfetti, setShowConfetti] = useState(false);
   const lastUiPositionRef = useRef<{ time: number; pos: number }>({ time: 0, pos: 0 });
-  const [sleepDeadline, setSleepDeadline] = useState<number | null>(null);
   // Settings modal removed - now using unified settings view
-  const [showDropOverlay, setShowDropOverlay] = useState(false);
   const [initialLibraryLoading, setInitialLibraryLoading] = useState(true);
   const [libraryLoadError, setLibraryLoadError] = useState<string | null>(null);
   const [playlistRepair, setPlaylistRepair] = useState<{
@@ -372,6 +345,7 @@ const App = () => {
     })),
   );
 
+  const { sleepDeadline, scheduleSleepTimer, cancelSleepTimer } = useSleepTimer({ setIsPlaying });
   useEffect(() => {
     if (wasScanning.current && !isScanning) {
       if (totalTracks > 0) {
@@ -435,6 +409,18 @@ const App = () => {
       autoLyrics: s.autoLyrics,
     })),
   );
+  const { showDropOverlay } = useDroppedAudioImport({
+    downloadArtwork,
+    followSymlinks,
+    queryClient,
+    setIsScanning,
+    setScanProgress,
+    setTrackCount,
+    setTracks,
+    startProcessing,
+    updateProcessing,
+    finishProcessing,
+  });
   const metadataClipboard = useMetadataClipboardStore();
 
   useEffect(() => {
@@ -579,15 +565,6 @@ const App = () => {
       void syncLyricsIndex().catch((error) => {
         reportError('Failed to refresh lyrics index', { source: 'app', error });
       });
-      try {
-        const lastScanRaw = localStorage.getItem(LAST_SCAN_KEY);
-        const lastScan = lastScanRaw ? Number.parseInt(lastScanRaw, 10) : 0;
-        if (total > 0 && (!lastScan || Date.now() - lastScan > SCAN_STALE_MS)) {
-
-        }
-      } catch {
-        // ignore storage errors
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load library tracks';
       setLibraryLoadError(message);
@@ -1359,37 +1336,6 @@ const App = () => {
     ],
   );
 
-  const cancelSleepTimer = useCallback(() => {
-    if (sleepTimeoutRef.current) {
-      clearTimeout(sleepTimeoutRef.current);
-      sleepTimeoutRef.current = null;
-    }
-    setSleepDeadline(null);
-  }, []);
-
-  const scheduleSleepTimer = useCallback(
-    (minutes: number) => {
-      cancelSleepTimer();
-      const deadline = Date.now() + minutes * 60 * 1000;
-      setSleepDeadline(deadline);
-      sleepTimeoutRef.current = setTimeout(
-        async () => {
-          try {
-            await pausePlayback();
-          } catch (err) {
-            reportError('Failed to pause for sleep timer', { source: 'app', error: err });
-          } finally {
-            setIsPlaying(false);
-            setSleepDeadline(null);
-            sleepTimeoutRef.current = null;
-          }
-        },
-        minutes * 60 * 1000,
-      );
-    },
-    [cancelSleepTimer, setIsPlaying],
-  );
-
   const handleRevealTracks = useCallback(async (tracks: Track[]) => {
     if (!tracks || tracks.length === 0) return;
     const first = tracks[0];
@@ -1601,199 +1547,6 @@ const App = () => {
     [applyTrackPathUpdates, queryClient],
   );
 
-  useEffect(() => {
-    return () => {
-      if (sleepTimeoutRef.current) {
-        clearTimeout(sleepTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const audioExt = new Set(['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'aiff', 'alac']);
-    const normalizeDir = (p: string) => {
-      const norm = p.replace(/\\/g, '/');
-      const idx = norm.lastIndexOf('/');
-      return idx >= 0 ? norm.slice(0, idx) : norm;
-    };
-    const handleDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-        e.preventDefault();
-        setShowDropOverlay(true);
-      }
-    };
-    const handleDrop = async (e: DragEvent) => {
-      if (!e.dataTransfer?.files) return;
-      e.preventDefault();
-      setShowDropOverlay(false);
-      const files = Array.from(e.dataTransfer.files);
-      const dirs = new Set<string>();
-      files.forEach((file) => {
-        const path = (file as FileWithPath).path;
-        if (!path) return;
-        const ext = path.split('.').pop()?.toLowerCase();
-        if (ext && audioExt.has(ext)) {
-          dirs.add(normalizeDir(path));
-        }
-      });
-      if (dirs.size === 0) return;
-      setIsScanning(true);
-      setScanProgress(0);
-      const taskId = startProcessing('Importing audio files');
-      let processed = 0;
-      const newlyAddedTracks: Track[] = [];
-      for (const dir of dirs) {
-        try {
-          const updateDirProgress = (ratio: number) => {
-            const overall = ((processed + ratio) / dirs.size) * 100;
-            setScanProgress(Math.round(overall));
-            updateProcessing(taskId, overall);
-          };
-
-          let filePaths: string[] = [];
-          try {
-            filePaths = await scanLibraryParallel(dir, followSymlinks);
-          } catch {
-            filePaths = await scanLibrary(dir, followSymlinks);
-          }
-          const normalizedFilePaths = filePaths.map((p) => normalizePath(p));
-          updateDirProgress(0.1);
-          const existingInDb = await dbGetExistingPaths(normalizedFilePaths);
-          const existingPaths = new Set(existingInDb.map((p) => normalizePath(p)));
-          const newFilePaths = normalizedFilePaths.filter((p) => !existingPaths.has(p));
-          if (newFilePaths.length > 0) {
-            const metadataBase = 0.1;
-            const metadataSpan = downloadArtwork ? 0.5 : 0.7;
-            const batchMetadata = await runBatches(
-              newFilePaths,
-              METADATA_BATCH_SIZE,
-              getBatchMetadata,
-              (done, total) => {
-                updateDirProgress(metadataBase + (metadataSpan * done) / total);
-              },
-            );
-            let coverArtHashes: Record<string, string | null> = {};
-            const artTargets = downloadArtwork
-              ? batchMetadata.filter((m) => m.has_cover_art).map((m) => m.file_path)
-              : [];
-            if (downloadArtwork && artTargets.length > 0) {
-              const artTask = startProcessing('Preparing cover art');
-              try {
-                const coverBase = metadataBase + metadataSpan;
-                const coverSpan = 0.25;
-                const hashed = await runBatches(
-                  artTargets,
-                  ART_BATCH_SIZE,
-                  generateCoverArtHashes,
-                  (done, total) => {
-                    updateDirProgress(coverBase + (coverSpan * done) / total);
-                    updateProcessing(artTask, (done / total) * 100);
-                  },
-                );
-                coverArtHashes = Object.fromEntries(hashed);
-              } catch (err) {
-                reportError('Failed to precompute cover art hashes', { source: 'app', error: err });
-              } finally {
-                finishProcessing(artTask);
-              }
-            }
-            const newTracks: Track[] = batchMetadata.map((meta) => ({
-              id: meta.file_path,
-              title: meta.title || getPathBaseName(meta.file_path) || 'Unknown',
-              artist: meta.artist || 'Unknown Artist',
-              albumArtist: meta.album_artist ?? null,
-              album: meta.album || 'Unknown Album',
-              year: meta.year,
-              duration: meta.duration_secs,
-              filePath: meta.file_path,
-              hasCoverArt: !!meta.has_cover_art,
-              coverArtHash: coverArtHashes[meta.file_path] ?? null,
-              dateAdded: Date.now(),
-              fileFormat: meta.file_format,
-              bitrate: meta.bitrate ?? undefined,
-              sampleRate: meta.sample_rate ?? undefined,
-              fileSize: meta.file_size ?? undefined,
-            }));
-            const existing = queryClient.getQueryData<Track[]>(libraryKeys.tracks()) ?? [];
-            const merged = [...existing, ...newTracks];
-            setTracks(merged);
-            newlyAddedTracks.push(...newTracks);
-          }
-          processed += 1;
-          updateDirProgress(1);
-        } catch (err) {
-          reportError('Failed to import dropped files', { source: 'app', error: err });
-        }
-      }
-      if (newlyAddedTracks.length > 0) {
-        try {
-          await dbUpsertTracks(
-            newlyAddedTracks.map((track) => ({
-              id: track.id,
-              title: track.title,
-              artist: track.artist,
-              albumArtist: track.albumArtist ?? null,
-              album: track.album,
-              year: track.year,
-              duration: track.duration,
-              filePath: track.filePath,
-              hasCoverArt: track.hasCoverArt,
-              coverArtHash: track.coverArtHash ?? null,
-              fileFormat: track.fileFormat ?? null,
-              bitrate: track.bitrate ?? null,
-              sampleRate: track.sampleRate ?? null,
-              fileSize: track.fileSize ?? null,
-              dateAdded: track.dateAdded,
-              playCount: 0,
-              lastPlayed: null,
-              rating: null,
-              blurhash: track.blurhash || null,
-            })),
-          );
-          void syncLyricsIndex().catch((error) => {
-            reportError('Failed to refresh lyrics index after import', { source: 'app', error });
-          });
-          const total = await dbGetTrackCount();
-          setTrackCount(total);
-          await invalidateLibraryForMutation(queryClient, 'upsert');
-        } catch (err) {
-          reportError('Failed to persist imported tracks', { source: 'app', error: err });
-        }
-      }
-      setScanProgress(100);
-      try {
-        localStorage.setItem(LAST_SCAN_KEY, Date.now().toString());
-      } catch {
-        // ignore storage errors
-      }
-      setIsScanning(false);
-      finishProcessing(taskId);
-    };
-    const handleDragLeave = (e: DragEvent) => {
-      if (e.relatedTarget === null) {
-        setShowDropOverlay(false);
-      }
-    };
-    window.addEventListener('dragover', handleDragOver);
-    window.addEventListener('drop', handleDrop);
-    window.addEventListener('dragleave', handleDragLeave);
-    return () => {
-      window.removeEventListener('dragover', handleDragOver);
-      window.removeEventListener('drop', handleDrop);
-      window.removeEventListener('dragleave', handleDragLeave);
-    };
-  }, [
-    downloadArtwork,
-    finishProcessing,
-    followSymlinks,
-    queryClient,
-    setIsScanning,
-    setScanProgress,
-    setTrackCount,
-    setTracks,
-    startProcessing,
-    updateProcessing,
-  ]);
 
   const { contextMenuItems } = useContextMenuBuilder({
     selectedTracks,
@@ -2110,8 +1863,7 @@ const App = () => {
       {reducedEffects ? (
         <div className="fixed inset-0 z-0 bg-[#07070f] pointer-events-none" />
       ) : (
-        <>
-          <AppShellLiquidWebGL
+        <AppShellLiquidWebGL
             heroAccent={reactivePalette.heroAccent}
             isScrolled={isScrolled}
             searchFocused={shellSearchFocused}
@@ -2119,8 +1871,6 @@ const App = () => {
             scanBurstKey={shellScanBurstKey}
             colors={reactivePalette.liquidColors}
           />
-          <HotkeysBootstrap />
-        </>
       )}
 
       <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} />
@@ -2296,6 +2046,7 @@ const App = () => {
   return (
     <GlassSystemProvider reducedEffects={reducedEffects} theme={theme}>
       <SmoothTimeProvider>
+        <HotkeysBootstrap onSearch={openGlobalSearch} />
         {theme === 'neobrutalism' ? renderNeobrutalismLayout() : renderLiquidGlassLayout()}
 
         <Suspense fallback={null}>
@@ -2424,4 +2175,3 @@ const App = () => {
 };
 
 export default App;
-

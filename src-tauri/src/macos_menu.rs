@@ -15,7 +15,6 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         .hide()
         .hide_others()
         .separator()
-        // TODO: The frontend must listen for the "menu-quit" event and call process.exit() after flushing state.
         .item(
             &MenuItemBuilder::with_id("quit", format!("Quit {}", app_name))
                 .accelerator("Cmd+Q")

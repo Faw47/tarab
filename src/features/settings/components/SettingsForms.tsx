@@ -340,6 +340,11 @@ export const AppearanceSettingsForm = memo(() => {
   const setFullscreenPlayerLayout = useSettingsStore((s) => s.setFullscreenPlayerLayout);
   const setNavMode = useSettingsStore((s) => s.setNavMode);
 
+  const showLiquidDebugControl =
+    debugLiquidControlGlass ||
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('debugLiquidGlass') === '1');
+
   return (
     <>
       <SettingsSection
@@ -375,7 +380,7 @@ export const AppearanceSettingsForm = memo(() => {
           onChange={setReducedEffects}
           description="Reduce heavier motion and visual effects."
         />
-        {theme === 'liquid-glass' ? (
+        {theme === 'liquid-glass' && showLiquidDebugControl ? (
           <SettingsSwitch
             label="Debug liquid tab glass"
             checked={debugLiquidControlGlass}

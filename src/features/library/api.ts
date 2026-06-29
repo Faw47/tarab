@@ -1,11 +1,18 @@
 import { normalizePath } from '../../lib/path-utils';
 import {
   dbGetTrackCount,
+  dbGetLibraryStats,
+  dbGetRecentlyAdded,
+  dbGetMostPlayed,
   dbGetTracksPaginated,
   dbSearchTracks,
   searchLyrics,
 } from '../../lib/tauri-commands';
-import { DbTrackArraySchema, TrackCountSchema } from '../../lib/validation/library';
+import {
+  DbTrackArraySchema,
+  LibraryStatsSchema,
+  TrackCountSchema,
+} from '../../lib/validation/library';
 import {
   LyricsSearchResultArraySchema,
   SearchResultArraySchema,
@@ -93,6 +100,11 @@ export async function fetchLibraryTrackCount(): Promise<number> {
   return TrackCountSchema.parse(raw);
 }
 
+export async function fetchLibraryStats() {
+  const raw = await dbGetLibraryStats();
+  return LibraryStatsSchema.parse(raw);
+}
+
 export async function fetchLibraryTracksPage(params: {
   offset: number;
   limit: number;
@@ -105,6 +117,17 @@ export async function fetchLibraryTracksPage(params: {
     params.sortBy ?? 'dateAdded',
     params.sortOrder ?? 'desc',
   );
+  const parsed = DbTrackArraySchema.parse(raw);
+  return parsed.map(mapDbTrackToTrack);
+}
+export async function fetchRecentlyAddedTracks(days = 30, limit = 50): Promise<Track[]> {
+  const raw = await dbGetRecentlyAdded(days, limit);
+  const parsed = DbTrackArraySchema.parse(raw);
+  return parsed.map(mapDbTrackToTrack);
+}
+
+export async function fetchMostPlayedTracks(limit = 100): Promise<Track[]> {
+  const raw = await dbGetMostPlayed(limit);
   const parsed = DbTrackArraySchema.parse(raw);
   return parsed.map(mapDbTrackToTrack);
 }
