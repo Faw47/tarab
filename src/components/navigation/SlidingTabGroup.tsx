@@ -1,16 +1,19 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  type CSSProperties,
   memo,
+  type PointerEvent as ReactPointerEvent,
   useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
-  type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 
 import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
-import { applyHorizontalPillDom, useLiquidSegmentedPillHorizontal } from '@/hooks/use-liquid-segmented-pill';
+import {
+  applyHorizontalPillDom,
+  useLiquidSegmentedPillHorizontal,
+} from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/store/settings-store';
 
@@ -35,7 +38,11 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
   const useGpuLiquidPill = useSettingsStore((s) => s.theme === 'liquid-glass' && !s.reducedEffects);
 
   const activeIndex = useMemo(
-    () => Math.max(0, tabs.findIndex((t) => t.view === currentView)),
+    () =>
+      Math.max(
+        0,
+        tabs.findIndex((t) => t.view === currentView),
+      ),
     [tabs, currentView],
   );
 

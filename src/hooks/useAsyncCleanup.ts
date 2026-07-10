@@ -1,4 +1,4 @@
-import { useEffect, type DependencyList } from 'react';
+import { type DependencyList, useEffect } from 'react';
 
 export function useAsyncCleanup(
   setup: () => Promise<() => void>,

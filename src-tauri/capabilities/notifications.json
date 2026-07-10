@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "notifications",
-  "description": "Permissions for sending notifications",
+  "description": "Main-window scan-complete notifications only; no notification action listeners, channels, batch, cancel, or active-notification management.",
   "windows": ["main"],
   "permissions": [
-    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
     "notification:allow-notify"
   ]
 }

@@ -1,6 +1,7 @@
+use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -96,11 +97,22 @@ pub fn start_watcher<R: Runtime>(
     Ok(WatcherTask { stop_tx, handle })
 }
 
+fn validate_watch_paths(paths: Vec<String>, roots: &[PathBuf]) -> Result<Vec<String>, String> {
+    let mut allowed_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let canonical =
+            ensure_existing_path_allowed(Path::new(&path), roots, "watch library folder")?;
+        allowed_paths.push(canonical.to_string_lossy().to_string());
+    }
+    Ok(allowed_paths)
+}
+
 #[tauri::command]
 pub fn watch_library_paths(
     app: AppHandle,
     paths: Vec<String>,
     state: tauri::State<'_, Mutex<Option<WatcherTask>>>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
     let mut watcher_handle = state.lock().map_err(|e| e.to_string())?;
 
@@ -108,7 +120,49 @@ pub fn watch_library_paths(
         existing.stop();
     }
 
-    *watcher_handle = Some(start_watcher(app, paths)?);
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    let roots = roots_state.read().roots.clone();
+    let allowed_paths = validate_watch_paths(paths, &roots)?;
+
+    *watcher_handle = Some(start_watcher(app, allowed_paths)?);
 
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::validate_watch_paths;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("tarab-{name}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn validates_watch_paths_against_library_roots() {
+        let allowed_root = temp_path("watch-allowed");
+        let outside_root = temp_path("watch-outside");
+        fs::create_dir_all(&allowed_root).expect("create allowed root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+        let allowed =
+            validate_watch_paths(vec![allowed_root.to_string_lossy().to_string()], &roots)
+                .expect("allowed path");
+        assert_eq!(allowed, vec![roots[0].to_string_lossy().to_string()]);
+
+        let blocked =
+            validate_watch_paths(vec![outside_root.to_string_lossy().to_string()], &roots);
+        assert!(blocked.is_err());
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
 }

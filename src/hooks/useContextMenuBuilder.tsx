@@ -1,11 +1,11 @@
+import type { QueryClient } from '@tanstack/react-query';
+import { Edit2, FolderOpen, Library, ListMusic, ListPlus, Play, Star, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
-import { Play, ListMusic, ListPlus, Edit2, Star, FolderOpen, Library, Trash2 } from 'lucide-react';
+import type { ContextMenuItem } from '../components/shared/ContextMenu';
+import { invalidateLibraryForMutation } from '../features/library/mutations';
 import { startPlayback } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
 import { dbSetTrackRating } from '../lib/tauri-commands';
-import { invalidateLibraryForMutation } from '../features/library/mutations';
-import type { QueryClient } from '@tanstack/react-query';
-import type { ContextMenuItem } from '../components/shared/ContextMenu';
 import type { Track } from '../types';
 
 interface UseContextMenuBuilderProps {

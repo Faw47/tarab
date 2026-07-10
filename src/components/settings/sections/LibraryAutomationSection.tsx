@@ -1,7 +1,7 @@
+import { RefreshCw } from 'lucide-react';
 import { memo } from 'react';
-
-import { SettingsSection, SettingsSwitch } from '../primitives';
 import { useSettingsStore } from '../../../store/settings-store';
+import { SettingsSection, SettingsSwitch } from '../primitives';
 
 export const LibraryAutomationSection = memo(function LibraryAutomationSection() {
   const autoWatch = useSettingsStore((s) => s.autoWatch);
@@ -14,6 +14,7 @@ export const LibraryAutomationSection = memo(function LibraryAutomationSection()
     <SettingsSection
       title="Watchers"
       description="Automation that keeps library metadata current after folders are added."
+      icon={<RefreshCw size={16} />}
       className="md:col-span-2"
     >
       <SettingsSwitch

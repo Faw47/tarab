@@ -6,8 +6,6 @@ export interface LiquidGlassSurfaceProps {
   interactive?: boolean;
   /** Optional background image/texture url to render behind the glass */
   bgTextureUrl?: string;
-  /** Overridable controls for the glass effect physics (ignored in CSS fallback) */
-  effectControls?: any;
   /** CSS class to apply to the container wrapper */
   className?: string;
   style?: React.CSSProperties;
@@ -17,14 +15,14 @@ export interface LiquidGlassSurfaceProps {
 /**
  * LiquidGlassSurface
  * A CSS-based fallback for the Liquid Glass effect.
- * Uses backdrop-filter for performance and stability while the 
+ * Uses backdrop-filter for performance and stability while the
  * WebGL compositor system is being migrated.
  */
 export const LiquidGlassSurface: React.FC<LiquidGlassSurfaceProps> = ({
   bgTextureUrl,
   className,
   style,
-  children
+  children,
 }) => {
   const { theme, reducedEffects } = useGlassSystem();
   const isNeobrutalism = theme === 'neobrutalism';
@@ -50,7 +48,7 @@ export const LiquidGlassSurface: React.FC<LiquidGlassSurfaceProps> = ({
         position: 'relative',
         width: '100%',
         height: '100%',
-        ...style
+        ...style,
       }}
     >
       <div style={glassStyle} aria-hidden="true" />

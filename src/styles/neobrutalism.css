@@ -7,20 +7,20 @@
   --surface-raised: #ffffff;
   --surface-overlay: #ffffff;
   --surface-muted: #e5e5e5;
-  --surface-interactive: #facc15;
-  --surface-highlight: #84cc16;
+  --surface-interactive: var(--signal-active);
+  --surface-highlight: var(--signal-play);
 
   --type-primary: #000000;
   --type-secondary: #1a1a1a;
   --type-subdued: #6b7280;
 
-  --signal-play: #84cc16;
+  --signal-play: #7cc61f;
   --signal-play-ink: #000000;
-  --signal-active: #facc15;
+  --signal-active: #f5c518;
   --signal-active-ink: #000000;
   --signal-secondary: #a855f7;
   --signal-secondary-ink: #ffffff;
-  --signal-danger: #f87171;
+  --signal-danger: #e53935;
   --signal-danger-ink: #ffffff;
 
   --stroke-subtle: #000000;
@@ -72,6 +72,25 @@
   --transition-d4: 150ms;
   --transition-easing: ease-out;
   --transition-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  --neo-ink: #000000;
+  --neo-paper: #ffffff;
+  --neo-panel: #f6f6f6;
+  --neo-muted: #e6e6e6;
+  --neo-utility-hover: #e4c463;
+  --neo-shadow-sm: 3px 3px 0 0 var(--neo-ink);
+  --neo-shadow-md: 4px 4px 0 0 var(--neo-ink);
+  --neo-shadow-lg: 6px 6px 0 0 var(--neo-ink);
+  --settings-section-surface: var(--surface-card, var(--neo-paper));
+  --settings-section-border: var(--neo-ink);
+  --settings-section-shadow: var(--neo-shadow-lg);
+  --settings-section-icon-surface: var(--accent);
+  --settings-section-icon-border: var(--neo-ink);
+  --settings-danger-surface: #fee2e2;
+  --state-warning-surface: #dab852;
+  --state-warning-border: var(--neo-ink);
+  --state-error-surface: #d88274;
+  --state-error-border: var(--neo-ink);
 }
 
 /* Root canvas — dot matrix (spec) */
@@ -85,7 +104,11 @@
 
 [data-theme="neobrutalism"].dark {
   background-color: #1a1a1a !important;
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px) !important;
+  background-image: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.08) 1px,
+    transparent 1px
+  ) !important;
   background-size: 18px 18px !important;
 }
 
@@ -173,7 +196,10 @@
   box-shadow: 4px 4px 0px 0px #000000 !important;
   text-transform: uppercase;
   font-weight: 800;
-  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+  transition:
+    transform 100ms ease-out,
+    box-shadow 100ms ease-out,
+    background-color 100ms ease-out !important;
   background-color: #ffffff;
   color: #000000;
 }
@@ -184,7 +210,10 @@
 }
 
 [data-theme="neobrutalism"] .glass-button:hover,
-[data-theme="neobrutalism"] button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(.neo-card-action):hover {
+[data-theme="neobrutalism"]
+  button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(
+    .neo-card-action
+  ):hover {
   transform: translate(-2px, -2px) !important;
   box-shadow: 4px 4px 0px 0px #000000 !important;
   background-color: var(--signal-play) !important;
@@ -196,7 +225,10 @@
 }
 
 [data-theme="neobrutalism"] .glass-button:active,
-[data-theme="neobrutalism"] button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(.neo-card-action):active {
+[data-theme="neobrutalism"]
+  button:not(.ghost):not(.link):not(.neo-play-pause):not(.neo-danger-action):not(
+    .neo-card-action
+  ):active {
   transform: translate(4px, 4px) !important;
   box-shadow: none !important;
 }
@@ -233,7 +265,10 @@
   box-shadow: 4px 4px 0px 0px #000000 !important;
   border-radius: 0px !important;
   transform: translateY(-4px) !important;
-  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+  transition:
+    transform 100ms ease-out,
+    box-shadow 100ms ease-out,
+    background-color 100ms ease-out !important;
 }
 
 [data-theme="neobrutalism"] [data-slot="slider-thumb"]:hover {
@@ -263,7 +298,10 @@
 
 [data-theme="neobrutalism"] .track-row {
   border-bottom: 2px solid #000000 !important;
-  transition: transform 100ms ease-out, box-shadow 100ms ease-out, background-color 100ms ease-out !important;
+  transition:
+    transform 100ms ease-out,
+    box-shadow 100ms ease-out,
+    background-color 100ms ease-out !important;
 }
 
 [data-theme="neobrutalism"] .track-row:hover {
@@ -289,7 +327,7 @@
 
 [data-theme="neobrutalism"] .neo-context-badge {
   border: 2px solid #000000;
-  background: #f5c518;
+  background: var(--signal-active);
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 700;
@@ -321,7 +359,7 @@
   left: 0;
   top: 0;
   height: 100%;
-  background: #7cc61f;
+  background: var(--signal-play);
   pointer-events: none;
   transition: width 0.1s linear;
 }
@@ -367,7 +405,7 @@
 }
 
 [data-theme="neobrutalism"] .neo-volume-segment.active {
-  background: #7cc61f;
+  background: var(--signal-play);
 }
 
 [data-theme="neobrutalism"] .neo-toggle {
@@ -386,7 +424,7 @@
 
 [data-theme="neobrutalism"] .neo-toggle-on {
   width: 50%;
-  background: #7cc61f;
+  background: var(--signal-play);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -403,7 +441,7 @@
 }
 
 [data-theme="neobrutalism"] .neo-toggle[data-active="true"] .neo-toggle-on {
-  background: #7cc61f;
+  background: var(--signal-play);
 }
 
 [data-theme="neobrutalism"] .neo-toggle[data-active="false"] .neo-toggle-on {
@@ -450,14 +488,14 @@
 }
 
 [data-theme="neobrutalism"] .neo-danger-zone-label {
-  color: #e53935;
+  color: var(--signal-danger);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 [data-theme="neobrutalism"] .neo-danger-action {
-  background: #e53935;
+  background: var(--signal-danger);
   border: 2px solid #000000;
   box-shadow: 4px 4px 0px 0px #000000;
   color: #ffffff;
@@ -499,7 +537,9 @@
   box-shadow: 4px 4px 0px 0px #000000;
   padding: 8px;
   cursor: pointer;
-  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease;
 }
 
 [data-theme="neobrutalism"] .neo-album-card:active {
@@ -513,7 +553,7 @@
 }
 
 [data-theme="neobrutalism"] .neo-album-card.playing {
-  background: #7cc61f;
+  background: var(--signal-play);
 }
 
 [data-theme="neobrutalism"] .neo-play-pause {
@@ -521,7 +561,7 @@
   height: 64px;
   background: #000000;
   border: 2px solid #000000;
-  box-shadow: 4px 4px 0px 0px #f5c518;
+  box-shadow: 4px 4px 0px 0px var(--signal-active);
   position: relative;
   top: -16px;
   margin-bottom: -16px;
@@ -621,27 +661,59 @@
 /* -------------------------------------------------------------------------- */
 
 @keyframes neo-pop {
-  0% { transform: scale(0.95) translate(2px, 2px); box-shadow: none; opacity: 0; }
-  60% { transform: scale(1.02) translate(-2px, -2px); box-shadow: 4px 4px 0px 0px #000000; opacity: 1; }
-  100% { transform: scale(1) translate(0, 0); box-shadow: 4px 4px 0px 0px #000000; opacity: 1; }
+  0% {
+    transform: scale(0.95) translate(2px, 2px);
+    box-shadow: none;
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.02) translate(-2px, -2px);
+    box-shadow: 4px 4px 0px 0px #000000;
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translate(0, 0);
+    box-shadow: 4px 4px 0px 0px #000000;
+    opacity: 1;
+  }
 }
 
 @keyframes neo-wiggle {
-  0% { transform: rotate(0deg); }
-  25% { transform: rotate(-3deg); }
-  50% { transform: rotate(3deg); }
-  75% { transform: rotate(-1deg); }
-  100% { transform: rotate(0deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+  75% {
+    transform: rotate(-1deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
 }
 
 @keyframes neo-slide-up-pop {
-  0% { transform: translateY(20px) scale(0.95); opacity: 0; }
-  100% { transform: translateY(0) scale(1); opacity: 1; }
+  0% {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes neo-marquee {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
 }
 
 [data-theme="neobrutalism"] .animate-neo-pop {
@@ -661,11 +733,21 @@
 }
 
 /* Stagger utilities for list items */
-[data-theme="neobrutalism"] .neo-stagger-1 { animation-delay: 50ms; }
-[data-theme="neobrutalism"] .neo-stagger-2 { animation-delay: 100ms; }
-[data-theme="neobrutalism"] .neo-stagger-3 { animation-delay: 150ms; }
-[data-theme="neobrutalism"] .neo-stagger-4 { animation-delay: 200ms; }
-[data-theme="neobrutalism"] .neo-stagger-5 { animation-delay: 250ms; }
+[data-theme="neobrutalism"] .neo-stagger-1 {
+  animation-delay: 50ms;
+}
+[data-theme="neobrutalism"] .neo-stagger-2 {
+  animation-delay: 100ms;
+}
+[data-theme="neobrutalism"] .neo-stagger-3 {
+  animation-delay: 150ms;
+}
+[data-theme="neobrutalism"] .neo-stagger-4 {
+  animation-delay: 200ms;
+}
+[data-theme="neobrutalism"] .neo-stagger-5 {
+  animation-delay: 250ms;
+}
 
 @media (prefers-reduced-motion: reduce) {
   [data-theme="neobrutalism"] *,

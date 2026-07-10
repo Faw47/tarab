@@ -22,10 +22,7 @@ export const LiquidHomeAmbientBackdrop = memo(function LiquidHomeAmbientBackdrop
   const localAccent = useDominantColor(coverUrl ?? null);
 
   return (
-    <div
-      className="pointer-events-none fixed inset-0 z-[4] overflow-hidden"
-      aria-hidden="true"
-    >
+    <div className="pointer-events-none fixed inset-0 z-[4] overflow-hidden" aria-hidden="true">
       <div className="absolute inset-0 bg-[#0d0b09]" />
 
       {!coverUrl ? (

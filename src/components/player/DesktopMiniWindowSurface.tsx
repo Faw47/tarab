@@ -12,17 +12,16 @@ import {
 } from 'react';
 import {
   EVENT_DESKTOP_CONTROL_ACTION,
-  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_PLAYBACK_SNAPSHOT,
+  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_SNAPSHOT_REQUEST,
   MAIN_WINDOW_LABEL,
 } from '../../features/app/desktop-events';
-import { useCoverArt } from '../../hooks/useCoverArt';
 import { useReactivePalette } from '../../hooks/useReactivePalette';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { formatTime } from '../../lib/format-time';
 import type { DesktopControlAction, DesktopPlaybackSnapshot } from '../../types';
-import { LiquidGlassButton } from '../ui/LiquidGlassButton';
+import { Button } from '../ui/button';
 import { cn } from '../ui/liquid-glass';
 
 const EMPTY_SNAPSHOT: DesktopPlaybackSnapshot = {
@@ -37,8 +36,14 @@ const EMPTY_SNAPSHOT: DesktopPlaybackSnapshot = {
 /**
  * Standalone mini window surface (320×92). Loaded only from `mini-player.html`.
  */
-export const DesktopMiniWindowSurface = () => {
-  const [snapshot, setSnapshot] = useState<DesktopPlaybackSnapshot>(EMPTY_SNAPSHOT);
+type DesktopMiniWindowSurfaceProps = {
+  initialSnapshot?: DesktopPlaybackSnapshot;
+};
+
+export const DesktopMiniWindowSurface = ({
+  initialSnapshot = EMPTY_SNAPSHOT,
+}: DesktopMiniWindowSurfaceProps) => {
+  const [snapshot, setSnapshot] = useState<DesktopPlaybackSnapshot>(initialSnapshot);
   const [seekState, setSeekState] = useState<{ isSeeking: boolean; valueSecs: number }>({
     isSeeking: false,
     valueSecs: 0,
@@ -46,16 +51,13 @@ export const DesktopMiniWindowSurface = () => {
   const seekStateRef = useRef(seekState);
   seekStateRef.current = seekState;
 
-  const coverArt = useCoverArt(
-    snapshot.track?.filePath,
-    snapshot.track?.hasCoverArt,
-    true,
-    'small',
-    snapshot.track?.coverArtHash ?? undefined,
+  const coverArtHash = snapshot.track?.coverArtHash ?? null;
+  const coverArt = useMemo(
+    () => (coverArtHash ? `cover-art://localhost/${coverArtHash}/small` : null),
+    [coverArtHash],
   );
   const palette = useReactivePalette({
-    filePath: snapshot.track?.filePath,
-    coverArtUrl: coverArt ?? null,
+    coverArtUrl: coverArt,
   });
 
   const displayPositionSecs = seekState.isSeeking ? seekState.valueSecs : snapshot.position;
@@ -66,7 +68,10 @@ export const DesktopMiniWindowSurface = () => {
     return Math.max(0, Math.min(displayPositionSecs / durationSecs, 1));
   }, [durationSecs, displayPositionSecs]);
 
-  const remaining = useMemo(() => Math.max(0, durationSecs - displayPositionSecs), [durationSecs, displayPositionSecs]);
+  const remaining = useMemo(
+    () => Math.max(0, durationSecs - displayPositionSecs),
+    [durationSecs, displayPositionSecs],
+  );
 
   const sendAction = useCallback(async (action: DesktopControlAction) => {
     await emitTo(MAIN_WINDOW_LABEL, EVENT_DESKTOP_CONTROL_ACTION, action);
@@ -180,7 +185,12 @@ export const DesktopMiniWindowSurface = () => {
             title="Drag to move"
           >
             {coverArt ? (
-              <img src={coverArt} alt="" className="pointer-events-none h-full w-full object-cover" draggable={false} />
+              <img
+                src={coverArt}
+                alt=""
+                className="pointer-events-none h-full w-full object-cover"
+                draggable={false}
+              />
             ) : (
               <div className="h-full w-full bg-gradient-to-br from-white/12 to-transparent" />
             )}
@@ -222,7 +232,8 @@ export const DesktopMiniWindowSurface = () => {
                 onChange={(e) => {
                   const raw = parseFloat((e.target as HTMLInputElement).value);
                   const duration = durationSecs;
-                  const clamped = duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
+                  const clamped =
+                    duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
 
                   if (seekStateRef.current.isSeeking) {
                     setSeekState({ isSeeking: true, valueSecs: clamped });
@@ -243,14 +254,16 @@ export const DesktopMiniWindowSurface = () => {
                   e.stopPropagation();
                   const raw = parseFloat((e.currentTarget as HTMLInputElement).value);
                   const duration = durationSecs;
-                  const clamped = duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
+                  const clamped =
+                    duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
                   setSeekState({ isSeeking: true, valueSecs: clamped });
                 }}
                 onPointerMove={(e) => {
                   if (!seekStateRef.current.isSeeking) return;
                   const raw = parseFloat((e.currentTarget as HTMLInputElement).value);
                   const duration = durationSecs;
-                  const clamped = duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
+                  const clamped =
+                    duration > 0 ? Math.max(0, Math.min(raw, duration)) : Math.max(0, raw);
                   setSeekState({ isSeeking: true, valueSecs: clamped });
                 }}
                 onPointerUp={(e) => {
@@ -272,7 +285,7 @@ export const DesktopMiniWindowSurface = () => {
           </div>
 
           <div className="flex shrink-0 items-center gap-0.5 pointer-events-auto" data-mini-no-drag>
-            <LiquidGlassButton
+            <Button
               onClick={() => {
                 void sendAction('previous');
               }}
@@ -296,14 +309,14 @@ export const DesktopMiniWindowSurface = () => {
               aria-label="Previous"
             >
               <SkipBack className="h-3 w-3" />
-            </LiquidGlassButton>
+            </Button>
 
-            <LiquidGlassButton
+            <Button
               onClick={() => {
                 void sendAction('toggle-play');
               }}
               disabled={!hasTrack}
-              tone="accent"
+              variant="primary"
               accentColor="var(--mini-accent)"
               accentForeground="#060606"
               className={cn(
@@ -329,9 +342,9 @@ export const DesktopMiniWindowSurface = () => {
               ) : (
                 <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />
               )}
-            </LiquidGlassButton>
+            </Button>
 
-            <LiquidGlassButton
+            <Button
               onClick={() => {
                 void sendAction('next');
               }}
@@ -355,9 +368,9 @@ export const DesktopMiniWindowSurface = () => {
               aria-label="Next"
             >
               <SkipForward className="h-3 w-3" />
-            </LiquidGlassButton>
+            </Button>
 
-            <LiquidGlassButton
+            <Button
               onClick={minimizeMiniWindow}
               className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-full p-0"
               style={
@@ -372,9 +385,9 @@ export const DesktopMiniWindowSurface = () => {
               title="Minimize to dock (restore from Dock or taskbar)"
             >
               <Minimize2 className="h-3 w-3" />
-            </LiquidGlassButton>
+            </Button>
 
-            <LiquidGlassButton
+            <Button
               onClick={() => {
                 void sendAction('show-main');
               }}
@@ -391,7 +404,7 @@ export const DesktopMiniWindowSurface = () => {
               title="Show main window"
             >
               <ExternalLink className="h-3 w-3" />
-            </LiquidGlassButton>
+            </Button>
           </div>
         </div>
       </div>

@@ -27,7 +27,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
     };
     const explicitAria = props['aria-label'];
     const title = props.title;
-    const ariaLabel = explicitAria ?? (typeof title === 'string' && title.trim().length > 0 ? title : undefined);
+    const ariaLabel =
+      explicitAria ?? (typeof title === 'string' && title.trim().length > 0 ? title : undefined);
 
     return (
       <Button

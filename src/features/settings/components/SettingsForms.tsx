@@ -1,6 +1,6 @@
-import { Eye, HardDrive, Layout, ListMusic, Monitor } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { Eye, HardDrive, Layout, ListMusic, Monitor, Shuffle } from 'lucide-react';
+import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   SettingsRow,
@@ -11,13 +11,10 @@ import {
   SettingsSwitch,
 } from '../../../components/settings/primitives';
 import { liquidGlassSettingsTextInputClassName } from '../../../lib/liquid-glass-settings-ui';
+import { reportError } from '../../../lib/report-error';
+import { type AudioOutputDeviceInfo, listAudioOutputDevices } from '../../../lib/tauri-commands';
 import { cn } from '../../../lib/utils';
-import {
-  listAudioOutputDevices,
-  setAudioOutputDevice,
-  type AudioOutputDeviceInfo,
-} from '../../../lib/tauri-commands';
-import { useSettingsStore } from '../../../store/settings-store';
+import { DEFAULT_SHORTCUTS, useSettingsStore } from '../../../store/settings-store';
 
 /* --- PLAYBACK ------------------------------------------------------------ */
 
@@ -31,7 +28,7 @@ export const PlaybackSettingsForm = memo(() => {
   const setCrossfadeSeconds = useSettingsStore((s) => s.setCrossfadeSeconds);
   const setShuffleHistorySize = useSettingsStore((s) => s.setShuffleHistorySize);
   const setSmartShuffleEnabled = useSettingsStore((s) => s.setSmartShuffleEnabled);
-  
+
   const outputDevice = useSettingsStore((s) => s.outputDevice);
   const setOutputDevice = useSettingsStore((s) => s.setOutputDevice);
 
@@ -63,18 +60,13 @@ export const PlaybackSettingsForm = memo(() => {
     if (outputDevice !== 'system' && !ids.has(outputDevice)) setOutputDevice('system');
   }, [devices, outputDevice, setOutputDevice]);
 
-  const handleOutputDeviceChange = async (deviceId: string) => {
+  const handleOutputDeviceChange = (deviceId: string) => {
     setOutputDevice(deviceId);
-    try {
-      await setAudioOutputDevice(deviceId);
-    } catch {
-      // Keep the stored preference even if this device cannot be applied immediately.
-    }
   };
 
   const outputDevices = useMemo(() => {
     const seen = new Set<string>();
-    return devices.filter((device) => {
+    return [{ id: 'system', name: 'System default' }, ...devices].filter((device) => {
       if (seen.has(device.id)) return false;
       seen.add(device.id);
       return true;
@@ -114,6 +106,7 @@ export const PlaybackSettingsForm = memo(() => {
       <SettingsSection
         title="Queue and Shuffle"
         description="Tune shuffle memory without changing library data."
+        icon={<Shuffle size={16} />}
       >
         <SettingsRow
           label="Shuffle history pool"
@@ -149,7 +142,7 @@ export const PlaybackSettingsForm = memo(() => {
           control={
             <SettingsSelect
               value={outputDevice}
-              onChange={(e) => void handleOutputDeviceChange(e.target.value)}
+              onChange={(value) => void handleOutputDeviceChange(value)}
               aria-label="Select audio output device"
             >
               {outputDevices.map((d) => (
@@ -186,6 +179,9 @@ export const DesktopIntegrationForm = memo(() => {
   const setShortcut = useSettingsStore((s) => s.setShortcut);
   const setAutostartEnabled = useSettingsStore((s) => s.setAutostartEnabled);
 
+  const autostartHydratedRef = useRef(false);
+  const skipNextShortcutCommitRef = useRef(false);
+
   const [draftPlayPause, setDraftPlayPause] = useState(shortcuts.playPause);
   const [draftNext, setDraftNext] = useState(shortcuts.next);
   const [draftPrevious, setDraftPrevious] = useState(shortcuts.previous);
@@ -196,32 +192,84 @@ export const DesktopIntegrationForm = memo(() => {
     setDraftPrevious(shortcuts.previous);
   }, [shortcuts]);
 
+  const shouldSkipShortcutCommit = useCallback(() => {
+    if (!skipNextShortcutCommitRef.current) return false;
+    skipNextShortcutCommitRef.current = false;
+    return true;
+  }, []);
+
   const handleCommitPlayPause = useCallback(() => {
-    setShortcut('playPause', draftPlayPause);
-  }, [draftPlayPause, setShortcut]);
+    if (shouldSkipShortcutCommit()) return;
+    const nextValue = draftPlayPause.trim() || DEFAULT_SHORTCUTS.playPause;
+    setDraftPlayPause(nextValue);
+    setShortcut('playPause', nextValue);
+  }, [draftPlayPause, setShortcut, shouldSkipShortcutCommit]);
 
   const handleCommitNext = useCallback(() => {
-    setShortcut('next', draftNext);
-  }, [draftNext, setShortcut]);
+    if (shouldSkipShortcutCommit()) return;
+    const nextValue = draftNext.trim() || DEFAULT_SHORTCUTS.next;
+    setDraftNext(nextValue);
+    setShortcut('next', nextValue);
+  }, [draftNext, setShortcut, shouldSkipShortcutCommit]);
 
   const handleCommitPrevious = useCallback(() => {
-    setShortcut('previous', draftPrevious);
-  }, [draftPrevious, setShortcut]);
+    if (shouldSkipShortcutCommit()) return;
+    const nextValue = draftPrevious.trim() || DEFAULT_SHORTCUTS.previous;
+    setDraftPrevious(nextValue);
+    setShortcut('previous', nextValue);
+  }, [draftPrevious, setShortcut, shouldSkipShortcutCommit]);
+
+  const handleShortcutInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>, resetDraft: () => void) => {
+      if (event.key === 'Enter') {
+        event.currentTarget.blur();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        skipNextShortcutCommitRef.current = true;
+        resetDraft();
+        event.currentTarget.blur();
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const syncAutostart = async () => {
+      const wasHydrated = autostartHydratedRef.current;
+      let currentlyEnabled: boolean | null = null;
       try {
-        const currentlyEnabled = await isEnabled();
+        currentlyEnabled = await isEnabled();
+        if (!wasHydrated) {
+          autostartHydratedRef.current = true;
+          if (currentlyEnabled !== autostartEnabled) {
+            setAutostartEnabled(currentlyEnabled);
+          }
+          return;
+        }
         if (currentlyEnabled !== autostartEnabled) {
           if (autostartEnabled) await enable();
           else await disable();
         }
-      } catch (e) {
-        console.error('Failed to sync autostart', e);
+      } catch (error) {
+        if (wasHydrated) {
+          if (currentlyEnabled !== null && currentlyEnabled !== autostartEnabled) {
+            setAutostartEnabled(currentlyEnabled);
+          }
+          reportError('Failed to sync open at login', { source: 'desktop-settings', error });
+        } else {
+          reportError('Failed to read open at login setting', {
+            source: 'desktop-settings',
+            error,
+          });
+          autostartHydratedRef.current = true;
+        }
       }
     };
     void syncAutostart();
-  }, [autostartEnabled]);
+  }, [autostartEnabled, setAutostartEnabled]);
 
   const shortcutInputClassName = cn(
     'w-full max-w-[14rem] outline-none transition-colors',
@@ -269,8 +317,12 @@ export const DesktopIntegrationForm = memo(() => {
               <input
                 type="text"
                 value={draftPlayPause}
+                aria-label="Play/Pause shortcut"
                 onChange={(e) => setDraftPlayPause(e.target.value)}
                 onBlur={handleCommitPlayPause}
+                onKeyDown={(e) =>
+                  handleShortcutInputKeyDown(e, () => setDraftPlayPause(shortcuts.playPause))
+                }
                 className={shortcutInputClassName}
               />
             }
@@ -281,8 +333,10 @@ export const DesktopIntegrationForm = memo(() => {
               <input
                 type="text"
                 value={draftNext}
+                aria-label="Next shortcut"
                 onChange={(e) => setDraftNext(e.target.value)}
                 onBlur={handleCommitNext}
+                onKeyDown={(e) => handleShortcutInputKeyDown(e, () => setDraftNext(shortcuts.next))}
                 className={shortcutInputClassName}
               />
             }
@@ -293,8 +347,12 @@ export const DesktopIntegrationForm = memo(() => {
               <input
                 type="text"
                 value={draftPrevious}
+                aria-label="Previous shortcut"
                 onChange={(e) => setDraftPrevious(e.target.value)}
                 onBlur={handleCommitPrevious}
+                onKeyDown={(e) =>
+                  handleShortcutInputKeyDown(e, () => setDraftPrevious(shortcuts.previous))
+                }
                 className={shortcutInputClassName}
               />
             }

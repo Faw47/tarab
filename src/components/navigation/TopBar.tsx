@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronLeft,
   Home,
@@ -8,8 +9,6 @@ import {
   Shuffle,
   X,
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
 import {
   type CSSProperties,
   forwardRef,
@@ -24,11 +23,12 @@ import {
   useRef,
   useState,
 } from 'react';
-
 import { cn } from '@/lib/utils';
+import { Button } from '../ui/button';
+import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
 import type { NavView } from './FloatingDock';
 import { SlidingTabGroup } from './SlidingTabGroup';
-import { LiquidGlassButton } from '../ui/LiquidGlassButton';
+import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
 import { WindowsWindowControls } from './WindowsWindowControls';
 
 /* ─── CONSTANTS ──────────────────────────────────────────────────────────── */
@@ -129,11 +129,6 @@ interface StatusIndicatorProps {
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────── */
 
-const isTextEntryTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.closest('input, textarea, select, [contenteditable]') !== null;
-};
-
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
@@ -161,48 +156,6 @@ const usePlatformShortcuts = (): PlatformShortcuts => {
   }
 
   return cached.current;
-};
-
-const useGlobalSearchShortcuts = ({
-  onFocusSearch,
-  onClearSearch,
-  searchInputRef,
-}: {
-  onFocusSearch: () => void;
-  onClearSearch: () => void;
-  searchInputRef: RefObject<HTMLInputElement | null>;
-}) => {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      const isSearchInput = target?.id === SEARCH_INPUT_ID;
-
-      const isSlash = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key === '/';
-      const isEscape = e.key === 'Escape';
-
-      if (isSlash) {
-        if (isTextEntryTarget(target) && !isSearchInput) return;
-        e.preventDefault();
-        onFocusSearch();
-        return;
-      }
-
-      if (isEscape && document.activeElement === searchInputRef.current) {
-        e.preventDefault();
-        if (searchInputRef.current?.value) {
-          onClearSearch();
-          searchInputRef.current.focus();
-        } else {
-          searchInputRef.current?.blur();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClearSearch, onFocusSearch, searchInputRef]);
 };
 
 /* ─── SHARED BASE GLASS BUTTON ───────────────────────────────────────────── */
@@ -525,7 +478,6 @@ export const TopBar = memo(function TopBar({
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const { shortcutLabel, ariaShortcut } = usePlatformShortcuts();
 
-
   const handleHeaderPointerMove = useCallback((e: PointerEvent<HTMLElement>) => {
     const el = headerRef.current;
     if (!el) return;
@@ -576,10 +528,11 @@ export const TopBar = memo(function TopBar({
     onSearchChange('');
   }, [onSearchChange]);
 
-  useGlobalSearchShortcuts({
+  useTopBarSearchShortcuts({
+    inputId: SEARCH_INPUT_ID,
+    inputRef: searchInputRef,
     onFocusSearch: handleSearchShortcutFocus,
     onClearSearch: handleClearSearch,
-    searchInputRef,
   });
 
   const handleSearchChange = useCallback(
@@ -664,7 +617,7 @@ export const TopBar = memo(function TopBar({
       ].join(', ');
       return style;
     }
-    
+
     // Unified dark glass shell background
     style.backgroundColor = 'rgba(13, 11, 9, 0.48)';
     return style;
@@ -727,7 +680,7 @@ export const TopBar = memo(function TopBar({
                 transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
                 className="flex items-center"
               >
-                <LiquidGlassButton
+                <Button
                   onClick={onBack}
                   className="h-10 w-10 rounded-full shadow-md bg-black/20"
                   contentClassName="flex items-center justify-center p-0"
@@ -736,7 +689,7 @@ export const TopBar = memo(function TopBar({
                   reducedEffects={false}
                 >
                   <ChevronLeft className="h-5 w-5 -translate-x-[0.5px]" />
-                </LiquidGlassButton>
+                </Button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -830,7 +783,10 @@ export const TopBar = memo(function TopBar({
 
       {/* Mobile layout */}
       <div className="relative z-10 flex h-full min-w-0 items-stretch gap-2 px-2 md:hidden">
-        <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto" style={chromeNoDragStyle}>
+        <div
+          className="flex shrink-0 items-center gap-0.5 overflow-x-auto"
+          style={chromeNoDragStyle}
+        >
           {PRIMARY_TABS.map((item) => (
             <ActionNavIcon
               key={item.view}

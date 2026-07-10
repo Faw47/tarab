@@ -151,6 +151,10 @@ export const setLibraryRoots = async (roots: string[]): Promise<void> => {
   return invoke('set_library_roots', { roots });
 };
 
+export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
+  return invoke('watch_library_paths', { paths });
+};
+
 // Library commands
 export const scanLibrary = async (folderPath: string, followLinks?: boolean): Promise<string[]> => {
   return invoke('scan_library', { folderPath, followLinks });
@@ -570,6 +574,13 @@ export const cacheHasThumbnail = async (hash: string): Promise<boolean> => {
   return invoke('cache_has_thumbnail', { hash });
 };
 
+export const cacheGetThumbnailBytes = async (
+  hash: string,
+  size: 'small' | 'medium' | 'large',
+): Promise<number[] | null> => {
+  return invoke('cache_get_thumbnail_bytes', { hash, size });
+};
+
 export const cacheGetStats = async (): Promise<CacheStats> => {
   return invoke('cache_get_stats');
 };
@@ -580,13 +591,6 @@ export const cacheClear = async (keepRecentDays?: number): Promise<number> => {
 
 export const cacheEnforceLimit = async (limitMb?: number): Promise<number> => {
   return invoke('cache_enforce_limit', { limitMb });
-};
-
-export const cacheGetThumbnailDataUrl = async (
-  hash: string,
-  size: 'small' | 'medium' | 'large',
-): Promise<string | null> => {
-  return invoke('cache_get_thumbnail_data_url', { hash, size });
 };
 
 // ========== Waveform Commands ==========

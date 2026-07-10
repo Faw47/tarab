@@ -1,24 +1,32 @@
-import { cn } from '@/lib/utils';
-import { Disc3, Maximize2, Mic2, Music2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useLibraryData } from '../../features/library/useLibraryData';
-import { useCoverArt } from '../../hooks/useCoverArt';
 import {
-  playAdjacentTrack,
-  startPlayback,
-  toggleCurrentPlayback,
-} from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+  Disc3,
+  Maximize2,
+  Mic2,
+  Music2,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
+import { type CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { cn } from '@/lib/utils';
+
+import { useCoverArt } from '../../hooks/useCoverArt';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
+import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
+import { reportError } from '../../lib/report-error';
 import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
-import { sortAlbumTracks } from '../../lib/track-order';
+
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
-import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
+import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import type { HomeViewProps } from './homeTypes';
+import { useHomeLibraryModel } from './useHomeLibraryModel';
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
@@ -35,11 +43,17 @@ const POLAROID_ROTATIONS = [
   'rotate-[-0.4deg]',
   'rotate-[0.8deg]',
 ];
-const POLAROID_TAPE_ROTATIONS = ['rotate-[-4deg]', 'rotate-[3deg]', 'rotate-[-3deg]', 'rotate-[4deg]'];
+const POLAROID_TAPE_ROTATIONS = [
+  'rotate-[-4deg]',
+  'rotate-[3deg]',
+  'rotate-[-3deg]',
+  'rotate-[4deg]',
+];
 
 const NEO_POLAROID_CARD =
   'group relative cursor-pointer select-none border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none';
-const NEO_POLAROID_PLAYING = 'border-[#7CC61F] bg-[#7CC61F] shadow-[3px_3px_0_0_#7CC61F]';
+const NEO_POLAROID_PLAYING =
+  'border-[var(--signal-play)] bg-[var(--signal-play)] shadow-[3px_3px_0_0_var(--signal-play)]';
 
 const NEO_TAPE =
   'pointer-events-none absolute -top-[9px] left-1/2 z-20 h-[18px] w-12 -translate-x-1/2 opacity-90';
@@ -58,7 +72,9 @@ function polaroidTapeRotation(i: number): string {
 }
 
 const NeoVolumeControl = memo(() => {
-  const { volume, setVolume } = usePlayerStore(useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })));
+  const { volume, setVolume } = usePlayerStore(
+    useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
+  );
   const [expanded, setExpanded] = useState(false);
   const restoreRef = useRef(0.55);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,7 +176,10 @@ const NowPlayingEqualizer = memo(({ isPlaying }: { isPlaying: boolean }) => {
       {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
-          className={cn('flex-1 border-t-2 border-black bg-[#7CC61F]', isPlaying && 'animate-pulse')}
+          className={cn(
+            'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
+            isPlaying && 'animate-pulse',
+          )}
           style={{
             height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
             animationDelay: `${i * 0.15}s`,
@@ -194,7 +213,9 @@ const NeoLyricsConsole = memo(() => {
 
   const words = activeLine?.words;
   const displayWords =
-    typeof words === 'string' ? words : words?.map((w: { text: string }) => w.text).join('') || '...';
+    typeof words === 'string'
+      ? words
+      : words?.map((w: { text: string }) => w.text).join('') || '...';
 
   return (
     <div className={cn(BORDER, SHADOW_COMP, 'flex flex-col gap-1.5 bg-white p-3 md:p-4')}>
@@ -282,7 +303,7 @@ const NeoAlbumCard = memo(
               'absolute bottom-2 right-2 z-20 flex h-11 w-11 items-center justify-center bg-[#9D80E3]',
               SNAP,
               PRESS_EFFECT,
-              'shadow-[3px_3px_0_0_#000] hover:bg-[#F5C518]',
+              'shadow-[3px_3px_0_0_#000] hover:bg-[var(--signal-active)]',
               'opacity-0 group-hover:opacity-100',
             )}
             onClick={(e) => {
@@ -311,6 +332,8 @@ export const HomeViewNeo = memo(function HomeViewNeo({
   onOpenAlbumDetails,
   onOpenFullPlayer,
   isLibraryLoading = false,
+  libraryError = null,
+  onRetryLoad,
   onScrollChange,
 }: HomeViewProps) {
   const { currentTrack, isPlaying } = usePlayerStore(
@@ -329,33 +352,57 @@ export const HomeViewNeo = memo(function HomeViewNeo({
       currentTrack?.coverArtHash,
     ) ?? null;
 
-  const { tracks } = useLibraryData();
+  const { albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
+  const albums = allAlbums.slice(0, 24);
 
-  const albumTracksByKey = useMemo(() => {
-    const map = new Map<string, Track[]>();
-    for (const track of tracks) {
-      const key = getAlbumKey(track);
-      const existing = map.get(key);
-      if (existing) existing.push(track);
-      else map.set(key, [track]);
-    }
-    return map;
-  }, [tracks]);
+  if (isLibraryLoading) {
+    return (
+      <div className="h-full overflow-y-auto bg-transparent custom-scrollbar">
+        <div
+          className="mx-auto flex max-w-[1600px] animate-pulse flex-col gap-8 p-6 md:p-8 lg:p-10"
+          role="status"
+          aria-label="Loading home"
+        >
+          <div className={cn(BORDER, SHADOW_PANEL, 'h-[340px] bg-white')} />
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className={cn(BORDER, SHADOW_COMP, 'aspect-[4/5] bg-white')} />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const albums = useMemo(
-    () =>
-      Array.from(albumTracksByKey.values())
-        .map((a) => ({ track: a[0], count: a.length }))
-        .slice(0, 24),
-    [albumTracksByKey],
-  );
-
-  const handlePlayAlbum = useCallback(async (_t: Track, albumTracks: Track[]) => {
-    const ordered = sortAlbumTracks(albumTracks);
-    if (ordered.length) await startPlayback(ordered[0], { queue: ordered, queueIndex: 0, shuffleEnabled: false });
-  }, []);
-
-  if (isLibraryLoading) return <div className="h-full bg-transparent" />;
+  if (libraryError) {
+    return (
+      <div className="flex h-full items-start justify-center overflow-y-auto bg-transparent p-8 custom-scrollbar">
+        <section
+          className={cn(BORDER, SHADOW_PANEL, 'mt-12 max-w-xl bg-white p-8 text-center')}
+          role="alert"
+        >
+          <Music2 className="mx-auto mb-4" size={48} strokeWidth={STROKE} aria-hidden="true" />
+          <h2 className="neo-type-level-1 text-black">Library failed to load</h2>
+          <p className="mt-3 break-words font-bold text-black/65">{libraryError}</p>
+          {onRetryLoad && (
+            <button
+              type="button"
+              className={cn(
+                BORDER,
+                SHADOW_COMP,
+                PRESS_EFFECT,
+                SNAP,
+                'mt-6 bg-[var(--signal-play)] px-5 py-3 font-black uppercase text-black',
+              )}
+              onClick={onRetryLoad}
+            >
+              Retry
+            </button>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -370,12 +417,22 @@ export const HomeViewNeo = memo(function HomeViewNeo({
             'group relative flex flex-col items-stretch gap-6 overflow-visible bg-white p-6 lg:flex-row lg:gap-8',
           )}
         >
-          <HidingProgressBar accentColor="#7CC61F" />
+          <HidingProgressBar accentColor="var(--signal-play)" />
 
           <div className="mx-auto flex w-full max-w-[240px] shrink-0 flex-col gap-3 sm:max-w-[260px] lg:mx-0">
-            <div className={cn(BORDER, SHADOW_COMP, 'relative aspect-square w-full overflow-hidden bg-[#E6E6E6]')}>
+            <div
+              className={cn(
+                BORDER,
+                SHADOW_COMP,
+                'relative aspect-square w-full overflow-hidden bg-[var(--neo-muted)]',
+              )}
+            >
               {currentCoverUrl ? (
-                <img src={currentCoverUrl} alt="Now Playing" className="h-full w-full object-cover" />
+                <img
+                  src={currentCoverUrl}
+                  alt="Now Playing"
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
                   <Disc3 size={88} strokeWidth={1} className="text-black/10" />
@@ -393,7 +450,9 @@ export const HomeViewNeo = memo(function HomeViewNeo({
             <div className="flex flex-col gap-3">
               {currentTrack ? (
                 <>
-                  <h1 className="neo-type-level-1 break-words py-1 text-black">{currentTrack.title}</h1>
+                  <h1 className="neo-type-level-1 break-words py-1 text-black">
+                    {currentTrack.title}
+                  </h1>
                   <div className={cn(BORDER, SHADOW_COMP, 'self-start bg-[#FFE234] px-3 py-1.5')}>
                     <span className="neo-type-level-2 text-black">{currentTrack.artist}</span>
                   </div>
@@ -498,7 +557,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                     index={albumIndex}
                     isPlayingAlbum={isPlayingAlbum}
                     onOpenAlbumDetails={onOpenAlbumDetails}
-                    onPlayAlbum={handlePlayAlbum}
+                    onPlayAlbum={playAlbum}
                   />
                 );
               })}
@@ -508,7 +567,8 @@ export const HomeViewNeo = memo(function HomeViewNeo({
               <Music2 size={80} strokeWidth={STROKE} className="mx-auto mb-8 text-black/10" />
               <h3 className="neo-empty-state-primary">COLD STORAGE / NO RECORDS FOUND</h3>
               <p className="neo-empty-state-secondary">
-                The local entity database is currently empty. Initialize a source mapping to begin records ingestion.
+                The local entity database is currently empty. Initialize a source mapping to begin
+                records ingestion.
               </p>
               <button
                 type="button"

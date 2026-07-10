@@ -1,9 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "log",
-  "description": "Application logging",
+  "description": "Renderer log command access for main and mini-player diagnostics",
   "windows": ["main", "mini-player"],
-  "permissions": [
-    "log:default"
-  ]
+  "permissions": ["log:allow-log"]
 }

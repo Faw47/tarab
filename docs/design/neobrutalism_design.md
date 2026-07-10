@@ -284,6 +284,9 @@ Two accent colors. One destructive color. One ink. That is the entire system.
 
 The lime green appears exactly where it needs to: when a track is playing, the card turns green. When the seek bar fills, it fills green. When a volume segment is active, it fills green. That single color now means "this is the thing that is happening right now" across the entire app, with zero ambiguity.
 
+**Implementation tokens:** use `--signal-active` for yellow active/navigation states, `--signal-play` for lime playing/progress/volume states, and `--signal-danger` for destructive red. Components must consume these variables instead of embedding the corresponding hex values. Theme-specific hover shades may remain separate only when they represent a real interaction state rather than the base semantic color.
+
+
 ### 3.5 Active State Logic
 
 Active states are fill-based. Never outline-based.

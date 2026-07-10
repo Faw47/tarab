@@ -1,41 +1,61 @@
 import { useEffect, useState } from 'react';
 import { ipcBatchLimit } from '../lib/ipc-concurrency';
-import { cacheGetThumbnailDataUrl, getCoverArt } from '../lib/tauri-commands';
+import { cacheGetThumbnailBytes, getCoverArt } from '../lib/tauri-commands';
 
-// Simple in-memory caches so multiple components share results
+type CoverArtSize = 'small' | 'medium' | 'large';
+
 const MAX_CACHE = 300;
-const MAX_DATA_URL_LENGTH = 3_000_000;
 const IPC_FALLBACK_WINDOW_MS = 15_000;
 const IPC_FALLBACK_MAX_REQUESTS = 1000;
 const coverArtCache = new Map<string, string | null>();
+const fallbackBlobCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string | null>>();
 const ipcFallbackRequests: number[] = [];
 const failedIpcFallbacks = new Set<string>();
 
-// Detect if we're on Windows where cover-art:// protocol doesn't work
-const isWindows = typeof navigator !== 'undefined' && navigator.platform.includes('Win');
+const buildCoverArtUrl = (hash: string, size: CoverArtSize = 'large') =>
+  `cover-art://localhost/${hash}/${size}`;
+const cacheKey = (filePath: string, size: CoverArtSize, hash?: string | null) =>
+  `${filePath}::${size}::${hash ?? 'nohash'}`;
+const fallbackKey = (hash: string, size: CoverArtSize) => `${hash}:${size}`;
+const isPersistableCoverArtUrl = (value: string) => value.startsWith('cover-art://');
 
-// Check if protocol is known to be unsupported (Windows or previously failed)
-const isProtocolUnsupported = (): boolean => {
-  if (isWindows) return true;
-  try {
-    return sessionStorage.getItem('coverart:protocol_unsupported') === 'true';
-  } catch {
-    return false;
+const removeCachedBlobUrl = (url: string) => {
+  for (const [key, value] of Array.from(coverArtCache.entries())) {
+    if (value === url) coverArtCache.delete(key);
   }
 };
 
-const buildCoverArtUrl = (hash: string, size: 'small' | 'medium' | 'large' = 'large') =>
-  `cover-art://localhost/${hash}/${size}`;
-const cacheKey = (filePath: string, size: 'small' | 'medium' | 'large', hash?: string | null) =>
-  `${filePath}::${size}::${hash ?? 'nohash'}`;
+const revokeBlobUrl = (url: string) => {
+  if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+  URL.revokeObjectURL(url);
+};
+
+const rememberFallbackBlob = (key: string, url: string) => {
+  const previous = fallbackBlobCache.get(key);
+  if (previous && previous !== url) {
+    revokeBlobUrl(previous);
+    removeCachedBlobUrl(previous);
+  }
+  if (previous) fallbackBlobCache.delete(key);
+  fallbackBlobCache.set(key, url);
+
+  while (fallbackBlobCache.size > MAX_CACHE) {
+    const firstKey = fallbackBlobCache.keys().next().value;
+    if (!firstKey) break;
+    const evicted = fallbackBlobCache.get(firstKey);
+    fallbackBlobCache.delete(firstKey);
+    if (evicted) {
+      removeCachedBlobUrl(evicted);
+      revokeBlobUrl(evicted);
+    }
+  }
+};
 
 const setWithLimit = (key: string, value: string | null) => {
-  if (coverArtCache.has(key)) {
-    coverArtCache.delete(key);
-  }
+  if (coverArtCache.has(key)) coverArtCache.delete(key);
   coverArtCache.set(key, value);
-  // Simple LRU eviction
+
   while (coverArtCache.size > MAX_CACHE) {
     const firstKey = coverArtCache.keys().next().value;
     if (firstKey !== undefined) {
@@ -50,8 +70,7 @@ const readSessionCoverArt = (key: string): string | null => {
   try {
     const stored = sessionStorage.getItem(key);
     if (!stored) return null;
-    // Avoid reviving oversized data URLs from stale caches.
-    if (stored.startsWith('data:image/')) {
+    if (!isPersistableCoverArtUrl(stored)) {
       sessionStorage.removeItem(key);
       return null;
     }
@@ -62,12 +81,19 @@ const readSessionCoverArt = (key: string): string | null => {
 };
 
 const writeSessionCoverArt = (key: string, value: string) => {
-  // Never persist data URLs to session storage; they bloat memory and reload cost.
-  if (value.startsWith('data:image/')) return;
+  if (!isPersistableCoverArtUrl(value)) return;
   try {
     sessionStorage.setItem(key, value);
   } catch {
     // ignore storage errors
+  }
+};
+
+const protocolFailed = (hash: string, size: CoverArtSize): boolean => {
+  try {
+    return sessionStorage.getItem(`coverart:protocol_failed:${hash}:${size}`) === 'true';
+  } catch {
+    return false;
   }
 };
 
@@ -76,17 +102,24 @@ const allowIpcFallbackRequest = (): boolean => {
   while (ipcFallbackRequests.length && now - ipcFallbackRequests[0] > IPC_FALLBACK_WINDOW_MS) {
     ipcFallbackRequests.shift();
   }
-  if (ipcFallbackRequests.length >= IPC_FALLBACK_MAX_REQUESTS) {
-    return false;
-  }
+  if (ipcFallbackRequests.length >= IPC_FALLBACK_MAX_REQUESTS) return false;
   ipcFallbackRequests.push(now);
   return true;
 };
 
-export const markCoverArtProtocolFailed = (
-  hash: string,
-  size: 'small' | 'medium' | 'large' = 'large',
-) => {
+const bytesToBlobUrl = (bytes: number[] | Uint8Array): string | null => {
+  if (
+    typeof Blob === 'undefined' ||
+    typeof URL === 'undefined' ||
+    typeof URL.createObjectURL !== 'function'
+  ) {
+    return null;
+  }
+  const body = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return URL.createObjectURL(new Blob([body], { type: 'image/webp' }));
+};
+
+export const markCoverArtProtocolFailed = (hash: string, size: CoverArtSize = 'large') => {
   try {
     sessionStorage.setItem(`coverart:protocol_failed:${hash}:${size}`, 'true');
   } catch {
@@ -94,23 +127,33 @@ export const markCoverArtProtocolFailed = (
   }
 };
 
-export const getCoverArtDataUrlFallback = async (
+export const getCoverArtBlobFallback = async (
   hash: string,
-  size: 'small' | 'medium' | 'large' = 'large',
+  size: CoverArtSize = 'large',
 ): Promise<string | null> => {
-  const key = `${hash}:${size}`;
+  const key = fallbackKey(hash, size);
+  const cached = fallbackBlobCache.get(key);
+  if (cached) return cached;
   if (failedIpcFallbacks.has(key)) return null;
   if (!allowIpcFallbackRequest()) return null;
+
   try {
-    const dataUrl = await cacheGetThumbnailDataUrl(hash, size);
-    if (dataUrl && dataUrl.length <= MAX_DATA_URL_LENGTH) {
-      return dataUrl;
+    const bytes = await cacheGetThumbnailBytes(hash, size);
+    if (!bytes || bytes.length === 0) {
+      failedIpcFallbacks.add(key);
+      return null;
     }
+    const url = bytesToBlobUrl(bytes);
+    if (!url) {
+      failedIpcFallbacks.add(key);
+      return null;
+    }
+    rememberFallbackBlob(key, url);
+    return url;
   } catch {
-    // fall through to failure cache
+    failedIpcFallbacks.add(key);
+    return null;
   }
-  failedIpcFallbacks.add(key);
-  return null;
 };
 
 export const invalidateCoverArtCache = (filePath: string, coverArtHash?: string | null) => {
@@ -121,7 +164,14 @@ export const invalidateCoverArtCache = (filePath: string, coverArtHash?: string 
   }
   if (coverArtHash) {
     for (const size of ['small', 'medium', 'large'] as const) {
-      failedIpcFallbacks.delete(`${coverArtHash}:${size}`);
+      const key = fallbackKey(coverArtHash, size);
+      const blobUrl = fallbackBlobCache.get(key);
+      if (blobUrl) {
+        fallbackBlobCache.delete(key);
+        removeCachedBlobUrl(blobUrl);
+        revokeBlobUrl(blobUrl);
+      }
+      failedIpcFallbacks.delete(key);
       try {
         sessionStorage.removeItem(`coverart:protocol_failed:${coverArtHash}:${size}`);
       } catch {
@@ -132,31 +182,18 @@ export const invalidateCoverArtCache = (filePath: string, coverArtHash?: string 
 };
 
 /**
- * Lazy-load cover art for a track. Returns a local cover-art:// URL or null.
+ * Lazy-load cover art for a track. Returns a local cover-art:// URL, blob fallback URL, or null.
  */
 export const useCoverArt = (
   filePath?: string,
   hasCoverArt?: boolean,
   load: boolean = true,
-  size: 'small' | 'medium' | 'large' = 'large',
+  size: CoverArtSize = 'large',
   coverArtHash?: string | null,
 ): string | null => {
   const key = filePath ? cacheKey(filePath, size, coverArtHash) : null;
   const initial = (() => {
     if (!filePath || !key) return null;
-    // On Windows, don't return protocol URLs from initial state - will be fetched via IPC
-    if (isProtocolUnsupported()) {
-      // Check if we have a cached data URL
-      const mem = coverArtCache.get(key);
-      if (mem !== undefined && !mem?.startsWith('cover-art://')) return mem;
-      return null;
-    }
-    if (coverArtHash) {
-      const url = buildCoverArtUrl(coverArtHash, size);
-      setWithLimit(key, url);
-      writeSessionCoverArt(`coverart:${key}`, url);
-      return url;
-    }
     const mem = coverArtCache.get(key);
     if (mem !== undefined) return mem;
     const stored = readSessionCoverArt(`coverart:${key}`);
@@ -164,22 +201,16 @@ export const useCoverArt = (
       setWithLimit(key, stored);
       return stored;
     }
+    if (coverArtHash && !protocolFailed(coverArtHash, size)) {
+      const url = buildCoverArtUrl(coverArtHash, size);
+      setWithLimit(key, url);
+      writeSessionCoverArt(`coverart:${key}`, url);
+      return url;
+    }
     return null;
   })();
 
   const [art, setArt] = useState<string | null>(initial);
-
-  // Fallback function to get cover art via IPC if protocol fails
-  const getCoverArtViaIPC = async (hash: string): Promise<string | null> => {
-    if (!allowIpcFallbackRequest()) {
-      return null;
-    }
-    try {
-      return await getCoverArtDataUrlFallback(hash, size);
-    } catch {
-      return null;
-    }
-  };
 
   useEffect(() => {
     if (!filePath || !load || !key) {
@@ -187,56 +218,38 @@ export const useCoverArt = (
       return;
     }
 
-    // Fast path: if we already have a hash, build the URL and cache it without IPC
-    if (coverArtHash) {
-      // On Windows or if protocol is known to be unsupported, use IPC directly
-      const protocolFailedKey = `coverart:protocol_failed:${coverArtHash}:${size}`;
-      let shouldUseIPC = isProtocolUnsupported();
-
-      if (!shouldUseIPC) {
-        try {
-          const failed = sessionStorage.getItem(protocolFailedKey);
-          if (failed === 'true') {
-            shouldUseIPC = true;
-          }
-        } catch {
-          // ignore storage errors
-        }
-      }
-
-      if (shouldUseIPC) {
-        // Protocol unsupported or failed before, use IPC directly
-        let cancelled = false;
-        getCoverArtViaIPC(coverArtHash).then((dataUrl) => {
-          if (!cancelled && dataUrl) {
-            setArt(dataUrl);
-            setWithLimit(key, dataUrl);
+    const resolveHash = (hash: string, cancelledRef: { current: boolean }) => {
+      if (protocolFailed(hash, size)) {
+        void getCoverArtBlobFallback(hash, size).then((blobUrl) => {
+          if (!cancelledRef.current && blobUrl) {
+            setArt(blobUrl);
+            setWithLimit(key, blobUrl);
           }
         });
-        return () => {
-          cancelled = true;
-        };
+        return;
       }
 
-      // Try protocol URL first (works on macOS)
-      const url = buildCoverArtUrl(coverArtHash, size);
-      setWithLimit(key, url);
+      const url = buildCoverArtUrl(hash, size);
       setArt(url);
+      setWithLimit(key, url);
       writeSessionCoverArt(`coverart:${key}`, url);
-      return;
+    };
+
+    const cancelledRef = { current: false };
+
+    if (coverArtHash) {
+      resolveHash(coverArtHash, cancelledRef);
+      return () => {
+        cancelledRef.current = true;
+      };
     }
 
     const cached = coverArtCache.get(key);
     if (cached !== undefined) {
       setArt(cached);
-      // If we know there should be art (hasCoverArt not explicitly false), allow a refresh
-      // when the cache has a null entry so we can recover from past failures.
-      if (cached !== null || hasCoverArt === false) {
-        return;
-      }
+      if (cached !== null || hasCoverArt === false) return;
     }
 
-    let cancelled = false;
     const existing = inflight.get(filePath);
     const promise =
       existing ??
@@ -251,50 +264,20 @@ export const useCoverArt = (
           return null;
         });
 
-    if (!existing) {
-      inflight.set(filePath, promise);
-    }
+    if (!existing) inflight.set(filePath, promise);
 
     promise.then((hash) => {
-      if (!cancelled && hash) {
-        // On Windows or if protocol is known to be unsupported, use IPC directly
-        const protocolFailedKey = `coverart:protocol_failed:${hash}:${size}`;
-        let shouldUseIPC = isProtocolUnsupported();
-
-        if (!shouldUseIPC) {
-          try {
-            const failed = sessionStorage.getItem(protocolFailedKey);
-            if (failed === 'true') {
-              shouldUseIPC = true;
-            }
-          } catch {
-            // ignore storage errors
-          }
-        }
-
-        if (shouldUseIPC) {
-          // Protocol unsupported or failed before, use IPC directly
-          getCoverArtViaIPC(hash).then((dataUrl) => {
-            if (!cancelled && dataUrl) {
-              setArt(dataUrl);
-              setWithLimit(key, dataUrl);
-            }
-          });
-        } else {
-          // Try protocol URL first (works on macOS)
-          const protocolUrl = buildCoverArtUrl(hash, size);
-          setArt(protocolUrl);
-          setWithLimit(key, protocolUrl);
-          writeSessionCoverArt(`coverart:${key}`, protocolUrl);
-        }
-      } else if (!cancelled) {
+      if (cancelledRef.current) return;
+      if (hash) {
+        resolveHash(hash, cancelledRef);
+      } else {
         setArt(null);
         setWithLimit(key, null);
       }
     });
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
   }, [filePath, hasCoverArt, load, size, coverArtHash]);
 
@@ -303,16 +286,14 @@ export const useCoverArt = (
 
 export const getCachedCoverArt = (
   filePath: string,
-  size: 'small' | 'medium' | 'large' = 'large',
+  size: CoverArtSize = 'large',
   coverArtHash?: string | null,
 ): string | null => coverArtCache.get(cacheKey(filePath, size, coverArtHash)) ?? null;
 
 export const prefetchCoverArtBatch = async (
   entries: { filePath: string; coverArtHash?: string | null; hasCoverArt?: boolean }[],
-  size: 'small' | 'medium' | 'large' = 'medium',
+  size: CoverArtSize = 'medium',
 ) => {
-  const useIPC = isProtocolUnsupported();
-
   const runOne = async ({
     filePath,
     coverArtHash,
@@ -325,46 +306,19 @@ export const prefetchCoverArtBatch = async (
     if (!filePath || hasCoverArt === false) return;
     const key = cacheKey(filePath, size, coverArtHash);
     if (coverArtCache.has(key)) return;
+
     if (coverArtHash) {
-      if (useIPC) {
-        try {
-          if (!allowIpcFallbackRequest()) return;
-          const dataUrl = await cacheGetThumbnailDataUrl(coverArtHash, size);
-          if (dataUrl && dataUrl.length <= MAX_DATA_URL_LENGTH) {
-            setWithLimit(key, dataUrl);
-          }
-        } catch {
-          // ignore errors
-        }
-      } else {
-        const url = buildCoverArtUrl(coverArtHash, size);
-        setWithLimit(key, url);
-      }
+      setWithLimit(key, buildCoverArtUrl(coverArtHash, size));
       return;
     }
-    if (inflight.has(filePath)) {
-      const existing = inflight.get(filePath);
-      if (existing) {
-        const hash = await existing.catch(() => null);
-        if (hash) {
-          if (useIPC) {
-            try {
-              if (!allowIpcFallbackRequest()) return;
-              const dataUrl = await cacheGetThumbnailDataUrl(hash, size);
-              if (dataUrl && dataUrl.length <= MAX_DATA_URL_LENGTH) {
-                setWithLimit(key, dataUrl);
-              }
-            } catch {
-              // ignore errors
-            }
-          } else {
-            const url = buildCoverArtUrl(hash, size);
-            setWithLimit(key, url);
-          }
-        }
-      }
+
+    const existing = inflight.get(filePath);
+    if (existing) {
+      const hash = await existing.catch(() => null);
+      if (hash) setWithLimit(key, buildCoverArtUrl(hash, size));
       return;
     }
+
     const promise = ipcBatchLimit(() =>
       getCoverArt(filePath)
         .then((hash) => {
@@ -378,22 +332,7 @@ export const prefetchCoverArtBatch = async (
     );
     inflight.set(filePath, promise);
     const hash = await promise;
-    if (hash) {
-      if (useIPC) {
-        try {
-          if (!allowIpcFallbackRequest()) return;
-          const dataUrl = await ipcBatchLimit(() => cacheGetThumbnailDataUrl(hash, size));
-          if (dataUrl && dataUrl.length <= MAX_DATA_URL_LENGTH) {
-            setWithLimit(key, dataUrl);
-          }
-        } catch {
-          // ignore errors
-        }
-      } else {
-        const url = buildCoverArtUrl(hash, size);
-        setWithLimit(key, url);
-      }
-    }
+    if (hash) setWithLimit(key, buildCoverArtUrl(hash, size));
   };
 
   await Promise.all(entries.slice(0, 200).map((entry) => ipcBatchLimit(() => runOne(entry))));

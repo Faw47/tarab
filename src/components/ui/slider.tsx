@@ -180,7 +180,10 @@ const Slider = React.forwardRef<React.ElementRef<typeof SliderPrimitive.Root>, S
                 isDragging && 'scale-105',
               )}
             >
-              <LiquidGlassSurface className="absolute inset-0 pointer-events-none mix-blend-screen opacity-90" interactive={isDragging || isHovering} />
+              <LiquidGlassSurface
+                className="absolute inset-0 pointer-events-none mix-blend-screen opacity-90"
+                interactive={isDragging || isHovering}
+              />
             </SliderPrimitive.Thumb>
           ))}
         </SliderPrimitive.Root>

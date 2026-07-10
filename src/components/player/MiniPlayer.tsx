@@ -24,8 +24,8 @@ import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { CoverArtImage } from '../shared/CoverArtImage';
-import { IconButton } from '../ui/IconButton';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
+import { IconButton } from '../ui/IconButton';
 import { PlayerProgressBar, PlayerTimeDisplay } from './PlayerProgressBar';
 import { SleepTimerButton } from './SleepTimerButton';
 
@@ -142,15 +142,14 @@ export const MiniPlayer = memo(
     if (isNeobrutalism) {
       return (
         <div className="group h-full w-full flex flex-col bg-[var(--surface-shell)] overflow-visible relative font-display animate-neo-slide-up">
-          <HidingProgressBar accentColor="#7CC61F" />
+          <HidingProgressBar accentColor="var(--signal-play)" />
 
           {/* Main Content Area */}
           <div className="flex-1 flex items-center justify-between px-4 sm:px-6 gap-4 bg-[var(--surface-interactive)] border-t-2 border-transparent">
-            
             {/* Left: Artwork & Info */}
             <div className="flex items-center gap-4 flex-1 min-w-0">
-              <button 
-                onClick={onExpand} 
+              <button
+                onClick={onExpand}
                 className="relative shrink-0 group hover:-translate-y-1 hover:translate-x-1 hover:shadow-[-4px_4px_0_0_#000] transition-all hover-neo-wiggle"
                 aria-label="Expand player"
               >
@@ -164,7 +163,7 @@ export const MiniPlayer = memo(
                   lazy={false}
                 />
               </button>
-              
+
               <button onClick={onExpand} className="flex flex-col text-left truncate group flex-1">
                 <span className="font-black text-lg text-black uppercase tracking-widest truncate group-hover:underline decoration-2 underline-offset-4">
                   {currentTrack.title}
@@ -174,7 +173,7 @@ export const MiniPlayer = memo(
                 </span>
               </button>
             </div>
-            
+
             {/* Center: Playback Controls */}
             <div className="flex items-center gap-3 shrink-0">
               <button
@@ -185,12 +184,12 @@ export const MiniPlayer = memo(
               >
                 <SkipBack className="w-5 h-5 text-black" fill="currentColor" />
               </button>
-              
+
               <button
                 type="button"
                 className={clsx(
-                  "flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-1 transition-all hover-neo-wiggle",
-                  isPlaying ? "bg-[var(--signal-active)]" : "bg-[var(--signal-play)]"
+                  'flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-1 transition-all hover-neo-wiggle',
+                  isPlaying ? 'bg-[var(--signal-active)]' : 'bg-[var(--signal-play)]',
                 )}
                 onClick={handleTogglePlay}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
@@ -201,7 +200,7 @@ export const MiniPlayer = memo(
                   <Play className="w-7 h-7 text-black ml-1" fill="currentColor" />
                 )}
               </button>
-              
+
               <button
                 type="button"
                 className="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-black bg-white shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-all hover-neo-wiggle"
@@ -211,25 +210,27 @@ export const MiniPlayer = memo(
                 <SkipForward className="w-5 h-5 text-black" fill="currentColor" />
               </button>
             </div>
-            
+
             {/* Right: Extra Controls */}
             <div className="hidden md:flex items-center gap-4 shrink-0 justify-end flex-1">
               <div className="text-black font-black text-sm tracking-widest bg-white border-2 border-black px-3 py-1.5 shadow-[4px_4px_0_0_#000]">
                 <PlayerTimeDisplay format="slash" className="font-black" />
               </div>
-              
+
               <button
                 type="button"
                 className={clsx(
-                  "flex h-10 px-3 shrink-0 items-center justify-center border-2 border-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-all font-black text-xs tracking-widest hover-neo-wiggle",
-                  loopMode !== 'off' ? "bg-[var(--signal-secondary)] text-white" : "bg-white text-black"
+                  'flex h-10 px-3 shrink-0 items-center justify-center border-2 border-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-all font-black text-xs tracking-widest hover-neo-wiggle',
+                  loopMode !== 'off'
+                    ? 'bg-[var(--signal-secondary)] text-white'
+                    : 'bg-white text-black',
                 )}
                 onClick={() => cycleLoopMode()}
                 aria-label={`Loop mode: ${loopMode}`}
               >
                 {loopMode === 'one' ? 'LOOP: 1' : loopMode === 'all' ? 'LOOP: ALL' : 'LOOP: OFF'}
               </button>
-              
+
               <div className="flex items-center gap-2 relative">
                 <button
                   type="button"
@@ -249,8 +250,8 @@ export const MiniPlayer = memo(
                 <button
                   type="button"
                   className={clsx(
-                    "flex h-10 px-3 items-center justify-center border-2 border-black text-xs font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-all",
-                    neoVolOpen ? "bg-[var(--signal-active)] text-black" : "bg-white text-black"
+                    'flex h-10 px-3 items-center justify-center border-2 border-black text-xs font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-all',
+                    neoVolOpen ? 'bg-[var(--signal-active)] text-black' : 'bg-white text-black',
                   )}
                   onClick={() => setNeoVolOpen((o) => !o)}
                   aria-expanded={neoVolOpen}
@@ -258,10 +259,12 @@ export const MiniPlayer = memo(
                 >
                   VOL
                 </button>
-                
+
                 {neoVolOpen && (
                   <div className="absolute bottom-[calc(100%+1.5rem)] right-0 bg-white border-2 border-black p-3 shadow-[8px_8px_0_0_#000] flex flex-col gap-2 z-50 animate-fade-in-up">
-                    <div className="text-black font-black uppercase text-xs border-b-2 border-black pb-1 tracking-widest">Volume</div>
+                    <div className="text-black font-black uppercase text-xs border-b-2 border-black pb-1 tracking-widest">
+                      Volume
+                    </div>
                     <div className="flex gap-1">
                       {Array.from({ length: 10 }).map((_, i) => {
                         const segmentValue = (i + 1) / 10;
@@ -273,7 +276,7 @@ export const MiniPlayer = memo(
                             tabIndex={0}
                             className={clsx(
                               'w-6 h-8 border-2 border-black cursor-pointer hover:scale-105 hover:-translate-y-1 transition-transform',
-                              active ? 'bg-[var(--signal-secondary)]' : 'bg-gray-100'
+                              active ? 'bg-[var(--signal-secondary)]' : 'bg-gray-100',
                             )}
                             onClick={() => void commitNeoVolume(segmentValue)}
                             onKeyDown={(e) => {
@@ -300,7 +303,8 @@ export const MiniPlayer = memo(
       <div
         className={clsx(
           'relative',
-          !isNeobrutalism && 'overflow-hidden rounded-[2rem] border border-white/10 backdrop-blur-[28px]',
+          !isNeobrutalism &&
+            'overflow-hidden rounded-[2rem] border border-white/10 backdrop-blur-[28px]',
           isNeobrutalism && 'h-full w-full flex items-center overflow-visible',
         )}
         style={
@@ -388,7 +392,9 @@ export const MiniPlayer = memo(
                 <p
                   className={clsx(
                     'text-xs truncate tracking-[0.02em]',
-                    isNeobrutalism ? 'text-black/60 font-black uppercase tracking-[0.05em]' : 'text-white/[0.54]',
+                    isNeobrutalism
+                      ? 'text-black/60 font-black uppercase tracking-[0.05em]'
+                      : 'text-white/[0.54]',
                   )}
                 >
                   {currentTrack.artist}
@@ -542,7 +548,7 @@ export const MiniPlayer = memo(
                 </button>
                 <button
                   type="button"
-                  className="border-2 border-black bg-[#F6F6F6] px-2 py-1 text-[10px] font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                  className="border-2 border-black bg-[var(--neo-panel)] px-2 py-1 text-[10px] font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   onClick={() => setNeoVolOpen((o) => !o)}
                   aria-expanded={neoVolOpen}
                   aria-label="Toggle volume segments"

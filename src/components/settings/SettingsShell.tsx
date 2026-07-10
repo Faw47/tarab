@@ -1,8 +1,10 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
-
 import { FolderOpen, HardDrive, Layout, Monitor, Volume2 } from 'lucide-react';
+import { memo, type ReactNode, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
-import { applyVerticalPillDom, useLiquidSegmentedPillVertical } from '@/hooks/use-liquid-segmented-pill';
+import {
+  applyVerticalPillDom,
+  useLiquidSegmentedPillVertical,
+} from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
 
 import type { SettingsPage } from '../../types';
@@ -41,7 +43,11 @@ export const SettingsShell = memo(function SettingsShell({
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
   const activeNavIndex = useMemo(
-    () => Math.max(0, navConfig.findIndex((item) => item.page === page)),
+    () =>
+      Math.max(
+        0,
+        navConfig.findIndex((item) => item.page === page),
+      ),
     [navConfig, page],
   );
 
@@ -112,10 +118,24 @@ export const SettingsShell = memo(function SettingsShell({
           >
             Settings
           </h1>
-          <p className={cn('text-xs', isNeobrutalism ? 'font-bold uppercase tracking-[0.12em] text-black/70' : 'text-white/50')}>
+          <p
+            className={cn(
+              'text-xs',
+              isNeobrutalism
+                ? 'font-bold uppercase tracking-[0.12em] text-black/70'
+                : 'text-white/50',
+            )}
+          >
             Instant apply enabled
           </p>
-          <p className={cn('text-[11px]', isNeobrutalism ? 'font-bold uppercase tracking-[0.1em] text-black/55' : 'text-white/40')}>
+          <p
+            className={cn(
+              'text-[11px]',
+              isNeobrutalism
+                ? 'font-bold uppercase tracking-[0.1em] text-black/55'
+                : 'text-white/40',
+            )}
+          >
             Destructive actions ask for confirmation.
           </p>
         </div>
@@ -133,42 +153,43 @@ export const SettingsShell = memo(function SettingsShell({
             {...listProps}
           >
             {!isNeobrutalism && (
-            <div
-              ref={pillRef}
-              className={cn(
-                'absolute left-0 right-0 rounded-xl pointer-events-none motion-reduce:transition-none',
-                isDragging || pillLayoutFromDom
-                  ? 'transition-none'
-                  : 'transition-[top,height,opacity] duration-200 ease-out',
-              )}
-              style={{
-                ...(pillLayoutFromDom
-                  ? {}
-                  : { top: pillStyle.top, height: pillStyle.height, opacity: pillStyle.opacity }),
-                background: [
-                  'linear-gradient(180deg,',
-                  `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 60%, rgba(255,255,255,0.13)) 0%,`,
-                  `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 30%, rgba(255,255,255,0.06)) 50%,`,
-                  `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 10%, rgba(255,255,255,0.04)) 100%`,
-                  ')',
-                ].join(''),
-                boxShadow: [
-                  'inset 0 1px 0 rgba(255,255,255,0.18)',
-                  'inset 0 -1px 0 rgba(0,0,0,0.08)',
-                  `0 0 14px -6px rgb(var(--hero-accent-rgb, 255 255 255) / 0.40)`,
-                  '0 2px 8px -4px rgba(0,0,0,0.25)',
-                ].join(', '),
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-4 top-0 h-px rounded-full"
+              <div
+                ref={pillRef}
+                className={cn(
+                  'absolute left-0 right-0 rounded-xl pointer-events-none motion-reduce:transition-none',
+                  isDragging || pillLayoutFromDom
+                    ? 'transition-none'
+                    : 'transition-[top,height,opacity] duration-200 ease-out',
+                )}
                 style={{
-                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
-                  opacity: 0.7,
+                  ...(pillLayoutFromDom
+                    ? {}
+                    : { top: pillStyle.top, height: pillStyle.height, opacity: pillStyle.opacity }),
+                  background: [
+                    'linear-gradient(180deg,',
+                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 60%, rgba(255,255,255,0.13)) 0%,`,
+                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 30%, rgba(255,255,255,0.06)) 50%,`,
+                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 10%, rgba(255,255,255,0.04)) 100%`,
+                    ')',
+                  ].join(''),
+                  boxShadow: [
+                    'inset 0 1px 0 rgba(255,255,255,0.18)',
+                    'inset 0 -1px 0 rgba(0,0,0,0.08)',
+                    `0 0 14px -6px rgb(var(--hero-accent-rgb, 255 255 255) / 0.40)`,
+                    '0 2px 8px -4px rgba(0,0,0,0.25)',
+                  ].join(', '),
                 }}
-              />
-            </div>
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-4 top-0 h-px rounded-full"
+                  style={{
+                    background:
+                      'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
+                    opacity: 0.7,
+                  }}
+                />
+              </div>
             )}
 
             {navConfig.map((item, navIndex) => (
@@ -204,4 +225,3 @@ export const SettingsShell = memo(function SettingsShell({
 });
 
 SettingsShell.displayName = 'SettingsShell';
-

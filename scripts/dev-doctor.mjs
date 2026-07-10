@@ -1,7 +1,7 @@
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync, execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFileSync(join(root, path), 'utf8').trim();
@@ -43,11 +43,13 @@ if (actualNode !== expectedNode) {
 }
 
 if (expectedPnpm && actualPnpm !== expectedPnpm) {
-  const localPnpm = process.platform === 'win32' && process.env.LOCALAPPDATA
-    ? join(process.env.LOCALAPPDATA, 'pnpm', 'pnpm.CMD')
-    : '';
+  const localPnpm =
+    process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? join(process.env.LOCALAPPDATA, 'pnpm', 'pnpm.CMD')
+      : '';
   const message = `pnpm ${actualPnpm} is active, expected ${expectedPnpm} from packageManager`;
-  if (actualPnpm.startsWith('unavailable:') && localPnpm && existsSync(localPnpm)) warnings.push(message);
+  if (actualPnpm.startsWith('unavailable:') && localPnpm && existsSync(localPnpm))
+    warnings.push(message);
   else failures.push(message);
 }
 

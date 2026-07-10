@@ -2,7 +2,10 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
-import { liquidBackgroundFragmentShader, liquidBackgroundVertexShader } from './liquid-background-shaders';
+import {
+  liquidBackgroundFragmentShader,
+  liquidBackgroundVertexShader,
+} from './liquid-background-shaders';
 
 export type LiquidBgColors = Record<'b1' | 'b2' | 'b3' | 'b4' | 'b5', string>;
 

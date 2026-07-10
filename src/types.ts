@@ -151,19 +151,34 @@ export interface TagInfo {
   extraTags?: Record<string, string>;
 }
 
+export type TagClearField =
+  | 'title'
+  | 'artist'
+  | 'album'
+  | 'albumArtist'
+  | 'year'
+  | 'trackNumber'
+  | 'totalTracks'
+  | 'discNumber'
+  | 'totalDiscs'
+  | 'genre'
+  | 'composer'
+  | 'comment';
+
 export interface TagUpdate {
-  title?: string;
-  artist?: string;
-  album?: string;
-  albumArtist?: string;
-  year?: number;
-  trackNumber?: number;
-  totalTracks?: number;
-  discNumber?: number;
-  totalDiscs?: number;
-  genre?: string;
-  composer?: string;
-  comment?: string;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  albumArtist?: string | null;
+  year?: number | null;
+  trackNumber?: number | null;
+  totalTracks?: number | null;
+  discNumber?: number | null;
+  totalDiscs?: number | null;
+  genre?: string | null;
+  composer?: string | null;
+  comment?: string | null;
+  clearFields?: TagClearField[];
   coverArtBase64?: string;
   coverArtMime?: string;
   extraTags?: Record<string, string>;
@@ -204,12 +219,7 @@ export type SortBy = 'title' | 'artist' | 'album' | 'dateAdded';
 // View types
 export type View = 'library' | 'player' | 'playlist' | 'settings';
 
-export type SettingsPage =
-  | 'library'
-  | 'playback'
-  | 'appearance'
-  | 'desktop'
-  | 'storage';
+export type SettingsPage = 'library' | 'playback' | 'appearance' | 'desktop' | 'storage';
 
 // Tauri command response types
 export interface TrackMetadata {

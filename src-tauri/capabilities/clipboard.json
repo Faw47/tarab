@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "clipboard",
+  "description": "System clipboard writes are used by main-window tag editor copy actions; the mini player must not read or write clipboard content.",
+  "windows": ["main"],
+  "permissions": ["clipboard-manager:allow-write-text"]
+}

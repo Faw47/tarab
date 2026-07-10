@@ -1,12 +1,12 @@
 import { useCallback, useRef } from 'react';
-import { usePlayerStore } from '../store/player-store';
+import type { NavView } from '../components/navigation';
 import { savePlayerStateToStore } from '../features/app/player-state-store';
 import { getAlbumKeyFromParts } from '../lib/album-key';
-import type { NavView } from '../components/navigation';
+import { usePlayerStore } from '../store/player-store';
 
 export function useSessionPersistence(
   currentView: NavView,
-  albumDetails: { album: string; artist: string; } | null,
+  albumDetails: { album: string; artist: string } | null,
 ) {
   const lastSessionSaveRef = useRef(0);
   const sessionSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -14,17 +14,25 @@ export function useSessionPersistence(
 
   const buildSessionPayload = useCallback(() => {
     const state = usePlayerStore.getState();
-    const { 
-      currentTime, currentTrack, volume, isPlaying: stateIsPlaying,
-      queue, queueIndex, playbackSpeed, shuffleEnabled, loopMode, stopAfterCurrent
+    const {
+      currentTime,
+      currentTrack,
+      volume,
+      isPlaying: stateIsPlaying,
+      queue,
+      queueIndex,
+      playbackSpeed,
+      shuffleEnabled,
+      loopMode,
+      stopAfterCurrent,
     } = state;
-    
+
     const duration = currentTrack?.duration ?? 0;
     const clampedTime = Math.max(
       0,
       Math.min(currentTime, duration > 0 ? Math.max(0, duration - 0.75) : currentTime),
     );
-    
+
     return {
       version: 1,
       queueIds: queue.map((t) => t.id),

@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { Music } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { getCoverArtDataUrlFallback, markCoverArtProtocolFailed } from '../../hooks/useCoverArt';
+import { getCoverArtBlobFallback, markCoverArtProtocolFailed } from '../../hooks/useCoverArt';
 import { useParallax } from './PlayerParallax';
 
 export interface ParallaxCoverArtProps {
@@ -44,9 +44,9 @@ export const ParallaxCoverArt = memo(
 
         markCoverArtProtocolFailed(coverArtHash, size);
 
-        const dataUrl = await getCoverArtDataUrlFallback(coverArtHash, size);
-        if (dataUrl) {
-          setImageSrc(dataUrl);
+        const blobUrl = await getCoverArtBlobFallback(coverArtHash, size);
+        if (blobUrl) {
+          setImageSrc(blobUrl);
           setHasError(false);
           return;
         }

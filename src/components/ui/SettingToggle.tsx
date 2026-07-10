@@ -1,6 +1,6 @@
+import { memo, useId } from 'react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/store/settings-store';
-import { memo, useId } from 'react';
 import { LiquidGlassSurface } from '../glass/LiquidGlassSurface';
 
 interface SettingToggleProps {
@@ -79,7 +79,9 @@ export const SettingToggle = memo(function SettingToggle({
         )}
       >
         {!isNeobrutalism && (
-          <div className="absolute inset-0 z-0 mix-blend-screen opacity-90"><LiquidGlassSurface interactive={checked} /></div>
+          <div className="absolute inset-0 z-0 mix-blend-screen opacity-90">
+            <LiquidGlassSurface interactive={checked} />
+          </div>
         )}
         {!isNeobrutalism && (
           <span

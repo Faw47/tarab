@@ -2,11 +2,12 @@ import { ChevronDown } from 'lucide-react';
 import {
   Children,
   type CSSProperties,
+  isValidElement,
+  type KeyboardEvent,
+  memo,
   type ReactElement,
   type ReactNode,
   type SelectHTMLAttributes,
-  isValidElement,
-  memo,
   useEffect,
   useId,
   useRef,
@@ -49,8 +50,8 @@ export const SettingsSection = memo(function SettingsSection({
       className={cn(
         'overflow-visible',
         isNeobrutalism
-          ? 'rounded-none border-2 border-black bg-[var(--surface-card)] shadow-[6px_6px_0_0_#000]'
-          : 'rounded-2xl border border-white/[0.07] bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_18px_45px_rgba(0,0,0,0.22)] backdrop-blur-2xl',
+          ? 'rounded-none border-2 border-[var(--settings-section-border)] bg-[var(--settings-section-surface)] shadow-[var(--settings-section-shadow)]'
+          : 'rounded-2xl border border-[var(--settings-section-border)] bg-[var(--settings-section-surface)] shadow-[var(--settings-section-shadow)] backdrop-blur-2xl',
         className,
       )}
     >
@@ -59,7 +60,7 @@ export const SettingsSection = memo(function SettingsSection({
           'flex flex-wrap items-start justify-between gap-3 px-4 py-3 sm:px-5',
           isNeobrutalism
             ? 'border-b-2 border-black bg-white'
-            : 'border-b border-white/[0.07] bg-black/10',
+            : 'border-b border-[var(--settings-section-border)]',
         )}
       >
         <div className="flex min-w-0 items-start gap-3">
@@ -68,8 +69,8 @@ export const SettingsSection = memo(function SettingsSection({
               className={cn(
                 'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center',
                 isNeobrutalism
-                  ? 'border-2 border-black bg-[var(--accent)] text-black shadow-[3px_3px_0_0_#000]'
-                  : 'rounded-full border border-white/[0.08] bg-white/[0.06] text-primary',
+                  ? 'border-2 border-[var(--settings-section-icon-border)] bg-[var(--settings-section-icon-surface)] text-black shadow-[var(--neo-shadow-sm)]'
+                  : 'rounded-full border border-[var(--settings-section-icon-border)] bg-[var(--settings-section-icon-surface)] text-primary',
               )}
             >
               {icon}
@@ -91,9 +92,13 @@ export const SettingsSection = memo(function SettingsSection({
             ) : null}
           </div>
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+        ) : null}
       </div>
-      <div className={cn(isNeobrutalism ? 'divide-y-2 divide-black' : 'divide-y divide-white/[0.06]')}>
+      <div
+        className={cn(isNeobrutalism ? 'divide-y-2 divide-black' : 'divide-y divide-white/[0.06]')}
+      >
         {children}
       </div>
     </section>
@@ -161,7 +166,9 @@ export const SettingsControlGroup = memo(function SettingsControlGroup({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}>{children}</div>;
+  return (
+    <div className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}>{children}</div>
+  );
 });
 
 export interface SettingsSwitchProps {
@@ -267,6 +274,7 @@ export function SettingsSegmentedControl<T extends string>({
           <button
             key={option.value}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(option.value)}
             className={cn(
               'min-w-0 px-3 py-1.5 text-xs font-semibold transition-colors',
@@ -277,7 +285,9 @@ export function SettingsSegmentedControl<T extends string>({
                   )
                 : cn(
                     'rounded-full',
-                    active ? 'bg-primary/75 text-white shadow-sm' : 'text-white/55 hover:text-white/85',
+                    active
+                      ? 'bg-primary/75 text-white shadow-sm'
+                      : 'text-white/55 hover:text-white/85',
                   ),
             )}
           >
@@ -322,15 +332,21 @@ export const SettingsSlider = memo(function SettingsSlider({
       onMouseUp={onCommit}
       onTouchEnd={onCommit}
       aria-label={label}
-      className="w-full cursor-pointer accent-primary [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-white/10"
+      className="block w-full cursor-pointer accent-primary [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-white/10"
       style={rangeProgressStyle(value, min, max) as CSSProperties}
     />
   );
 
   return (
-    <div className="min-w-[12rem] space-y-2">
-      {valueLabel ? <div className="text-right text-xs font-semibold text-text-muted">{valueLabel}</div> : null}
-      {isNeobrutalism ? <div className="settings-neo-volume w-full">{input}</div> : <div className={liquidGlassSettingsSliderWellClassName()}>{input}</div>}
+    <div className="w-48 max-w-full min-w-[12rem] space-y-2">
+      {valueLabel ? (
+        <div className="text-right text-xs font-semibold text-text-muted">{valueLabel}</div>
+      ) : null}
+      {isNeobrutalism ? (
+        <div className="settings-neo-volume w-full">{input}</div>
+      ) : (
+        <div className={liquidGlassSettingsSliderWellClassName()}>{input}</div>
+      )}
     </div>
   );
 });
@@ -359,13 +375,30 @@ export const SettingsSelect = memo(function SettingsSelect({
   disabled,
   'aria-label': ariaLabel,
   ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & { isNeobrutalism?: boolean }) {
+}: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> & {
+  isNeobrutalism?: boolean;
+  onChange?: (value: string) => void;
+}) {
   const isNeobrutalism = useSettingsTheme(explicitTheme);
   const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
   const options = getSettingsSelectOptions(children);
   const selectedValue = String(value ?? defaultValue ?? options[0]?.value ?? '');
-  const selectedOption = options.find((option) => option.value === selectedValue) ?? options[0];
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === selectedValue),
+  );
+  const selectedOption = options[selectedIndex];
+  const activeOptionId =
+    open && options[activeIndex] ? `${listboxId}-option-${activeIndex}` : undefined;
+
+  useEffect(() => {
+    if (open) {
+      setActiveIndex(selectedIndex);
+    }
+  }, [open, selectedIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -381,8 +414,64 @@ export const SettingsSelect = memo(function SettingsSelect({
   }, [open]);
 
   const commitValue = (nextValue: string) => {
-    onChange?.({ target: { value: nextValue }, currentTarget: { value: nextValue } } as unknown as React.ChangeEvent<HTMLSelectElement>);
+    onChange?.(nextValue);
     setOpen(false);
+  };
+
+  const moveActiveOption = (direction: 1 | -1) => {
+    if (options.length === 0) return;
+    setActiveIndex((current) => (current + direction + options.length) % options.length);
+  };
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+        event.preventDefault();
+        if (open) {
+          moveActiveOption(event.key === 'ArrowDown' ? 1 : -1);
+        } else {
+          setActiveIndex(selectedIndex);
+          setOpen(true);
+        }
+        break;
+      case 'Home':
+        if (open && options.length > 0) {
+          event.preventDefault();
+          setActiveIndex(0);
+        }
+        break;
+      case 'End':
+        if (open && options.length > 0) {
+          event.preventDefault();
+          setActiveIndex(options.length - 1);
+        }
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        if (open) {
+          const activeOption = options[activeIndex] ?? selectedOption;
+          if (activeOption) commitValue(activeOption.value);
+        } else {
+          setActiveIndex(selectedIndex);
+          setOpen(true);
+        }
+        break;
+      case 'Escape':
+        if (open) {
+          event.preventDefault();
+          setOpen(false);
+        }
+        break;
+      case 'Tab':
+        setOpen(false);
+        break;
+      default:
+        break;
+    }
   };
 
   if (isNeobrutalism) {
@@ -393,7 +482,7 @@ export const SettingsSelect = memo(function SettingsSelect({
           value={value}
           defaultValue={defaultValue}
           disabled={disabled}
-          onChange={onChange}
+          onChange={(event) => onChange?.(event.target.value)}
           aria-label={ariaLabel}
           className={cn(
             'w-full appearance-none rounded-none border-2 border-black bg-white px-3 py-2 pr-10 text-sm text-black outline-none transition-colors focus:ring-2 focus:ring-black',
@@ -412,17 +501,29 @@ export const SettingsSelect = memo(function SettingsSelect({
   }
 
   return (
-    <div ref={rootRef} className={cn('relative min-w-[12rem]', className)}>
+    <div
+      ref={rootRef}
+      className={cn('relative w-48 max-w-full min-w-[12rem]', className)}
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
       <button
         type="button"
+        role="combobox"
         disabled={disabled}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
+        aria-activedescendant={activeOptionId}
         onClick={(event) => {
           event.stopPropagation();
           setOpen((current) => !current);
         }}
+        onKeyDown={handleTriggerKeyDown}
         className="library-v2-tab relative flex min-h-10 w-full items-center justify-between gap-2 rounded-full border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-left text-[0.81rem] font-medium text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none backdrop-blur-md transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/30 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="min-w-0 truncate">{selectedOption?.label}</span>
@@ -431,23 +532,29 @@ export const SettingsSelect = memo(function SettingsSelect({
 
       {open ? (
         <div
+          id={listboxId}
           role="listbox"
           className="absolute left-0 top-full z-[100] mt-2 flex w-full min-w-[10rem] flex-col gap-0.5 rounded-xl border border-white/[0.08] bg-[rgba(18,16,15,0.85)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_12px_30px_-10px_rgba(8,6,4,0.8)] backdrop-blur-2xl"
         >
-          {options.map((option) => {
+          {options.map((option, index) => {
             const selected = option.value === selectedValue;
+            const active = index === activeIndex;
             return (
               <button
+                id={`${listboxId}-option-${index}`}
                 key={option.value}
                 type="button"
                 role="option"
                 aria-selected={selected}
+                tabIndex={-1}
+                onMouseEnter={() => setActiveIndex(index)}
                 onClick={(event) => {
                   event.stopPropagation();
                   commitValue(option.value);
                 }}
                 className={cn(
                   'w-full rounded-lg border-0 bg-transparent px-3 py-2 text-left text-[0.81rem] font-medium text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white',
+                  active && 'bg-white/[0.06] text-white',
                   selected && 'bg-white/[0.10] font-semibold text-[var(--hero-accent,#fff)]',
                 )}
               >
@@ -470,16 +577,8 @@ export const SettingsDangerRow = memo(function SettingsDangerRow({
     <SettingsRow
       {...props}
       isNeobrutalism={isNeobrutalism}
-      className={cn(
-        isNeobrutalism ? 'bg-red-100' : 'bg-red-500/[0.035]',
-        props.className,
-      )}
+      className={cn('bg-[var(--settings-danger-surface)]', props.className)}
       control={action}
     />
   );
 });
-
-
-
-
-

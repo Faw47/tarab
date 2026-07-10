@@ -70,6 +70,12 @@ pnpm -s tsc --noEmit
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
+If settings primitives, shared UI states, or theme tokens changed, also run:
+
+```bash
+pnpm build:storybook
+```
+
 If desktop shell changes were made, also run:
 
 ```bash
@@ -93,4 +99,5 @@ If behavior changes (desktop controls, window lifecycle, settings, motion/contra
 
 - `README.md`
 - `docs/design/design_language.md`
+- `docs/release-hardening.md` for release permissions, updater, dependency, or desktop-shell risk changes.
 - this `AGENTS.md` when workflow or architecture expectations change.

@@ -23,13 +23,12 @@ import {
   Sliders,
   User,
 } from 'lucide-react';
-import { VinylIcon, TrackIcon, QueueIcon as ListMusic } from '../ui/Icons';
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSmoothTimeSubscription } from '../../contexts/smooth-time';
 import { useCoverArt } from '../../hooks/useCoverArt';
-import { useRenderLog } from '../../lib/performance';
 import { lazyWithRetry } from '../../lib/lazy-with-retry';
+import { useRenderLog } from '../../lib/performance';
 import {
   playAdjacentTrack,
   seekToPosition,
@@ -47,6 +46,7 @@ import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { IconButton } from '../ui/IconButton';
+import { QueueIcon as ListMusic, TrackIcon, VinylIcon } from '../ui/Icons';
 import { LyricsDisplay } from './LyricsDisplay';
 import { LyricsSnippet } from './LyricsSnippet';
 import { ParallaxCoverArt } from './ParallaxCoverArt';
@@ -515,7 +515,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
         {showActions && (
           <div
             ref={actionsMenuRef}
-            className="absolute top-16 right-6 w-64 bg-zinc-900/95 backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl py-2 z-50 animate-fade-in max-h-[80vh] overflow-y-auto"
+            className="glass-overlay-menu absolute top-16 right-6 z-50 max-h-[80vh] w-64 overflow-y-auto py-2"
           >
             <div className="px-3 py-2 text-xs text-text-muted border-b border-white/5 mb-1">
               Playback Options
@@ -894,7 +894,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
             {showActions && (
               <div
                 ref={actionsMenuRef}
-                className="absolute right-8 bottom-20 w-56 bg-zinc-900/95 backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl py-2 z-50 animate-fade-in origin-bottom-right"
+                className="glass-overlay-menu absolute right-8 bottom-20 z-50 w-56 origin-bottom-right py-2"
               >
                 <div className="px-3 py-2 text-xs text-text-muted border-b border-white/5 mb-1">
                   Playback Options

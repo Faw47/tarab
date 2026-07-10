@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { useLibraryData } from '../../features/library/useLibraryData';
+import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { getPathBaseName, isSameOrSubPath } from '../../lib/path-utils';
 import { reportError } from '../../lib/report-error';
 import {
@@ -11,10 +12,10 @@ import {
   generateCoverArtHashes,
   getBatchMetadata,
   scanLibrary,
+  setLibraryRoots,
   syncLyricsIndex,
+  watchLibraryPaths,
 } from '../../lib/tauri-commands';
-import type { FsWatchEvent } from '../../platform/fs';
-import { fs } from '../../platform/fs';
 import { notifications } from '../../platform/notifications';
 import { useLibraryStore } from '../../store/library-store';
 import { useSettingsStore } from '../../store/settings-store';
@@ -38,7 +39,6 @@ function recordLibraryScan(): void {
 }
 
 export { isSameOrSubPath };
-
 
 const clampProgress = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -267,7 +267,6 @@ export function useLibraryScan(): UseLibraryScanResult {
   const watchQueueRef = useRef<Set<string>>(new Set());
   const watchQueueProcessingRef = useRef(false);
   const watchDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const unwatchFnsRef = useRef<Array<() => void>>([]);
 
   const [folderStatuses, setFolderStatuses] = useState<Record<string, FolderStatus>>({});
 
@@ -278,6 +277,11 @@ export function useLibraryScan(): UseLibraryScanResult {
       setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'scanning' } }));
 
       try {
+        const rootsForScan = libraryFolders.some((root) => isSameOrSubPath(folderPath, root))
+          ? libraryFolders
+          : [...libraryFolders, folderPath];
+        await setLibraryRoots(rootsForScan);
+
         const newTracks = await scanSingleFolder({
           folderPath,
           followSymlinks,
@@ -301,7 +305,6 @@ export function useLibraryScan(): UseLibraryScanResult {
           ...prev,
           [folderPath]: { status: 'success', lastScanned: new Date() },
         }));
-        setScanProgress(10000000); // Trigger completion UI
         setScanProgress(100);
         recordLibraryScan();
         if (!options?.silent) {
@@ -327,6 +330,7 @@ export function useLibraryScan(): UseLibraryScanResult {
     [
       downloadArtwork,
       followSymlinks,
+      libraryFolders,
       queryClient,
       setIsScanning,
       setScanProgress,
@@ -340,6 +344,17 @@ export function useLibraryScan(): UseLibraryScanResult {
 
     setIsScanning(true);
     setScanProgress(0);
+
+    try {
+      await setLibraryRoots(libraryFolders);
+    } catch (error) {
+      reportError('Failed to sync library root allowlist before rescan', {
+        source: 'useLibraryScan',
+        error,
+      });
+      setIsScanning(false);
+      return;
+    }
 
     const allTracks: Track[] = [];
     const total = libraryFolders.length;
@@ -410,12 +425,6 @@ export function useLibraryScan(): UseLibraryScanResult {
     watchDebounceRef.current.clear();
   }, []);
 
-  const clearWatchers = useCallback(() => {
-    const existing = unwatchFnsRef.current;
-    unwatchFnsRef.current = [];
-    existing.forEach((unwatch) => fs.unwatchPath(unwatch));
-  }, []);
-
   const drainWatchQueue = useCallback(() => {
     if (watchQueueProcessingRef.current) return;
     watchQueueProcessingRef.current = true;
@@ -427,9 +436,8 @@ export function useLibraryScan(): UseLibraryScanResult {
             await sleep(WATCH_RETRY_MS);
             continue;
           }
-
-          const nextFolder = watchQueueRef.current.values().next().value as string | undefined;
-          if (!nextFolder) {
+          const { value: nextFolder, done } = watchQueueRef.current.values().next();
+          if (done) {
             break;
           }
 
@@ -474,20 +482,35 @@ export function useLibraryScan(): UseLibraryScanResult {
   );
 
   const handleWatchEvent = useCallback(
-    (folderPath: string, event: FsWatchEvent) => {
-      const eventType = event.type;
-      if (
-        typeof eventType === 'object' &&
-        eventType !== null &&
-        'access' in eventType &&
-        eventType.access.kind !== 'any'
-      ) {
-        return;
-      }
-
+    (changedPath: string) => {
+      if (!autoWatchRef.current) return;
+      const folderPath = libraryFolders.find((folder) => isSameOrSubPath(changedPath, folder));
+      if (!folderPath) return;
       scheduleWatchedFolderScan(folderPath);
     },
-    [scheduleWatchedFolderScan],
+    [libraryFolders, scheduleWatchedFolderScan],
+  );
+
+  useTauriEvent<string>(
+    'library-files-changed',
+    (event) => handleWatchEvent(event.payload),
+    [handleWatchEvent],
+    (error) =>
+      reportError('Failed to listen for library file change events', {
+        source: 'library-scan',
+        error,
+      }),
+  );
+
+  useTauriEvent<string>(
+    'library-file-removed',
+    (event) => handleWatchEvent(event.payload),
+    [handleWatchEvent],
+    (error) =>
+      reportError('Failed to listen for library file removal events', {
+        source: 'library-scan',
+        error,
+      }),
   );
 
   useEffect(() => {
@@ -495,62 +518,41 @@ export function useLibraryScan(): UseLibraryScanResult {
       isMountedRef.current = false;
       watchQueueRef.current.clear();
       clearWatchDebounces();
-      clearWatchers();
+      void watchLibraryPaths([]).catch(() => undefined);
     };
-  }, [clearWatchDebounces, clearWatchers]);
+  }, [clearWatchDebounces]);
 
   useEffect(() => {
-    clearWatchers();
     watchQueueRef.current.clear();
     clearWatchDebounces();
 
     if (!autoWatch || libraryFolders.length === 0) {
+      void watchLibraryPaths([]).catch(() => undefined);
       return;
     }
 
     let disposed = false;
-    const localUnwatchers: Array<() => void> = [];
 
-    const setupWatchers = async () => {
-      for (const folderPath of libraryFolders) {
-        if (disposed) break;
-
-        const unwatch = await fs.watchPath(
-          folderPath,
-          (event) => handleWatchEvent(folderPath, event),
-          { recursive: true, delayMs: 700 },
-        );
-
-        if (!unwatch) {
-          console.warn(`[useLibraryScan] Failed to start watcher for folder: ${folderPath}`);
-          continue;
+    void (async () => {
+      try {
+        await setLibraryRoots(libraryFolders);
+        if (!disposed) {
+          await watchLibraryPaths(libraryFolders);
         }
-
-        localUnwatchers.push(unwatch);
+      } catch (error) {
+        if (!disposed) {
+          reportError('Failed to setup filesystem watchers', { source: 'library-scan', error });
+        }
       }
-
-      if (disposed) {
-        localUnwatchers.forEach((unwatch) => fs.unwatchPath(unwatch));
-        return;
-      }
-
-      unwatchFnsRef.current = localUnwatchers;
-    };
-
-    void setupWatchers().catch((error) =>
-      console.warn('[useLibraryScan] Failed to setup filesystem watchers', error),
-    );
+    })();
 
     return () => {
       disposed = true;
-      localUnwatchers.forEach((unwatch) => fs.unwatchPath(unwatch));
-      if (unwatchFnsRef.current === localUnwatchers) {
-        unwatchFnsRef.current = [];
-      }
+      void watchLibraryPaths([]).catch(() => undefined);
       watchQueueRef.current.clear();
       clearWatchDebounces();
     };
-  }, [autoWatch, clearWatchDebounces, clearWatchers, handleWatchEvent, libraryFolders]);
+  }, [autoWatch, clearWatchDebounces, libraryFolders]);
 
   return useMemo(
     () => ({ isScanning, folderStatuses, scanFolder, rescanAll }),

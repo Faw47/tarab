@@ -1,8 +1,9 @@
 import {
+  ChevronLeft,
   Home,
   Library,
-  Loader2,
   ListMusic,
+  Loader2,
   type LucideIcon,
   Search,
   Settings,
@@ -15,13 +16,13 @@ import {
   memo,
   type ReactNode,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
 } from 'react';
 import { cn } from '@/lib/utils';
 import type { NavView } from './FloatingDock';
+import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
 import { WindowsWindowControls } from './WindowsWindowControls';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,8 @@ interface TopBarNeoProps {
   isSearching?: boolean;
   isScrolled?: boolean;
   focusSearchNonce?: number;
+  onBack?: () => void;
+  canGoBack?: boolean;
   // NOTE: Secondary tabs (Tags, Settings) are intentionally absent in
   // iconRail mode — FloatingDock owns them in that layout. This is a
   // deliberate design contract, not an oversight.
@@ -91,11 +94,6 @@ const SECONDARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-const isTextEntryTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.closest('input, textarea, select, [contenteditable]') !== null;
-};
-
 const chromeNoDragStyle = {
   WebkitAppRegion: 'no-drag',
   appRegion: 'no-drag',
@@ -114,10 +112,10 @@ const titleDragStyle = {
 //   Secondary (Tags/Settings/Shuffle/Clear/kbd): 2px offset
 //
 // TopBarNeo palette (this bar only):
-//   Header shell:             #E6E6E6
+//   Header shell:             var(--neo-muted)
 //   Primary nav idle:         #FFFFFF  | hover: #A4B680 (sage)
 //   Search field:             #FFFFFF at rest | focus-within: #A091D0 (lavender)
-//   Secondary actions idle:   #F6F6F6  | hover: #E4C463 (mustard)
+//   Secondary actions idle:   var(--neo-panel)  | hover: var(--neo-utility-hover) (mustard)
 //   Active / pressed:         #000000 bg, #FFFFFF text
 // ---------------------------------------------------------------------------
 
@@ -125,7 +123,7 @@ const BUTTON_BASE_CLASS =
   'inline-flex items-center justify-center gap-3 border-2 border-black font-black uppercase tracking-[0.15em] transition-none focus-visible:outline-none rounded-none cursor-pointer';
 
 // Primary nav buttons — 4px hard shadow
-// Active state: background: #F5C518, border: 2px solid #000000, padding: 6px equivalent
+// Active state: background: var(--signal-active), border: 2px solid #000000, padding: 6px equivalent
 const primaryButtonStateClass = (active: boolean) =>
   active
     ? 'bg-transparent text-black border-2 border-black shadow-none'
@@ -135,7 +133,7 @@ const primaryButtonStateClass = (active: boolean) =>
 const secondaryButtonStateClass = (active: boolean) =>
   active
     ? 'bg-black text-white translate-x-[2px] translate-y-[2px] shadow-none'
-    : 'bg-[#F6F6F6] text-black shadow-[4px_4px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[#E4C463]';
+    : 'bg-[var(--neo-panel)] text-black shadow-[4px_4px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -159,12 +157,18 @@ const NeoNavButton = memo(function NeoNavButton({
       type="button"
       onClick={() => onNavigate(view)}
       aria-current={isActive ? 'page' : undefined}
-      className={cn(BUTTON_BASE_CLASS, primaryButtonStateClass(isActive), 'h-10 px-0 pr-5 text-[12px] overflow-hidden hover-neo-wiggle')}
+      className={cn(
+        BUTTON_BASE_CLASS,
+        primaryButtonStateClass(isActive),
+        'h-10 px-0 pr-5 text-[12px] overflow-hidden hover-neo-wiggle',
+      )}
     >
-      <div className={cn(
-        'flex h-full aspect-square items-center justify-center border-r-2 border-inherit transition-none',
-        isActive ? 'bg-[#F5C518]' : 'bg-transparent'
-      )}>
+      <div
+        className={cn(
+          'flex h-full aspect-square items-center justify-center border-r-2 border-inherit transition-none',
+          isActive ? 'bg-[var(--signal-active)]' : 'bg-transparent',
+        )}
+      >
         <Icon className="h-4 w-4 shrink-0" strokeWidth={3} />
       </div>
       <span className="ml-[6px]">{label}</span>
@@ -191,7 +195,11 @@ const NeoSecondaryAction = memo(function NeoSecondaryAction({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={cn(BUTTON_BASE_CLASS, secondaryButtonStateClass(active), 'h-10 px-4 text-[12px] hover-neo-wiggle')}
+      className={cn(
+        BUTTON_BASE_CLASS,
+        secondaryButtonStateClass(active),
+        'h-10 px-4 text-[12px] hover-neo-wiggle',
+      )}
     >
       {icon}
       <span className="hidden lg:inline-block">{label}</span>
@@ -230,7 +238,6 @@ const ProcessingStatus = memo(function ProcessingStatus({ status }: { status: St
   );
 });
 
-
 ProcessingStatus.displayName = 'ProcessingStatus';
 
 // ---------------------------------------------------------------------------
@@ -250,6 +257,8 @@ export const TopBarNeo = memo(function TopBarNeo({
   onShuffleAll,
   isSearching = false,
   focusSearchNonce = 0,
+  onBack,
+  canGoBack = false,
 }: TopBarNeoProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isWindowsDesktop = /Win/i.test(navigator.platform);
@@ -298,6 +307,15 @@ export const TopBarNeo = memo(function TopBarNeo({
 
   // currentView is in the dep array directly so the callback never captures a
   // stale isSearchSurface derivation from a previous render.
+  const clearSearch = useCallback(() => onSearchChange(''), [onSearchChange]);
+
+  useTopBarSearchShortcuts({
+    inputId: SEARCH_INPUT_ID,
+    inputRef: searchInputRef,
+    onFocusSearch: focusSearchInput,
+    onClearSearch: clearSearch,
+  });
+
   const handleSearchChange = useCallback(
     (query: string) => {
       onSearchChange(query);
@@ -309,45 +327,8 @@ export const TopBarNeo = memo(function TopBarNeo({
     [currentView, onNavigate, onSearchChange],
   );
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const isSearchInput = target?.id === SEARCH_INPUT_ID;
-
-      const isSlash =
-        !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === '/';
-      const isEscape = event.key === 'Escape';
-
-      if (isSlash) {
-        if (isTextEntryTarget(target) && !isSearchInput) return;
-        event.preventDefault();
-        requestAnimationFrame(() => {
-          searchInputRef.current?.focus();
-          searchInputRef.current?.select();
-        });
-      }
-
-      if (isEscape && document.activeElement === searchInputRef.current) {
-        event.preventDefault();
-        if (searchInputRef.current?.value) {
-          onSearchChange('');
-          searchInputRef.current.focus();
-        } else {
-          searchInputRef.current?.blur();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSearchChange]);
-
   return (
-    <header
-      className="relative z-50 flex h-14 shrink-0 items-center border-b-2 border-black bg-[#E6E6E6] px-4"
-    >
+    <header className="relative z-50 flex h-14 shrink-0 items-center border-b-2 border-black bg-[var(--neo-muted)] px-4">
       <div
         data-tauri-drag-region
         aria-hidden="true"
@@ -362,6 +343,17 @@ export const TopBarNeo = memo(function TopBarNeo({
           className="flex shrink-0 items-center"
           style={{ ...chromeNoDragStyle, paddingLeft: titlebarInsetLeft || undefined }}
         >
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back"
+              title="Back"
+              className="mr-2 inline-flex h-10 w-10 items-center justify-center border-2 border-black bg-white text-black shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-utility-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+            >
+              <ChevronLeft className="h-5 w-5" strokeWidth={3} aria-hidden />
+            </button>
+          )}
           {navMode === 'topNav' ? (
             <nav
               aria-label="Primary sections"
@@ -395,7 +387,10 @@ export const TopBarNeo = memo(function TopBarNeo({
         />
 
         {/* Center: Search — lavender focus-within; instant state */}
-        <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2" style={chromeNoDragStyle}>
+        <div
+          className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2"
+          style={chromeNoDragStyle}
+        >
           <div className="flex h-10 w-full items-center gap-3 border-2 border-black bg-white px-4 shadow-[4px_4px_0_0_#000] transition-none focus-within:bg-[#A091D0]">
             <div className="flex shrink-0 items-center justify-center">
               {isSearching ? (
@@ -424,12 +419,12 @@ export const TopBarNeo = memo(function TopBarNeo({
                   onSearchChange('');
                   searchInputRef.current?.focus();
                 }}
-                className="inline-flex h-6 w-6 items-center justify-center border-2 border-black bg-[#F6F6F6] text-black shadow-[2px_2px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[#E4C463]"
+                className="inline-flex h-6 w-6 items-center justify-center border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]"
               >
                 <X className="h-3 w-3" strokeWidth={3} />
               </button>
             ) : (
-              <kbd className="hidden h-6 items-center border-2 border-black bg-[#F6F6F6] px-2 shadow-[2px_2px_0_0_#000] md:inline-flex">
+              <kbd className="hidden h-6 items-center border-2 border-black bg-[var(--neo-panel)] px-2 shadow-[2px_2px_0_0_#000] md:inline-flex">
                 <span className="text-[10px] font-black">{PLATFORM_SHORTCUT.shortcutLabel}</span>
               </kbd>
             )}
@@ -452,7 +447,10 @@ export const TopBarNeo = memo(function TopBarNeo({
         />
 
         {/* Right: Status + Secondary Nav */}
-        <div className="pointer-events-auto flex shrink-0 items-center justify-end gap-3" style={chromeNoDragStyle}>
+        <div
+          className="pointer-events-auto flex shrink-0 items-center justify-end gap-3"
+          style={chromeNoDragStyle}
+        >
           {status && <ProcessingStatus status={status} />}
 
           {navMode === 'topNav' && (

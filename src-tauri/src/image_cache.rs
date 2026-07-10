@@ -20,6 +20,15 @@ const THUMBNAIL_SIZES: [(u32, &str); 3] = [
 
 const MAX_CACHE_SIZE_MB: u64 = 500;
 
+fn max_thumbnail_bytes(size: &str) -> usize {
+    match size {
+        "small" => 200_000,
+        "medium" => 700_000,
+        "large" => 1_800_000,
+        _ => 700_000,
+    }
+}
+
 fn is_valid_thumbnail_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -379,6 +388,41 @@ mod tests {
     }
 
     #[test]
+    fn generate_thumbnails_reuses_stable_hash() {
+        let root = temp_dir("stable-hash");
+        let cache_dir = root.join("covers");
+        fs::create_dir_all(&cache_dir).expect("create cache dir");
+        let cache = test_cache(cache_dir);
+
+        let img = DynamicImage::new_rgb8(8, 8);
+        let mut bytes = Cursor::new(Vec::new());
+        img.write_to(&mut bytes, ImageFormat::Png)
+            .expect("encode test image");
+        let data = bytes.into_inner();
+
+        let first = cache
+            .generate_thumbnails(&data)
+            .expect("generate thumbnails");
+        let second = cache.generate_thumbnails(&data).expect("reuse thumbnails");
+
+        assert_eq!(first, second);
+        assert!(cache.has_thumbnail(&first));
+        assert!(cache
+            .get_thumbnail_bytes(&first, "small")
+            .expect("small")
+            .is_some());
+        assert!(cache
+            .get_thumbnail_bytes(&first, "medium")
+            .expect("medium")
+            .is_some());
+        assert!(cache
+            .get_thumbnail_bytes(&first, "large")
+            .expect("large")
+            .is_some());
+
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
     fn thumbnail_lookup_rejects_traversal_size() {
         let root = temp_dir("traversal");
         let cache_dir = root.join("covers");
@@ -392,8 +436,15 @@ mod tests {
             .expect("lookup should not error");
 
         assert!(result.is_none());
-
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn max_thumbnail_bytes_bounds_sizes() {
+        assert_eq!(max_thumbnail_bytes("small"), 200_000);
+        assert_eq!(max_thumbnail_bytes("medium"), 700_000);
+        assert_eq!(max_thumbnail_bytes("large"), 1_800_000);
+        assert_eq!(max_thumbnail_bytes("unexpected"), 700_000);
     }
 }
 
@@ -425,6 +476,27 @@ pub async fn cache_get_thumbnail(
     spawn_blocking(move || cache.get_thumbnail(&hash, &size))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cache_get_thumbnail_bytes(
+    hash: String,
+    size: String,
+    cache: tauri::State<'_, SharedImageCache>,
+) -> Result<Option<Vec<u8>>, String> {
+    let cache = cache.inner().clone();
+    spawn_blocking(move || match cache.get_thumbnail_bytes(&hash, &size) {
+        Ok(Some(bytes)) => {
+            if bytes.len() > max_thumbnail_bytes(&size) {
+                return Ok(None);
+            }
+            Ok(Some(bytes))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(e),
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -468,34 +540,4 @@ pub async fn cache_enforce_limit(
     spawn_blocking(move || cache.enforce_size_limit(limit_mb))
         .await
         .map_err(|e| e.to_string())?
-}
-
-/// Get cover art thumbnail as base64 data URL (fallback for when protocol handler doesn't work)
-#[tauri::command]
-pub async fn cache_get_thumbnail_data_url(
-    hash: String,
-    size: String,
-    cache: tauri::State<'_, SharedImageCache>,
-) -> Result<Option<String>, String> {
-    let cache = cache.inner().clone();
-    spawn_blocking(move || match cache.get_thumbnail_bytes(&hash, &size) {
-        Ok(Some(bytes)) => {
-            let max_bytes = match size.as_str() {
-                "small" => 200_000,
-                "medium" => 700_000,
-                "large" => 1_800_000,
-                _ => 700_000,
-            };
-            if bytes.len() > max_bytes {
-                return Ok(None);
-            }
-            use base64::Engine;
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            Ok(Some(format!("data:image/webp;base64,{}", encoded)))
-        }
-        Ok(None) => Ok(None),
-        Err(e) => Err(e),
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }

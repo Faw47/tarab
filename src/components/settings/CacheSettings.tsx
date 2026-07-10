@@ -35,7 +35,9 @@ export const CacheSettings = memo(() => {
   const setCacheSizeLimitMb = useSettingsStore((s) => s.setCacheSizeLimitMb);
   const clearCacheOnStartup = useSettingsStore((s) => s.clearCacheOnStartup);
   const setClearCacheOnStartup = useSettingsStore((s) => s.setClearCacheOnStartup);
-  const [confirmDialog, setConfirmDialog] = useState<Omit<ConfirmDialogProps, 'onCancel'> | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<Omit<ConfirmDialogProps, 'onCancel'> | null>(
+    null,
+  );
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -68,7 +70,8 @@ export const CacheSettings = memo(() => {
   const handleClearCache = useCallback(() => {
     setConfirmDialog({
       title: 'Clear image cache',
-      message: 'Are you sure you want to clear the image cache? Images will need to be re-downloaded or re-generated.',
+      message:
+        'Are you sure you want to clear the image cache? Images will need to be re-downloaded or re-generated.',
       variant: 'danger',
       confirmLabel: 'Clear Cache',
       onConfirm: executeClearCache,
@@ -94,15 +97,27 @@ export const CacheSettings = memo(() => {
         description="Manage generated image assets and disk quota."
         icon={<HardDrive size={16} />}
         actions={
-          <SettingsActionButton size="sm" tone="ghost" onClick={loadStats} disabled={loading} title="Refresh stats">
+          <SettingsActionButton
+            size="sm"
+            tone="ghost"
+            onClick={loadStats}
+            disabled={loading}
+            title="Refresh stats"
+          >
             <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} /> Refresh
           </SettingsActionButton>
         }
       >
         <SettingsRow
           label="Cover cache"
-          description={stats ? `${stats.fileCount} files tracked in storage.` : 'Calculating cache usage.'}
-          control={<span className="text-sm font-semibold text-text-primary">{stats ? formatBytes(stats.totalSizeBytes) : '...'}</span>}
+          description={
+            stats ? `${stats.fileCount} files tracked in storage.` : 'Calculating cache usage.'
+          }
+          control={
+            <span className="text-sm font-semibold text-text-primary">
+              {stats ? formatBytes(stats.totalSizeBytes) : '...'}
+            </span>
+          }
         />
         <SettingsRow
           label="Automatic quota"
@@ -121,7 +136,12 @@ export const CacheSettings = memo(() => {
           }
         >
           <div className="flex justify-end">
-            <SettingsActionButton size="sm" tone="ghost" onClick={handleEnforceLimit} disabled={loading}>
+            <SettingsActionButton
+              size="sm"
+              tone="ghost"
+              onClick={handleEnforceLimit}
+              disabled={loading}
+            >
               Enforce Limit
             </SettingsActionButton>
           </div>
@@ -136,7 +156,11 @@ export const CacheSettings = memo(() => {
           label="Clear image cache"
           description="Free disk space by removing cached cover assets. Library files are not affected."
           action={
-            <SettingsActionButton tone="danger" onClick={handleClearCache} disabled={clearing || !stats?.totalSizeBytes}>
+            <SettingsActionButton
+              tone="danger"
+              onClick={handleClearCache}
+              disabled={clearing || !stats?.totalSizeBytes}
+            >
               {clearing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               Clear Image Cache
             </SettingsActionButton>
@@ -144,10 +168,11 @@ export const CacheSettings = memo(() => {
         />
       </SettingsSection>
 
-      {confirmDialog && <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
+      {confirmDialog && (
+        <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />
+      )}
     </>
   );
 });
 
 CacheSettings.displayName = 'CacheSettings';
-

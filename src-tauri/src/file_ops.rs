@@ -18,13 +18,41 @@ pub fn create_library_roots_state() -> SharedLibraryRoots {
     Arc::new(RwLock::new(LibraryRootsState::default()))
 }
 
-fn ensure_filename_with_extension(base: &str, source: &Path) -> String {
-    if base.contains('.') {
+fn normalize_library_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    roots.dedup();
+
+    let mut normalized = Vec::with_capacity(roots.len());
+    for root in roots {
+        if !is_path_allowed(&root, &normalized) {
+            normalized.push(root);
+        }
+    }
+    normalized
+}
+
+fn ensure_filename_with_extension(base: &str, source: &Path) -> Result<String, String> {
+    if base.trim().is_empty() {
+        return Err("Rename target must not be empty".to_string());
+    }
+
+    let candidate = if base.contains('.') {
         base.to_string()
     } else if let Some(ext) = source.extension().and_then(|e| e.to_str()) {
         format!("{}.{}", base, ext)
     } else {
         base.to_string()
+    };
+
+    let mut components = Path::new(&candidate).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(candidate),
+        _ => Err("Rename target must be a filename, not a path".to_string()),
     }
 }
 
@@ -172,9 +200,7 @@ pub fn set_library_roots(
         })?;
         canonical_roots.push(canonical);
     }
-    canonical_roots.sort();
-    canonical_roots.dedup();
-    roots_state.write().roots = canonical_roots;
+    roots_state.write().roots = normalize_library_roots(canonical_roots);
     Ok(())
 }
 
@@ -197,7 +223,7 @@ pub async fn rename_file(
         let parent = source
             .parent()
             .ok_or_else(|| "Source has no parent directory".to_string())?;
-        let final_name = ensure_filename_with_extension(&new_name, &source);
+        let final_name = ensure_filename_with_extension(&new_name, &source)?;
         let target = parent.join(final_name);
         if source == target {
             return Ok(target.to_string_lossy().to_string());
@@ -332,6 +358,19 @@ mod tests {
     }
 
     #[test]
+    fn rename_filename_validation_rejects_paths() {
+        let source = PathBuf::from("song.mp3");
+
+        assert_eq!(
+            ensure_filename_with_extension("renamed", &source).expect("plain filename"),
+            "renamed.mp3"
+        );
+        assert!(ensure_filename_with_extension("nested/song", &source).is_err());
+        assert!(ensure_filename_with_extension("../escape", &source).is_err());
+        assert!(ensure_filename_with_extension("", &source).is_err());
+    }
+
+    #[test]
     fn delete_prevalidation_rejects_mixed_outside_root_before_delete() {
         let allowed_root = temp_dir("allowed");
         let outside_root = temp_dir("outside");
@@ -374,6 +413,34 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         let _ = fs::remove_dir_all(allowed_root);
+    }
+
+    #[test]
+    fn library_roots_drop_duplicates_and_nested_children() {
+        let temp = temp_dir("roots");
+        let music = temp.join("Music");
+        let jazz = music.join("Jazz");
+        let other = temp.join("Other");
+        fs::create_dir_all(&jazz).expect("create nested music");
+        fs::create_dir_all(&other).expect("create other root");
+
+        let music = fs::canonicalize(&music).expect("canonical music");
+        let jazz = fs::canonicalize(&jazz).expect("canonical jazz");
+        let other = fs::canonicalize(&other).expect("canonical other");
+
+        let normalized = normalize_library_roots(vec![
+            jazz.clone(),
+            other.clone(),
+            music.clone(),
+            music.clone(),
+        ]);
+
+        assert!(normalized.contains(&music));
+        assert!(normalized.contains(&other));
+        assert!(!normalized.contains(&jazz));
+        assert_eq!(normalized.len(), 2);
+
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]

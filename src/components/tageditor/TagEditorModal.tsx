@@ -27,7 +27,7 @@ import {
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { clipboard } from '../../platform/clipboard';
 import { useMetadataClipboardStore } from '../../store/metadata-clipboard-store';
-import type { TagInfo, TagUpdate, Track } from '../../types';
+import type { TagClearField, TagInfo, TagUpdate, Track } from '../../types';
 import { MetadataClipboard } from '../metadata/MetadataClipboard';
 import { Button } from '../ui/button';
 import { IconButton } from '../ui/IconButton';
@@ -299,18 +299,42 @@ export const TagEditorModal = memo(
         setError(null);
 
         const updates: TagUpdate = {};
+        const clearFields: TagClearField[] = [];
+        const clearIfSingle = (field: TagClearField) => {
+          if (!isBatchEdit) clearFields.push(field);
+        };
+        const parseTagNumber = (value: string) => {
+          const trimmed = value.trim();
+          if (!trimmed) return null;
+          const parsed = Number.parseInt(trimmed, 10);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        };
 
-        // Only include fields that have values (for batch, only filled fields apply)
+        // Batch edits only apply filled fields. Single-track edits may intentionally clear fields.
         if (title.trim()) updates.title = title.trim();
+        else clearIfSingle('title');
         if (artist.trim()) updates.artist = artist.trim();
+        else clearIfSingle('artist');
         if (album.trim()) updates.album = album.trim();
+        else clearIfSingle('album');
         if (albumArtist.trim()) updates.albumArtist = albumArtist.trim();
-        if (year.trim()) updates.year = parseInt(year, 10) || undefined;
-        if (trackNumber.trim()) updates.trackNumber = parseInt(trackNumber, 10) || undefined;
-        if (discNumber.trim()) updates.discNumber = parseInt(discNumber, 10) || undefined;
+        else clearIfSingle('albumArtist');
+        const parsedYear = parseTagNumber(year);
+        if (typeof parsedYear === 'number') updates.year = parsedYear;
+        else if (parsedYear === null) clearIfSingle('year');
+        const parsedTrackNumber = parseTagNumber(trackNumber);
+        if (typeof parsedTrackNumber === 'number') updates.trackNumber = parsedTrackNumber;
+        else if (parsedTrackNumber === null) clearIfSingle('trackNumber');
+        const parsedDiscNumber = parseTagNumber(discNumber);
+        if (typeof parsedDiscNumber === 'number') updates.discNumber = parsedDiscNumber;
+        else if (parsedDiscNumber === null) clearIfSingle('discNumber');
         if (genre.trim()) updates.genre = genre.trim();
+        else clearIfSingle('genre');
         if (composer.trim()) updates.composer = composer.trim();
+        else clearIfSingle('composer');
         if (comment.trim()) updates.comment = comment.trim();
+        else clearIfSingle('comment');
+        if (clearFields.length > 0) updates.clearFields = clearFields;
 
         // Handle cover art
         if (newCoverArt) {
@@ -402,12 +426,14 @@ export const TagEditorModal = memo(
         // Keep internal clipboard
         setClipboard(update, art, trackPath);
 
-        // Also copy text to system clipboard
+        // Also copy a plain-text summary to the system clipboard.
         const artist = update.artist || 'Unknown Artist';
         const title = update.title || 'Unknown Title';
-        void clipboard.writeText(`${artist} - ${title}`);
+        const systemClipboardUpdated = await clipboard.writeText(`${artist} - ${title}`);
 
-        setClipboardMessage('Copied metadata');
+        setClipboardMessage(
+          systemClipboardUpdated ? 'Copied metadata' : 'Copied metadata inside Tarab only',
+        );
       } catch (err) {
         reportError('Failed to copy metadata', { source: 'tag-editor-modal', error: err });
         setClipboardMessage('Copy failed');
@@ -417,23 +443,33 @@ export const TagEditorModal = memo(
     const handlePasteMetadata = useCallback(() => {
       if (!clipboardData) return;
 
-      const applyField = <T extends string>(value: T | undefined, setter: (v: T) => void) => {
+      const applyTextField = (
+        value: string | null | undefined,
+        setter: (value: string) => void,
+      ) => {
         if (value !== undefined) {
-          setter(value);
+          setter(value ?? '');
+        }
+      };
+      const applyNumberField = (
+        value: number | null | undefined,
+        setter: (value: string) => void,
+      ) => {
+        if (value !== undefined) {
+          setter(value === null ? '' : String(value));
         }
       };
 
-      applyField(clipboardData.title, setTitle);
-      applyField(clipboardData.artist, setArtist);
-      applyField(clipboardData.album, setAlbum);
-      applyField(clipboardData.albumArtist as string | undefined, setAlbumArtist);
-      if (clipboardData.year !== undefined) setYear(String(clipboardData.year));
-      if (clipboardData.trackNumber !== undefined)
-        setTrackNumber(String(clipboardData.trackNumber));
-      if (clipboardData.discNumber !== undefined) setDiscNumber(String(clipboardData.discNumber));
-      applyField(clipboardData.genre, setGenre);
-      applyField(clipboardData.composer, setComposer);
-      applyField(clipboardData.comment, setComment);
+      applyTextField(clipboardData.title, setTitle);
+      applyTextField(clipboardData.artist, setArtist);
+      applyTextField(clipboardData.album, setAlbum);
+      applyTextField(clipboardData.albumArtist, setAlbumArtist);
+      applyNumberField(clipboardData.year, setYear);
+      applyNumberField(clipboardData.trackNumber, setTrackNumber);
+      applyNumberField(clipboardData.discNumber, setDiscNumber);
+      applyTextField(clipboardData.genre, setGenre);
+      applyTextField(clipboardData.composer, setComposer);
+      applyTextField(clipboardData.comment, setComment);
       if (clipboardData.extraTags) {
         setExtendedFields(
           Object.entries(clipboardData.extraTags).map(([key, value]) => ({

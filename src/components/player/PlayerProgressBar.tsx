@@ -28,7 +28,7 @@ function updateNeoFill(
   const percent = duration > 0 ? (timeSec / duration) * 100 : 0;
   if (fillEl) {
     fillEl.style.width = `${percent}%`;
-    fillEl.style.background = percent > 80 ? '#E8A020' : '#7CC61F';
+    fillEl.style.background = 'var(--signal-play)';
   }
   if (thumbEl) thumbEl.style.left = `${percent}%`;
   if (showLabels && labelEl) labelEl.textContent = formatTime(timeSec);
@@ -68,7 +68,7 @@ export const PlayerProgressBar = memo(
       if (inputRef.current) inputRef.current.value = validTime.toString();
 
       if (isNeobrutalism && fillRef.current) {
-        fillRef.current.style.background = percent > 80 ? '#E8A020' : '#7CC61F';
+        fillRef.current.style.background = 'var(--signal-play)';
       }
 
       if (currentLabelRef.current && (showLabels || isNeobrutalism)) {
@@ -89,7 +89,14 @@ export const PlayerProgressBar = memo(
 
     const applySeekVisual = useCallback(
       (timeSec: number) => {
-        updateNeoFill(fillRef.current, thumbRef.current, currentLabelRef.current, timeSec, duration, showLabels);
+        updateNeoFill(
+          fillRef.current,
+          thumbRef.current,
+          currentLabelRef.current,
+          timeSec,
+          duration,
+          showLabels,
+        );
       },
       [duration, showLabels],
     );
@@ -180,7 +187,10 @@ export const PlayerProgressBar = memo(
         seekValueRef.current = next;
         applySeekVisual(next);
         void seekToPosition(next).catch((err) =>
-          reportError('Failed to seek playback', { source: 'player-progress-keyboard', error: err }),
+          reportError('Failed to seek playback', {
+            source: 'player-progress-keyboard',
+            error: err,
+          }),
         );
       },
       [applySeekVisual, duration],
@@ -280,7 +290,7 @@ export const PlayerProgressBar = memo(
             <div
               ref={fillRef}
               className="neo-seek-fill"
-              style={{ width: '0%', background: '#7CC61F' }}
+              style={{ width: '0%', background: 'var(--signal-play)' }}
             />
             {ticks.map((i) => (
               <div key={i} className="neo-seek-tick" style={{ left: `${i * 10}%` }} />
@@ -302,9 +312,7 @@ export const PlayerProgressBar = memo(
 
     if (variant === 'mini') {
       return (
-        <div
-          className={clsx('w-full relative overflow-hidden h-[2px] bg-white/10', className)}
-        >
+        <div className={clsx('w-full relative overflow-hidden h-[2px] bg-white/10', className)}>
           <div
             ref={fillRef}
             className="h-full transition-none will-change-[width]"

@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLibraryStore } from '../../store/library-store';
 import type { SortBy, Track } from '../../types';
+import type { SearchScope } from '../../workers/library.worker';
+import { rankTracksWithFuseWorker } from '../../workers/librarySearchFuseClient';
 import {
   fetchLibrarySearch,
   fetchLibraryStats,
@@ -11,9 +13,8 @@ import {
   fetchRecentlyAddedTracks,
   mapSearchResultToTrack,
 } from './api';
+import { mergeTrackPages } from './mergeTrackPages';
 import { libraryKeys } from './queryKeys';
-import { rankTracksWithFuseWorker } from '../../workers/librarySearchFuseClient';
-import type { SearchScope } from '../../workers/library.worker';
 
 const SEARCH_DEBOUNCE_MS = 160;
 
@@ -245,10 +246,9 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
 
   const appendTracks = useCallback(
     (newTracks: Track[]) => {
-      queryClient.setQueryData<Track[]>(libraryKeys.tracks(), (previous = []) => [
-        ...previous,
-        ...newTracks,
-      ]);
+      queryClient.setQueryData<Track[]>(libraryKeys.tracks(), (previous = []) =>
+        mergeTrackPages(previous, newTracks),
+      );
     },
     [queryClient],
   );

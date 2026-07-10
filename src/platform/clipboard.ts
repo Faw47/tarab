@@ -1,4 +1,4 @@
-import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { logger } from './logger';
 
 const DOMAIN = 'Clipboard';
@@ -18,20 +18,6 @@ export const clipboard = {
     } catch (err) {
       logger.error(DOMAIN, 'Failed to write text to clipboard', err);
       return false;
-    }
-  },
-
-  /**
-   * Read text from the system clipboard.
-   */
-  readText: async (): Promise<string | null> => {
-    try {
-      const text = await readText();
-      logger.debug(DOMAIN, 'Text read from clipboard');
-      return text;
-    } catch (err) {
-      logger.error(DOMAIN, 'Failed to read text from clipboard', err);
-      return null;
     }
   },
 };

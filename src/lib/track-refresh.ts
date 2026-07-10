@@ -1,11 +1,11 @@
 import { getLibraryQueryClient } from '../features/library/queryClientBridge';
 import { libraryKeys } from '../features/library/queryKeys';
+import { invalidateCoverArtCache } from '../hooks/useCoverArt';
 import { usePlayerStore } from '../store/player-store';
 import { useSettingsStore } from '../store/settings-store';
 import type { Track } from '../types';
 import { getPathBaseName } from './path-utils';
 import { reportError } from './report-error';
-import { invalidateCoverArtCache } from '../hooks/useCoverArt';
 import {
   dbGetTracksByIds,
   dbUpsertTracks,

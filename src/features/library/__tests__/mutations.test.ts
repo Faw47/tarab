@@ -1,11 +1,11 @@
-import type { QueryClient } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import { invalidateLibraryForMutation } from '../mutations';
 
 describe('invalidateLibraryForMutation', () => {
   it('invalidates expected query targets for scan mutations', async () => {
-    const invalidateQueries = vi.fn(async () => undefined);
-    const queryClient = { invalidateQueries } as unknown as QueryClient;
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
 
     await invalidateLibraryForMutation(queryClient, 'scan');
 
@@ -21,8 +21,8 @@ describe('invalidateLibraryForMutation', () => {
   });
 
   it('invalidates expected query targets for rating mutations', async () => {
-    const invalidateQueries = vi.fn(async () => undefined);
-    const queryClient = { invalidateQueries } as unknown as QueryClient;
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
 
     await invalidateLibraryForMutation(queryClient, 'rating');
 

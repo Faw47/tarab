@@ -1,6 +1,6 @@
 import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
-import { useEffect, useRef } from 'react';
 import type { CSSProperties, HTMLAttributes, ReactNode, UIEvent } from 'react';
+import { useEffect, useRef } from 'react';
 
 type ScrollToIndexAlign = 'auto' | 'start' | 'center' | 'end';
 

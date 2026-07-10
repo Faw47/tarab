@@ -94,6 +94,21 @@
   --lgrb: oklch(1 0 0 / 0.09);
   --lgtb: oklch(1 0 0 / 0.38);
   --lgsb: oklch(1 0 0 / 0.16);
+  --toast-surface: oklch(0.18 0.015 140 / 0.8);
+  --toast-border: oklch(1 0 0 / 0.1);
+  --toast-foreground: var(--type-primary);
+  --toast-blur: 12px;
+
+  --settings-section-surface: oklch(1 0 0 / 0.045);
+  --settings-section-border: oklch(1 0 0 / 0.07);
+  --settings-section-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 18px 45px oklch(0 0 0 / 0.22);
+  --settings-section-icon-surface: oklch(1 0 0 / 0.06);
+  --settings-section-icon-border: oklch(1 0 0 / 0.08);
+  --settings-danger-surface: oklch(0.577 0.245 27.325 / 0.035);
+  --state-warning-surface: oklch(0.82 0.12 80 / 0.45);
+  --state-warning-border: oklch(0.82 0.12 80 / 0.35);
+  --state-error-surface: oklch(0.32 0.12 28 / 0.55);
+  --state-error-border: oklch(0.68 0.18 28 / 0.4);
 }
 
 @theme inline {
@@ -151,7 +166,6 @@
   --animate-art-float: artFloat 5.2s ease-in-out infinite;
 
   @keyframes b1 {
-
     0%,
     100% {
       transform: translate(0, 0) scale(1);
@@ -167,7 +181,6 @@
   }
 
   @keyframes b2 {
-
     0%,
     100% {
       transform: translate(0, 0) scale(1);
@@ -183,7 +196,6 @@
   }
 
   @keyframes b3 {
-
     0%,
     100% {
       transform: translate(0, 0);
@@ -205,7 +217,6 @@
   }
 
   @keyframes artFloat {
-
     0%,
     100% {
       transform: translateY(0);
@@ -236,7 +247,6 @@
 }
 
 @layer base {
-
   html,
   body,
   #root {
@@ -304,6 +314,17 @@
   transform: scale(0.98);
 }
 
+.glass-overlay-menu {
+  color: var(--type-primary);
+  background: var(--surface-overlay);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  animation: fadeIn 0.32s ease forwards;
+}
+
 /* Volumetric Glass: dual-layer inset shadow for interactive glass panels */
 .volumetric-glass {
   box-shadow:
@@ -317,7 +338,7 @@
 }
 
 .library-card:has(+ .library-card:hover),
-.library-card:hover+.library-card {
+.library-card:hover + .library-card {
   transform: scale(0.98);
 }
 
@@ -356,12 +377,14 @@
 .empty-state-mesh {
   position: absolute;
   inset: -50%;
-  background: conic-gradient(from 0deg at 50% 50%,
-      color-mix(in oklch, var(--primary) 25%, transparent) 0deg,
-      color-mix(in oklch, var(--primary) 12%, transparent) 90deg,
-      color-mix(in oklch, var(--primary) 20%, transparent) 180deg,
-      color-mix(in oklch, var(--primary) 8%, transparent) 270deg,
-      color-mix(in oklch, var(--primary) 25%, transparent) 360deg);
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    color-mix(in oklch, var(--primary) 25%, transparent) 0deg,
+    color-mix(in oklch, var(--primary) 12%, transparent) 90deg,
+    color-mix(in oklch, var(--primary) 20%, transparent) 180deg,
+    color-mix(in oklch, var(--primary) 8%, transparent) 270deg,
+    color-mix(in oklch, var(--primary) 25%, transparent) 360deg
+  );
   animation: empty-state-mesh-rotate 30s linear infinite;
   pointer-events: none;
 }
@@ -472,9 +495,11 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   touch-action: manipulation;
-  background: linear-gradient(to right,
-      var(--range-fill) 0 var(--range-progress),
-      var(--range-track) var(--range-progress) 100%);
+  background: linear-gradient(
+    to right,
+    var(--range-fill) 0 var(--range-progress),
+    var(--range-track) var(--range-progress) 100%
+  );
   border-radius: 999px;
   height: 4px;
   cursor: pointer;
@@ -520,7 +545,6 @@ input[type="range"]::-moz-range-thumb {
 
 /* Animation for now playing */
 @keyframes pulse-glow {
-
   0%,
   100% {
     opacity: 0.4;
@@ -570,17 +594,18 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .skeleton-shimmer {
-  background: linear-gradient(90deg,
-      oklch(1 0 0 / 0.04) 25%,
-      oklch(1 0 0 / 0.08) 50%,
-      oklch(1 0 0 / 0.04) 75%);
+  background: linear-gradient(
+    90deg,
+    oklch(1 0 0 / 0.04) 25%,
+    oklch(1 0 0 / 0.08) 50%,
+    oklch(1 0 0 / 0.04) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.8s ease-in-out infinite;
 }
 
 /* Pill mini player breathing animation */
 @keyframes breathe {
-
   0%,
   100% {
     transform: scale(1);
@@ -611,7 +636,6 @@ input[type="range"]::-moz-range-thumb {
     opacity: 0;
   }
 }
-
 
 /* Album details: track row entrance */
 @keyframes adl-track-in {
@@ -699,7 +723,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @keyframes player-flow-slow {
-
   0%,
   100% {
     transform: translate(-50%, -50%) scale(1.02) rotate(0deg);
@@ -736,7 +759,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @keyframes player-blob-flow {
-
   0%,
   100% {
     transform: translate3d(0, 0, 0) scale(1);
@@ -790,15 +812,16 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .home-spotlight-overlay {
-  background: radial-gradient(180px circle at var(--home-spot-x) var(--home-spot-y),
-      oklch(1 0 0 / 0.11) 0%,
-      transparent 65%);
+  background: radial-gradient(
+    180px circle at var(--home-spot-x) var(--home-spot-y),
+    oklch(1 0 0 / 0.11) 0%,
+    transparent 65%
+  );
   opacity: var(--home-spot-o);
   transition: opacity 220ms ease;
 }
 
 @keyframes app-grain-breathe {
-
   0%,
   100% {
     opacity: 0.08;
@@ -830,7 +853,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-
   .glass-panel,
   .glass-panel-subtle,
   .glass-panel-strong,
@@ -864,7 +886,6 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .animate-pulse-glow,
   .animate-breathe,
   .animate-fade-in,
@@ -895,4 +916,120 @@ input[type="range"]::-moz-range-thumb {
   .app-shell-grain::after {
     animation: none;
   }
+}
+
+/* Home player motion and album-card interactions */
+/* Equalizer bars */
+@keyframes tarab-eq-1 {
+  0%,
+  100% {
+    height: 34%;
+  }
+  18% {
+    height: 88%;
+  }
+  42% {
+    height: 48%;
+  }
+  68% {
+    height: 95%;
+  }
+  84% {
+    height: 36%;
+  }
+}
+@keyframes tarab-eq-2 {
+  0%,
+  100% {
+    height: 72%;
+  }
+  22% {
+    height: 24%;
+  }
+  48% {
+    height: 96%;
+  }
+  74% {
+    height: 38%;
+  }
+  90% {
+    height: 80%;
+  }
+}
+@keyframes tarab-eq-3 {
+  0%,
+  100% {
+    height: 92%;
+  }
+  28% {
+    height: 50%;
+  }
+  55% {
+    height: 18%;
+  }
+  78% {
+    height: 76%;
+  }
+  92% {
+    height: 58%;
+  }
+}
+@keyframes tarab-eq-4 {
+  0%,
+  100% {
+    height: 46%;
+  }
+  16% {
+    height: 98%;
+  }
+  44% {
+    height: 64%;
+  }
+  70% {
+    height: 20%;
+  }
+  88% {
+    height: 82%;
+  }
+}
+
+/* Entrance stagger */
+@keyframes tarab-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(11px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.tarab-fade-up {
+  animation: tarab-fade-up 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 3-D cover tilt */
+.home-cover-tilt {
+  transform: perspective(920px) rotateX(var(--home-tilt-x, 0deg)) rotateY(var(--home-tilt-y, 0deg));
+  will-change: transform;
+  transform-style: preserve-3d;
+}
+.home-cover-tilt-static {
+  transform: none !important;
+}
+
+/* Spotlight overlay on album cards */
+.home-spotlight-card {
+  --home-spot-x: 50%;
+  --home-spot-y: 50%;
+  --home-spot-o: 0;
+}
+.home-spotlight-overlay {
+  background: radial-gradient(
+    circle at var(--home-spot-x) var(--home-spot-y),
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 62%
+  );
+  opacity: var(--home-spot-o);
+  transition: opacity 0.3s ease;
 }

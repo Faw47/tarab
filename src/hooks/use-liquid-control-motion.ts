@@ -2,7 +2,7 @@
  * Spring-smoothed pill motion + lightweight FSM (`idle | hover | press | drag | settle`) for GPU glass.
  * Feeds `useLiquidControlGlassStore` with pixel-space uniforms for the shell composite pass.
  */
-import { useEffect, useRef, type RefObject } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 
 import { readLiquidGlassDebugExaggerated } from '@/lib/liquid-glass-debug';
 import {
@@ -163,7 +163,7 @@ export function useLiquidControlMotionHorizontal(options: HorizontalMotionOpts):
       setPill({
         visible: true,
         centerPx: [centerX, centerY],
-        halfSizePx: [(pillW * (1 + stretchX)) * 0.5, (pillH * (1 + stretchY)) * 0.5],
+        halfSizePx: [pillW * (1 + stretchX) * 0.5, pillH * (1 + stretchY) * 0.5],
         radiusPx,
         stretchX,
         stretchY,

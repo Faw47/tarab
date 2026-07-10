@@ -1,10 +1,63 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
+import { isSameOrSubPath, normalizePath } from '../lib/path-utils';
 import { SettingsSchema } from '../lib/validation/settings';
 import { createTauriZustandStorage } from '../platform/tauri-zustand-storage';
 
 export type NavMode = 'iconRail' | 'topNav';
 export type AppTheme = 'liquid-glass' | 'neobrutalism';
+export const DEFAULT_SHORTCUTS = {
+  playPause: 'CommandOrControl+Alt+Space',
+  next: 'CommandOrControl+Alt+Right',
+  previous: 'CommandOrControl+Alt+Left',
+} as const;
+
+type ShortcutKey = keyof typeof DEFAULT_SHORTCUTS;
+
+const normalizeShortcut = (key: ShortcutKey, value: string | undefined): string => {
+  const normalized = value
+    ?.split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join('+');
+  return normalized || DEFAULT_SHORTCUTS[key];
+};
+
+const normalizeShortcuts = (shortcuts?: Partial<Record<ShortcutKey, string>>) => ({
+  playPause: normalizeShortcut('playPause', shortcuts?.playPause),
+  next: normalizeShortcut('next', shortcuts?.next),
+  previous: normalizeShortcut('previous', shortcuts?.previous),
+});
+
+const normalizeLibraryFolder = (folder: string): string =>
+  normalizePath(folder.trim()).replace(/\/+$/, '');
+
+const mergeLibraryFolders = (
+  currentFolders: Iterable<string>,
+  additions: Iterable<string>,
+): string[] => {
+  const candidates = [...currentFolders, ...additions]
+    .map(normalizeLibraryFolder)
+    .filter(Boolean)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+
+  const merged: string[] = [];
+  for (const folder of candidates) {
+    if (merged.some((existing) => isSameOrSubPath(folder, existing))) {
+      continue;
+    }
+    merged.push(folder);
+  }
+  return merged;
+};
+
+const withoutLibraryFolder = (currentFolders: Iterable<string>, folder: string): string[] => {
+  const target = normalizeLibraryFolder(folder);
+  return mergeLibraryFolders(
+    Array.from(currentFolders).filter((current) => normalizeLibraryFolder(current) !== target),
+    [],
+  );
+};
 
 interface SettingsState {
   theme: AppTheme;
@@ -42,11 +95,7 @@ interface SettingsState {
   fullscreenBackgroundBlur: number;
 
   globalShortcutsEnabled: boolean;
-  shortcuts: {
-    playPause: string;
-    next: string;
-    previous: string;
-  };
+  shortcuts: Record<ShortcutKey, string>;
   autostartEnabled: boolean;
 
   // Actions
@@ -87,7 +136,7 @@ interface SettingsState {
   setFullscreenBackgroundBlur: (blur: number) => void;
   setTheme: (theme: AppTheme) => void;
   setGlobalShortcutsEnabled: (enabled: boolean) => void;
-  setShortcut: (key: 'playPause' | 'next' | 'previous', value: string) => void;
+  setShortcut: (key: ShortcutKey, value: string) => void;
   setAutostartEnabled: (enabled: boolean) => void;
 }
 
@@ -129,11 +178,7 @@ export const useSettingsStore = create<SettingsState>()(
         fullscreenBackgroundBlur: 15,
 
         globalShortcutsEnabled: false,
-        shortcuts: {
-          playPause: 'CommandOrControl+Alt+Space',
-          next: 'CommandOrControl+Alt+Right',
-          previous: 'CommandOrControl+Alt+Left',
-        },
+        shortcuts: { ...DEFAULT_SHORTCUTS },
         autostartEnabled: false,
 
         setLyricsEnabled: (enabled) =>
@@ -148,9 +193,7 @@ export const useSettingsStore = create<SettingsState>()(
         addLibraryFolder: (folder) =>
           set(
             (state) => ({
-              libraryFolders: state.libraryFolders.includes(folder)
-                ? state.libraryFolders
-                : [...state.libraryFolders, folder],
+              libraryFolders: mergeLibraryFolders(state.libraryFolders, [folder]),
             }),
             false,
             'settings/addLibraryFolder',
@@ -159,14 +202,18 @@ export const useSettingsStore = create<SettingsState>()(
         removeLibraryFolder: (folder) =>
           set(
             (state) => ({
-              libraryFolders: state.libraryFolders.filter((f) => f !== folder),
+              libraryFolders: withoutLibraryFolder(state.libraryFolders, folder),
             }),
             false,
             'settings/removeLibraryFolder',
           ),
 
         setLibraryFolders: (folders) =>
-          set({ libraryFolders: folders }, false, 'settings/setLibraryFolders'),
+          set(
+            { libraryFolders: mergeLibraryFolders([], folders) },
+            false,
+            'settings/setLibraryFolders',
+          ),
 
         setOutputDevice: (device) =>
           set({ outputDevice: device }, false, 'settings/setOutputDevice'),
@@ -254,7 +301,7 @@ export const useSettingsStore = create<SettingsState>()(
         setShortcut: (key, value) =>
           set(
             (state) => ({
-              shortcuts: { ...state.shortcuts, [key]: value },
+              shortcuts: { ...state.shortcuts, [key]: normalizeShortcut(key, value) },
             }),
             false,
             'settings/setShortcut',
@@ -265,7 +312,7 @@ export const useSettingsStore = create<SettingsState>()(
       {
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
-        version: 5,
+        version: 6,
         migrate: (persisted, version) => {
           let incoming = (persisted as Partial<SettingsState>) ?? {};
           if ((version ?? 0) < 2) {
@@ -290,7 +337,7 @@ export const useSettingsStore = create<SettingsState>()(
               ...incoming,
               globalShortcutsEnabled: incoming.globalShortcutsEnabled ?? false,
               autostartEnabled: incoming.autostartEnabled ?? false,
-              shortcuts: incoming.shortcuts ?? { playPause: 'Space', next: 'MediaNextTrack', previous: 'MediaPreviousTrack' }
+              shortcuts: normalizeShortcuts(incoming.shortcuts),
             } as Partial<SettingsState>;
           }
           if ((version ?? 0) < 5) {
@@ -299,6 +346,11 @@ export const useSettingsStore = create<SettingsState>()(
               desktopMiniWindowEnabled: false,
             } as Partial<SettingsState>;
           }
+          incoming = {
+            ...incoming,
+            libraryFolders: mergeLibraryFolders([], incoming.libraryFolders ?? []),
+            shortcuts: normalizeShortcuts(incoming.shortcuts),
+          } as Partial<SettingsState>;
           const parsed = SettingsSchema.safeParse(incoming);
           if (parsed.success) {
             return parsed.data as SettingsState;

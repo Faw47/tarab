@@ -15,8 +15,7 @@ export const BackendSmartPlaylistRuleSchema = z.union([
 ]);
 
 /** Serde / JSON often emits `null` for absent optional fields; Zod `.optional()` does not accept null. */
-const nullToUndefined = <T>(v: T | null | undefined): T | undefined =>
-  v === null ? undefined : v;
+const nullToUndefined = <T>(v: T | null | undefined): T | undefined => (v === null ? undefined : v);
 
 export const PlaylistSummarySchema = z.object({
   id: z.string(),
@@ -24,10 +23,7 @@ export const PlaylistSummarySchema = z.object({
   playlistType: PlaylistTypeSchema,
   trackCount: z.number(),
   missingCount: z.number(),
-  smartRules: z.preprocess(
-    nullToUndefined,
-    z.array(BackendSmartPlaylistRuleSchema).optional(),
-  ),
+  smartRules: z.preprocess(nullToUndefined, z.array(BackendSmartPlaylistRuleSchema).optional()),
   folderPath: z.preprocess(nullToUndefined, z.string().optional()),
   createdAt: z.number(),
   updatedAt: z.number(),

@@ -21,7 +21,7 @@ export const liquidGlassSettingsInsetPanelClassName = (className?: string) =>
 /** Rounded track shell for range inputs (echoes SearchBar pill). */
 export const liquidGlassSettingsSliderWellClassName = (className?: string) =>
   cn(
-    'rounded-full border border-white/[0.06] bg-black/15 px-3 py-2.5 backdrop-blur-md',
+    'flex h-10 items-center rounded-full border border-white/[0.06] bg-black/15 px-3 backdrop-blur-md',
     'shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.06)]',
     className,
   );

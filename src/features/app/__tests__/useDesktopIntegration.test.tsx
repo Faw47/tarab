@@ -5,8 +5,8 @@ import { useSettingsStore } from '../../../store/settings-store';
 import type { DesktopControlAction } from '../../../types';
 import {
   EVENT_DESKTOP_CONTROL_ACTION,
-  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_PLAYBACK_SNAPSHOT,
+  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_SNAPSHOT_REQUEST,
   MINI_WINDOW_LABEL,
 } from '../desktop-events';
@@ -29,16 +29,18 @@ const {
   playAdjacentTrackMock,
   seekToPositionMock,
 } = vi.hoisted(() => {
-  const listeners = new Map<string, (event: { payload: any }) => unknown>();
+  const listeners = new Map<string, (event: { payload: unknown }) => unknown>();
   return {
     listeners,
     emitToMock: vi.fn(async () => undefined),
-    listenMock: vi.fn(async (eventName: string, handler: (event: { payload: any }) => unknown) => {
-      listeners.set(eventName, handler);
-      return () => {
-        listeners.delete(eventName);
-      };
-    }),
+    listenMock: vi.fn(
+      async (eventName: string, handler: (event: { payload: unknown }) => unknown) => {
+        listeners.set(eventName, handler);
+        return () => {
+          listeners.delete(eventName);
+        };
+      },
+    ),
     desktopSetNativeUiStateMock: vi.fn(async () => undefined),
     desktopSyncMediaSessionMock: vi.fn(async () => undefined),
     desktopFocusMainWindowMock: vi.fn(async () => undefined),

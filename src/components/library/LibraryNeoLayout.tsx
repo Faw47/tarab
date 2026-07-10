@@ -3,17 +3,18 @@ import {
   ChevronLeft,
   Clock3,
   Disc3,
-  TrendingUp,
   LayoutGrid,
   List,
   type LucideIcon,
   Music2,
+  TrendingUp,
   User,
 } from 'lucide-react';
 import { memo, type UIEvent, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import type { LibrarySearchScope } from '../../store/library-store';
 import type { SortBy } from '../../types';
+import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import { LibraryResultsOrchestrator } from './LibraryResultsOrchestrator';
 import { LibrarySelectionBar } from './LibrarySelectionBar';
 import {
@@ -23,7 +24,6 @@ import {
   type LibraryFacet,
 } from './library-view-model';
 import type { FacetItem, LibraryViewDensity, ResultsOrchestratorProps } from './library-view-types';
-import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,13 +76,12 @@ const PIXEL_PATTERN = new Set([0, 1, 4, 5, 6, 9, 10, 14, 15]);
 
 // Base button styles for Neo Brutalism
 const NEO_BUTTON_BASE =
-  'inline-flex shrink-0 items-center justify-center gap-2 border-2 border-black text-black font-black uppercase tracking-[0.08em] transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F5C518] rounded-none cursor-pointer';
+  'inline-flex shrink-0 items-center justify-center gap-2 border-2 border-black text-black font-black uppercase tracking-[0.08em] transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-active)] rounded-none cursor-pointer';
 
 const NEO_BUTTON_DEFAULT =
-  'bg-[#F6F6F6] shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:bg-[#F5C518]';
+  'bg-[var(--neo-panel)] shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:bg-[var(--signal-active)]';
 
-const NEO_BUTTON_ACTIVE =
-  'bg-black text-white shadow-none';
+const NEO_BUTTON_ACTIVE = 'bg-black text-white shadow-none';
 
 // ---------------------------------------------------------------------------
 // Pure derivation helpers
@@ -156,7 +155,10 @@ function NeoPixelStamp() {
       {Array.from({ length: 16 }, (_, index) => (
         <span
           key={index}
-          className={cn('border border-[#000]', PIXEL_PATTERN.has(index) ? 'bg-[#000]' : 'bg-transparent')}
+          className={cn(
+            'border border-[#000]',
+            PIXEL_PATTERN.has(index) ? 'bg-[#000]' : 'bg-transparent',
+          )}
         />
       ))}
     </div>
@@ -233,8 +235,10 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
         {/* ------------------------------------------------------------------ */}
         {/* COMMAND CENTER                                                       */}
         {/* ------------------------------------------------------------------ */}
-        <section className="flex shrink-0 flex-col gap-3 border-2 border-black bg-[#F6F6F6] p-3 md:p-4 shadow-[4px_4px_0_0_#000]" aria-label="Library command deck">
-
+        <section
+          className="flex shrink-0 flex-col gap-3 border-2 border-black bg-[var(--neo-panel)] p-3 md:p-4 shadow-[4px_4px_0_0_#000]"
+          aria-label="Library command deck"
+        >
           {/* Title row */}
           <div className="flex items-center gap-3">
             {isDetail ? (
@@ -247,7 +251,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                 <ChevronLeft className="h-5 w-5" strokeWidth={3} />
               </button>
             ) : (
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center border-2 border-black bg-[#F6F6F6] shadow-[4px_4px_0_0_#000]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center border-2 border-black bg-[var(--neo-panel)] shadow-[4px_4px_0_0_#000]">
                 <ActiveFacetIcon className="h-5 w-5" strokeWidth={3} />
               </div>
             )}
@@ -283,18 +287,24 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                         className={cn(
                           NEO_BUTTON_BASE,
                           'h-10 px-2.5 pl-1.5',
-                          isActive ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT
+                          isActive ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT,
                         )}
                         onClick={() => onFacetChange(facet.id)}
                       >
-                        <div className={cn(
-                          'flex h-6 w-6 items-center justify-center border-2 border-inherit',
-                          isActive ? 'bg-[#F5C518] text-black shadow-none translate-x-[1px] translate-y-[1px]' : 'bg-[#D1D1D1] text-black'
-                        )}>
+                        <div
+                          className={cn(
+                            'flex h-6 w-6 items-center justify-center border-2 border-inherit',
+                            isActive
+                              ? 'bg-[var(--signal-active)] text-black shadow-none translate-x-[1px] translate-y-[1px]'
+                              : 'bg-[#D1D1D1] text-black',
+                          )}
+                        >
                           <Icon className="h-3.5 w-3.5" strokeWidth={3} />
                         </div>
                         <div className="flex flex-col items-start pr-1">
-                          <strong className="text-[11px] leading-tight font-black tracking-[0.05em]">{facet.label}</strong>
+                          <strong className="text-[11px] leading-tight font-black tracking-[0.05em]">
+                            {facet.label}
+                          </strong>
                           <span className="font-mono text-[9px] leading-none font-black opacity-70">
                             {facet.count > 999 ? `${Math.floor(facet.count / 1000)}K` : facet.count}
                           </span>
@@ -312,42 +322,57 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                     className={cn(
                       NEO_BUTTON_BASE,
                       'h-10 px-2.5 text-[11px]',
-                      viewMode === 'grid' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT
+                      viewMode === 'grid' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT,
                     )}
                     onClick={() => onViewModeChange('grid')}
                     aria-pressed={viewMode === 'grid'}
                   >
-                    <div className={cn(
-                      'flex h-5 w-5 items-center justify-center border-2 border-inherit',
-                      viewMode === 'grid' ? 'bg-[#F5C518] text-black' : 'bg-[#D1D1D1] text-black'
-                    )}>
+                    <div
+                      className={cn(
+                        'flex h-5 w-5 items-center justify-center border-2 border-inherit',
+                        viewMode === 'grid'
+                          ? 'bg-[var(--signal-active)] text-black'
+                          : 'bg-[#D1D1D1] text-black',
+                      )}
+                    >
                       <LayoutGrid className="h-2.5 w-2.5" strokeWidth={3} />
                     </div>
-                    {viewMode === 'grid' && <span className="ml-1.5 uppercase font-black">GRID</span>}
+                    {viewMode === 'grid' && (
+                      <span className="ml-1.5 uppercase font-black">GRID</span>
+                    )}
                   </button>
                   <button
                     type="button"
                     className={cn(
                       NEO_BUTTON_BASE,
                       'h-10 px-2.5 text-[11px]',
-                      viewMode === 'list' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT
+                      viewMode === 'list' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT,
                     )}
                     onClick={() => onViewModeChange('list')}
                     aria-pressed={viewMode === 'list'}
                   >
-                    <div className={cn(
-                      'flex h-5 w-5 items-center justify-center border-2 border-inherit',
-                      viewMode === 'list' ? 'bg-[#F5C518] text-black' : 'bg-[#D1D1D1] text-black'
-                    )}>
+                    <div
+                      className={cn(
+                        'flex h-5 w-5 items-center justify-center border-2 border-inherit',
+                        viewMode === 'list'
+                          ? 'bg-[var(--signal-active)] text-black'
+                          : 'bg-[#D1D1D1] text-black',
+                      )}
+                    >
                       <List className="h-2.5 w-2.5" strokeWidth={3} />
                     </div>
-                    {viewMode === 'list' && <span className="ml-1.5 uppercase font-black">LIST</span>}
+                    {viewMode === 'list' && (
+                      <span className="ml-1.5 uppercase font-black">LIST</span>
+                    )}
                   </button>
                 </div>
               )}
             </div>
 
-            <label className="relative flex h-10 shrink-0 cursor-pointer items-stretch border-2 border-black bg-[#F6F6F6] shadow-[4px_4px_0_0_#000] focus-within:ring-2 focus-within:ring-[#F5C518] hover:bg-[#F5C518]" aria-label="Sort order">
+            <label
+              className="relative flex h-10 shrink-0 cursor-pointer items-stretch border-2 border-black bg-[var(--neo-panel)] shadow-[4px_4px_0_0_#000] focus-within:ring-2 focus-within:ring-[var(--signal-active)] hover:bg-[var(--signal-active)]"
+              aria-label="Sort order"
+            >
               <div className="flex px-3 items-center gap-2">
                 <span className="text-[11px] font-black uppercase leading-tight tracking-[0.05em] whitespace-nowrap">
                   SORT: {SORT_LABELS[sortBy]}
@@ -373,7 +398,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
         {/* ------------------------------------------------------------------ */}
         {/* RESULTS                                                              */}
         {/* ------------------------------------------------------------------ */}
-        <section className="flex min-h-[260px] flex-1 flex-col gap-3 border-2 border-black bg-[#F6F6F6] p-3 md:p-4 shadow-[4px_4px_0_0_#000]">
+        <section className="flex min-h-[260px] flex-1 flex-col gap-3 border-2 border-black bg-[var(--neo-panel)] p-3 md:p-4 shadow-[4px_4px_0_0_#000]">
           <header className="flex flex-wrap items-center gap-3 shrink-0 mb-2">
             <NeoSectionHeader emoji={resultsTitle.emoji} label={resultsTitle.label} />
           </header>
@@ -412,7 +437,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
               </div>
             ) : (
               <div className="neo-empty-state" role="status" aria-live="polite">
-                <div className="mb-8 flex h-[80px] w-[80px] shrink-0 items-center justify-center border-2 border-black bg-[#7CC61F] shadow-[4px_4px_0_0_#000]">
+                <div className="mb-8 flex h-[80px] w-[80px] shrink-0 items-center justify-center border-2 border-black bg-[var(--signal-play)] shadow-[4px_4px_0_0_#000]">
                   <NeoPixelStamp />
                 </div>
                 <div className="grid gap-2 text-center">
@@ -429,16 +454,25 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
         {/* ------------------------------------------------------------------ */}
         {/* METRICS FOOTER                                                       */}
         {/* ------------------------------------------------------------------ */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 shrink-0" aria-label="Library metrics">
+        <div
+          className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 shrink-0"
+          aria-label="Library metrics"
+        >
           {metrics.map((metric) => (
             <div
               key={metric.label}
               className={cn(
                 'flex min-h-[72px] flex-col justify-center gap-1.5 border-2 border-black p-2.5 md:p-3 shadow-[4px_4px_0_0_#000] min-w-0 transition-colors',
-                metric.tone === 'olive' ? 'bg-[#7CC61F]' : metric.tone === 'yellow' ? 'bg-[#F5C518]' : 'bg-[#F6F6F6]',
+                metric.tone === 'olive'
+                  ? 'bg-[var(--signal-play)]'
+                  : metric.tone === 'yellow'
+                    ? 'bg-[var(--signal-active)]'
+                    : 'bg-[var(--neo-panel)]',
               )}
             >
-              <span className="text-[9px] font-black uppercase tracking-[0.1em] truncate">{metric.label}</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.1em] truncate">
+                {metric.label}
+              </span>
               <strong className="font-mono text-xl md:text-[min(1.8vw,1.65rem)] font-black leading-none truncate block">
                 {metric.value}
               </strong>

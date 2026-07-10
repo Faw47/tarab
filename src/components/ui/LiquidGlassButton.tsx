@@ -1,48 +1,14 @@
-import {
-  forwardRef,
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ButtonHTMLAttributes,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from 'react';
-
+import { Slot } from '@radix-ui/react-slot';
+import { cva, type VariantProps } from 'class-variance-authority';
+import * as React from 'react';
 import { cn } from '@/lib/utils';
-import {
-  useGlassSystem,
-  usePointerTracker,
-  usePrefersReducedMotion,
-} from './liquid-glass';
-
-type LiquidGlassButtonTone = 'neutral' | 'accent' | 'danger';
-
-export type LiquidGlassPressFeedback = 'scale' | 'inset';
-
-export interface LiquidGlassButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement> {
-  children: ReactNode;
-  tone?: LiquidGlassButtonTone;
-  reducedEffects?: boolean;
-  contentClassName?: string;
-  accentColor?: string;
-  accentForeground?: string;
-  /** `scale` shrinks when pressed; `inset` keeps size and uses inner shadow (e.g. hero play). */
-  pressFeedback?: LiquidGlassPressFeedback;
-}
+import { useGlassSystem, usePointerTracker, usePrefersReducedMotion } from './liquid-glass';
 
 const DEFAULT_SCALE = 1;
-const PRESSED_SCALE = 0.92;
+const PRESSED_SCALE = 0.95;
 
-interface Ripple {
-  id: number;
-  x: number;
-  y: number;
-}
+const INSET_SUBMERGE_SHADOW =
+  'inset 0 5px 16px rgba(0, 0, 0, 0.42), inset 0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
 
 const BUTTON_TRACKER_VARS = {
   x: '--adl-liquid-x',
@@ -50,46 +16,75 @@ const BUTTON_TRACKER_VARS = {
   size: '--adl-liquid-spotlight-size',
 } as const;
 
-function getLiquidToneVars({
-  tone,
-  accentColor,
-  accentForeground,
-}: {
-  tone: LiquidGlassButtonTone;
+interface Ripple {
+  id: number;
+  x: number;
+  y: number;
+}
+
+const buttonVariants = cva(
+  [
+    'relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium',
+    'isolate overflow-hidden select-none touch-manipulation outline-none',
+    'transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+    'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
+    'shrink-0',
+    'focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+    '[&_svg]:pointer-events-none [&_svg]:shrink-0[&_svg:not([class*="size-"])]:size-4',
+  ].join(' '),
+  {
+    variants: {
+      variant: {
+        default: 'text-text-primary',
+        primary: 'font-semibold',
+        danger: 'text-red-100',
+        destructive: 'text-red-50',
+        outline: 'border border-border bg-transparent text-text-primary hover:bg-white/5',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        ghost: 'text-text-secondary hover:text-white',
+        link: 'bg-transparent text-primary underline-offset-4 hover:underline !shadow-none !backdrop-blur-none !backdrop-saturate-100',
+      },
+      size: {
+        default: 'h-9 px-4 py-2',
+        sm: 'h-8 px-3 py-1.5',
+        md: 'h-9 px-4 py-2',
+        lg: 'h-10 px-6 py-3 text-base',
+        icon: 'size-9 p-0',
+        'icon-sm': 'size-8 p-0',
+        'icon-lg': 'size-10 p-0',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+      size: 'default',
+    },
+  },
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+  reducedEffects?: boolean;
+  contentClassName?: string;
   accentColor?: string;
   accentForeground?: string;
-}): CSSProperties {
-  if (tone === 'accent') {
-    const base = accentColor ?? 'rgba(255, 255, 255, 0.86)';
-    const ink = accentForeground ?? '#0a0a0a';
+  pressFeedback?: 'scale' | 'inset';
+}
 
-    return {
-      '--adl-liquid-bg': `linear-gradient(180deg, color-mix(in oklch, ${base} 34%, rgba(255,255,255,0.14)) 0%, color-mix(in oklch, ${base} 22%, rgba(255,255,255,0.08)) 38%, color-mix(in oklch, ${base} 7%, rgba(255,255,255,0.02)) 100%)`,
-      '--adl-liquid-bg-hover': `linear-gradient(180deg, color-mix(in oklch, ${base} 42%, rgba(255,255,255,0.16)) 0%, color-mix(in oklch, ${base} 28%, rgba(255,255,255,0.10)) 40%, color-mix(in oklch, ${base} 12%, rgba(255,255,255,0.04)) 100%)`,
-      '--adl-liquid-bg-active': `linear-gradient(180deg, color-mix(in oklch, ${base} 14%, rgba(255,255,255,0.05)) 0%, color-mix(in oklch, ${base} 5%, transparent) 100%)`,
-      '--adl-liquid-text': ink,
-      '--adl-liquid-highlight': `color-mix(in oklch, ${base} 80%, rgba(255,255,255,0.7))`,
-      '--adl-liquid-spotlight': `color-mix(in oklch, ${base} 32%, rgba(255,255,255,0.2))`,
-      '--adl-liquid-ripple': `color-mix(in oklch, ${base} 60%, rgba(255,255,255,0.6))`,
-    } as CSSProperties;
-  }
+function getMergedLiquidVars(
+  variant: ButtonProps['variant'],
+  accentColor?: string,
+  accentForeground?: string,
+): React.CSSProperties {
+  const safeVariant = variant ?? 'default';
+  const baseHighlight =
+    'inset 0 1px 1px rgba(255, 255, 255, 0.2), inset 0 -1px 1px rgba(0, 0, 0, 0.05)';
 
-  if (tone === 'danger') {
-    return {
-      '--adl-liquid-bg':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.26) 0%, rgba(255, 59, 48, 0.14) 40%, rgba(255, 59, 48, 0.045) 100%)',
-      '--adl-liquid-bg-hover':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.34) 0%, rgba(255, 59, 48, 0.20) 42%, rgba(255, 59, 48, 0.09) 100%)',
-      '--adl-liquid-bg-active':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.14) 0%, rgba(255, 59, 48, 0.03) 100%)',
-      '--adl-liquid-text': 'rgba(255, 236, 236, 0.98)',
-      '--adl-liquid-highlight': 'rgba(255, 160, 160, 0.60)',
-      '--adl-liquid-spotlight': 'rgba(255, 100, 100, 0.22)',
-      '--adl-liquid-ripple': 'rgba(255, 59, 48, 0.55)',
-    } as CSSProperties;
-  }
-
-  return {
+  let vars: Record<string, string> = {
+    '--adl-liquid-highlight': baseHighlight,
+    '--adl-liquid-shadow': '0 8px 24px -8px rgba(0, 0, 0, 0.15)',
+    '--adl-liquid-shadow-hover': '0 12px 32px -6px rgba(0, 0, 0, 0.25)',
     '--adl-liquid-bg':
       'linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.09) 40%, rgba(255, 255, 255, 0.018) 100%)',
     '--adl-liquid-bg-hover':
@@ -97,31 +92,95 @@ function getLiquidToneVars({
     '--adl-liquid-bg-active':
       'linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 100%)',
     '--adl-liquid-text': 'rgba(255, 255, 255, 0.92)',
-    '--adl-liquid-highlight': 'rgba(255, 255, 255, 0.45)',
     '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.16)',
     '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.45)',
-  } as CSSProperties;
+  };
+
+  if (safeVariant === 'primary') {
+    const base = accentColor ?? 'rgba(255, 255, 255, 0.92)';
+    const ink = accentForeground ?? '#070707';
+    vars = {
+      ...vars,
+      '--adl-liquid-bg': `linear-gradient(180deg, color-mix(in oklch, ${base} 34%, rgba(255,255,255,0.14)) 0%, color-mix(in oklch, ${base} 22%, rgba(255,255,255,0.08)) 38%, color-mix(in oklch, ${base} 7%, rgba(255,255,255,0.02)) 100%)`,
+      '--adl-liquid-bg-hover': `linear-gradient(180deg, color-mix(in oklch, ${base} 42%, rgba(255,255,255,0.16)) 0%, color-mix(in oklch, ${base} 28%, rgba(255,255,255,0.10)) 40%, color-mix(in oklch, ${base} 12%, rgba(255,255,255,0.04)) 100%)`,
+      '--adl-liquid-bg-active': `linear-gradient(180deg, color-mix(in oklch, ${base} 14%, rgba(255,255,255,0.05)) 0%, color-mix(in oklch, ${base} 5%, transparent) 100%)`,
+      '--adl-liquid-text': ink,
+      '--adl-liquid-highlight': `inset 0 1px 1px color-mix(in oklch, ${base} 80%, rgba(255,255,255,0.7)), inset 0 -1px 1px rgba(0, 0, 0, 0.1)`,
+      '--adl-liquid-spotlight': `color-mix(in oklch, ${base} 32%, rgba(255,255,255,0.2))`,
+      '--adl-liquid-ripple': `color-mix(in oklch, ${base} 60%, rgba(255,255,255,0.6))`,
+      '--adl-liquid-shadow': '0 12px 32px -12px rgba(0, 0, 0, 0.25)',
+      '--adl-liquid-shadow-hover': '0 16px 40px -10px rgba(0, 0, 0, 0.35)',
+    };
+  } else if (safeVariant === 'danger' || safeVariant === 'destructive') {
+    vars = {
+      ...vars,
+      '--adl-liquid-bg':
+        'linear-gradient(180deg, rgba(255, 59, 48, 0.26) 0%, rgba(255, 59, 48, 0.14) 40%, rgba(255, 59, 48, 0.045) 100%)',
+      '--adl-liquid-bg-hover':
+        'linear-gradient(180deg, rgba(255, 59, 48, 0.34) 0%, rgba(255, 59, 48, 0.20) 42%, rgba(255, 59, 48, 0.09) 100%)',
+      '--adl-liquid-bg-active':
+        'linear-gradient(180deg, rgba(255, 59, 48, 0.14) 0%, rgba(255, 59, 48, 0.03) 100%)',
+      '--adl-liquid-text': 'rgba(255, 236, 236, 0.98)',
+      '--adl-liquid-highlight':
+        'inset 0 1px 1px rgba(255, 160, 160, 0.60), inset 0 -1px 1px rgba(0, 0, 0, 0.1)',
+      '--adl-liquid-spotlight': 'rgba(255, 100, 100, 0.22)',
+      '--adl-liquid-ripple': 'rgba(255, 59, 48, 0.55)',
+      '--adl-liquid-shadow': '0 8px 24px -8px rgba(255, 59, 48, 0.3)',
+      '--adl-liquid-shadow-hover': '0 12px 32px -6px rgba(255, 59, 48, 0.4)',
+    };
+  } else if (safeVariant === 'ghost') {
+    vars = {
+      ...vars,
+      '--adl-liquid-bg': 'rgba(255, 255, 255, 0.01)',
+      '--adl-liquid-bg-hover': 'rgba(255, 255, 255, 0.05)',
+      '--adl-liquid-bg-active': 'rgba(255, 255, 255, 0.02)',
+      '--adl-liquid-text': 'inherit',
+      '--adl-liquid-highlight': 'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+      '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.09)',
+      '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.25)',
+      '--adl-liquid-shadow': 'none',
+      '--adl-liquid-shadow-hover': 'none',
+    };
+  } else if (safeVariant === 'outline') {
+    vars = {
+      ...vars,
+      '--adl-liquid-bg': 'rgba(255, 255, 255, 0.02)',
+      '--adl-liquid-bg-hover': 'rgba(255, 255, 255, 0.06)',
+      '--adl-liquid-bg-active': 'rgba(255, 255, 255, 0.01)',
+      '--adl-liquid-border': 'rgba(255, 255, 255, 0.20)',
+      '--adl-liquid-border-hover': 'rgba(255, 255, 255, 0.30)',
+      '--adl-liquid-text': 'inherit',
+      '--adl-liquid-highlight': baseHighlight,
+      '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.09)',
+      '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.25)',
+      '--adl-liquid-shadow': '0 4px 16px -4px rgba(0, 0, 0, 0.1)',
+      '--adl-liquid-shadow-hover': '0 8px 24px -4px rgba(0, 0, 0, 0.15)',
+    };
+  }
+
+  return vars as React.CSSProperties;
 }
 
 function composeTransform(
-  baseTransform: CSSProperties['transform'],
+  baseTransform: React.CSSProperties['transform'],
   scale: number,
-): CSSProperties['transform'] {
+): React.CSSProperties['transform'] {
   const scaleTransform = `scale(${scale})`;
   if (!baseTransform || baseTransform === 'none') return scaleTransform;
   return `${baseTransform} ${scaleTransform}`;
 }
 
-const INSET_SUBMERGE_SHADOW =
-  'inset 0 5px 16px rgba(0, 0, 0, 0.42), inset 0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
-
-const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonProps>(
+const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       children,
       className,
       contentClassName,
-      tone = 'neutral',
+      variant = 'default',
+      size = 'default',
+      asChild = false,
+      type,
+      style,
       reducedEffects,
       accentColor,
       accentForeground,
@@ -136,8 +195,6 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       onKeyDown,
       onKeyUp,
       onBlur,
-      style,
-      type,
       ...props
     },
     forwardedRef,
@@ -145,21 +202,26 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
     const prefersReducedMotion = usePrefersReducedMotion();
     const { theme, reducedEffects: contextReducedEffects } = useGlassSystem();
 
-    const finalReducedEffects =
-      reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
-
+    const finalReducedEffects = reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
     const isNeobrutalism = theme === 'neobrutalism';
 
-    const [hovered, setHovered] = useState(false);
-    const [pressed, setPressed] = useState(false);
-    const [ripples, setRipples] = useState<Ripple[]>([]);
+    const [hovered, setHovered] = React.useState(false);
+    const [pressed, setPressed] = React.useState(false);
+    const [ripples, setRipples] = React.useState<Ripple[]>([]);
 
-    const trackerEnabled = !finalReducedEffects && !isNeobrutalism && !disabled;
+    // We still call the hook, but disable it if it's a link or child to save work
+    const bypassEffects = asChild || variant === 'link';
+    const trackerEnabled = !bypassEffects && !finalReducedEffects && !isNeobrutalism && !disabled;
 
-    const { ref: trackerRef, measure, scheduleUpdate, clearVars, invalidateRect } =
-      usePointerTracker<HTMLButtonElement>(BUTTON_TRACKER_VARS, trackerEnabled);
+    const {
+      ref: trackerRef,
+      measure,
+      scheduleUpdate,
+      clearVars,
+      invalidateRect,
+    } = usePointerTracker<HTMLButtonElement>(BUTTON_TRACKER_VARS, trackerEnabled);
 
-    const setRefs = useCallback(
+    const setRefs = React.useCallback(
       (node: HTMLButtonElement | null) => {
         trackerRef.current = node;
         if (typeof forwardedRef === 'function') {
@@ -171,7 +233,7 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [forwardedRef, trackerRef],
     );
 
-    useEffect(() => {
+    React.useEffect(() => {
       if (!disabled) return;
       setHovered(false);
       setPressed(false);
@@ -180,8 +242,8 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       invalidateRect();
     }, [clearVars, disabled, invalidateRect]);
 
-    const handlePointerEnter = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const handlePointerEnter = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
         if (!disabled && event.pointerType === 'mouse') {
           setHovered(true);
           if (trackerEnabled) {
@@ -194,22 +256,18 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [disabled, measure, onPointerEnter, scheduleUpdate, trackerEnabled],
     );
 
-    const handlePointerMove = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
-        if (
-          !disabled &&
-          event.pointerType === 'mouse' &&
-          (hovered || pressed) &&
-          trackerEnabled
-        ) {
+    const handlePointerMove = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!disabled && event.pointerType === 'mouse' && (hovered || pressed) && trackerEnabled) {
           scheduleUpdate(event.clientX, event.clientY);
         }
         onPointerMove?.(event);
-      }, [disabled, hovered, onPointerMove, pressed, scheduleUpdate, trackerEnabled],
+      },
+      [disabled, hovered, onPointerMove, pressed, scheduleUpdate, trackerEnabled],
     );
 
-    const handlePointerLeave = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const handlePointerLeave = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
         setHovered(false);
         setPressed(false);
         invalidateRect();
@@ -219,12 +277,12 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [clearVars, invalidateRect, onPointerLeave],
     );
 
-    const handlePointerDown = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const handlePointerDown = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
         if (!disabled) {
           setPressed(true);
 
-          if (!finalReducedEffects) {
+          if (!finalReducedEffects && !bypassEffects) {
             const rect = event.currentTarget.getBoundingClientRect();
             const x = event.clientX - rect.left;
             const y = event.clientY - rect.top;
@@ -243,27 +301,36 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
           }
         }
         onPointerDown?.(event);
-      }, [disabled, finalReducedEffects, measure, onPointerDown, scheduleUpdate, trackerEnabled],
+      },
+      [
+        disabled,
+        finalReducedEffects,
+        bypassEffects,
+        measure,
+        onPointerDown,
+        scheduleUpdate,
+        trackerEnabled,
+      ],
     );
 
-    const handlePointerUp = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const handlePointerUp = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
         if (!disabled) setPressed(false);
         onPointerUp?.(event);
       },
       [disabled, onPointerUp],
     );
 
-    const handlePointerCancel = useCallback(
-      (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const handlePointerCancel = React.useCallback(
+      (event: React.PointerEvent<HTMLButtonElement>) => {
         if (!disabled) setPressed(false);
         onPointerCancel?.(event);
       },
       [disabled, onPointerCancel],
     );
 
-    const handleKeyDown = useCallback(
-      (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const handleKeyDown = React.useCallback(
+      (event: React.KeyboardEvent<HTMLButtonElement>) => {
         if (!disabled && (event.key === ' ' || event.key === 'Enter')) {
           setPressed(true);
         }
@@ -272,8 +339,8 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [disabled, onKeyDown],
     );
 
-    const handleKeyUp = useCallback(
-      (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const handleKeyUp = React.useCallback(
+      (event: React.KeyboardEvent<HTMLButtonElement>) => {
         if (!disabled && (event.key === ' ' || event.key === 'Enter')) {
           setPressed(false);
         }
@@ -282,7 +349,7 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [disabled, onKeyUp],
     );
 
-    const handleBlur = useCallback(
+    const handleBlur = React.useCallback(
       (event: React.FocusEvent<HTMLButtonElement>) => {
         setPressed(false);
         onBlur?.(event);
@@ -290,56 +357,50 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       [onBlur],
     );
 
-    const toneVars = useMemo(
-      () => getLiquidToneVars({ tone, accentColor, accentForeground }),
-      [accentColor, accentForeground, tone],
+    const toneVars = React.useMemo(
+      () => getMergedLiquidVars(variant, accentColor, accentForeground),
+      [accentColor, accentForeground, variant],
     );
 
     const useInsetPress = !isNeobrutalism && pressFeedback === 'inset';
 
     const targetScale =
-      pressed && !finalReducedEffects && !isNeobrutalism && !useInsetPress
+      pressed && !finalReducedEffects && !isNeobrutalism && !useInsetPress && !bypassEffects
         ? PRESSED_SCALE
         : DEFAULT_SCALE;
 
-    const mergedStyle = useMemo(() => {
+    const mergedStyle = React.useMemo(() => {
       const baseTransform = style?.transform;
       const mergedTransform = isNeobrutalism
         ? baseTransform
         : composeTransform(baseTransform, targetScale);
 
+      const toneVarsRecord = toneVars as Record<string, string>;
+
       const currentBg = pressed
-        ? (toneVars as Record<string, string>)['--adl-liquid-bg-active']
+        ? toneVarsRecord['--adl-liquid-bg-active']
         : hovered
-          ? (toneVars as Record<string, string>)['--adl-liquid-bg-hover']
-          : (toneVars as Record<string, string>)['--adl-liquid-bg'];
+          ? toneVarsRecord['--adl-liquid-bg-hover']
+          : toneVarsRecord['--adl-liquid-bg'];
 
-      const scaleShadowDefault =
-        'inset 0 1px 1px rgba(255, 255, 255, 0.15), inset 0 -1px 1px rgba(0, 0, 0, 0.05), 0 4px 16px -4px rgba(0, 0, 0, 0.35)';
-      const scaleShadowHover =
-        'inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -1px 1px rgba(0, 0, 0, 0.1), 0 8px 24px -6px rgba(0, 0, 0, 0.45)';
-      const scaleShadowPressed =
-        'inset 0 1px 1px rgba(0, 0, 0, 0.15), inset 0 2px 8px rgba(0, 0, 0, 0.2)';
+      let boxShadow: React.CSSProperties['boxShadow'] = style?.boxShadow;
 
-      let boxShadow: CSSProperties['boxShadow'];
-      if (isNeobrutalism) {
-        boxShadow = style?.boxShadow;
-      } else if (useInsetPress) {
-        if (pressed) {
+      if (!isNeobrutalism && !boxShadow) {
+        if (useInsetPress && pressed) {
           boxShadow = INSET_SUBMERGE_SHADOW;
-        } else if (style?.boxShadow != null) {
-          boxShadow = style.boxShadow;
+        } else if (pressed) {
+          boxShadow = 'inset 0 1px 1px rgba(0, 0, 0, 0.15), inset 0 2px 8px rgba(0, 0, 0, 0.2)';
+        } else if (hovered) {
+          boxShadow =
+            toneVarsRecord['--adl-liquid-shadow-hover'] !== 'none'
+              ? `${toneVarsRecord['--adl-liquid-highlight']}, ${toneVarsRecord['--adl-liquid-shadow-hover']}`
+              : toneVarsRecord['--adl-liquid-highlight'];
         } else {
-          boxShadow = hovered ? scaleShadowHover : scaleShadowDefault;
+          boxShadow =
+            toneVarsRecord['--adl-liquid-shadow'] !== 'none'
+              ? `${toneVarsRecord['--adl-liquid-highlight']}, ${toneVarsRecord['--adl-liquid-shadow']}`
+              : toneVarsRecord['--adl-liquid-highlight'];
         }
-      } else {
-        boxShadow =
-          style?.boxShadow ??
-          (pressed
-            ? scaleShadowPressed
-            : hovered
-              ? scaleShadowHover
-              : scaleShadowDefault);
       }
 
       return {
@@ -348,16 +409,19 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
         background: isNeobrutalism ? style?.background : (style?.background ?? currentBg),
         color: isNeobrutalism
           ? style?.color
-          : (style?.color ?? (toneVars as Record<string, string>)['--adl-liquid-text']),
+          : (style?.color ?? toneVarsRecord['--adl-liquid-text']),
         transform: mergedTransform,
-        transitionTimingFunction: !isNeobrutalism && !pressed && !useInsetPress ? 'cubic-bezier(0.34, 1.56, 0.64, 1)' : undefined,
+        transitionTimingFunction:
+          !isNeobrutalism && !pressed && !useInsetPress
+            ? 'cubic-bezier(0.34, 1.56, 0.64, 1)'
+            : undefined,
         transitionDuration: !isNeobrutalism && !pressed && !useInsetPress ? '400ms' : undefined,
         willChange:
           !finalReducedEffects && !isNeobrutalism && (hovered || pressed) && !useInsetPress
             ? 'transform'
             : 'auto',
         boxShadow,
-      } as CSSProperties;
+      } as React.CSSProperties;
     }, [
       finalReducedEffects,
       hovered,
@@ -369,6 +433,30 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
       useInsetPress,
     ]);
 
+    // If the button is rendered as a child (e.g. standard Radix Slot) or is purely a text link,
+    // we bypass the heavy glass computation and just utilize standard Tailwind classes to save performance.
+    if (bypassEffects) {
+      const Comp = asChild ? Slot : 'button';
+      return (
+        <Comp
+          className={cn(buttonVariants({ variant, size, className }))}
+          ref={setRefs}
+          type={asChild ? undefined : (type ?? 'button')}
+          style={style}
+          {...props}
+        >
+          {children}
+        </Comp>
+      );
+    }
+
+    const baseClasses = cn(
+      buttonVariants({ variant, size }),
+      !isNeobrutalism && 'backdrop-blur-[10px] backdrop-saturate-[1.35] border-0',
+      isNeobrutalism && 'border-2 border-black',
+      className,
+    );
+
     return (
       <button
         {...props}
@@ -377,15 +465,7 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
         disabled={disabled}
         data-hovered={hovered ? 'true' : undefined}
         data-pressed={pressed ? 'true' : undefined}
-        className={cn(
-          'relative inline-flex items-center justify-center overflow-hidden isolate cursor-pointer select-none touch-manipulation',
-          'outline-none transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          isNeobrutalism && 'border-2 border-black',
-          !isNeobrutalism && 'border-0',
-          !isNeobrutalism && 'backdrop-blur-[10px] backdrop-saturate-[1.35]',
-          className,
-        )}
+        className={baseClasses}
         style={mergedStyle}
         onPointerEnter={handlePointerEnter}
         onPointerMove={handlePointerMove}
@@ -406,7 +486,8 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
                 pressed ? 'opacity-40' : 'opacity-80',
               )}
               style={{
-                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
+                background:
+                  'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
               }}
               aria-hidden="true"
             />
@@ -425,7 +506,7 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
                 {ripples.map((ripple) => (
                   <span
                     key={ripple.id}
-                    className="pointer-events-none absolute z-[2] rounded-full box-border"
+                    className="pointer-events-none absolute z-[2] box-border rounded-full"
                     style={{
                       left: ripple.x,
                       top: ripple.y,
@@ -452,7 +533,6 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
         >
           {children}
         </span>
-
       </button>
     );
   },
@@ -460,5 +540,7 @@ const LiquidGlassButtonBase = forwardRef<HTMLButtonElement, LiquidGlassButtonPro
 
 LiquidGlassButtonBase.displayName = 'LiquidGlassButton';
 
-export const LiquidGlassButton = memo(LiquidGlassButtonBase);
+export const LiquidGlassButton = React.memo(LiquidGlassButtonBase);
 LiquidGlassButton.displayName = 'memo(LiquidGlassButton)';
+
+export { buttonVariants };

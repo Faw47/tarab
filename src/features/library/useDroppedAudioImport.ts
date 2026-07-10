@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { runBatches } from '../../lib/batch-utils';
-import { getPathBaseName, normalizePath } from '../../lib/path-utils';
+import { getPathBaseName, isSameOrSubPath, normalizePath } from '../../lib/path-utils';
 import { reportError } from '../../lib/report-error';
 import {
   dbGetExistingPaths,
@@ -11,6 +11,7 @@ import {
   getBatchMetadata,
   scanLibrary,
   scanLibraryParallel,
+  setLibraryRoots,
   syncLyricsIndex,
 } from '../../lib/tauri-commands';
 import type { Track } from '../../types';
@@ -21,6 +22,31 @@ const LAST_SCAN_KEY = 'tarab-last-scan-v1';
 const METADATA_BATCH_SIZE = 200;
 const ART_BATCH_SIZE = 120;
 
+const cleanFolderPath = (folder: string): string => normalizePath(folder).replace(/\/+$/, '');
+
+export function mergeDroppedLibraryFolders(
+  currentFolders: string[],
+  droppedFolders: Iterable<string>,
+): string[] {
+  const candidates = [...currentFolders, ...droppedFolders]
+    .map(cleanFolderPath)
+    .filter(Boolean)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+
+  const merged: string[] = [];
+  for (const folder of candidates) {
+    if (merged.some((existing) => isSameOrSubPath(folder, existing))) {
+      continue;
+    }
+    merged.push(folder);
+  }
+
+  return merged;
+}
+
+const areFolderListsEqual = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((folder, index) => folder === b[index]);
+
 interface FileWithPath extends File {
   path?: string;
 }
@@ -28,8 +54,10 @@ interface FileWithPath extends File {
 interface UseDroppedAudioImportOptions {
   downloadArtwork: boolean;
   followSymlinks: boolean;
+  libraryFolders: string[];
   queryClient: QueryClient;
   setIsScanning: (isScanning: boolean) => void;
+  setLibraryFolders: (folders: string[]) => void;
   setScanProgress: (progress: number) => void;
   setTrackCount: (count: number) => void;
   setTracks: (tracks: Track[]) => void;
@@ -41,8 +69,10 @@ interface UseDroppedAudioImportOptions {
 export function useDroppedAudioImport({
   downloadArtwork,
   followSymlinks,
+  libraryFolders,
   queryClient,
   setIsScanning,
+  setLibraryFolders,
   setScanProgress,
   setTrackCount,
   setTracks,
@@ -80,16 +110,31 @@ export function useDroppedAudioImport({
         }
       });
       if (dirs.size === 0) return;
+      const droppedFolders = Array.from(dirs);
+      const foldersToScan = mergeDroppedLibraryFolders([], droppedFolders);
+      const mergedLibraryFolders = mergeDroppedLibraryFolders(libraryFolders, droppedFolders);
+      if (!areFolderListsEqual(mergedLibraryFolders, libraryFolders)) {
+        setLibraryFolders(mergedLibraryFolders);
+      }
+      try {
+        await setLibraryRoots(mergedLibraryFolders);
+      } catch (error) {
+        reportError('Failed to sync dropped folders to library root allowlist', {
+          source: 'app',
+          error,
+        });
+        return;
+      }
       setIsScanning(true);
       setScanProgress(0);
       const taskId = startProcessing('Importing audio files');
       let processed = 0;
       const newlyAddedTracks: Track[] = [];
       try {
-        for (const dir of dirs) {
+        for (const dir of foldersToScan) {
           try {
             const updateDirProgress = (ratio: number) => {
-              const overall = ((processed + ratio) / dirs.size) * 100;
+              const overall = ((processed + ratio) / foldersToScan.length) * 100;
               setScanProgress(Math.round(overall));
               updateProcessing(taskId, overall);
             };
@@ -136,7 +181,10 @@ export function useDroppedAudioImport({
                   );
                   coverArtHashes = Object.fromEntries(hashed);
                 } catch (err) {
-                  reportError('Failed to precompute cover art hashes', { source: 'app', error: err });
+                  reportError('Failed to precompute cover art hashes', {
+                    source: 'app',
+                    error: err,
+                  });
                 } finally {
                   finishProcessing(artTask);
                 }
@@ -232,8 +280,10 @@ export function useDroppedAudioImport({
     downloadArtwork,
     finishProcessing,
     followSymlinks,
+    libraryFolders,
     queryClient,
     setIsScanning,
+    setLibraryFolders,
     setScanProgress,
     setTrackCount,
     setTracks,

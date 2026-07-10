@@ -1,4 +1,3 @@
-mod artwork;
 mod audio;
 mod database;
 mod desktop_integration;
@@ -217,8 +216,6 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_log::Builder::default().build())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -229,9 +226,6 @@ pub fn run() {
         .plugin(tauri_plugin_media::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_liquid_glass::init());
-
-    #[cfg(target_os = "macos")]
-    let builder = builder.plugin(tauri_plugin_process::init());
 
     builder
         .setup(move |app| {
@@ -244,15 +238,6 @@ pub fn run() {
                     ..Default::default()
                 },
             ));
-
-            // Initialize updater only in release builds; updater failures should not abort app startup.
-            #[cfg(not(debug_assertions))]
-            if let Err(err) = app
-                .handle()
-                .plugin(tauri_plugin_updater::Builder::default().build())
-            {
-                eprintln!("Updater plugin initialization failed: {}", err);
-            }
 
             // Create audio manager with app handle for events
             let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
@@ -306,7 +291,9 @@ pub fn run() {
             });
 
             let desktop_start = Instant::now();
-            desktop_integration::setup(app)?;
+            if let Err(err) = desktop_integration::setup(app) {
+                eprintln!("Desktop integration setup failed: {}", err);
+            }
             eprintln!(
                 "[startup] desktop_integration_ms={:.1}",
                 desktop_start.elapsed().as_secs_f64() * 1000.0
@@ -335,7 +322,9 @@ pub fn run() {
             }
 
             #[cfg(target_os = "macos")]
-            macos_menu::build_menu(app)?;
+            if let Err(err) = macos_menu::build_menu(app) {
+                eprintln!("macOS menu setup failed: {}", err);
+            }
 
             eprintln!(
                 "[startup] setup_total_ms={:.1}",
@@ -350,7 +339,7 @@ pub fn run() {
             }
 
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if desktop_integration::should_hide_main_window_on_close(&window.app_handle()) {
+                if desktop_integration::should_hide_main_window_on_close(window.app_handle()) {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -432,11 +421,11 @@ pub fn run() {
             // Image cache commands
             image_cache::cache_generate_thumbnail,
             image_cache::cache_get_thumbnail,
+            image_cache::cache_get_thumbnail_bytes,
             image_cache::cache_has_thumbnail,
             image_cache::cache_get_stats,
             image_cache::cache_clear,
             image_cache::cache_enforce_limit,
-            image_cache::cache_get_thumbnail_data_url,
             // Waveform commands
             waveform::waveform_generate,
             waveform::waveform_cancel,
@@ -467,7 +456,6 @@ pub fn run() {
             desktop_integration::desktop_sync_media_session,
             media_controls::update_media_metadata,
             library_watcher::watch_library_paths,
-            artwork::process_artwork,
             #[cfg(target_os = "windows")]
             taskbar::update_progress,
             #[cfg(target_os = "windows")]

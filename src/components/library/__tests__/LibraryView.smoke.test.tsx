@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../store/settings-store', () => ({
@@ -16,6 +16,11 @@ vi.mock('../../../features/library/useLibraryData', () => ({
   useLibraryData: () => ({
     searchQuery: '',
     sortBy: 'dateAdded',
+    libraryStats: null,
+    recentTracks: [],
+    mostPlayedTracks: [],
+    searchScope: 'all',
+    setSearchScope: vi.fn(),
     setSortBy: vi.fn(),
     getFilteredTracks: () => [],
     trackCount: 0,
@@ -36,8 +41,11 @@ vi.mock('../../../hooks/useDominantColor', () => ({
   useDominantColor: () => null,
 }));
 
+vi.mock('../../../features/library/api', () => ({
+  fetchLibraryTracksPage: vi.fn(async () => []),
+}));
+
 vi.mock('../../../lib/tauri-commands', () => ({
-  dbGetTracksPaginated: vi.fn(async () => []),
   generateCoverArtHashes: vi.fn(async () => []),
 }));
 
@@ -55,6 +63,15 @@ describe('LibraryView', () => {
   it('renders empty library state when there are no tracks', () => {
     render(<LibraryView selectedTrackIds={[]} />);
 
-    expect(screen.getByText('No tracks found')).toBeInTheDocument();
+    expect(screen.getByText('No music yet')).toBeInTheDocument();
+  });
+
+  it('routes true empty libraries to folder setup', () => {
+    const onNavigateToFolders = vi.fn();
+    render(<LibraryView selectedTrackIds={[]} onNavigateToFolders={onNavigateToFolders} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /add folders/i }));
+
+    expect(onNavigateToFolders).toHaveBeenCalledTimes(1);
   });
 });

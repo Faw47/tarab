@@ -1,9 +1,9 @@
 import { normalizePath } from '../../lib/path-utils';
 import {
-  dbGetTrackCount,
   dbGetLibraryStats,
-  dbGetRecentlyAdded,
   dbGetMostPlayed,
+  dbGetRecentlyAdded,
+  dbGetTrackCount,
   dbGetTracksPaginated,
   dbSearchTracks,
   searchLyrics,

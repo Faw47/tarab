@@ -1,6 +1,5 @@
 import { clsx } from 'clsx';
 import {
-  AlertTriangle,
   ArrowUpDown,
   CheckSquare,
   ChevronDown,
@@ -24,8 +23,6 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchLibraryTracksPage } from '../../features/library/api';
-import { useLibraryData } from '../../features/library/useLibraryData';
 import { formatTime } from '../../lib/format-time';
 import { normalizePath } from '../../lib/path-utils';
 import { useRenderLog } from '../../lib/performance';
@@ -37,12 +34,22 @@ import {
   writeTags,
   writeTagsBatch,
 } from '../../lib/tauri-commands';
-import type { ContextMenuPosition, TagInfo, TagUpdate, Track } from '../../types';
+import type { ContextMenuPosition, TagClearField, TagInfo, TagUpdate, Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { CoverArtImage } from '../shared/CoverArtImage';
-import { GlassCard } from '../shared/GlassCard';
 import { VirtualizedList } from '../shared/VirtualizedList';
+import { ConfirmDialog, type ConfirmDialogProps } from '../ui/ConfirmDialog';
 import { InputDialog, type InputDialogProps } from '../ui/InputDialog';
+import {
+  buildFolderTree,
+  type FileFilter,
+  filterAndSortTracks,
+  formatQuality,
+  getSelectedFolderName,
+  type SortColumn,
+  type SortDirection,
+} from './tag-manager-model';
+import { useTagManagerLibraryTracks } from './useTagManagerLibraryTracks';
 
 interface TagManagerViewProps {
   selectedTracks: Track[];
@@ -60,19 +67,8 @@ interface TagManagerViewProps {
   onScrollChange?: (scrolled: boolean) => void;
 }
 
-type FileFilter = 'all' | 'missing-art' | 'untagged';
-type SortColumn = 'title' | 'artist' | 'album' | 'year' | 'duration';
-type SortDirection = 'asc' | 'desc';
-
-const losslessFormats = new Set(['flac', 'alac', 'wav', 'aiff']);
-
-interface FolderNode {
-  path: string;
-  name: string;
-  trackCount: number;
-}
-
-type TagEditKey =
+type TagEditKey = Extract<
+  keyof TagInfo,
   | 'title'
   | 'artist'
   | 'album'
@@ -82,9 +78,15 @@ type TagEditKey =
   | 'trackNumber'
   | 'totalTracks'
   | 'discNumber'
-  | 'totalDiscs' // optional in some libs, handled safely via "as any"
+  | 'totalDiscs'
   | 'composer'
-  | 'comment';
+  | 'comment'
+>;
+
+type EditableTagValue = string | number | null | undefined;
+type TagEditState = Partial<Record<TagEditKey, EditableTagValue>>;
+type PendingTagUpdate = Partial<Record<TagEditKey, EditableTagValue>> &
+  Pick<TagUpdate, 'coverArtBase64' | 'coverArtMime' | 'clearFields'>;
 
 const TAG_FIELDS: Array<{
   key: TagEditKey;
@@ -105,6 +107,53 @@ const TAG_FIELDS: Array<{
   { key: 'composer', label: 'Composer', kind: 'text', placeholder: 'Composer' },
   { key: 'comment', label: 'Comment', kind: 'textarea', placeholder: 'Comment' },
 ];
+const getEditableTagValue = (tags: TagInfo, key: TagEditKey): EditableTagValue => tags[key];
+
+const pickEditableTags = (tags: TagInfo): TagEditState => {
+  const next: TagEditState = {};
+  for (const field of TAG_FIELDS) {
+    next[field.key] = getEditableTagValue(tags, field.key);
+  }
+  return next;
+};
+
+const hasTagEditKey = (state: TagEditState, key: TagEditKey): boolean => key in state;
+
+const addClearField = (updates: TagUpdate | PendingTagUpdate, key: TagClearField) => {
+  updates.clearFields = updates.clearFields?.includes(key)
+    ? updates.clearFields
+    : [...(updates.clearFields ?? []), key];
+};
+
+const setTagUpdateField = (
+  updates: TagUpdate | PendingTagUpdate,
+  key: TagEditKey,
+  value: EditableTagValue,
+) => {
+  if (value === null || value === undefined) {
+    updates[key] = null;
+    addClearField(updates, key);
+    return;
+  }
+
+  updates[key] = value;
+};
+
+const tagValuesEqual = (left: EditableTagValue, right: EditableTagValue): boolean => {
+  if (left == null && right == null) return true;
+  if (typeof left === 'number' || typeof right === 'number') return left === right;
+  return String(left ?? '') === String(right ?? '');
+};
+
+const tagEditStateToUpdate = (state: TagEditState): TagUpdate => {
+  const updates: TagUpdate = {};
+  for (const field of TAG_FIELDS) {
+    if (hasTagEditKey(state, field.key)) {
+      setTagUpdateField(updates, field.key, state[field.key]);
+    }
+  }
+  return updates;
+};
 
 // const CORE_KEYS: TagEditKey[] = ['title', 'artist', 'album'];
 // const GRID_KEYS: TagEditKey[] = ['albumArtist', 'genre', 'year'];
@@ -137,19 +186,12 @@ type CoverArtAction =
   | { kind: 'set'; base64: string; mime: string; previewDataUrl: string }
   | { kind: 'remove' };
 
-type ConfirmModalState = null | {
-  type: 'save' | 'delete';
-  title: string;
-  body: React.ReactNode;
-  confirmLabel: string;
-  danger?: boolean;
-  onConfirm: () => void | Promise<void>;
-};
+type ConfirmModalState = Omit<ConfirmDialogProps, 'onCancel'> | null;
 
 type UndoSnapshot = {
   expiresAt: number;
   label: string;
-  items: Array<{ filePath: string; restore: Partial<Record<TagEditKey, any>> }>;
+  items: Array<{ filePath: string; restore: TagEditState }>;
 };
 
 export const TagManagerView = ({
@@ -167,47 +209,12 @@ export const TagManagerView = ({
   onScrollChange,
 }: TagManagerViewProps) => {
   useRenderLog('TagManagerView');
-  const { trackCount, tracks: loadedTracks } = useLibraryData();
-  const [allTracks, setAllTracks] = useState<Track[]>(loadedTracks);
-
-  useEffect(() => {
-    setAllTracks((current) => (current.length > loadedTracks.length ? current : loadedTracks));
-  }, [loadedTracks]);
-
-  useEffect(() => {
-    if (loadedTracks.length >= trackCount) return;
-
-    let cancelled = false;
-
-    async function loadRemainingTracks() {
-      const pageSize = 500;
-      const pages: Track[] = [];
-      for (let offset = loadedTracks.length; offset < trackCount; offset += pageSize) {
-        const page = await fetchLibraryTracksPage({
-          offset,
-          limit: pageSize,
-          sortBy: 'dateAdded',
-          sortOrder: 'desc',
-        });
-        if (cancelled || page.length === 0) return;
-        pages.push(...page);
-        setAllTracks([...loadedTracks, ...pages]);
-        if (page.length < pageSize) return;
-      }
-    }
-
-    // Tag Manager needs complete track scope for folder filters and bulk selection.
-    void loadRemainingTracks().catch((error) => {
-      reportError('Failed to load full library for tag manager', {
-        source: 'tag-manager',
-        error,
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedTracks, trackCount]);
+  const {
+    tracks: allTracks,
+    loadedCount: hydrationLoadedCount,
+    totalCount: hydrationTotalCount,
+    isHydrating: isLibraryHydrating,
+  } = useTagManagerLibraryTracks();
   // Toolbar UI
   const [showSourceDropdown, setShowSourceDropdown] = useState(false);
   const [queryInput, setQueryInput] = useState('');
@@ -223,7 +230,7 @@ export const TagManagerView = ({
   const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
 
   // Editor
-  const [edited, setEdited] = useState<Partial<Record<TagEditKey, any>>>({});
+  const [edited, setEdited] = useState<TagEditState>({});
   const [applyFields, setApplyFields] = useState<Record<TagEditKey, boolean>>(() => {
     const init = {} as Record<TagEditKey, boolean>;
     for (const f of TAG_FIELDS) init[f.key] = false;
@@ -298,89 +305,23 @@ export const TagManagerView = ({
     return () => window.clearTimeout(t);
   }, [undo]);
 
-
-  // Folder tree (Windows + macOS safe)
-  const folderTree = useMemo(() => {
-    const folders = new Map<string, FolderNode>();
-
-    allTracks.forEach((track) => {
-      const norm = normalizePath(track.filePath);
-      const parts = norm.split('/');
-      parts.pop();
-      const folderPath = parts.join('/');
-
-      if (!folderPath) return;
-
-      const existing = folders.get(folderPath);
-      if (existing) existing.trackCount += 1;
-      else {
-        folders.set(folderPath, {
-          path: folderPath,
-          name: parts[parts.length - 1] || folderPath,
-          trackCount: 1,
-        });
-      }
-    });
-
-    return Array.from(folders.values()).sort((a, b) => a.path.localeCompare(b.path));
-  }, [allTracks]);
-
-  const selectedFolderName = useMemo(() => {
-    if (!selectedFolder) return 'All Library';
-    const folder = folderTree.find((f) => f.path === selectedFolder);
-    return folder?.name || 'Unknown Folder';
-  }, [selectedFolder, folderTree]);
-
-  // Filter + sort
-  const filteredTracks = useMemo(() => {
-    let result = allTracks;
-
-    if (selectedFolder) {
-      const normFolder = normalizePath(selectedFolder);
-      result = result.filter((t) => normalizePath(t.filePath).startsWith(normFolder + '/'));
-    }
-
-    const q = query.trim().toLowerCase();
-    if (q) {
-      result = result.filter((t) => {
-        const title = (t.title || '').toLowerCase();
-        const artist = (t.artist || '').toLowerCase();
-        const album = (t.album || '').toLowerCase();
-        const path = (t.filePath || '').toLowerCase();
-        return title.includes(q) || artist.includes(q) || album.includes(q) || path.includes(q);
-      });
-    }
-
-    if (fileFilter === 'missing-art') result = result.filter((t) => !t.hasCoverArt);
-    if (fileFilter === 'untagged')
-      result = result.filter(
-        (t) => !t.artist || t.artist.toLowerCase() === 'unknown artist' || !t.title,
-      );
-
-    const sorted = [...result].sort((a, b) => {
-      let cmp = 0;
-      switch (sortColumn) {
-        case 'title':
-          cmp = (a.title || '').localeCompare(b.title || '');
-          break;
-        case 'artist':
-          cmp = (a.artist || '').localeCompare(b.artist || '');
-          break;
-        case 'album':
-          cmp = (a.album || '').localeCompare(b.album || '');
-          break;
-        case 'year':
-          cmp = (a.year || 0) - (b.year || 0);
-          break;
-        case 'duration':
-          cmp = (a.duration || 0) - (b.duration || 0);
-          break;
-      }
-      return sortDirection === 'asc' ? cmp : -cmp;
-    });
-
-    return sorted;
-  }, [allTracks, selectedFolder, query, fileFilter, sortColumn, sortDirection]);
+  const folderTree = useMemo(() => buildFolderTree(allTracks), [allTracks]);
+  const selectedFolderName = useMemo(
+    () => getSelectedFolderName(folderTree, selectedFolder),
+    [folderTree, selectedFolder],
+  );
+  const filteredTracks = useMemo(
+    () =>
+      filterAndSortTracks({
+        tracks: allTracks,
+        selectedFolder,
+        query,
+        fileFilter,
+        sortColumn,
+        sortDirection,
+      }),
+    [allTracks, fileFilter, query, selectedFolder, sortColumn, sortDirection],
+  );
 
   // Map id to index
   const idToIndex = useMemo(() => {
@@ -440,20 +381,7 @@ export const TagManagerView = ({
 
       setOriginalTags(tags);
 
-      const next: Partial<Record<TagEditKey, any>> = {
-        title: tags.title,
-        artist: tags.artist,
-        album: tags.album,
-        albumArtist: (tags as any).albumArtist,
-        year: tags.year,
-        genre: (tags as any).genre,
-        trackNumber: (tags as any).trackNumber,
-        totalTracks: (tags as any).totalTracks,
-        discNumber: (tags as any).discNumber,
-        totalDiscs: (tags as any).totalDiscs,
-        composer: (tags as any).composer,
-        comment: (tags as any).comment,
-      };
+      const next = pickEditableTags(tags);
 
       setEdited(next);
 
@@ -475,15 +403,8 @@ export const TagManagerView = ({
   // Helpers
   const isMulti = selectedTracks.length > 1;
 
-  const formatQuality = (track: Track) => {
-    const ext =
-      track.fileFormat?.toUpperCase() || track.filePath.split('.').pop()?.toUpperCase() || '';
-    const isLossless = losslessFormats.has(ext.toLowerCase());
-    return { format: ext, isLossless };
-  };
-
-  const parseNumberOrUndef = (raw: string) => {
-    if (!raw) return undefined;
+  const parseNumberOrNull = (raw: string) => {
+    if (!raw) return null;
     const n = Number(raw);
     return Number.isFinite(n) ? n : undefined;
   };
@@ -492,7 +413,7 @@ export const TagManagerView = ({
     setApplyFields((prev) => ({ ...prev, [key]: on }));
   };
 
-  const setField = (key: TagEditKey, value: any) => {
+  const setField = (key: TagEditKey, value: EditableTagValue) => {
     setEdited((prev) => ({ ...prev, [key]: value }));
     if (isMulti) setApplyField(key, true);
   };
@@ -665,20 +586,7 @@ export const TagManagerView = ({
 
   const handleRevert = () => {
     if (selectedTracks.length === 1 && originalTags) {
-      setEdited({
-        title: originalTags.title,
-        artist: originalTags.artist,
-        album: originalTags.album,
-        albumArtist: (originalTags as any).albumArtist,
-        year: originalTags.year,
-        genre: (originalTags as any).genre,
-        trackNumber: (originalTags as any).trackNumber,
-        totalTracks: (originalTags as any).totalTracks,
-        discNumber: (originalTags as any).discNumber,
-        totalDiscs: (originalTags as any).totalDiscs,
-        composer: (originalTags as any).composer,
-        comment: (originalTags as any).comment,
-      });
+      setEdited(pickEditableTags(originalTags));
 
       setApplyFields(() => {
         const init = {} as Record<TagEditKey, boolean>;
@@ -711,27 +619,22 @@ export const TagManagerView = ({
       for (const f of TAG_FIELDS) {
         const k = f.key;
         const newVal = edited[k];
-        const oldVal = (originalTags as any)[k];
+        const oldVal = getEditableTagValue(originalTags, k);
 
-        const changed =
-          typeof newVal === 'number' || typeof oldVal === 'number'
-            ? (newVal ?? undefined) !== (oldVal ?? undefined)
-            : String(newVal ?? '') !== String(oldVal ?? '');
-
-        if (changed) return true;
+        if (!tagValuesEqual(newVal, oldVal)) return true;
       }
       return false;
     }
 
-    // Multi: any APPLY field with a value (string can be empty to clear)
+    // Multi: each APPLY field with a value (string can be empty to clear)
     for (const f of TAG_FIELDS) {
       const k = f.key;
       if (!applyFields[k]) continue;
       const v = edited[k];
       if (f.kind === 'number') {
-        if (typeof v === 'number' && Number.isFinite(v)) return true;
+        if ((typeof v === 'number' && Number.isFinite(v)) || v === null) return true;
       } else {
-        if (typeof v === 'string') return true;
+        if (typeof v === 'string' || v === null) return true;
       }
     }
 
@@ -739,20 +642,17 @@ export const TagManagerView = ({
   }, [applyFields, coverArtAction.kind, edited, originalTags, selectedTracks.length]);
 
   const buildUpdatesForSave = useCallback(() => {
-    const updates: any = {};
+    const updates: PendingTagUpdate = {};
 
     if (selectedTracks.length === 1 && originalTags) {
       for (const f of TAG_FIELDS) {
         const k = f.key;
         const newVal = edited[k];
-        const oldVal = (originalTags as any)[k];
+        const oldVal = getEditableTagValue(originalTags, k);
 
-        const changed =
-          typeof newVal === 'number' || typeof oldVal === 'number'
-            ? (newVal ?? undefined) !== (oldVal ?? undefined)
-            : String(newVal ?? '') !== String(oldVal ?? '');
-
-        if (changed) updates[k] = newVal;
+        if (!tagValuesEqual(newVal, oldVal)) {
+          setTagUpdateField(updates, k, newVal);
+        }
       }
     } else {
       for (const f of TAG_FIELDS) {
@@ -761,9 +661,13 @@ export const TagManagerView = ({
 
         const v = edited[k];
         if (f.kind === 'number') {
-          if (typeof v === 'number' && Number.isFinite(v)) updates[k] = v;
+          if ((typeof v === 'number' && Number.isFinite(v)) || v === null) {
+            setTagUpdateField(updates, k, v);
+          }
         } else {
-          if (typeof v === 'string') updates[k] = v;
+          if (typeof v === 'string' || v === null) {
+            setTagUpdateField(updates, k, v);
+          }
         }
       }
     }
@@ -777,11 +681,11 @@ export const TagManagerView = ({
   }, [applyFields, coverArtAction, edited, originalTags, selectedTracks.length]);
 
   const computeSaveSummary = useCallback(() => {
-    const updates: any = buildUpdatesForSave();
+    const updates = buildUpdatesForSave();
     const fields: string[] = [];
 
     for (const f of TAG_FIELDS) {
-      const k = f.key as any;
+      const k = f.key;
       if (updates[k] !== undefined) fields.push(f.label);
     }
     if (coverArtAction.kind === 'set') fields.push('Cover Art (set)');
@@ -794,7 +698,7 @@ export const TagManagerView = ({
     if (selectedTracks.length === 0) return;
 
     const { updates } = computeSaveSummary();
-    const hasAnyUpdates = Object.keys(updates as any).length > 0;
+    const hasAnyUpdates = Object.keys(updates).length > 0;
     const needsCoverRemove = coverArtAction.kind === 'remove';
 
     if (!hasAnyUpdates && !needsCoverRemove) return;
@@ -804,11 +708,10 @@ export const TagManagerView = ({
     try {
       // Snapshot for undo (tag fields only)
       const changedKeys = new Set<TagEditKey>();
-      const updatesAny = updates as any;
 
       for (const f of TAG_FIELDS) {
         const k = f.key;
-        if (updatesAny[k] !== undefined) changedKeys.add(k);
+        if (updates[k] !== undefined) changedKeys.add(k);
       }
 
       const snapshotItems =
@@ -818,8 +721,8 @@ export const TagManagerView = ({
                 selectedTracks.length === 1 && originalTags
                   ? originalTags
                   : await readFullTags(t.filePath);
-              const restore: Partial<Record<TagEditKey, any>> = {};
-              for (const k of changedKeys) restore[k] = (tags as any)[k];
+              const restore: TagEditState = {};
+              for (const k of changedKeys) restore[k] = getEditableTagValue(tags, k);
               return { filePath: t.filePath, restore };
             })
           : [];
@@ -830,7 +733,7 @@ export const TagManagerView = ({
       }
 
       // Write tags
-      if (Object.keys(updates as any).length > 0) {
+      if (Object.keys(updates).length > 0) {
         if (selectedTracks.length === 1) {
           await writeTags(selectedTracks[0].filePath, updates);
         } else {
@@ -884,42 +787,12 @@ export const TagManagerView = ({
     const count = selectedTracks.length;
 
     setConfirmModal({
-      type: 'save',
       title: 'Confirm Save',
       confirmLabel: count === 1 ? 'Save' : `Save to ${count} tracks`,
-      body: (
-        <div className="space-y-3">
-          <div className="text-sm text-text-secondary">
-            You are about to update <span className="text-text-primary font-semibold">{count}</span>{' '}
-            track{count === 1 ? '' : 's'}.
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-            <div className="text-[11px] uppercase tracking-widest text-text-subtle font-bold mb-2">
-              Changes
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {fields.length ? (
-                fields.map((f) => (
-                  <span
-                    key={f}
-                    className="px-2 py-1 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-text-primary"
-                  >
-                    {f}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs text-text-muted">No changes detected</span>
-              )}
-            </div>
-          </div>
-          {count > 1 && (
-            <div className="text-xs text-text-muted">
-              Multi-edit only applies fields you explicitly enabled, this prevents accidental batch
-              wipes.
-            </div>
-          )}
-        </div>
-      ),
+      message: `You are about to update ${count} track${count === 1 ? '' : 's'}.${
+        count > 1 ? ' Only explicitly enabled fields will be applied.' : ''
+      }`,
+      detail: fields.length ? `Changes: ${fields.join(', ')}` : 'No changes detected',
       onConfirm: async () => {
         setConfirmModal(null);
         await handleSaveImpl();
@@ -934,9 +807,8 @@ export const TagManagerView = ({
 
     try {
       await mapWithConcurrency(snapshot.items, 8, async (it) => {
-        const restoreAny: any = it.restore;
-        if (Object.keys(restoreAny).length === 0) return;
-        await writeTags(it.filePath, restoreAny as TagUpdate);
+        if (Object.keys(it.restore).length === 0) return;
+        await writeTags(it.filePath, tagEditStateToUpdate(it.restore));
       });
 
       if (selectedTracks.length === 1) await loadSingleTrackTags(selectedTracks[0]);
@@ -954,44 +826,19 @@ export const TagManagerView = ({
       .map((t) => normalizePath(t.filePath).split('/').pop() || t.title || t.id);
 
     setConfirmModal({
-      type: 'delete',
       title: 'Delete Files',
-      danger: true,
+      variant: 'danger',
       confirmLabel: count === 1 ? 'Delete File' : `Delete ${count} Files`,
-      body: (
-        <div className="space-y-3">
-          <div className="text-sm text-text-secondary">
-            This will delete <span className="text-text-primary font-semibold">{count}</span> file
-            {count === 1 ? '' : 's'}.
-          </div>
-          <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-            <div className="flex items-center gap-2 text-red-300 text-sm font-semibold">
-              <AlertTriangle className="w-4 h-4" />
-              Destructive action
-            </div>
-            <div className="mt-2 text-xs text-red-200/80">
-              Example files:
-              <ul className="mt-2 list-disc pl-5 space-y-1">
-                {sample.map((s) => (
-                  <li key={s} className="break-all">
-                    {s}
-                  </li>
-                ))}
-                {count > sample.length && (
-                  <li className="opacity-70">and {count - sample.length} more</li>
-                )}
-              </ul>
-            </div>
-          </div>
-        </div>
-      ),
+      message: `This will permanently delete ${count} file${count === 1 ? '' : 's'}.`,
+      detail: `Example files: ${sample.join(', ')}${
+        count > sample.length ? `, and ${count - sample.length} more` : ''
+      }`,
       onConfirm: async () => {
         setConfirmModal(null);
         await onDeleteFiles(selectedTracks);
       },
     });
   };
-
 
   // Render helpers
   const FieldLabel = ({ label, k }: { label: string; k: TagEditKey }) => {
@@ -1035,7 +882,7 @@ export const TagManagerView = ({
     );
   };
   const showTotalDiscs = useMemo(() => {
-    if ((originalTags as any)?.totalDiscs != null) return true;
+    if (originalTags?.totalDiscs != null) return true;
     if (edited.totalDiscs != null) return true;
     return false;
   }, [edited.totalDiscs, originalTags]);
@@ -1063,58 +910,8 @@ export const TagManagerView = ({
           </div>
         </div>
       )}
-
-      {/* Confirm Modal */}
-      {confirmModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmModal(null)} />
-          <div className="relative w-full max-w-md">
-            <GlassCard className="p-5" intensity="strong">
-              <div className="flex items-start justify-between gap-4 mb-3">
-                <div>
-                  <div className="text-lg font-bold text-text-primary">{confirmModal.title}</div>
-                  <div className="text-xs text-text-muted mt-1">Review before continuing.</div>
-                </div>
-                <button
-                  onClick={() => setConfirmModal(null)}
-                  className="p-2 rounded-xl bg-white/5 text-text-secondary hover:bg-white/10 hover:text-white transition-colors"
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="mb-5">{confirmModal.body}</div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setConfirmModal(null)}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 text-text-primary text-sm border border-white/10 hover:bg-white/10 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    await confirmModal.onConfirm();
-                  }}
-                  className={clsx(
-                    'flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-[1.02] active:scale-[0.98]',
-                    confirmModal.danger ? 'bg-red-500 text-black' : 'bg-white text-black',
-                  )}
-                >
-                  {confirmModal.confirmLabel}
-                </button>
-              </div>
-
-              <div className="mt-3 text-[11px] text-text-muted">
-                Undo is available for tag fields after saving, for a short time.
-              </div>
-            </GlassCard>
-          </div>
-        </div>
-      )}
-
-      {/* Slim Toolbar Header */}
+      {confirmModal && <ConfirmDialog {...confirmModal} onCancel={() => setConfirmModal(null)} />}
+      {/* Slim Toolbar Header */}{' '}
       <div className="h-16 shrink-0 border-b border-white/5 bg-black/40 flex items-center px-4 gap-4 z-20 backdrop-blur-md">
         <div className="flex items-center gap-3 pr-4 border-r border-white/10">
           <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -1224,7 +1021,28 @@ export const TagManagerView = ({
           </button>
         </div>
       </div>
-
+      {isLibraryHydrating && hydrationTotalCount > hydrationLoadedCount && (
+        <div
+          className="shrink-0 border-b border-white/5 bg-black/30 px-4 py-2"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="mb-1 flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em] text-text-muted">
+            <span>Loading full library for bulk editing</span>
+            <span>
+              {hydrationLoadedCount} / {hydrationTotalCount}
+            </span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-300"
+              style={{
+                width: `${Math.round((hydrationLoadedCount / hydrationTotalCount) * 100)}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Table */}
@@ -1282,7 +1100,8 @@ export const TagManagerView = ({
               containerProps={{
                 tabIndex: 0,
                 onKeyDown: handleTableKeyDown,
-                title: 'Keyboard: Up/Down to move, Space toggle, Enter select, Cmd/Ctrl+A select all',
+                title:
+                  'Keyboard: Up/Down to move, Space toggle, Enter select, Cmd/Ctrl+A select all',
               }}
               onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
               renderItem={(track, index) => {
@@ -1397,7 +1216,8 @@ export const TagManagerView = ({
                         <div className="w-full h-full flex items-center justify-center">
                           <ImageIcon className="w-8 h-8 text-white/20" />
                         </div>
-                      ) : selectedTracks.length === 1 && (originalTags?.hasCoverArt ?? selectedTracks[0].hasCoverArt) ? (
+                      ) : selectedTracks.length === 1 &&
+                        (originalTags?.hasCoverArt ?? selectedTracks[0].hasCoverArt) ? (
                         <CoverArtImage
                           track={selectedTracks[0]}
                           className="w-full h-full"
@@ -1477,7 +1297,7 @@ export const TagManagerView = ({
                     <input
                       type="number"
                       value={typeof edited.year === 'number' ? edited.year : (edited.year ?? '')}
-                      onChange={(e) => setField('year', parseNumberOrUndef(e.target.value))}
+                      onChange={(e) => setField('year', parseNumberOrNull(e.target.value))}
                       onFocus={() => {
                         if (isMulti && !applyFields.year) setApplyField('year', true);
                       }}
@@ -1501,9 +1321,7 @@ export const TagManagerView = ({
                             ? edited.trackNumber
                             : (edited.trackNumber ?? '')
                         }
-                        onChange={(e) =>
-                          setField('trackNumber', parseNumberOrUndef(e.target.value))
-                        }
+                        onChange={(e) => setField('trackNumber', parseNumberOrNull(e.target.value))}
                         onFocus={() => {
                           if (isMulti && !applyFields.trackNumber)
                             setApplyField('trackNumber', true);
@@ -1522,9 +1340,7 @@ export const TagManagerView = ({
                             ? edited.totalTracks
                             : (edited.totalTracks ?? '')
                         }
-                        onChange={(e) =>
-                          setField('totalTracks', parseNumberOrUndef(e.target.value))
-                        }
+                        onChange={(e) => setField('totalTracks', parseNumberOrNull(e.target.value))}
                         onFocus={() => {
                           if (isMulti && !applyFields.totalTracks)
                             setApplyField('totalTracks', true);
@@ -1543,7 +1359,7 @@ export const TagManagerView = ({
                             ? edited.discNumber
                             : (edited.discNumber ?? '')
                         }
-                        onChange={(e) => setField('discNumber', parseNumberOrUndef(e.target.value))}
+                        onChange={(e) => setField('discNumber', parseNumberOrNull(e.target.value))}
                         onFocus={() => {
                           if (isMulti && !applyFields.discNumber) setApplyField('discNumber', true);
                         }}
@@ -1563,7 +1379,7 @@ export const TagManagerView = ({
                               : (edited.totalDiscs ?? '')
                           }
                           onChange={(e) =>
-                            setField('totalDiscs', parseNumberOrUndef(e.target.value))
+                            setField('totalDiscs', parseNumberOrNull(e.target.value))
                           }
                           onFocus={() => {
                             if (isMulti && !applyFields.totalDiscs)
@@ -1728,7 +1544,6 @@ export const TagManagerView = ({
           )}
         </div>
       </div>
-
       {inputDialog && (
         <InputDialog
           title={inputDialog.title}

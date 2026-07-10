@@ -1,12 +1,11 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { memo, useMemo, useRef, useEffect, useState, useLayoutEffect } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-
+import { topBarAuroraFragmentShader, topBarAuroraVertexShader } from './header-aurora-shaders';
 import { LiquidBackgroundPlane, type LiquidBgColors } from './liquid-background-mesh';
-import { topBarAuroraVertexShader, topBarAuroraFragmentShader } from './header-aurora-shaders';
 import { LiquidShellRenderPipeline } from './liquid-shell-render-pipeline';
-import { liquidShellGl, liquidShellOrthoCamera, LIQUID_HEADER_STRIP_PX } from './webgl-defaults';
 import { useDocumentHidden } from './use-document-hidden';
+import { LIQUID_HEADER_STRIP_PX, liquidShellGl, liquidShellOrthoCamera } from './webgl-defaults';
 
 /* ─── AURORA COMPONENT ───────────────────────────────────────────────────── */
 

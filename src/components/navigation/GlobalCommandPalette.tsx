@@ -272,7 +272,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
               className={cn(
                 'shrink-0 text-[10px] font-semibold',
                 isNeo
-                  ? 'border-2 border-black bg-[#F6F6F6] px-2 py-1 text-black'
+                  ? 'border-2 border-black bg-[var(--neo-panel)] px-2 py-1 text-black'
                   : 'rounded border border-white/15 bg-white/5 px-2 py-1 text-white/70',
               )}
             >
@@ -303,7 +303,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                         'group flex cursor-pointer items-center gap-3 px-3 py-2.5 outline-none',
                         'data-[selected=true]:translate-x-[1px] data-[selected=true]:translate-y-[1px]',
                         isNeo
-                          ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[#E4C463] data-[selected=true]:shadow-[2px_2px_0_0_#000] data-[disabled=true]:opacity-40'
+                          ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[var(--neo-utility-hover)] data-[selected=true]:shadow-[2px_2px_0_0_#000] data-[disabled=true]:opacity-40'
                           : 'rounded-xl text-white/90 data-[selected=true]:bg-white/14 data-[selected=true]:text-white data-[disabled=true]:opacity-40',
                       )}
                     >

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "autostart",
+  "description": "Open-at-login controls are main-window settings only; the mini player must not read or change login startup state.",
+  "windows": ["main"],
+  "permissions": ["autostart:allow-is-enabled", "autostart:allow-enable", "autostart:allow-disable"]
+}

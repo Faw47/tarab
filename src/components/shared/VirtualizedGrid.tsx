@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface VirtualizedGridProps<T> {
   items: T[];
@@ -17,6 +17,8 @@ interface VirtualizedGridProps<T> {
 
 const CELL_GUTTER = 6;
 const DEFAULT_ROW_HEIGHT = 220;
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function VirtualizedGridCell<T>({
   item,
@@ -28,7 +30,12 @@ function VirtualizedGridCell<T>({
   renderItem: (item: T, index: number) => React.ReactNode;
 }) {
   return (
-    <div style={{ boxSizing: 'border-box', padding: CELL_GUTTER, height: '100%' }}>
+    <div
+      data-virtual-grid-index={index}
+      role="gridcell"
+      tabIndex={-1}
+      style={{ boxSizing: 'border-box', padding: CELL_GUTTER, height: '100%' }}
+    >
       <div className="h-full w-full">{renderItem(item, index)}</div>
     </div>
   );
@@ -39,7 +46,7 @@ const MemoVirtualizedGridCell = memo(VirtualizedGridCell) as typeof VirtualizedG
 export function VirtualizedGrid<T>({
   items,
   minColumnWidth,
-  rowHeight = DEFAULT_ROW_HEIGHT, // Now used for row estimation
+  rowHeight = DEFAULT_ROW_HEIGHT,
   overscan = 3,
   className,
   style,
@@ -51,6 +58,7 @@ export function VirtualizedGrid<T>({
   const containerRef = useRef<HTMLDivElement>(null);
   const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [pendingFocusIndex, setPendingFocusIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -91,6 +99,57 @@ export function VirtualizedGrid<T>({
   }, [virtualRows, columns, items.length, onRangeChange]);
 
   useEffect(() => {
+    if (pendingFocusIndex === null) return;
+    const cell = containerRef.current?.querySelector<HTMLElement>(
+      `[data-virtual-grid-index="${pendingFocusIndex}"]`,
+    );
+    if (!cell) return;
+    (cell.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? cell).focus();
+    setPendingFocusIndex(null);
+  }, [pendingFocusIndex, virtualRows]);
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target as HTMLElement;
+      if (target.matches('input, textarea, select, [contenteditable="true"]')) return;
+
+      const cell = target.closest<HTMLElement>('[data-virtual-grid-index]');
+      const currentIndex = Number(cell?.dataset.virtualGridIndex ?? -1);
+      let nextIndex: number;
+
+      switch (event.key) {
+        case 'ArrowLeft':
+          nextIndex = Math.max(0, currentIndex < 0 ? 0 : currentIndex - 1);
+          break;
+        case 'ArrowRight':
+          nextIndex = Math.min(items.length - 1, currentIndex + 1);
+          break;
+        case 'ArrowUp':
+          nextIndex = Math.max(0, currentIndex < 0 ? 0 : currentIndex - columns);
+          break;
+        case 'ArrowDown':
+          nextIndex = Math.min(items.length - 1, currentIndex < 0 ? 0 : currentIndex + columns);
+          break;
+        case 'Home':
+          nextIndex = 0;
+          break;
+        case 'End':
+          nextIndex = items.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      if (nextIndex < 0) return;
+      event.preventDefault();
+      rowVirtualizer.scrollToIndex(Math.floor(nextIndex / columns), { align: 'auto' });
+      setPendingFocusIndex(nextIndex);
+    },
+    [columns, items.length, rowVirtualizer],
+  );
+
+  useEffect(() => {
     if (!onScrollNearEnd || items.length === 0) return;
     const node = containerRef.current;
     if (!node) return;
@@ -118,6 +177,12 @@ export function VirtualizedGrid<T>({
   return (
     <div
       ref={containerRef}
+      role="grid"
+      aria-label="Library items"
+      aria-colcount={columns}
+      aria-rowcount={rowCount}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
       className={className}
       style={{
         ...style,
@@ -147,6 +212,8 @@ export function VirtualizedGrid<T>({
           return (
             <div
               key={virtualRow.key}
+              role="row"
+              aria-rowindex={rowIndex + 1}
               style={{
                 position: 'absolute',
                 top: 0,

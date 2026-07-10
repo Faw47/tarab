@@ -133,12 +133,19 @@ pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>
     let menu_handles = if cfg!(target_os = "windows") {
         None
     } else {
-        Some(build_app_menu(&app_handle)?)
+        build_app_menu(&app_handle)
+            .map_err(|e| {
+                eprintln!("Failed to initialize app menu: {}", e);
+                e
+            })
+            .ok()
     };
-    let tray_handles = build_tray_menu(&app_handle).map_err(|e| {
-        eprintln!("Failed to initialize tray menu: {}", e);
-        e
-    }).ok();
+    let tray_handles = build_tray_menu(&app_handle)
+        .map_err(|e| {
+            eprintln!("Failed to initialize tray menu: {}", e);
+            e
+        })
+        .ok();
 
     app.manage(DesktopIntegrationState {
         native_ui: Mutex::new(DesktopNativeUiStatePayload::default()),
@@ -343,9 +350,7 @@ pub fn desktop_sync_media_session(
 }
 
 fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
-    let Some(encoded) = data else {
-        return None;
-    };
+    let encoded = data?;
 
     match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(bytes) => Some(bytes),

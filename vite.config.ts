@@ -1,9 +1,9 @@
-import path from "path";
-import { fileURLToPath } from "url";
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
-import tailwindcss from "@tailwindcss/vite";
-import { visualizer } from "rollup-plugin-visualizer";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react-swc';
+import { visualizer } from 'rollup-plugin-visualizer';
+import { defineConfig } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,10 +11,12 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
-    ...(process.env.ANALYZE
+    ...(mode === 'analyze'
       ? [
           visualizer({
-            open: true,
+            filename: 'bundle-report.html',
+            emitFile: true,
+            open: false,
             gzipSize: true,
             brotliSize: true,
           }),
@@ -22,40 +24,54 @@ export default defineConfig(({ mode }) => ({
       : []),
   ],
   worker: {
-    format: "es",
+    format: 'es',
   },
   define: {
-    __DEV__: JSON.stringify(mode !== "production"),
+    __DEV__: JSON.stringify(mode !== 'production'),
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      '@': path.resolve(__dirname, 'src'),
     },
   },
   build: {
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, "index.html"),
-        miniPlayer: path.resolve(__dirname, "mini-player.html"),
+        main: path.resolve(__dirname, 'index.html'),
+        miniPlayer: path.resolve(__dirname, 'mini-player.html'),
       },
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return;
+          const normalizedId = id.replaceAll('\\', '/');
           if (
-            id.includes("three") ||
-            id.includes("@react-three/fiber") ||
-            id.includes("@react-three/drei")
+            normalizedId.includes('vite/preload-helper') ||
+            normalizedId.includes('/react@') ||
+            normalizedId.includes('/react-dom@') ||
+            normalizedId.includes('/scheduler@') ||
+            normalizedId.includes('/zustand@') ||
+            normalizedId.includes('/use-sync-external-store@')
           ) {
-            return "three-stack";
+            return 'react-runtime';
           }
-          if (id.includes("framer-motion")) {
-            return "motion";
+          if (!normalizedId.includes('node_modules')) return;
+          if (
+            normalizedId.includes('three') ||
+            normalizedId.includes('@react-three/fiber') ||
+            normalizedId.includes('@react-three/drei')
+          ) {
+            return 'three-stack';
           }
-          if (id.includes("lucide-react")) {
-            return "icons";
+          if (normalizedId.includes('framer-motion')) {
+            return 'motion';
           }
-          if (id.includes("@tauri-apps/api") || id.includes("@tauri-apps/plugin-opener")) {
-            return "tauri-api";
+          if (normalizedId.includes('lucide-react')) {
+            return 'icons';
+          }
+          if (
+            normalizedId.includes('@tauri-apps/api') ||
+            normalizedId.includes('@tauri-apps/plugin-opener')
+          ) {
+            return 'tauri-api';
           }
         },
       },
@@ -65,7 +81,7 @@ export default defineConfig(({ mode }) => ({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ['**/src-tauri/**'],
     },
   },
 }));

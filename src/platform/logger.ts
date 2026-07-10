@@ -48,7 +48,8 @@ export const formatErrorLog = (
   includeStack = import.meta.env.DEV,
 ): string => {
   const errorMsg = error instanceof Error ? error.message : String(error);
-  const stack = includeStack && error instanceof Error && error.stack ? ` | Stack: ${error.stack}` : '';
+  const stack =
+    includeStack && error instanceof Error && error.stack ? ` | Stack: ${error.stack}` : '';
   const serializedMeta = safeStringify(meta);
   return `[${domain}] ${message} | Error: ${errorMsg}${stack}${serializedMeta ? ` | Meta: ${serializedMeta}` : ''}`;
 };
@@ -69,9 +70,12 @@ export async function initLogger() {
 
   const requestIdle = (globalThis as Window & typeof globalThis).requestIdleCallback;
   if (typeof requestIdle === 'function') {
-    requestIdle(() => {
-      void attach();
-    }, { timeout: 1200 });
+    requestIdle(
+      () => {
+        void attach();
+      },
+      { timeout: 1200 },
+    );
     return;
   }
 

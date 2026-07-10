@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { TagInfo, TagUpdate, Track } from '../types';
+import type { TagClearField, TagInfo, TagUpdate, Track } from '../types';
 
 interface ClipboardArt {
   base64: string;
@@ -17,6 +17,42 @@ interface MetadataClipboardState {
   buildTagUpdateFromInfo: (info: TagInfo) => TagUpdate;
   canPaste: () => boolean;
 }
+
+const tagFields = [
+  'title',
+  'artist',
+  'album',
+  'albumArtist',
+  'year',
+  'trackNumber',
+  'totalTracks',
+  'discNumber',
+  'totalDiscs',
+  'genre',
+  'composer',
+  'comment',
+] as const satisfies readonly TagClearField[];
+
+const buildTagUpdateFromInfo = (info: TagInfo): TagUpdate => {
+  const update: TagUpdate = {};
+  const editableUpdate = update as Partial<Record<TagClearField, string | number | null>>;
+  const clearFields: TagClearField[] = [];
+
+  for (const field of tagFields) {
+    const value = info[field];
+    if (value === undefined || value === null) {
+      editableUpdate[field] = null;
+      clearFields.push(field);
+    } else {
+      editableUpdate[field] = value;
+    }
+  }
+
+  if (clearFields.length > 0) update.clearFields = clearFields;
+  if (info.extraTags) update.extraTags = info.extraTags;
+
+  return update;
+};
 
 export const useMetadataClipboardStore = create<MetadataClipboardState>()(
   persist(
@@ -39,21 +75,7 @@ export const useMetadataClipboardStore = create<MetadataClipboardState>()(
           copiedFromPath: undefined,
           copiedAt: undefined,
         }),
-      buildTagUpdateFromInfo: (info) => ({
-        title: info.title ?? undefined,
-        artist: info.artist ?? undefined,
-        album: info.album ?? undefined,
-        albumArtist: info.albumArtist ?? undefined,
-        year: info.year ?? undefined,
-        trackNumber: info.trackNumber ?? undefined,
-        totalTracks: info.totalTracks ?? undefined,
-        discNumber: info.discNumber ?? undefined,
-        totalDiscs: info.totalDiscs ?? undefined,
-        genre: info.genre ?? undefined,
-        composer: info.composer ?? undefined,
-        comment: info.comment ?? undefined,
-        extraTags: info.extraTags ?? undefined,
-      }),
+      buildTagUpdateFromInfo,
       canPaste: () => {
         const { data } = get();
         return !!data;

@@ -1,23 +1,23 @@
 import { Check, Play } from 'lucide-react';
-import { ArtistIcon } from '../ui/Icons';
 import type { CSSProperties, DragEvent } from 'react';
 import { memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { usePlayerStore } from '../../store/player-store';
 import { getContextMenuPosition } from '../../lib/context-menu-position';
+import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedGrid } from '../shared/VirtualizedGrid';
 import { Button } from '../ui/button';
-import { LibraryTracksList } from './LibraryTracksList';
+import { ArtistIcon } from '../ui/Icons';
 import { LibraryAlbumsList } from './LibraryAlbumsList';
 import { LibraryArtistsList } from './LibraryArtistsList';
+import { LibraryTracksList } from './LibraryTracksList';
 import type { AlbumGroup, ArtistGroup } from './library-view-model';
 import type { ResultsOrchestratorProps } from './library-view-types';
 import { renderHighlightedText } from './search-highlight';
 
 const DEFAULT_HIGHLIGHT_CLASS = 'rounded-[3px] bg-primary/35 px-0.5 text-inherit';
-const NEO_HIGHLIGHT_CLASS = 'rounded-none bg-[#F5C518] px-0.5 text-black';
+const NEO_HIGHLIGHT_CLASS = 'rounded-none bg-[var(--signal-active)] px-0.5 text-black';
 
 const ALBUM_ROTATIONS = [
   'rotate-[-0.8deg]',
@@ -30,10 +30,12 @@ const ALBUM_TAPE_ROTATIONS = ['rotate-[-4deg]', 'rotate-[3deg]', 'rotate-[-3deg]
 const NEO_CARD_BASE =
   'group relative border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none cursor-pointer select-none';
 const NEO_CARD_SELECTED =
-  'bg-[#F5C518] shadow-none translate-x-[1px] translate-y-[1px] border-[1.5px] border-[#1a1a1a]';
-const NEO_CARD_PLAYING = 'border-[#7CC61F] bg-[#7CC61F] shadow-[3px_3px_0_0_#7CC61F]';
+  'bg-[var(--signal-active)] shadow-none translate-x-[1px] translate-y-[1px] border-[1.5px] border-[#1a1a1a]';
+const NEO_CARD_PLAYING =
+  'border-[var(--signal-play)] bg-[var(--signal-play)] shadow-[3px_3px_0_0_var(--signal-play)]';
 
-const NEO_TAPE_STYLE = 'absolute -top-[9px] left-1/2 -translate-x-1/2 w-12 h-[18px] z-20 pointer-events-none opacity-90';
+const NEO_TAPE_STYLE =
+  'absolute -top-[9px] left-1/2 -translate-x-1/2 w-12 h-[18px] z-20 pointer-events-none opacity-90';
 const TAPE_INNER_STYLE: CSSProperties = {
   background: 'rgba(230, 200, 120, 0.28)',
   border: '1px solid rgba(180, 155, 80, 0.35)',
@@ -41,7 +43,7 @@ const TAPE_INNER_STYLE: CSSProperties = {
 };
 
 const NEO_TILE_PLAY_BTN =
-  'absolute flex items-center justify-center border-2 border-black bg-[#F5C518] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#FFE234] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none z-20';
+  'absolute flex items-center justify-center border-2 border-black bg-[var(--signal-active)] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#FFE234] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none z-20';
 
 function getAlbumRotationClass(i: number): string {
   return ALBUM_ROTATIONS[i % ALBUM_ROTATIONS.length];
@@ -164,11 +166,11 @@ const TrackTile = memo(function TrackTile({
             : renderHighlightedText(track.artist, searchQuery, highlightClass)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1">
-          <span className="max-w-full truncate border border-black/20 bg-[#E6E6E6] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest">
+          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest">
             {renderHighlightedText(track.album, searchQuery, highlightClass)}
           </span>
           {isLyricsMatch && (
-            <span className="border border-black/20 bg-[#7CC61F] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#000]">
+            <span className="border border-black/20 bg-[var(--signal-play)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#000]">
               LYR
             </span>
           )}
@@ -346,7 +348,7 @@ const AlbumTile = memo(function AlbumTile({
         </div>
         {album.track.year && (
           <div className="mt-auto flex flex-wrap gap-1.5 pt-2">
-            <span className="border border-black bg-[#E6E6E6] px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.05em] text-black/70">
+            <span className="border border-black bg-[var(--neo-muted)] px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.05em] text-black/70">
               {String(album.track.year)}
             </span>
           </div>
@@ -789,20 +791,17 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
             onOpen={onAlbumOpen}
             onPlay={onPlayAlbum}
             isNeo={isNeo}
-            isPlayingAlbum={
-              Boolean(
-                isPlaying &&
+            isPlayingAlbum={Boolean(
+              isPlaying &&
                 currentTrack &&
                 currentTrack.album === album.track.album &&
                 currentTrack.artist === album.track.artist,
-              )
-            }
+            )}
           />
         )}
       />
     );
   }
-
 
   if (activeFacet === 'artists') {
     const artists = groupedData as ArtistGroup[];
@@ -839,13 +838,14 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
             onOpen={onArtistOpen}
             onPlay={onPlayTrack}
             isNeo={isNeo}
-            isPlayingArtist={Boolean(isPlaying && currentTrack && currentTrack.artist === artist.artist)}
+            isPlayingArtist={Boolean(
+              isPlaying && currentTrack && currentTrack.artist === artist.artist,
+            )}
           />
         )}
       />
     );
   }
-
 
   return null;
 });

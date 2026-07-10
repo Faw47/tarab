@@ -4,16 +4,14 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Blurhash } from 'react-blurhash';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  getCoverArtDataUrlFallback,
+  getCoverArtBlobFallback,
   markCoverArtProtocolFailed,
   useCoverArt,
 } from '../../hooks/useCoverArt';
-import { cacheGetThumbnailDataUrl, getCoverArt } from '../../lib/tauri-commands';
+import { getCoverArt } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
 import { CoverArtSkeleton } from './CoverArtSkeleton';
-
-const MAX_FALLBACK_DATA_URL_LENGTH = 3_000_000;
 
 interface CoverArtImageProps {
   track: Pick<Track, 'filePath' | 'hasCoverArt' | 'album' | 'coverArtHash' | 'blurhash'>;
@@ -96,9 +94,9 @@ export const CoverArtImage = memo(
       // If we have a hash, try IPC fallback (protocol likely failed)
       if (track.coverArtHash) {
         try {
-          const dataUrl = await getCoverArtDataUrlFallback(track.coverArtHash, size);
-          if (dataUrl && dataUrl.length <= MAX_FALLBACK_DATA_URL_LENGTH) {
-            setOverrideSrc(dataUrl);
+          const blobUrl = await getCoverArtBlobFallback(track.coverArtHash, size);
+          if (blobUrl) {
+            setOverrideSrc(blobUrl);
             return;
           }
         } catch (e) {
@@ -110,11 +108,11 @@ export const CoverArtImage = memo(
       try {
         const hash = await getCoverArt(track.filePath);
         if (hash) {
-          // Try IPC data URL instead of protocol URL
+          // Try IPC Blob URL instead of protocol URL
           try {
-            const dataUrl = await cacheGetThumbnailDataUrl(hash, size);
-            if (dataUrl && dataUrl.length <= MAX_FALLBACK_DATA_URL_LENGTH) {
-              setOverrideSrc(dataUrl);
+            const blobUrl = await getCoverArtBlobFallback(hash, size);
+            if (blobUrl) {
+              setOverrideSrc(blobUrl);
               return;
             }
           } catch (e) {

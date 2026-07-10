@@ -63,14 +63,20 @@ const withQueueId = (track: Track): Track => ({
   _queueId: track._queueId ?? crypto.randomUUID(),
 });
 
-const resolveActiveQueueIndex = (
+export const resolveActiveQueueIndex = (
   queue: Track[],
   queueIndex: number,
   currentTrack: Track | null,
 ): number => {
   if (queue.length === 0) return -1;
 
-  if (queueIndex >= 0 && queueIndex < queue.length) {
+  const indexedTrack = queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
+  if (
+    indexedTrack &&
+    (!currentTrack ||
+      indexedTrack._queueId === currentTrack._queueId ||
+      indexedTrack.id === currentTrack.id)
+  ) {
     return queueIndex;
   }
 
@@ -84,7 +90,7 @@ const resolveActiveQueueIndex = (
     if (byTrackId >= 0) return byTrackId;
   }
 
-  return -1;
+  return indexedTrack ? queueIndex : -1;
 };
 
 export const usePlayerStore = create<PlayerState>()(
@@ -267,7 +273,7 @@ export const usePlayerStore = create<PlayerState>()(
         set(
           (state) => {
             if (state.queue.length === 0) {
-              return { queueIndex: 0 };
+              return { queueIndex: -1 };
             }
             const clampedIndex = Math.max(0, Math.min(index, state.queue.length - 1));
             return { queueIndex: clampedIndex };

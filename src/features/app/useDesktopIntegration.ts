@@ -30,8 +30,8 @@ import type {
 import {
   DESKTOP_ACTION_DEDUP_WINDOW_MS,
   EVENT_DESKTOP_CONTROL_ACTION,
-  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_PLAYBACK_SNAPSHOT,
+  EVENT_DESKTOP_SEEK,
   EVENT_DESKTOP_SNAPSHOT_REQUEST,
   MINI_WINDOW_LABEL,
 } from './desktop-events';
@@ -191,13 +191,21 @@ export function useDesktopIntegration() {
       void emitDesktopSnapshotToMini();
     },
     [emitDesktopSnapshotToMini],
-    (error) => reportError('Failed to setup desktop snapshot listener', { source: 'desktop-bridge', error }),
+    (error) =>
+      reportError('Failed to setup desktop snapshot listener', { source: 'desktop-bridge', error }),
   );
 
   useEffect(() => {
     if (!startupReady) return;
     void emitDesktopSnapshotToMini();
-  }, [emitDesktopSnapshotToMini, startupReady, currentTrack?.id, isPlaying, queueIndex, queueVersion]);
+  }, [
+    emitDesktopSnapshotToMini,
+    startupReady,
+    currentTrack?.id,
+    isPlaying,
+    queueIndex,
+    queueVersion,
+  ]);
 
   useEffect(() => {
     if (!startupReady) return;
@@ -316,7 +324,8 @@ export function useDesktopIntegration() {
       })();
     },
     [miniWindowEnabled],
-    (error) => reportError('Failed to setup desktop action listener', { source: 'desktop-bridge', error }),
+    (error) =>
+      reportError('Failed to setup desktop action listener', { source: 'desktop-bridge', error }),
   );
 
   useTauriEvent<DesktopSeekPayload>(
@@ -331,7 +340,8 @@ export function useDesktopIntegration() {
       });
     },
     [miniWindowEnabled],
-    (error) => reportError('Failed to setup desktop seek listener', { source: 'desktop-bridge', error }),
+    (error) =>
+      reportError('Failed to setup desktop seek listener', { source: 'desktop-bridge', error }),
   );
 
   useTauriEvent<void>(
@@ -345,6 +355,7 @@ export function useDesktopIntegration() {
       });
     },
     [],
-    (error) => reportError('Failed to setup menu-quit listener', { source: 'desktop-bridge', error }),
+    (error) =>
+      reportError('Failed to setup menu-quit listener', { source: 'desktop-bridge', error }),
   );
 }

@@ -33,30 +33,32 @@ import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import type { AlbumDetailsOverlayProps } from './AlbumDetailsOverlay';
+import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ---------------------------------------------------------------------------
 // Unified Design Constants
 // ---------------------------------------------------------------------------
 
 const BUTTON_BASE =
-  'inline-flex items-center justify-center gap-2 border-[2px] border-black font-black uppercase tracking-[0.08em] transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F5C518] rounded-none cursor-pointer';
+  'inline-flex items-center justify-center gap-2 border-[2px] border-black font-black uppercase tracking-[0.08em] transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-active)] rounded-none cursor-pointer';
 
 const BUTTON_DEFAULT =
-  'bg-white text-black shadow-[4px_4px_0_0_#000] hover:bg-[#E6E6E6] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
+  'bg-white text-black shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-muted)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
 
 const BUTTON_PRIMARY =
   'bg-[#9D80E3] text-black shadow-[4px_4px_0_0_#000] hover:bg-[#8A6FCC] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
 
 const BUTTON_DANGER =
-  'bg-[#F87171] text-black shadow-[4px_4px_0_0_#000] hover:bg-[#E53935] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
+  'bg-[var(--signal-danger)] text-black shadow-[4px_4px_0_0_#000] hover:bg-[var(--signal-danger)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
 
-const TRACK_GRID = 'grid grid-cols-[36px_40px_1fr_64px] md:grid-cols-[40px_48px_1fr_90px] items-center gap-3';
+const TRACK_GRID =
+  'grid grid-cols-[36px_40px_1fr_64px] md:grid-cols-[40px_48px_1fr_90px] items-center gap-3';
 
 const neoIconButtonClass = (active = false) =>
   cn(
     BUTTON_BASE,
     active
-      ? 'translate-x-[4px] translate-y-[4px] bg-[#F5C518] text-black shadow-none'
+      ? 'translate-x-[4px] translate-y-[4px] bg-[var(--signal-active)] text-black shadow-none'
       : BUTTON_DEFAULT,
     'h-10 w-10 p-0 shadow-[4px_4px_0_0_#000]',
   );
@@ -83,110 +85,105 @@ const isMultiSelectKey = (event: ReactMouseEvent | ReactKeyboardEvent): boolean 
 // Subcomponents
 // ---------------------------------------------------------------------------
 
-const TrackRow = memo(({
-  track,
-  index,
-  isSelected,
-  isCurrentTrack,
-  isCurrentlyPlaying,
-  selectionActive,
-  onTrackSelect,
-  onTrackContextMenu,
-  handleRowActivate,
-  handleTrackKeyDown,
-  trackGridClass
-}: {
-  track: Track;
-  index: number;
-  isSelected: boolean;
-  isCurrentTrack: boolean;
-  isCurrentlyPlaying: boolean;
-  selectionActive: boolean;
-  onTrackSelect?: (track: Track, isMulti: boolean) => void;
-  onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
-  handleRowActivate: (track: Track) => void;
-  handleTrackKeyDown: (track: Track, e: ReactKeyboardEvent<HTMLDivElement>) => void;
-  trackGridClass: string;
-}) => {
-  const rowPlaying = isCurrentTrack && isCurrentlyPlaying;
-  const rowSelectedOnly = isSelected && !rowPlaying;
+const TrackRow = memo(
+  ({
+    track,
+    index,
+    isSelected,
+    isCurrentTrack,
+    isCurrentlyPlaying,
+    selectionActive,
+    onTrackSelect,
+    onTrackContextMenu,
+    handleRowActivate,
+    handleTrackKeyDown,
+    trackGridClass,
+  }: {
+    track: Track;
+    index: number;
+    isSelected: boolean;
+    isCurrentTrack: boolean;
+    isCurrentlyPlaying: boolean;
+    selectionActive: boolean;
+    onTrackSelect?: (track: Track, isMulti: boolean) => void;
+    onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
+    handleRowActivate: (track: Track) => void;
+    handleTrackKeyDown: (track: Track, e: ReactKeyboardEvent<HTMLDivElement>) => void;
+    trackGridClass: string;
+  }) => {
+    const rowPlaying = isCurrentTrack && isCurrentlyPlaying;
+    const rowSelectedOnly = isSelected && !rowPlaying;
 
-  return (
-    <div
-      role="row"
-      tabIndex={0}
-      aria-selected={isSelected}
-      onClick={(event) => {
-        onTrackSelect?.(track, isMultiSelectKey(event));
-      }}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        handleRowActivate(track);
-      }}
-      onKeyDown={(event) => handleTrackKeyDown(track, event)}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onTrackContextMenu?.(event, track);
-      }}
-      className={cn(
-        trackGridClass,
-        'cursor-pointer px-4 py-3 text-sm outline-none transition-none md:px-6 md:py-4',
-        'border-y-2 border-r-2 border-black focus-visible:border-l-black',
-        rowPlaying && 'border-l-4 border-l-black bg-[#7CC61F]',
-        rowSelectedOnly && 'border-l-4 border-l-black bg-[#F5C518]',
-        !rowPlaying && !rowSelectedOnly && 'border-l-4 border-l-transparent bg-white hover:bg-[#E6E6E6]',
-      )}
-    >
-      <div role="cell" className="flex justify-center">
-        {selectionActive && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onTrackSelect?.(track, true);
-            }}
-            aria-label={
-              isSelected ? `Deselect ${track.title}` : `Select ${track.title}`
-            }
-            className="text-black"
-          >
-            {isSelected ? (
-              <CheckSquare className="h-4 w-4" />
-            ) : (
-              <Square className="h-4 w-4" />
-            )}
-          </button>
+    return (
+      <div
+        role="row"
+        tabIndex={0}
+        aria-selected={isSelected}
+        onClick={(event) => {
+          onTrackSelect?.(track, isMultiSelectKey(event));
+        }}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          handleRowActivate(track);
+        }}
+        onKeyDown={(event) => handleTrackKeyDown(track, event)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onTrackContextMenu?.(event, track);
+        }}
+        className={cn(
+          trackGridClass,
+          'cursor-pointer px-4 py-3 text-sm outline-none transition-none md:px-6 md:py-4',
+          'border-y-2 border-r-2 border-black focus-visible:border-l-black',
+          rowPlaying && 'border-l-4 border-l-black bg-[var(--signal-play)]',
+          rowSelectedOnly && 'border-l-4 border-l-black bg-[var(--signal-active)]',
+          !rowPlaying &&
+            !rowSelectedOnly &&
+            'border-l-4 border-l-transparent bg-white hover:bg-[var(--neo-muted)]',
         )}
-      </div>
-
-      <div
-        role="cell"
-        className="text-center font-mono text-[13px] font-black tabular-nums text-black"
       >
-        {String(index + 1).padStart(2, '0')}
-      </div>
-
-      <div role="cell" className="min-w-0">
-        <div className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2">
-          {isCurrentTrack && isCurrentlyPlaying && (
-            <div className="w-2 h-2 rounded-none bg-black animate-pulse shrink-0" />
+        <div role="cell" className="flex justify-center">
+          {selectionActive && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onTrackSelect?.(track, true);
+              }}
+              aria-label={isSelected ? `Deselect ${track.title}` : `Select ${track.title}`}
+              className="text-black"
+            >
+              {isSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+            </button>
           )}
-          {track.title}
         </div>
-        <div className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5">
-          {track.artist}
-        </div>
-      </div>
 
-      <div
-        role="cell"
-        className="text-right text-[12px] font-mono font-black text-black"
-      >
-        {formatTime(track.duration)}
+        <div
+          role="cell"
+          className="text-center font-mono text-[13px] font-black tabular-nums text-black"
+        >
+          {String(index + 1).padStart(2, '0')}
+        </div>
+
+        <div role="cell" className="min-w-0">
+          <div className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2">
+            {isCurrentTrack && isCurrentlyPlaying && (
+              <div className="w-2 h-2 rounded-none bg-black animate-pulse shrink-0" />
+            )}
+            {track.title}
+          </div>
+          <div className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5">
+            {track.artist}
+          </div>
+        </div>
+
+        <div role="cell" className="text-right text-[12px] font-mono font-black text-black">
+          {formatTime(track.duration)}
+        </div>
       </div>
-    </div>
-  );
-});
+    );
+  },
+);
 TrackRow.displayName = 'TrackRow';
 
 // ---------------------------------------------------------------------------
@@ -217,7 +214,6 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
   onScrollChange,
 }: AlbumDetailsOverlayProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [manualSelectionMode, setManualSelectionMode] = useState(false);
   const [playlistPickerIds, setPlaylistPickerIds] = useState<string[] | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -242,24 +238,25 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
   const coverFormatSticker = firstTrack?.filePath ? extensionFromPath(firstTrack.filePath) : 'FILE';
   const coverMetaSticker = firstTrack?.fileFormat?.trim() || null;
 
-  const selectedSet = useMemo(() => new Set(selectedTrackIds), [selectedTrackIds]);
-  const selectedTracks = useMemo(
-    () => tracks.filter((track) => selectedSet.has(track.id)),
-    [tracks, selectedSet],
-  );
-  const selectedCount = selectedSet.size;
-  const someSelected = selectedCount > 0;
-  const allSelected = tracks.length > 0 && selectedCount === tracks.length;
-  const selectionActive = manualSelectionMode || someSelected;
-
+  const {
+    selectedSet,
+    selectedTracks,
+    selectedCount,
+    someSelected,
+    allSelected,
+    selectionActive,
+    targetTracks,
+    activateSelection,
+    clearSelection,
+    handleSelectAll,
+  } = useAlbumTrackSelection({
+    tracks,
+    selectedTrackIds,
+    onClearSelection,
+    onSelectAll,
+  });
   const canPlayAlbum = Boolean(onPlayAlbum && tracks.length > 0);
   const canShuffleAlbum = Boolean(onShuffleAlbum && tracks.length > 0);
-
-  useEffect(() => {
-    if (selectedTrackIds.length === 0) {
-      setManualSelectionMode(false);
-    }
-  }, [selectedTrackIds]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -272,24 +269,6 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [menuOpen]);
-
-  const clearSelection = useCallback(() => {
-    setManualSelectionMode(false);
-    onClearSelection?.();
-  }, [onClearSelection]);
-
-  const handleSelectAll = useCallback(() => {
-    if (allSelected) {
-      clearSelection();
-      return;
-    }
-    onSelectAll?.(tracks);
-  }, [allSelected, clearSelection, onSelectAll, tracks]);
-
-  const targetTracks = useMemo(
-    () => (selectedTracks.length > 0 ? selectedTracks : tracks),
-    [selectedTracks, tracks],
-  );
 
   const openPlaylistPicker = useCallback(() => {
     if (targetTracks.length === 0) return;
@@ -328,7 +307,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
       if (event.key === ' ' || event.key === 'Spacebar') {
         event.preventDefault();
         if (selectionActive) {
-          setManualSelectionMode(true);
+          activateSelection();
           onTrackSelect?.(track, true);
           return;
         }
@@ -340,8 +319,6 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-transparent text-black animate-neo-slide-up">
-
-
       <div className="relative flex h-full flex-col">
         <div className="shrink-0 border-b-2 border-black bg-white px-4 md:px-6 py-3 flex items-center justify-between z-30">
           <div className="flex min-w-0 items-center gap-3">
@@ -367,7 +344,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             <button
               type="button"
               onClick={() => onShuffleAlbum?.()}
-              className={cn(neoActionButtonClass(), "hover-neo-wiggle")}
+              className={cn(neoActionButtonClass(), 'hover-neo-wiggle')}
               disabled={!canShuffleAlbum}
             >
               <Shuffle className="h-4 w-4" />
@@ -376,7 +353,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             <button
               type="button"
               onClick={() => onPlayAlbum?.()}
-              className={cn(neoActionButtonClass(true), "hover-neo-wiggle")}
+              className={cn(neoActionButtonClass(true), 'hover-neo-wiggle')}
               disabled={!canPlayAlbum}
             >
               <Play className="h-4 w-4 fill-current" />
@@ -391,67 +368,70 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
         >
           <div className="mx-auto max-w-6xl space-y-8 md:space-y-12">
             <section className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr] md:gap-8">
-                <div className="rounded-none border-2 border-black bg-white p-2 shadow-[4px_4px_0_0_#000] animate-neo-pop">
-                  <div className="neo-album-art-wrap relative aspect-square overflow-hidden bg-[#E6E6E6]">
-                    <div className="absolute left-2 top-2 z-30 border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase text-black">
-                      {coverFormatSticker}
-                    </div>
-                    {coverMetaSticker && (
-                      <div className="absolute bottom-2 right-2 z-30 -rotate-2 border-2 border-black bg-[#F5C518] px-2 py-1 text-[10px] font-black uppercase text-black">
-                        {coverMetaSticker}
-                      </div>
-                    )}
-                    {resolvedCoverArt ? (
-                      <img
-                        src={resolvedCoverArt}
-                        alt={album}
-                        className="h-full w-full object-cover"
-                        draggable={false}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center">
-                        <Music2 className="h-16 w-16 text-black/45" />
-                      </div>
-                    )}
+              <div className="rounded-none border-2 border-black bg-white p-2 shadow-[4px_4px_0_0_#000] animate-neo-pop">
+                <div className="neo-album-art-wrap relative aspect-square overflow-hidden bg-[var(--neo-muted)]">
+                  <div className="absolute left-2 top-2 z-30 border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase text-black">
+                    {coverFormatSticker}
                   </div>
+                  {coverMetaSticker && (
+                    <div className="absolute bottom-2 right-2 z-30 -rotate-2 border-2 border-black bg-[var(--signal-active)] px-2 py-1 text-[10px] font-black uppercase text-black">
+                      {coverMetaSticker}
+                    </div>
+                  )}
+                  {resolvedCoverArt ? (
+                    <img
+                      src={resolvedCoverArt}
+                      alt={album}
+                      className="h-full w-full object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Music2 className="h-16 w-16 text-black/45" />
+                    </div>
+                  )}
                 </div>
-{/* Info / Metadata */}
-<div className="flex flex-col justify-center rounded-none border-2 border-black bg-white p-6 md:p-8 shadow-[4px_4px_0_0_#000] animate-neo-pop" style={{ animationDelay: '100ms' }}>
-  <p className="text-[12px] font-black uppercase tracking-[0.18em] text-black/50">
+              </div>
+              {/* Info / Metadata */}
+              <div
+                className="flex flex-col justify-center rounded-none border-2 border-black bg-white p-6 md:p-8 shadow-[4px_4px_0_0_#000] animate-neo-pop"
+                style={{ animationDelay: '100ms' }}
+              >
+                <p className="text-[12px] font-black uppercase tracking-[0.18em] text-black/50">
                   Album Release
                 </p>
                 <h1 className="mt-2 text-3xl md:text-5xl font-black uppercase leading-tight tracking-tight text-black break-words">
                   {album}
                 </h1>
-                
-                <div className="mt-4 inline-flex self-start bg-black px-3 py-1.5 shadow-[3px_3px_0_0_#7CC61F]">
-                  <p className="text-sm md:text-base font-black uppercase tracking-[0.05em] text-[#7CC61F]">
+
+                <div className="mt-4 inline-flex self-start bg-black px-3 py-1.5 shadow-[3px_3px_0_0_var(--signal-play)]">
+                  <p className="text-sm md:text-base font-black uppercase tracking-[0.05em] text-[var(--signal-play)]">
                     {artist}
                   </p>
                 </div>
 
                 <div className="mt-8 flex flex-wrap items-center gap-3">
                   {releaseYear && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[#E6E6E6] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
                       <Calendar className="h-3.5 w-3.5" />
                       {releaseYear}
                     </span>
                   )}
-                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[#E6E6E6] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
                     <ListMusic className="h-3.5 w-3.5" />
                     {tracks.length} {tracks.length === 1 ? 'Track' : 'Tracks'}
                   </span>
-                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[#E6E6E6] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
                     <Clock className="h-3.5 w-3.5" />
                     {formatTime(totalDuration)}
                   </span>
                   {firstTrack?.fileFormat && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[#E6E6E6] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
                       {firstTrack.fileFormat}
                     </span>
                   )}
                   {firstTrack?.bitrate && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[#E6E6E6] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
                       {Math.round(firstTrack.bitrate / 1000)} kbps
                     </span>
                   )}
@@ -481,7 +461,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             </section>
 
             <section className="rounded-none border-2 border-black bg-white shadow-[4px_4px_0_0_#000] overflow-hidden">
-              <div className="flex items-center justify-between gap-2 border-b-2 border-black px-4 md:px-6 py-4 bg-[#F6F6F6]">
+              <div className="flex items-center justify-between gap-2 border-b-2 border-black px-4 md:px-6 py-4 bg-[var(--neo-panel)]">
                 <div className="flex items-center gap-3">
                   <h3 className="text-[13px] font-black uppercase tracking-[0.16em] text-black">
                     Track Roster
@@ -499,7 +479,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                         clearSelection();
                         return;
                       }
-                      setManualSelectionMode(true);
+                      activateSelection();
                     }}
                     className={neoActionButtonClass()}
                   >
@@ -612,33 +592,37 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
               <div role="table" aria-label={`${album} tracklist`}>
                 <div role="rowgroup" className="border-b-2 border-black bg-black text-white">
-                    <div
-                      role="row"
-                      className={cn(
-                        TRACK_GRID,
-                        'px-4 md:px-6 py-3 text-[11px] font-black uppercase tracking-[0.1em]',
+                  <div
+                    role="row"
+                    className={cn(
+                      TRACK_GRID,
+                      'px-4 md:px-6 py-3 text-[11px] font-black uppercase tracking-[0.1em]',
+                    )}
+                  >
+                    <div role="columnheader" className="flex justify-center">
+                      {selectionActive && (
+                        <button
+                          type="button"
+                          onClick={handleSelectAll}
+                          aria-label={allSelected ? 'Deselect all tracks' : 'Select all tracks'}
+                          className="text-white hover:text-[var(--signal-active)] transition-none"
+                        >
+                          {allSelected ? (
+                            <CheckSquare className="h-4 w-4" />
+                          ) : (
+                            <Square className="h-4 w-4" />
+                          )}
+                        </button>
                       )}
-                    >
-                      <div role="columnheader" className="flex justify-center">
-                        {selectionActive && (
-                          <button
-                            type="button"
-                            onClick={handleSelectAll}
-                            aria-label={allSelected ? 'Deselect all tracks' : 'Select all tracks'}
-                            className="text-white hover:text-[#F5C518] transition-none"
-                          >
-                            {allSelected ? (
-                              <CheckSquare className="h-4 w-4" />
-                            ) : (
-                              <Square className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                      </div>
-                      <div role="columnheader" className="text-center">#</div>
-                      <div role="columnheader">ID _ TITLE</div>
-                      <div role="columnheader" className="text-right">DUR</div>
                     </div>
+                    <div role="columnheader" className="text-center">
+                      #
+                    </div>
+                    <div role="columnheader">ID _ TITLE</div>
+                    <div role="columnheader" className="text-right">
+                      DUR
+                    </div>
+                  </div>
                 </div>
 
                 {tracks.length === 0 ? (
@@ -676,7 +660,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
         {someSelected && (
           <div className="pointer-events-none fixed bottom-8 left-0 right-0 z-40 flex justify-center px-4">
             <div className="pointer-events-auto flex w-full max-w-[800px] flex-wrap items-center justify-center gap-3 border-2 border-black bg-white p-4 shadow-[4px_4px_0_0_#000]">
-              <span className="border-[2px] border-black bg-black text-[#F5C518] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em]">
+              <span className="border-[2px] border-black bg-black text-[var(--signal-active)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em]">
                 {selectedCount} Selected
               </span>
 

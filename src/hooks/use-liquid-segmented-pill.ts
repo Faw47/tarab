@@ -1,10 +1,10 @@
 import {
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
-  type RefObject,
 } from 'react';
 
 import {
@@ -101,7 +101,11 @@ export function useLiquidSegmentedPillHorizontal(options: {
     syncDependencies,
     enabled = true,
   } = options;
-  const [pillStyle, setPillStyle] = useState<LiquidPillHorizontal>({ left: 0, width: 0, opacity: 0 });
+  const [pillStyle, setPillStyle] = useState<LiquidPillHorizontal>({
+    left: 0,
+    width: 0,
+    opacity: 0,
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [pillLayoutFromDom, setPillLayoutFromDom] = useState(false);
   const [dragPreviewIndex, setDragPreviewIndex] = useState<number | null>(null);

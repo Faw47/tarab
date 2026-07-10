@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import type { NavView } from '../components/navigation/FloatingDock';
 import { startPlayback } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
 import { sortAlbumTracks } from '../lib/track-order';
@@ -15,24 +14,20 @@ interface AlbumDetails {
 interface UseAlbumActionsParams {
   albumDetails: AlbumDetails | null;
   setShowFullPlayer: (show: boolean) => void;
-  setAlbumDetails: (details: AlbumDetails | null) => void;
-  setCurrentView: (view: NavView) => void;
+  openAlbumDetails: (details: AlbumDetails) => void;
 }
 
 export const useAlbumActions = ({
   albumDetails,
   setShowFullPlayer,
-  setAlbumDetails,
-  setCurrentView,
+  openAlbumDetails,
 }: UseAlbumActionsParams) => {
   const handleOpenAlbumDetails = useCallback(
     (payload: { album: string; artist: string; coverArt?: string; tracks: Track[] }) => {
       setShowFullPlayer(false);
-      const sortedTracks = sortAlbumTracks(payload.tracks);
-      setAlbumDetails({ ...payload, tracks: sortedTracks });
-      setCurrentView('album');
+      openAlbumDetails({ ...payload, tracks: sortAlbumTracks(payload.tracks) });
     },
-    [setShowFullPlayer, setAlbumDetails, setCurrentView],
+    [setShowFullPlayer, openAlbumDetails],
   );
 
   const handlePlayAlbum = useCallback(async () => {
