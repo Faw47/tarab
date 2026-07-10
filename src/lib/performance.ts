@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { useEffect, useRef } from 'react';
 
 export const PERF_BUDGETS = {
   startupInteractiveMs: 3500,
@@ -10,7 +11,6 @@ export const PERF_BUDGETS = {
 
 export type PerfBudgetKey = keyof typeof PERF_BUDGETS;
 
-// Check for debug flag in localStorage or URL params (only in dev)
 const isDebugPerf = () => {
   if (typeof window === 'undefined') return false;
 
@@ -23,7 +23,17 @@ const isDebugPerf = () => {
 
   return storageDebugEnabled || new URLSearchParams(window.location.search).has('debug_perf');
 };
+
 export const DEBUG_PERF_ENABLED = __DEV__ && isDebugPerf();
+
+const safeSerializedSize = (value: unknown): number => {
+  if (value == null) return 0;
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+};
 
 class PerformanceMonitor {
   private enabled: boolean;
@@ -31,15 +41,14 @@ class PerformanceMonitor {
   private activeTimers: Map<string, number> = new Map();
   private ipcCalls: Array<{ cmd: string; time: number }> = [];
   private renderTimes: Map<string, Array<number>> = new Map();
-  private lastMetricsReport: number = 0;
+  private lastMetricsReport = 0;
   private metricsIntervalId: ReturnType<typeof setInterval> | null = null;
   private budgetSamples: Map<PerfBudgetKey, number[]> = new Map();
 
   constructor() {
     this.enabled = DEBUG_PERF_ENABLED;
     if (__DEV__ && this.enabled) {
-      console.log('🚀 Performance Monitor Enabled');
-      (window as any).perfMonitor = this;
+      console.log('[Perf] Performance monitor enabled');
       this.startMetricsReporting();
     }
   }
@@ -63,36 +72,23 @@ class PerformanceMonitor {
     }
   }
 
-  logRender(componentName: string, extra?: any) {
+  logRender(componentName: string, extra?: unknown) {
     if (!this.enabled) return;
 
     const count = (this.renderCounts.get(componentName) || 0) + 1;
     this.renderCounts.set(componentName, count);
 
-    // Track render times for frequency calculation
     const now = Date.now();
-    if (!this.renderTimes.has(componentName)) {
-      this.renderTimes.set(componentName, []);
-    }
-    this.renderTimes.get(componentName)!.push(now);
-    // Keep only last 10 seconds of render times
-    const oneSecondAgo = now - 10000;
-    const times = this.renderTimes.get(componentName)!;
+    const times = this.renderTimes.get(componentName) ?? [];
+    times.push(now);
     this.renderTimes.set(
       componentName,
-      times.filter((t) => t > oneSecondAgo),
+      times.filter((t) => t > now - 10000),
     );
 
-    // Group console logs to reduce noise, color code by frequency
-    const color = count > 100 ? '#ff0000' : count > 50 ? '#ff9900' : '#00cc00';
-
-    console.groupCollapsed(
-      `%c[Render] ${componentName} (${count})`,
-      `color: ${color}; font-weight: bold`,
-    );
-    if (extra) console.log('Props/State:', extra);
-    console.trace('Render Trigger'); // Helpful to see what triggered it
-    console.groupEnd();
+    if (count === 1 || count % 25 === 0) {
+      console.log(`[Render] ${componentName} (${count})`, extra ?? '');
+    }
   }
 
   startMeasure(label: string) {
@@ -116,26 +112,22 @@ class PerformanceMonitor {
     }
   }
 
-  // Wrap Tauri invoke to measure IPC cost
   async measureIPC<T>(
     cmd: string,
     args?: unknown,
     originalInvoke: typeof invoke = invoke,
   ): Promise<T> {
-    if (!this.enabled) return originalInvoke(cmd, args as any);
+    if (!this.enabled) return originalInvoke<T>(cmd, args as Parameters<typeof invoke>[1]);
 
     const start = performance.now();
-    const argSize = args ? JSON.stringify(args).length : 0;
+    const argSize = safeSerializedSize(args);
     const now = Date.now();
 
-    // Track IPC call for frequency calculation
     this.ipcCalls.push({ cmd, time: now });
-    // Keep only last 5 seconds of calls
-    const fiveSecondsAgo = now - 5000;
-    this.ipcCalls = this.ipcCalls.filter((call) => call.time > fiveSecondsAgo);
+    this.ipcCalls = this.ipcCalls.filter((call) => call.time > now - 5000);
 
     try {
-      const result = await originalInvoke(cmd, args as any);
+      const result = await originalInvoke<T>(cmd, args as Parameters<typeof invoke>[1]);
       const duration = performance.now() - start;
 
       console.log(
@@ -144,21 +136,21 @@ class PerformanceMonitor {
         argSize > 1000 ? 'color: red' : 'color: inherit',
         'color: #00aaff; font-weight: bold',
       );
-      return result as T;
+      return result;
     } catch (err) {
       console.error(`[IPC Fail] ${cmd}`, err);
       throw err;
     }
   }
+
   startMetricsReporting() {
     if (!this.enabled) return;
     if (this.metricsIntervalId !== null) return;
     this.metricsIntervalId = setInterval(() => {
       const now = Date.now();
-      if (now - this.lastMetricsReport < 5000) return; // Report every 5s
+      if (now - this.lastMetricsReport < 5000) return;
       this.lastMetricsReport = now;
 
-      // IPC frequency (calls per second)
       const oneSecondAgo = now - 1000;
       this.ipcCalls = this.ipcCalls.filter((call) => call.time > oneSecondAgo);
       const ipcPerSecond = this.ipcCalls.length;
@@ -170,7 +162,6 @@ class PerformanceMonitor {
         this.recordBudget('ipcCallsPerSecond', ipcPerSecond);
       }
 
-      // Render frequency per component
       this.renderTimes.forEach((times, component) => {
         const recentTimes = times.filter((t) => t > oneSecondAgo);
         if (recentTimes.length > 0) {
@@ -182,22 +173,18 @@ class PerformanceMonitor {
               'color: red; font-weight: bold',
             );
           }
-          // Keep only recent times
           this.renderTimes.set(component, recentTimes);
         }
       });
-
     }, 5000);
   }
 }
 
 export const Perf = new PerformanceMonitor();
+
 export const recordPerfBudget = (key: PerfBudgetKey, value: number) => {
   Perf.recordBudget(key, value);
 };
-
-// React Hook for render counting
-import { useEffect, useRef } from 'react';
 
 export const useRenderLog = (componentName: string, active = true) => {
   const renders = useRef(0);

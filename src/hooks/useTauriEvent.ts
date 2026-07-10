@@ -1,5 +1,5 @@
-import { listen, type Event, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
-import { useEffect, type DependencyList } from 'react';
+import { type Event, type EventCallback, listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { type DependencyList, useEffect } from 'react';
 
 type EventHandler<T> = EventCallback<T>;
 

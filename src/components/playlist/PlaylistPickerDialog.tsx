@@ -1,6 +1,5 @@
 import { clsx } from 'clsx';
 import { Plus, Search, X } from 'lucide-react';
-import { PlaylistIcon } from '../ui/Icons';
 import { memo, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -11,14 +10,9 @@ import { usePlaylistsQuery } from '../../features/playlists/queries';
 import { reportError } from '../../lib/report-error';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from '../ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
+import { PlaylistIcon } from '../ui/Icons';
 import { PlaylistEditorDialog } from './PlaylistEditorDialog';
 
 interface PlaylistPickerDialogProps {

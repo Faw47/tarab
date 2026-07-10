@@ -1,9 +1,7 @@
-import { memo } from 'react';
-
 import { Monitor } from 'lucide-react';
-
-import { SettingsSection, SettingsSwitch } from '../primitives';
+import { memo } from 'react';
 import { useSettingsStore } from '../../../store/settings-store';
+import { SettingsSection, SettingsSwitch } from '../primitives';
 
 export const MiniPlayerSection = memo(function MiniPlayerSection() {
   const miniPlayerVolumeVisible = useSettingsStore((s) => s.miniPlayerVolumeVisible);
@@ -34,4 +32,3 @@ export const MiniPlayerSection = memo(function MiniPlayerSection() {
 });
 
 MiniPlayerSection.displayName = 'MiniPlayerSection';
-

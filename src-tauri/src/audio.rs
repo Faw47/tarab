@@ -3,6 +3,7 @@ use parking_lot::Mutex;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::Serialize;
 use std::fs::File;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
@@ -17,6 +18,8 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
+
+use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1042,9 +1045,9 @@ impl AudioManager {
 
 const MAX_REFILL_ATTEMPTS: usize = 64;
 
-fn open_decoder_for_file(
-    file_path: &str,
-) -> Result<(Box<dyn FormatReader>, Box<dyn SymphoniaDecoder>, f64), String> {
+type OpenedDecoder = (Box<dyn FormatReader>, Box<dyn SymphoniaDecoder>, f64);
+
+fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
     let file = File::open(file_path).map_err(|e| format!("open error: {}", e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -1376,12 +1379,24 @@ pub fn create_audio_manager(app: AppHandle) -> SharedAudioManager {
     Arc::new(AudioManager::new(app))
 }
 
+fn ensure_audio_file_allowed(
+    file_path: &str,
+    roots: &[std::path::PathBuf],
+    action: &str,
+) -> Result<(), String> {
+    ensure_existing_path_allowed(Path::new(file_path), roots, action)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn play_track(
     file_path: String,
     start_pos: Option<f64>,
     state: tauri::State<'_, SharedAudioManager>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
+    let roots = roots_state.inner().read().roots.clone();
+    ensure_audio_file_allowed(&file_path, &roots, "play audio file")?;
     state.play(file_path, start_pos)
 }
 
@@ -1391,7 +1406,10 @@ pub fn crossfade_to_track(
     start_pos: Option<f64>,
     duration_secs: f32,
     state: tauri::State<'_, SharedAudioManager>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
+    let roots = roots_state.inner().read().roots.clone();
+    ensure_audio_file_allowed(&file_path, &roots, "crossfade audio file")?;
     state.crossfade_to(file_path, start_pos, duration_secs)
 }
 
@@ -1489,13 +1507,51 @@ pub fn set_audio_output_device(
 pub fn preload_next_track(
     file_path: Option<String>,
     state: tauri::State<'_, SharedAudioManager>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
+    if let Some(path) = file_path.as_deref() {
+        let roots = roots_state.inner().read().roots.clone();
+        ensure_audio_file_allowed(path, &roots, "preload audio file")?;
+    }
     state.preload_next(file_path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("tarab-audio-{}-{}", name, nonce));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn audio_file_validation_rejects_paths_outside_library_roots() {
+        let allowed_root = temp_dir("allowed");
+        let outside_root = temp_dir("outside");
+        let outside_file = outside_root.join("outside.mp3");
+        fs::write(&outside_file, b"not audio").expect("write outside file");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        let result =
+            ensure_audio_file_allowed(&outside_file.to_string_lossy(), &roots, "play audio file");
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("outside configured library roots"));
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
 
     #[test]
     fn normalized_progress_is_clamped() {

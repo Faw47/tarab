@@ -13,15 +13,17 @@ const {
   playAdjacentTrackMock,
   reportErrorMock,
 } = vi.hoisted(() => {
-  const listeners = new Map<string, (event: { payload: any }) => unknown>();
+  const listeners = new Map<string, (event: { payload: unknown }) => unknown>();
   return {
     listeners,
-    listenMock: vi.fn(async (eventName: string, handler: (event: { payload: any }) => unknown) => {
-      listeners.set(eventName, handler);
-      return () => {
-        listeners.delete(eventName);
-      };
-    }),
+    listenMock: vi.fn(
+      async (eventName: string, handler: (event: { payload: unknown }) => unknown) => {
+        listeners.set(eventName, handler);
+        return () => {
+          listeners.delete(eventName);
+        };
+      },
+    ),
     crossfadeToTrackMock: vi.fn(async () => undefined),
     dbUpdatePlayStatsMock: vi.fn(async () => undefined),
     preloadNextTrackMock: vi.fn(async () => undefined),
@@ -247,5 +249,26 @@ describe('usePlaybackLifecycle', () => {
     });
     expect(usePlayerStore.getState().isPlaying).toBe(false);
     expect(usePlayerStore.getState().hasActivePlayback).toBe(false);
+  });
+  it('ignores playback errors for stale non-current tracks', async () => {
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-error')).toBe(true);
+    });
+
+    await listeners.get('playback-error')?.({
+      payload: {
+        filePath: '/music/not-current.mp3',
+        stage: 'stream',
+        message: 'old stream failed',
+        recoverable: false,
+      },
+    });
+
+    expect(reportErrorMock).not.toHaveBeenCalled();
+    expect(playAdjacentTrackMock).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+    expect(usePlayerStore.getState().hasActivePlayback).toBe(true);
   });
 });

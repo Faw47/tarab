@@ -3,6 +3,11 @@ import type { SortBy } from '../types';
 
 export type LibrarySearchScope = 'all' | 'tracks' | 'albums' | 'artists' | 'lyrics';
 
+const clampScanProgress = (progress: number): number => {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(100, progress));
+};
+
 interface LibraryState {
   searchQuery: string;
   searchScope: LibrarySearchScope;
@@ -46,7 +51,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   },
 
   setScanProgress: (progress) => {
-    set({ scanProgress: progress });
+    set({ scanProgress: clampScanProgress(progress) });
   },
 
   startProcessing: (label) => {

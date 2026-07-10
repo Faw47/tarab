@@ -75,13 +75,13 @@
       "icons/icon.ico"
     ],
     "fileAssociations": [
-      { "ext": ["mp3"],  "name": "MP3 Audio",  "description": "MP3 Audio File",  "role": "Viewer" },
+      { "ext": ["mp3"], "name": "MP3 Audio", "description": "MP3 Audio File", "role": "Viewer" },
       { "ext": ["flac"], "name": "FLAC Audio", "description": "FLAC Audio File", "role": "Viewer" },
       { "ext": ["aiff"], "name": "AIFF Audio", "description": "AIFF Audio File", "role": "Viewer" },
-      { "ext": ["wav"],  "name": "WAV Audio",  "description": "WAV Audio File",  "role": "Viewer" },
-      { "ext": ["ogg"],  "name": "OGG Audio",  "description": "OGG Audio File",  "role": "Viewer" },
-      { "ext": ["m4a"],  "name": "M4A Audio",  "description": "M4A Audio File",  "role": "Viewer" },
-      { "ext": ["aac"],  "name": "AAC Audio",  "description": "AAC Audio File",  "role": "Viewer" }
+      { "ext": ["wav"], "name": "WAV Audio", "description": "WAV Audio File", "role": "Viewer" },
+      { "ext": ["ogg"], "name": "OGG Audio", "description": "OGG Audio File", "role": "Viewer" },
+      { "ext": ["m4a"], "name": "M4A Audio", "description": "M4A Audio File", "role": "Viewer" },
+      { "ext": ["aac"], "name": "AAC Audio", "description": "AAC Audio File", "role": "Viewer" }
     ]
   }
 }

@@ -4,12 +4,33 @@ import { libraryKeys } from './queryKeys';
 export type LibraryMutationKind = 'upsert' | 'delete' | 'rename' | 'rating' | 'play-stats' | 'scan';
 
 const INVALIDATION_MAP: Record<LibraryMutationKind, ReadonlyArray<readonly unknown[]>> = {
-  upsert: [libraryKeys.tracks(), libraryKeys.stats(), libraryKeys.recent(30, 50), libraryKeys.mostPlayed(100), libraryKeys.trackCount(), libraryKeys.searchRoot()],
-  delete: [libraryKeys.tracks(), libraryKeys.stats(), libraryKeys.recent(30, 50), libraryKeys.mostPlayed(100), libraryKeys.trackCount(), libraryKeys.searchRoot()],
+  upsert: [
+    libraryKeys.tracks(),
+    libraryKeys.stats(),
+    libraryKeys.recent(30, 50),
+    libraryKeys.mostPlayed(100),
+    libraryKeys.trackCount(),
+    libraryKeys.searchRoot(),
+  ],
+  delete: [
+    libraryKeys.tracks(),
+    libraryKeys.stats(),
+    libraryKeys.recent(30, 50),
+    libraryKeys.mostPlayed(100),
+    libraryKeys.trackCount(),
+    libraryKeys.searchRoot(),
+  ],
   rename: [libraryKeys.tracks(), libraryKeys.searchRoot()],
   rating: [libraryKeys.tracks(), libraryKeys.searchRoot()],
   'play-stats': [libraryKeys.tracks(), libraryKeys.stats(), libraryKeys.mostPlayed(100)],
-  scan: [libraryKeys.tracks(), libraryKeys.stats(), libraryKeys.recent(30, 50), libraryKeys.mostPlayed(100), libraryKeys.trackCount(), libraryKeys.searchRoot()],
+  scan: [
+    libraryKeys.tracks(),
+    libraryKeys.stats(),
+    libraryKeys.recent(30, 50),
+    libraryKeys.mostPlayed(100),
+    libraryKeys.trackCount(),
+    libraryKeys.searchRoot(),
+  ],
 };
 
 export async function invalidateLibraryForMutation(

@@ -4,13 +4,15 @@
  * blit sharp bg to screen, then layer 1 (aurora/particles).
  * WebGPU could mirror this graph later; v1 stays on WebGL2.
  */
-import { useLayoutEffect, useRef } from 'react';
+
 import { useThree } from '@react-three/fiber';
+import { useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 
 import blurFragY from '@/graphics/glass/shaders/fragment-bg-hblur.glsl?raw';
 import blurFragX from '@/graphics/glass/shaders/fragment-bg-vblur.glsl?raw';
 import { buildGaussianKernel, gaussianKernelToUniformArray } from '@/lib/gaussian-kernel';
+
 const GLSL_MAX_BLUR_RADIUS = 200;
 const BLUR_RADIUS = 12;
 const BLUR_SIGMA = 4;
@@ -76,7 +78,7 @@ class LiquidShellPipeline {
       vertexShader: POST_VERT,
       fragmentShader: BLIT_FRAG,
       uniforms: {
-        u_tex: { value: null as unknown as THREE.Texture },
+        u_tex: { value: this.bgRT.texture },
       },
       depthTest: false,
       depthWrite: false,
@@ -86,7 +88,7 @@ class LiquidShellPipeline {
       vertexShader: POST_VERT,
       fragmentShader: blurFragX,
       uniforms: {
-        u_prevPassTexture: { value: null as unknown as THREE.Texture },
+        u_prevPassTexture: { value: this.bgRT.texture },
         u_resolution: { value: new THREE.Vector2(w, h) },
         u_blurRadius: { value: BLUR_RADIUS },
         u_blurWeights: { value: this.blurWeights },
@@ -99,7 +101,7 @@ class LiquidShellPipeline {
       vertexShader: POST_VERT,
       fragmentShader: blurFragY,
       uniforms: {
-        u_prevPassTexture: { value: null as unknown as THREE.Texture },
+        u_prevPassTexture: { value: this.blurA.texture },
         u_resolution: { value: new THREE.Vector2(w, h) },
         u_blurRadius: { value: BLUR_RADIUS },
         u_blurWeights: { value: this.blurWeights },

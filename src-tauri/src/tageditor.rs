@@ -41,9 +41,11 @@ pub struct TagUpdate {
     pub track_number: Option<u32>,
     pub total_tracks: Option<u32>,
     pub disc_number: Option<u32>,
+    pub total_discs: Option<u32>,
     pub genre: Option<String>,
     pub composer: Option<String>,
     pub comment: Option<String>,
+    pub clear_fields: Option<Vec<String>>,
     pub cover_art_base64: Option<String>, // Base64 encoded image
     pub cover_art_mime: Option<String>,   // e.g., "image/jpeg", "image/png"
     pub extra_tags: Option<HashMap<String, String>>,
@@ -60,6 +62,7 @@ pub struct TagInfo {
     pub track_number: Option<u32>,
     pub total_tracks: Option<u32>,
     pub disc_number: Option<u32>,
+    pub total_discs: Option<u32>,
     pub genre: Option<String>,
     pub composer: Option<String>,
     pub comment: Option<String>,
@@ -82,6 +85,24 @@ pub async fn read_full_tags(
     spawn_blocking(move || read_full_tags_checked(file_path, roots))
         .await
         .map_err(|e| e.to_string())?
+}
+
+fn clear_tag_field(tag: &mut Tag, field: &str) {
+    match field {
+        "title" => tag.remove_key(&ItemKey::TrackTitle),
+        "artist" => tag.remove_key(&ItemKey::TrackArtist),
+        "album" => tag.remove_key(&ItemKey::AlbumTitle),
+        "albumArtist" => tag.remove_key(&ItemKey::AlbumArtist),
+        "year" => tag.remove_year(),
+        "trackNumber" => tag.remove_track(),
+        "totalTracks" => tag.remove_track_total(),
+        "discNumber" => tag.remove_disk(),
+        "totalDiscs" => tag.remove_disk_total(),
+        "genre" => tag.remove_key(&ItemKey::Genre),
+        "composer" => tag.remove_key(&ItemKey::Composer),
+        "comment" => tag.remove_key(&ItemKey::Comment),
+        _ => {}
+    }
 }
 
 fn read_full_tags_checked(file_path: String, roots: Vec<PathBuf>) -> Result<TagInfo, String> {
@@ -112,6 +133,7 @@ fn read_full_tags_checked(file_path: String, roots: Vec<PathBuf>) -> Result<TagI
         track_number: None,
         total_tracks: None,
         disc_number: None,
+        total_discs: None,
         genre: None,
         composer: None,
         comment: None,
@@ -133,6 +155,7 @@ fn read_full_tags_checked(file_path: String, roots: Vec<PathBuf>) -> Result<TagI
         tag_info.track_number = tag.track();
         tag_info.total_tracks = tag.track_total();
         tag_info.disc_number = tag.disk();
+        tag_info.total_discs = tag.disk_total();
         tag_info.genre = tag.genre().map(|s| s.to_string());
 
         // Get album artist
@@ -220,6 +243,12 @@ fn write_tags_checked(
 
     let tag = tagged_file.tag_mut(tag_type).ok_or("Failed to get tag")?;
 
+    if let Some(clear_fields) = updates.clear_fields.as_ref() {
+        for field in clear_fields {
+            clear_tag_field(tag, field);
+        }
+    }
+
     // Apply updates
     if let Some(title) = updates.title {
         tag.set_title(title);
@@ -244,6 +273,9 @@ fn write_tags_checked(
     }
     if let Some(disc) = updates.disc_number {
         tag.set_disk(disc);
+    }
+    if let Some(total) = updates.total_discs {
+        tag.set_disk_total(total);
     }
     if let Some(genre) = updates.genre {
         tag.set_genre(genre);
@@ -376,6 +408,38 @@ mod tests {
     }
 
     #[test]
+    fn tag_update_accepts_total_discs_from_camel_case_payload() {
+        let update: TagUpdate = serde_json::from_str(r#"{"totalDiscs":2}"#).expect("tag update");
+        assert_eq!(update.total_discs, Some(2));
+    }
+
+    #[test]
+    fn tag_update_accepts_clear_fields_from_camel_case_payload() {
+        let update: TagUpdate =
+            serde_json::from_str(r#"{"clearFields":["year","totalDiscs"]}"#).expect("tag update");
+        assert_eq!(
+            update.clear_fields,
+            Some(vec!["year".to_string(), "totalDiscs".to_string()])
+        );
+    }
+
+    #[test]
+    fn clear_tag_field_removes_standard_tag_values() {
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.set_title("Title".to_string());
+        tag.set_year(2024);
+        tag.set_disk_total(2);
+
+        clear_tag_field(&mut tag, "title");
+        clear_tag_field(&mut tag, "year");
+        clear_tag_field(&mut tag, "totalDiscs");
+
+        assert!(tag.title().is_none());
+        assert_eq!(tag.year(), None);
+        assert_eq!(tag.disk_total(), None);
+    }
+
+    #[test]
     fn write_tags_rejects_outside_root_before_opening_file() {
         let allowed_root = temp_dir("allowed");
         let outside_root = temp_dir("outside");
@@ -394,9 +458,11 @@ mod tests {
                 track_number: None,
                 total_tracks: None,
                 disc_number: None,
+                total_discs: None,
                 genre: None,
                 composer: None,
                 comment: None,
+                clear_fields: None,
                 cover_art_base64: None,
                 cover_art_mime: None,
                 extra_tags: None,

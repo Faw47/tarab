@@ -6,20 +6,9 @@ interface NeoSectionHeaderProps {
 }
 
 export const NeoSectionHeader = memo(({ emoji, label }: NeoSectionHeaderProps) => (
-  <div style={{
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: '16px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    borderBottom: '2px solid #000',
-    paddingBottom: '6px',
-    marginBottom: '12px'
-  }}>
-    <span style={{ width: 10, height: 10, background: '#000', display: 'inline-block', flexShrink: 0 }} />
-    <span style={{ fontSize: 14 }}>{emoji}</span>
+  <div className="mb-3 flex items-center gap-1.5 border-b-2 border-black pb-1.5 text-base font-bold uppercase tracking-[0.06em] text-[var(--type-primary)]">
+    <span className="inline-block h-2.5 w-2.5 shrink-0 bg-[var(--type-primary)]" />
+    <span className="text-sm">{emoji}</span>
     {label}
   </div>
 ));

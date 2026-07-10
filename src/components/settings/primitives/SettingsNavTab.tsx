@@ -56,11 +56,7 @@ export const SettingsNavTab = memo(function SettingsNavTab({
               ? 'scale-105'
               : 'text-white/45 group-hover:scale-105 group-hover:text-white/70',
         )}
-        style={
-          !isNeobrutalism && active
-            ? { color: 'var(--hero-accent, #fff)' }
-            : undefined
-        }
+        style={!isNeobrutalism && active ? { color: 'var(--hero-accent, #fff)' } : undefined}
       >
         {icon}
       </span>

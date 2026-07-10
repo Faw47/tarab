@@ -189,6 +189,11 @@ export function usePlaybackLifecycle() {
     (event) => {
       void (async () => {
         const payload = event.payload;
+        const activeTrack = usePlayerStore.getState().currentTrack;
+        if (payload.filePath && activeTrack && payload.filePath !== activeTrack.filePath) {
+          return;
+        }
+
         const stageLabel = payload.stage ? `${payload.stage}` : 'playback';
         const detail = payload.filePath
           ? `${payload.message} (${payload.filePath})`
@@ -209,7 +214,10 @@ export function usePlaybackLifecycle() {
               await playAdjacentTrack('next');
               return;
             } catch (error) {
-              reportError('Failed to play next track after playback error', { source: 'app', error });
+              reportError('Failed to play next track after playback error', {
+                source: 'app',
+                error,
+              });
             }
           }
         }

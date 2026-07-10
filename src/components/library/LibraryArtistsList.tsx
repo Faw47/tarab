@@ -1,20 +1,16 @@
-import { memo } from 'react';
 import { Info, Play } from 'lucide-react';
+import { memo } from 'react';
 import { cn } from '@/lib/utils';
-import { ArtistIcon } from '../ui/Icons';
+import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedList } from '../shared/VirtualizedList';
-import { renderHighlightedText } from './search-highlight';
+import { ArtistIcon } from '../ui/Icons';
+import { NEO_ICON_BUTTON_CLASS, NEO_PLAY_ICON_BUTTON_CLASS } from './library-neo-classes';
 import type { ArtistGroup } from './library-view-model';
-import type { Track } from '../../types';
+import { renderHighlightedText } from './search-highlight';
 import './library-view.css';
 
 const ARTIST_ROW_HEIGHT = 72;
-
-const NEO_ICON_BTN =
-  'flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center border-2 border-black bg-white p-0 text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#F5C518] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
-const NEO_ICON_BTN_PLAY =
-  'flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center border-2 border-black bg-[#F5C518] p-0 text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#FFE234] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
 
 interface ArtistRowProps {
   artist: ArtistGroup;
@@ -37,7 +33,7 @@ const ArtistRow = memo(function ArtistRow({
 }: ArtistRowProps) {
   const leadTrack = artist.tracks[0];
   const highlightClass = isNeo
-    ? 'rounded-none bg-[#E4C463] px-0.5 text-black'
+    ? 'rounded-none bg-[var(--neo-utility-hover)] px-0.5 text-black'
     : 'rounded-[3px] bg-primary/35 px-0.5 text-inherit';
 
   return (
@@ -47,8 +43,12 @@ const ArtistRow = memo(function ArtistRow({
           isNeo
             ? 'group -mt-[2px] grid cursor-pointer grid-cols-[58px_4.1fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none focus-visible:border-l-black'
             : 'library-list-row group grid grid-cols-[58px_4.1fr_1fr_132px] cursor-pointer',
-          isNeo && isPlayingArtist && 'relative z-10 border-l-4 border-l-black bg-[#7CC61F]',
-          isNeo && !isPlayingArtist && 'border-l-4 border-l-transparent bg-white hover:z-10 hover:bg-[#F6F6F6]',
+          isNeo &&
+            isPlayingArtist &&
+            'relative z-10 border-l-4 border-l-black bg-[var(--signal-play)]',
+          isNeo &&
+            !isPlayingArtist &&
+            'border-l-4 border-l-transparent bg-white hover:z-10 hover:bg-[var(--neo-panel)]',
         )}
         role="button"
         tabIndex={0}
@@ -56,7 +56,11 @@ const ArtistRow = memo(function ArtistRow({
       >
         <div className="flex items-center justify-center">
           <span
-            className={cn(isNeo ? 'text-black font-mono font-black text-[13px] tabular-nums' : 'text-text-subtle font-mono text-xs')}
+            className={cn(
+              isNeo
+                ? 'text-black font-mono font-black text-[13px] tabular-nums'
+                : 'text-text-subtle font-mono text-xs',
+            )}
           >
             {idx + 1}
           </span>
@@ -74,7 +78,12 @@ const ArtistRow = memo(function ArtistRow({
               alt={artist.artist}
             />
           ) : artist.coverArt ? (
-            <div className={cn('neo-artist-avatar h-12 w-12 shrink-0 overflow-hidden bg-[#D1D1D1]', !isNeo && 'rounded-lg')}>
+            <div
+              className={cn(
+                'neo-artist-avatar h-12 w-12 shrink-0 overflow-hidden bg-[#D1D1D1]',
+                !isNeo && 'rounded-lg',
+              )}
+            >
               <img
                 src={artist.coverArt}
                 alt={artist.artist}
@@ -86,7 +95,9 @@ const ArtistRow = memo(function ArtistRow({
             <div
               className={cn(
                 'flex shrink-0 items-center justify-center',
-                isNeo ? 'neo-artist-avatar h-12 w-12 bg-[#D1D1D1] text-black' : 'h-12 w-12 rounded-lg bg-secondary/50 text-text-muted',
+                isNeo
+                  ? 'neo-artist-avatar h-12 w-12 bg-[#D1D1D1] text-black'
+                  : 'h-12 w-12 rounded-lg bg-secondary/50 text-text-muted',
               )}
             >
               <ArtistIcon className="h-6 w-6" />
@@ -96,7 +107,9 @@ const ArtistRow = memo(function ArtistRow({
             <div
               className={cn(
                 'truncate',
-                isNeo ? 'font-black uppercase tracking-[0.05em] text-black text-[14px]' : 'font-medium text-text-primary text-[1.05rem]',
+                isNeo
+                  ? 'font-black uppercase tracking-[0.05em] text-black text-[14px]'
+                  : 'font-medium text-text-primary text-[1.05rem]',
               )}
             >
               {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
@@ -109,7 +122,7 @@ const ArtistRow = memo(function ArtistRow({
             className={cn(
               'uppercase tracking-tight inline-flex self-start',
               isNeo
-                ? 'border-2 border-black bg-[#E6E6E6] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
                 : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
             )}
           >
@@ -125,7 +138,11 @@ const ArtistRow = memo(function ArtistRow({
                 e.stopPropagation();
                 onPlay(leadTrack);
               }}
-              className={isNeo ? NEO_ICON_BTN_PLAY : 'library-icon-action flex items-center justify-center p-2'}
+              className={
+                isNeo
+                  ? NEO_PLAY_ICON_BUTTON_CLASS
+                  : 'library-icon-action flex items-center justify-center p-2'
+              }
               aria-label={`Play tracks by ${artist.artist}`}
             >
               <Play size={14} fill="currentColor" strokeWidth={isNeo ? 3 : 2} />
@@ -137,7 +154,11 @@ const ArtistRow = memo(function ArtistRow({
               e.stopPropagation();
               onOpen(artist.artist);
             }}
-            className={isNeo ? NEO_ICON_BTN : 'library-icon-action flex items-center justify-center p-2'}
+            className={
+              isNeo
+                ? NEO_ICON_BUTTON_CLASS
+                : 'library-icon-action flex items-center justify-center p-2'
+            }
             aria-label={`Open artist ${artist.artist}`}
           >
             <Info size={16} strokeWidth={isNeo ? 2.5 : 2} />
@@ -175,7 +196,7 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
         className={cn(
           'library-list-head grid-cols-[58px_4.1fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[#E6E6E6] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
         )}
       >
         <span className="text-center">#</span>
@@ -200,9 +221,9 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
             onOpen={onOpen}
             onPlay={onPlay}
             isNeo={isNeo}
-            isPlayingArtist={
-              Boolean(isPlaying && currentTrack && currentTrack.artist === artist.artist)
-            }
+            isPlayingArtist={Boolean(
+              isPlaying && currentTrack && currentTrack.artist === artist.artist,
+            )}
           />
         )}
       />

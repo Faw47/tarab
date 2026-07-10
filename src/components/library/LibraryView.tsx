@@ -1,47 +1,37 @@
+import * as Tabs from '@radix-ui/react-tabs';
+import { ChevronDown, Clock3, Edit2, Grid, List, SortAsc, TrendingUp } from 'lucide-react';
 import type {
+  ComponentType,
   DragEvent,
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   UIEvent,
   UIEventHandler,
 } from 'react';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import * as Tabs from '@radix-ui/react-tabs';
-import { Clock3, Edit2, Grid, List, SortAsc, TrendingUp, ChevronDown } from 'lucide-react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-
-import { AlbumIcon, TrackIcon, ArtistIcon } from '../ui/Icons';
-import {
-  useLiquidControlMotionHorizontal,
-} from '@/hooks/use-liquid-control-motion';
+import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
 import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
-import { VirtualizedGrid } from '../shared/VirtualizedGrid';
-
+import { fetchLibraryTracksPage } from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
 import { getAlbumArtist } from '../../lib/album-key';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
+import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
-import { dbGetTracksPaginated, generateCoverArtHashes } from '../../lib/tauri-commands';
 import type { LibrarySearchScope } from '../../store/library-store';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
-import type { SortBy, Track, ContextMenuPosition } from '../../types';
+import type { ContextMenuPosition, SortBy, Track } from '../../types';
+import { VirtualizedGrid } from '../shared/VirtualizedGrid';
+import { AlbumIcon, ArtistIcon, TrackIcon } from '../ui/Icons';
 
 import { LibraryDetailFocusHeader } from './LibraryDetailFocusHeader';
 import { LibraryFileInfoModal } from './LibraryFileInfoModal';
@@ -55,16 +45,16 @@ import './library-view.css';
 // ============================================================================
 
 import {
-  type LibraryFacet,
-  type LibrarySmartFilter,
-  type LibraryDetailScope,
   type AlbumGroup,
   type ArtistGroup,
-  type FacetCounts,
   applySmartFilter,
   buildDetailTracks,
   buildFacetCounts,
   buildFacetPayload,
+  type FacetCounts,
+  type LibraryDetailScope,
+  type LibraryFacet,
+  type LibrarySmartFilter,
 } from './library-view-model';
 
 export type LibraryViewDensity = 'grid' | 'list';
@@ -98,6 +88,7 @@ export interface LibraryViewProps {
   isLibraryLoading?: boolean;
   libraryError?: string | null;
   onRetryLoad?: () => void;
+  onNavigateToFolders?: () => void;
   onScrollChange?: (isScrolled: boolean) => void;
   /** Liquid icon rail: nudge library chrome so the first glass edge does not stack on the rail seam. */
   iconRailLayout?: boolean;
@@ -145,7 +136,6 @@ export interface LibraryAlbumsGridProps {
 // Constants & View Model Helpers
 // ============================================================================
 
-
 const LIBRARY_V2_VIEW_MODE_KEY = 'library-v2-view-mode';
 const ARTIST_ALBUM_GRID_MIN_COLUMN = 160;
 
@@ -155,7 +145,7 @@ const facetIcon = {
   artists: ArtistIcon,
   recent: Clock3,
   mostPlayed: TrendingUp,
-} as const satisfies Record<LibraryFacet, React.ComponentType<any>>;
+} as const satisfies Record<LibraryFacet, ComponentType<{ className?: string }>>;
 
 function getPersistedViewMode(): LibraryViewDensity {
   try {
@@ -176,8 +166,6 @@ function persistViewMode(mode: LibraryViewDensity): void {
     // no-op
   }
 }
-
-
 
 // ============================================================================
 // Sub-Components
@@ -244,7 +232,12 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   }, [showSortDropdown]);
 
   const activeIndex = useMemo(
-    () => Math.max(0, facets.findIndex((f) => f.id === activeFacet)), [facets, activeFacet],
+    () =>
+      Math.max(
+        0,
+        facets.findIndex((f) => f.id === activeFacet),
+      ),
+    [facets, activeFacet],
   );
 
   const onCommitIndex = useCallback(
@@ -310,7 +303,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     [vmListProps],
   );
 
-
   useLayoutEffect(() => {
     if (!pillLayoutFromDom) return;
     const el = pillRef.current;
@@ -337,7 +329,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     activeIndex: viewMode === 'grid' ? 0 : 1,
   });
 
-
   return (
     <section className={cn('library-v2-command-deck', isScrolled && 'is-scrolled')}>
       <div className="library-v2-command-bottom">
@@ -354,15 +345,18 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
           >
             <div
               ref={pillRef}
-              className={cn('library-v2-tabs-pill', (isDragging || pillLayoutFromDom) && 'is-dragging')}
+              className={cn(
+                'library-v2-tabs-pill',
+                (isDragging || pillLayoutFromDom) && 'is-dragging',
+              )}
               style={
                 pillLayoutFromDom
                   ? undefined
                   : {
-                    left: pillStyle.left,
-                    width: pillStyle.width,
-                    opacity: pillStyle.opacity,
-                  }
+                      left: pillStyle.left,
+                      width: pillStyle.width,
+                      opacity: pillStyle.opacity,
+                    }
               }
             />
             {facets.map((facet, facetIndex) => {
@@ -433,7 +427,13 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
               >
                 <SortAsc className="library-v2-tab-icon h-3.5 w-3.5" />
                 <span className="text-[0.81rem] font-medium text-inherit opacity-70 hover:opacity-100 transition-opacity">
-                  {sortBy === 'dateAdded' ? 'Date added' : sortBy === 'title' ? 'Title' : sortBy === 'artist' ? 'Artist' : 'Album'}
+                  {sortBy === 'dateAdded'
+                    ? 'Date added'
+                    : sortBy === 'title'
+                      ? 'Title'
+                      : sortBy === 'artist'
+                        ? 'Artist'
+                        : 'Album'}
                 </span>
                 <ChevronDown className="w-3 h-3 opacity-50" />
               </button>
@@ -455,7 +455,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                       }}
                       className={cn(
                         'library-v2-sort-option',
-                        sortBy === option.id && 'is-selected'
+                        sortBy === option.id && 'is-selected',
                       )}
                     >
                       {option.label}
@@ -489,10 +489,10 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                 vmPillLayoutFromDom
                   ? undefined
                   : {
-                    left: vmPillStyle.left,
-                    width: vmPillStyle.width,
-                    opacity: vmPillStyle.opacity,
-                  }
+                      left: vmPillStyle.left,
+                      width: vmPillStyle.width,
+                      opacity: vmPillStyle.opacity,
+                    }
               }
             />
             <button
@@ -512,7 +512,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
               <List className="library-v2-tab-icon h-4 w-4" />
             </button>
           </div>
-
         </div>
       </div>
     </section>
@@ -573,6 +572,7 @@ export const LibraryView = memo(function LibraryView({
   isLibraryLoading = false,
   libraryError = null,
   onRetryLoad,
+  onNavigateToFolders,
   onScrollChange,
   iconRailLayout = false,
 }: LibraryViewProps) {
@@ -687,7 +687,8 @@ export const LibraryView = memo(function LibraryView({
   );
 
   const detailTracks = useMemo(
-    () => buildDetailTracks(allTracks, detailScope), [allTracks, detailScope],
+    () => buildDetailTracks(allTracks, detailScope),
+    [allTracks, detailScope],
   );
 
   const usesFullLibraryFacetData = searchQuery.trim().length === 0 && smartFilter === null;
@@ -705,7 +706,14 @@ export const LibraryView = memo(function LibraryView({
       mostPlayed: mostPlayedTracks.length,
       duration: libraryStats?.totalDuration ?? counts.duration,
     } satisfies FacetCounts;
-  }, [libraryStats, mostPlayedTracks.length, recentTracks.length, trackCount, usesFullLibraryFacetData, visibleTracks]);
+  }, [
+    libraryStats,
+    mostPlayedTracks.length,
+    recentTracks.length,
+    trackCount,
+    usesFullLibraryFacetData,
+    visibleTracks,
+  ]);
 
   const facetTracks = useMemo(() => {
     if (!usesFullLibraryFacetData) return visibleTracks;
@@ -761,7 +769,8 @@ export const LibraryView = memo(function LibraryView({
 
   const selectedTrackSet = useMemo(() => new Set(selectedTrackIds), [selectedTrackIds]);
   const selectedTracks = useMemo(
-    () => allTracks.filter((track) => selectedTrackSet.has(track.id)), [allTracks, selectedTrackSet],
+    () => allTracks.filter((track) => selectedTrackSet.has(track.id)),
+    [allTracks, selectedTrackSet],
   );
 
   const prefetchedCoverArt = useRef<Set<string>>(new Set());
@@ -801,6 +810,10 @@ export const LibraryView = memo(function LibraryView({
 
   const loadedCount = allTracks.length;
 
+  useEffect(() => {
+    setHasMore(loadedCount < trackCount);
+  }, [loadedCount, trackCount]);
+
   const handleLoadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) {
       return;
@@ -817,23 +830,15 @@ export const LibraryView = memo(function LibraryView({
         return;
       }
 
-      const nextTracks = await dbGetTracksPaginated(offset, limit, sortBy, 'desc');
-      const mapped = nextTracks.map((track) => ({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        year: track.year,
-        duration: track.duration,
-        filePath: track.filePath,
-        hasCoverArt: track.hasCoverArt,
-        coverArt: undefined,
-        coverArtHash: track.coverArtHash ?? null,
-        dateAdded: track.dateAdded,
-      }));
+      const nextTracks = await fetchLibraryTracksPage({
+        offset,
+        limit,
+        sortBy: 'dateAdded',
+        sortOrder: 'desc',
+      });
 
-      appendTracks(mapped);
-      prefetchCoverArt(mapped);
+      appendTracks(nextTracks);
+      prefetchCoverArt(nextTracks);
 
       if (offset + nextTracks.length >= trackCount || nextTracks.length < limit) {
         setHasMore(false);
@@ -846,7 +851,7 @@ export const LibraryView = memo(function LibraryView({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, sortBy, trackCount]);
+  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, trackCount]);
 
   const triggerLoadMoreThrottled = useCallback(() => {
     if (loadMoreThrottleRef.current) {
@@ -873,7 +878,8 @@ export const LibraryView = memo(function LibraryView({
       if (scrollTop + clientHeight >= 0.9 * scrollHeight) {
         triggerLoadMoreThrottled();
       }
-    }, [hasMore, triggerLoadMoreThrottled],
+    },
+    [hasMore, triggerLoadMoreThrottled],
   );
 
   const handleLibraryScroll = useCallback(
@@ -911,7 +917,8 @@ export const LibraryView = memo(function LibraryView({
         clearTimeout(loadMoreThrottleRef.current);
         loadMoreThrottleRef.current = null;
       }
-    }, [],
+    },
+    [],
   );
 
   const handlePlayTrack = useCallback(
@@ -982,7 +989,8 @@ export const LibraryView = memo(function LibraryView({
       }
 
       setDetailScope({ type: 'album', album: track.album, artist: albumArtist });
-    }, [allTracks, onOpenAlbumDetails, setDetailScope],
+    },
+    [allTracks, onOpenAlbumDetails, setDetailScope],
   );
 
   const handleArtistOpen = useCallback(
@@ -1054,7 +1062,8 @@ export const LibraryView = memo(function LibraryView({
         })),
         'small',
       );
-    }, [],
+    },
+    [],
   );
 
   const handleArtistGridRangeChange = useCallback(
@@ -1073,7 +1082,8 @@ export const LibraryView = memo(function LibraryView({
           })),
         'small',
       );
-    }, [],
+    },
+    [],
   );
 
   const formatSize = useCallback((size?: number) => {
@@ -1115,11 +1125,12 @@ export const LibraryView = memo(function LibraryView({
   const trimmedSearchQuery = searchQuery.trim();
   const needsLongerLyricsQuery =
     searchScope === 'lyrics' && trimmedSearchQuery.length > 0 && trimmedSearchQuery.length < 3;
+  const isTrueEmptyLibrary = trimmedSearchQuery.length === 0 && trackCount === 0;
 
   if (isLibraryLoading) {
     return (
       <div className="library-v2-state-wrap">
-        <div className="library-v2-loading-shell" aria-label="Loading library">
+        <div className="library-v2-loading-shell" role="status" aria-label="Loading library">
           <div className="library-v2-loading-line" />
           <div className="library-v2-loading-line" />
           <div className="library-v2-loading-line" />
@@ -1280,7 +1291,7 @@ export const LibraryView = memo(function LibraryView({
                   <TrackIcon className="h-10 w-10 text-primary" />
                 </div>
                 <div className="library-v2-empty-copy">
-                  <h3>No tracks found</h3>
+                  <h3>{isTrueEmptyLibrary ? 'No music yet' : 'No tracks found'}</h3>
                   <p>
                     {searchQuery
                       ? needsLongerLyricsQuery
@@ -1288,11 +1299,24 @@ export const LibraryView = memo(function LibraryView({
                         : `No ${getScopeLabel(searchScope)} match "${searchQuery}". Try a different search term.`
                       : 'Your library is empty. Add folders to start building your music collection.'}
                   </p>
+                  {isTrueEmptyLibrary && onNavigateToFolders && (
+                    <button
+                      type="button"
+                      className="library-v2-empty-action"
+                      onClick={onNavigateToFolders}
+                    >
+                      Add Folders
+                    </button>
+                  )}
                 </div>
               </div>
             )}
 
-            {isLoadingMore && <div className="library-v2-loading-more">Loading more…</div>}
+            {isLoadingMore && (
+              <div className="library-v2-loading-more" role="status" aria-live="polite">
+                Loading more...
+              </div>
+            )}
           </section>
         </div>
       )}

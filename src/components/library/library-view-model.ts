@@ -1,5 +1,5 @@
-import type { Track } from '../../types';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
+import type { Track } from '../../types';
 
 export type LibraryFacet = 'all' | 'albums' | 'artists' | 'recent' | 'mostPlayed';
 export type LibrarySmartFilter = 'missingArt' | 'untagged' | null;

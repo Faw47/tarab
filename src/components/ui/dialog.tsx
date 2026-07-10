@@ -58,7 +58,9 @@ function DialogContent({
         )}
         {...props}
       >
-        <div className="absolute inset-0 z-[-1] opacity-90 mix-blend-screen"><LiquidGlassSurface interactive={false} /></div>
+        <div className="absolute inset-0 z-[-1] opacity-90 mix-blend-screen">
+          <LiquidGlassSurface interactive={false} />
+        </div>
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close

@@ -5,11 +5,12 @@ use lofty::prelude::*;
 use lofty::probe::Probe;
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tauri::async_runtime::spawn_blocking;
 
 use crate::database::SharedDatabase;
+use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 use crate::image_cache::SharedImageCache;
 
 #[derive(Debug, Serialize, Clone)]
@@ -55,6 +56,7 @@ pub struct CoverArtPalette {
 
 const MAX_METADATA_THREADS: usize = 4;
 const MAX_ART_THREADS: usize = 2;
+type CoverArtHashResult = (String, Option<(String, Option<String>)>);
 
 fn capped_threads(limit: usize) -> usize {
     std::thread::available_parallelism()
@@ -345,9 +347,37 @@ fn generate_blurhash_from_bytes(bytes: &[u8]) -> Option<String> {
     blurhash::encode(4, 3, tw, th, &thumb.into_raw()).ok()
 }
 
+fn ensure_metadata_path_allowed(
+    file_path: &str,
+    roots: &[PathBuf],
+    action: &str,
+) -> Result<(), String> {
+    ensure_existing_path_allowed(Path::new(file_path), roots, action)?;
+    Ok(())
+}
+
+fn allowed_metadata_paths(file_paths: Vec<String>, roots: &[PathBuf], action: &str) -> Vec<String> {
+    file_paths
+        .into_iter()
+        .filter(|path| {
+            if let Err(err) = ensure_metadata_path_allowed(path, roots, action) {
+                eprintln!("Skipped metadata path: {}", err);
+                false
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
 #[tauri::command]
-pub async fn get_track_metadata(file_path: String) -> Result<TrackMetadata, String> {
+pub async fn get_track_metadata(
+    file_path: String,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<TrackMetadata, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        ensure_metadata_path_allowed(&file_path, &roots, "read track metadata")?;
         extract_metadata_fast(&file_path)
             .ok_or_else(|| format!("Failed to read metadata from: {}", file_path))
     })
@@ -360,11 +390,14 @@ pub async fn get_cover_art_with_blurhash(
     file_path: String,
     cache: tauri::State<'_, SharedImageCache>,
     db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<(String, Option<String>)>, String> {
     let cache = cache.inner().clone();
     let db = db.inner().clone();
+    let roots = roots_state.inner().read().roots.clone();
 
     spawn_blocking(move || {
+        ensure_metadata_path_allowed(&file_path, &roots, "read cover art")?;
         let normalized_path = file_path.replace('\\', "/");
 
         if let Some(hash) = db.get_cover_art_hash(&normalized_path).unwrap_or(None) {
@@ -400,8 +433,13 @@ pub async fn get_cover_art_with_blurhash(
 
 // Batch metadata loading - fast, no cover art
 #[tauri::command]
-pub async fn get_batch_metadata(file_paths: Vec<String>) -> Vec<TrackMetadata> {
+pub async fn get_batch_metadata(
+    file_paths: Vec<String>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<TrackMetadata>, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        let file_paths = allowed_metadata_paths(file_paths, &roots, "read track metadata");
         run_with_pool(metadata_pool(), || {
             file_paths
                 .par_iter()
@@ -410,12 +448,17 @@ pub async fn get_batch_metadata(file_paths: Vec<String>) -> Vec<TrackMetadata> {
         })
     })
     .await
-    .unwrap_or_default()
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_cover_art_data(file_path: String) -> Result<Option<(String, String)>, String> {
+pub async fn get_cover_art_data(
+    file_path: String,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<(String, String)>, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        ensure_metadata_path_allowed(&file_path, &roots, "read cover art data")?;
         let path = Path::new(&file_path);
         let tagged_file = Probe::open(path)
             .map_err(|e| format!("Failed to open file: {}", e))?
@@ -439,8 +482,13 @@ pub async fn get_cover_art_data(file_path: String) -> Result<Option<(String, Str
 
 // Batch metadata loading with cover art - for visible items only
 #[tauri::command]
-pub async fn get_batch_metadata_with_art(file_paths: Vec<String>) -> Vec<TrackMetadataWithArt> {
+pub async fn get_batch_metadata_with_art(
+    file_paths: Vec<String>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<TrackMetadataWithArt>, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        let file_paths = allowed_metadata_paths(file_paths, &roots, "read track metadata with art");
         run_with_pool(art_pool(), || {
             file_paths
                 .par_iter()
@@ -449,13 +497,18 @@ pub async fn get_batch_metadata_with_art(file_paths: Vec<String>) -> Vec<TrackMe
         })
     })
     .await
-    .unwrap_or_default()
+    .map_err(|e| e.to_string())
 }
 
 // Get cover art for multiple files in batch
 #[tauri::command]
-pub async fn get_batch_cover_art(file_paths: Vec<String>) -> Vec<(String, Option<String>)> {
+pub async fn get_batch_cover_art(
+    file_paths: Vec<String>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        let file_paths = allowed_metadata_paths(file_paths, &roots, "read batch cover art");
         run_with_pool(art_pool(), || {
             file_paths
                 .par_iter()
@@ -472,12 +525,17 @@ pub async fn get_batch_cover_art(file_paths: Vec<String>) -> Vec<(String, Option
         })
     })
     .await
-    .unwrap_or_default()
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_cover_art_palette(file_path: String) -> Result<Option<CoverArtPalette>, String> {
+pub async fn get_cover_art_palette(
+    file_path: String,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<CoverArtPalette>, String> {
+    let roots = roots_state.inner().read().roots.clone();
     spawn_blocking(move || {
+        ensure_metadata_path_allowed(&file_path, &roots, "read cover art palette")?;
         let path = Path::new(&file_path);
         let tagged_file = Probe::open(path)
             .map_err(|e| format!("Failed to open file: {}", e))?
@@ -501,11 +559,14 @@ pub async fn generate_cover_art_hashes(
     file_paths: Vec<String>,
     cache: tauri::State<'_, SharedImageCache>,
     db: tauri::State<'_, SharedDatabase>,
-) -> Result<Vec<(String, Option<(String, Option<String>)>)>, String> {
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<CoverArtHashResult>, String> {
     let cache = cache.inner().clone();
     let db = db.inner().clone();
+    let roots = roots_state.inner().read().roots.clone();
 
     spawn_blocking(move || {
+        let file_paths = allowed_metadata_paths(file_paths, &roots, "generate cover art hashes");
         run_with_pool(art_pool(), || {
             file_paths
                 .par_iter()
@@ -549,7 +610,73 @@ pub async fn get_cover_art(
     file_path: String,
     cache: tauri::State<'_, SharedImageCache>,
     db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<String>, String> {
-    let res = get_cover_art_with_blurhash(file_path, cache, db).await?;
+    let res = get_cover_art_with_blurhash(file_path, cache, db, roots_state).await?;
     Ok(res.map(|(hash, _)| hash))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("tarab-metadata-{}-{}", name, nonce));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn metadata_path_validation_rejects_paths_outside_library_roots() {
+        let allowed_root = temp_dir("allowed");
+        let outside_root = temp_dir("outside");
+        let outside_file = outside_root.join("outside.mp3");
+        fs::write(&outside_file, b"not audio").expect("write outside file");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        let result = ensure_metadata_path_allowed(
+            &outside_file.to_string_lossy(),
+            &roots,
+            "read track metadata",
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("outside configured library roots"));
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn metadata_path_filter_keeps_allowed_paths_only() {
+        let allowed_root = temp_dir("allowed");
+        let outside_root = temp_dir("outside");
+        let allowed_file = allowed_root.join("inside.mp3");
+        let outside_file = outside_root.join("outside.mp3");
+        fs::write(&allowed_file, b"not audio").expect("write allowed file");
+        fs::write(&outside_file, b"not audio").expect("write outside file");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        let filtered = allowed_metadata_paths(
+            vec![
+                allowed_file.to_string_lossy().to_string(),
+                outside_file.to_string_lossy().to_string(),
+            ],
+            &roots,
+            "read track metadata",
+        );
+
+        assert_eq!(filtered, vec![allowed_file.to_string_lossy().to_string()]);
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
 }

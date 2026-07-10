@@ -1,10 +1,10 @@
 import { ContactShadows, Environment, Float, PerspectiveCamera } from '@react-three/drei';
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { useMotionValue, useSpring, useTransform } from 'framer-motion';
-import { VinylIcon } from '../ui/Icons';
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { getCoverArtDataUrlFallback, markCoverArtProtocolFailed } from '../../hooks/useCoverArt';
+import { getCoverArtBlobFallback, markCoverArtProtocolFailed } from '../../hooks/useCoverArt';
+import { VinylIcon } from '../ui/Icons';
 
 interface TiltAlbumArtProps {
   src: string;
@@ -19,7 +19,7 @@ class TextureErrorBoundary extends React.Component<
   },
   { hasError: boolean }
 > {
-  constructor(props: any) {
+  constructor(props: TextureErrorBoundary['props']) {
     super(props);
     this.state = { hasError: false };
   }
@@ -28,7 +28,7 @@ class TextureErrorBoundary extends React.Component<
     return { hasError: true };
   }
 
-  componentDidCatch(error: any) {
+  componentDidCatch(error: unknown) {
     console.error('TiltAlbumArt load error:', error);
     this.props.onError();
   }
@@ -110,9 +110,9 @@ export const TiltAlbumArt = ({ src, className }: TiltAlbumArtProps) => {
       const size = parts[4] || 'large';
       if (hash) {
         markCoverArtProtocolFailed(hash, size as 'small' | 'medium' | 'large');
-        const dataUrl = await getCoverArtDataUrlFallback(hash, size as 'small' | 'medium' | 'large');
-        if (dataUrl) {
-          setFallbackSrc(dataUrl);
+        const blobUrl = await getCoverArtBlobFallback(hash, size as 'small' | 'medium' | 'large');
+        if (blobUrl) {
+          setFallbackSrc(blobUrl);
           setHasError(false);
           return;
         }

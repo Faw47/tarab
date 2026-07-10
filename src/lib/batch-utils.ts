@@ -1,4 +1,4 @@
-export const _chunkArrayInternal = <T,>(items: T[], size: number): T[][] => {
+export const _chunkArrayInternal = <T>(items: T[], size: number): T[][] => {
   if (items.length <= size) return [items];
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {

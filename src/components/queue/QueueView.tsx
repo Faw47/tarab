@@ -33,13 +33,13 @@ import { formatTime } from '../../lib/format-time';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
-import { usePlayerStore } from '../../store/player-store';
+import { resolveActiveQueueIndex, usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedList } from '../shared/VirtualizedList';
-import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import { Button } from '../ui/button';
+import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 
 interface QueueViewProps {
   isLibraryLoading?: boolean;
@@ -51,28 +51,6 @@ interface QueueViewProps {
 const UPCOMING_ROW_HEIGHT = 72;
 const UPCOMING_VIRTUALIZE_THRESHOLD = 100;
 const HISTORY_PREVIEW_COUNT = 12;
-
-const resolveActiveQueueIndex = (
-  queue: Track[],
-  queueIndex: number,
-  currentTrack: Track | null,
-): number => {
-  if (queue.length === 0) return -1;
-
-  if (queueIndex >= 0 && queueIndex < queue.length) return queueIndex;
-
-  if (currentTrack?._queueId) {
-    const byQueueId = queue.findIndex((track) => track._queueId === currentTrack._queueId);
-    if (byQueueId >= 0) return byQueueId;
-  }
-
-  if (currentTrack) {
-    const byId = queue.findIndex((track) => track.id === currentTrack.id);
-    if (byId >= 0) return byId;
-  }
-
-  return -1;
-};
 
 const summaryLabel = (queueLength: number, activeIndex: number) => {
   const upcomingCount =
@@ -253,7 +231,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={clearQueue}
-                    className="inline-flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#E53935] hover:text-white active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="inline-flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={2.5} />
                     Clear queue
@@ -273,7 +251,7 @@ export const QueueView = memo(
               <div className="mt-5 h-4 border-2 border-black bg-white p-[2px]">
                 {/* Brutalist striped progress bar */}
                 <div
-                  className="h-full bg-[#7CC61F] transition-[width] duration-500 ease-out"
+                  className="h-full bg-[var(--signal-play)] transition-[width] duration-500 ease-out"
                   style={{
                     width: `${playedRatio * 100}%`,
                     backgroundImage:
@@ -284,9 +262,16 @@ export const QueueView = memo(
             </header>
 
             {queue.length === 0 && (
-              <section className="border-2 border-black bg-[#F5C518] p-8 text-center shadow-[4px_4px_0_0_#000]" role="status">
-                <p className="font-mono text-lg font-black uppercase tracking-tight text-black">NOTHING QUEUED</p>
-                <p className="mt-2 text-sm font-bold uppercase tracking-widest text-black/70">Drop a track to start</p>
+              <section
+                className="border-2 border-black bg-[var(--signal-active)] p-8 text-center shadow-[4px_4px_0_0_#000]"
+                role="status"
+              >
+                <p className="font-mono text-lg font-black uppercase tracking-tight text-black">
+                  NOTHING QUEUED
+                </p>
+                <p className="mt-2 text-sm font-bold uppercase tracking-widest text-black/70">
+                  Drop a track to start
+                </p>
               </section>
             )}
 
@@ -302,7 +287,9 @@ export const QueueView = memo(
                     alt={nowPlayingTrack.album}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#E53935]">Now playing</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
+                      Now playing
+                    </p>
                     <p className="mt-1 truncate text-lg font-black uppercase tracking-tight text-black">
                       {nowPlayingTrack.title}
                     </p>
@@ -313,7 +300,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={handleToggleCurrent}
-                    className="flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black bg-[#F5C518] text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-black hover:text-[#F5C518] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black bg-[var(--signal-active)] text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-black hover:text-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                     aria-label={isPlaying ? 'Pause current track' : 'Play current track'}
                   >
                     {isPlaying ? (
@@ -327,10 +314,14 @@ export const QueueView = memo(
             )}
 
             {upcomingTracks.length > 0 && (
-              <section className="border-2 border-black bg-[#F6F6F6] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
-                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[#F6F6F6]/90">
-                  <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">Up next</h2>
-                  <p className="font-mono text-xs font-black text-black/60">{upcomingTracks.length} tracks</p>
+              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
+                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[var(--neo-panel)]/90">
+                  <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">
+                    Up next
+                  </h2>
+                  <p className="font-mono text-xs font-black text-black/60">
+                    {upcomingTracks.length} tracks
+                  </p>
                 </div>
                 <DndContext
                   sensors={sensors}
@@ -387,13 +378,15 @@ export const QueueView = memo(
             )}
 
             {playedTracks.length > 0 && (
-              <section className="border-2 border-black bg-[#F6F6F6] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
-                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[#F6F6F6]/90">
-                  <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">Played</h2>
+              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
+                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[var(--neo-panel)]/90">
+                  <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">
+                    Played
+                  </h2>
                   <button
                     type="button"
                     onClick={() => setShowFullHistory((prev) => !prev)}
-                    className="border-2 border-black bg-white px-2 py-1 text-xs font-black uppercase shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#F5C518] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="border-2 border-black bg-white px-2 py-1 text-xs font-black uppercase shadow-[4px_4px_0_0_#000] transition-none hover:bg-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   >
                     {showFullHistory ? 'Less' : 'All'}
                   </button>
@@ -428,7 +421,6 @@ export const QueueView = memo(
         onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
       >
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-6 sm:px-7 lg:py-8">
-
           <header className="rounded-[22px] border border-white/[0.08] bg-white/[0.02] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_18px_34px_-28px_rgba(8,6,4,0.78)] backdrop-blur-[24px]">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="min-w-0">
@@ -482,14 +474,17 @@ export const QueueView = memo(
             </section>
           ) : (
             <section className="flex flex-col gap-6">
-
               {nowPlayingTrack && (
                 <article className="group relative flex min-h-[100px] items-center gap-5 overflow-hidden rounded-[22px] border border-white/[0.12] bg-white/[0.04] p-4 pl-5 shadow-[0_8px_32px_rgba(0,0,0,0.25)]">
                   {/* Background blur from cover art */}
                   {nowPlayingTrack.coverArt && (
-                    <div 
+                    <div
                       className="absolute inset-0 z-0 opacity-20 blur-[40px]"
-                      style={{ backgroundImage: `url(${nowPlayingTrack.coverArt})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                      style={{
+                        backgroundImage: `url(${nowPlayingTrack.coverArt})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                      }}
                     />
                   )}
                   <div className="pointer-events-none absolute -inset-24 z-0 bg-[var(--hero-accent)] opacity-[0.08] blur-[60px]" />
@@ -510,10 +505,14 @@ export const QueueView = memo(
                         Now playing
                       </span>
                       <span className="text-xs font-semibold text-white/60">
-                        {activeIndex >= 0 ? `${activeIndex + 1} of ${queue.length}` : `${queue.length} tracks`}
+                        {activeIndex >= 0
+                          ? `${activeIndex + 1} of ${queue.length}`
+                          : `${queue.length} tracks`}
                       </span>
                     </div>
-                    <p className="truncate text-lg font-bold text-white tracking-tight">{nowPlayingTrack.title}</p>
+                    <p className="truncate text-lg font-bold text-white tracking-tight">
+                      {nowPlayingTrack.title}
+                    </p>
                     <p className="truncate text-sm font-medium text-white/60 mt-0.5">
                       {nowPlayingTrack.artist} • {nowPlayingTrack.album}
                     </p>
@@ -537,13 +536,19 @@ export const QueueView = memo(
               {upcomingTracks.length > 0 ? (
                 <div className="rounded-[22px] border border-white/[0.04] bg-white/[0.015] p-2 backdrop-blur-md">
                   <div className="sticky top-0 z-10 -mx-2 -mt-2 mb-2 flex items-center justify-between rounded-t-[22px] bg-[#0a0a0a]/80 px-5 py-4 backdrop-blur-xl border-b border-white/[0.04]">
-                    <span className="text-sm font-bold uppercase tracking-widest text-white/90">Up next</span>
+                    <span className="text-sm font-bold uppercase tracking-widest text-white/90">
+                      Up next
+                    </span>
                     <span className="text-xs font-medium text-white/60">
                       {upcomingTracks.length} tracks • drag to reorder
                     </span>
                   </div>
 
-                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
                     <SortableContext
                       items={upcomingTracks.map((track) => track._queueId || track.id)}
                       strategy={verticalListSortingStrategy}
@@ -561,7 +566,8 @@ export const QueueView = memo(
                               track={track}
                               position={localIndex + 1}
                               onPlay={() => {
-                                const absoluteIndex = (activeIndex >= 0 ? activeIndex + 1 : 0) + localIndex;
+                                const absoluteIndex =
+                                  (activeIndex >= 0 ? activeIndex + 1 : 0) + localIndex;
                                 void handlePlayTrack(track, absoluteIndex);
                               }}
                               onRemove={() => handleRemoveUpcoming(localIndex)}
@@ -576,7 +582,8 @@ export const QueueView = memo(
                               track={track}
                               position={localIndex + 1}
                               onPlay={() => {
-                                const absoluteIndex = (activeIndex >= 0 ? activeIndex + 1 : 0) + localIndex;
+                                const absoluteIndex =
+                                  (activeIndex >= 0 ? activeIndex + 1 : 0) + localIndex;
                                 void handlePlayTrack(track, absoluteIndex);
                               }}
                               onRemove={() => handleRemoveUpcoming(localIndex)}
@@ -596,7 +603,9 @@ export const QueueView = memo(
               {playedTracks.length > 0 && (
                 <div className="rounded-[22px] border border-white/[0.04] bg-white/[0.015] p-2 backdrop-blur-md">
                   <div className="sticky top-0 z-10 -mx-2 -mt-2 mb-2 flex items-center justify-between rounded-t-[22px] bg-[#0a0a0a]/80 px-5 py-3 backdrop-blur-xl border-b border-white/[0.04]">
-                    <span className="text-sm font-bold uppercase tracking-widest text-white/90">Played</span>
+                    <span className="text-sm font-bold uppercase tracking-widest text-white/90">
+                      Played
+                    </span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -654,14 +663,15 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
       'bg-gradient-to-b from-white/[0.08] to-white/[0.03]',
       'hover:from-white/[0.12] hover:to-white/[0.05]',
-      'transition-all duration-300'
+      'transition-all duration-300',
     )}
   >
     <div
       className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-500"
       style={{ background: 'var(--hero-accent)' }}
     />
-    <div className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.07]"
+    <div
+      className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.07]"
       style={{
         background: `linear-gradient(180deg, color-mix(in oklch, var(--hero-accent) 40%, rgba(255,255,255,0.15)) 0%, color-mix(in oklch, var(--hero-accent) 20%, rgba(255,255,255,0.05)) 100%)`,
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.2)`,
@@ -727,16 +737,17 @@ const QueueRowBase = memo(
         'group relative flex h-[72px] items-center gap-4 px-4 transition-all duration-200',
         isNeobrutalism
           ? [
-            'border-2 border-black bg-white',
-            isDragging
-              ? 'shadow-[8px_8px_0_0_#000] z-10'
-              : 'shadow-[4px_4px_0_0_#000] hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[6px_6px_0_0_#000] hover:bg-[#F6F6F6]',
-          ]
+              'border-2 border-black bg-white',
+              isDragging
+                ? 'shadow-[8px_8px_0_0_#000] z-10'
+                : 'shadow-[4px_4px_0_0_#000] hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[6px_6px_0_0_#000] hover:bg-[var(--neo-panel)]',
+            ]
           : [
-            'rounded-[16px] border border-transparent bg-transparent',
-            'hover:border-white/[0.08] hover:bg-white/[0.03]',
-            isDragging && 'border-white/[0.15] bg-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-10',
-          ],
+              'rounded-[16px] border border-transparent bg-transparent',
+              'hover:border-white/[0.08] hover:bg-white/[0.03]',
+              isDragging &&
+                'border-white/[0.15] bg-white/[0.06] shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-10',
+            ],
       )}
     >
       <button
@@ -744,7 +755,7 @@ const QueueRowBase = memo(
         className={clsx(
           'flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing',
           isNeobrutalism
-            ? 'border-2 border-black bg-[#F6F6F6] text-black shadow-[2px_2px_0_0_#000]'
+            ? 'border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000]'
             : 'rounded-full text-white/40 transition-colors hover:bg-white/[0.12] group-hover:text-white/80 focus-visible:text-white/80',
         )}
         aria-label={`Drag track ${position}`}
@@ -756,7 +767,9 @@ const QueueRowBase = memo(
       <p
         className={clsx(
           'w-6 shrink-0 text-center text-[13px] tabular-nums',
-          isNeobrutalism ? 'font-mono font-black text-black' : 'font-semibold text-white/50 group-hover:text-white/90 transition-colors',
+          isNeobrutalism
+            ? 'font-mono font-black text-black'
+            : 'font-semibold text-white/50 group-hover:text-white/90 transition-colors',
         )}
       >
         {position}
@@ -786,7 +799,9 @@ const QueueRowBase = memo(
         <p
           className={clsx(
             'truncate text-[15px]',
-            isNeobrutalism ? 'font-black uppercase tracking-tight text-black' : 'font-semibold text-white/90',
+            isNeobrutalism
+              ? 'font-black uppercase tracking-tight text-black'
+              : 'font-semibold text-white/90',
           )}
         >
           {track.title}
@@ -794,7 +809,9 @@ const QueueRowBase = memo(
         <p
           className={clsx(
             'truncate text-[13px] mt-0.5',
-            isNeobrutalism ? 'font-bold uppercase tracking-[0.06em] text-black/55' : 'font-medium text-white/60',
+            isNeobrutalism
+              ? 'font-bold uppercase tracking-[0.06em] text-black/55'
+              : 'font-medium text-white/60',
           )}
         >
           {track.artist} • {track.album}
@@ -804,7 +821,9 @@ const QueueRowBase = memo(
       <span
         className={clsx(
           'shrink-0 text-[13px] tabular-nums mr-2',
-          isNeobrutalism ? 'font-mono font-black text-black/60' : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
+          isNeobrutalism
+            ? 'font-mono font-black text-black/60'
+            : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
         )}
       >
         {formatTime(track.duration)}
@@ -813,7 +832,9 @@ const QueueRowBase = memo(
       <div
         className={clsx(
           'flex items-center gap-2',
-          isNeobrutalism ? 'opacity-100' : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+          isNeobrutalism
+            ? 'opacity-100'
+            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
@@ -822,7 +843,7 @@ const QueueRowBase = memo(
           className={clsx(
             'flex h-9 w-9 items-center justify-center transition-all',
             isNeobrutalism
-              ? 'border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[#E53935] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] hover:bg-red-500/30 hover:text-red-200 text-white/60',
           )}
           aria-label="Remove from queue"
@@ -893,8 +914,14 @@ const HistoryRow = memo(
         <CoverArtImage
           track={track}
           variant={isNeobrutalism ? 'album' : undefined}
-          className={clsx("h-11 w-11 shadow-sm", !isNeobrutalism && "opacity-80 group-hover:opacity-100 transition-opacity")}
-          imgClassName={clsx("h-full w-full object-cover transition-transform group-hover:scale-105", isNeobrutalism && "grayscale group-hover:grayscale-0 transition-all")}
+          className={clsx(
+            'h-11 w-11 shadow-sm',
+            !isNeobrutalism && 'opacity-80 group-hover:opacity-100 transition-opacity',
+          )}
+          imgClassName={clsx(
+            'h-full w-full object-cover transition-transform group-hover:scale-105',
+            isNeobrutalism && 'grayscale group-hover:grayscale-0 transition-all',
+          )}
           roundedClassName={isNeobrutalism ? '' : 'rounded-[10px]'}
           iconClassName="h-4 w-4"
           alt={track.album}
@@ -909,11 +936,18 @@ const HistoryRow = memo(
         </span>
       </button>
 
-      <div className={clsx("min-w-0 flex-1", !isNeobrutalism && "opacity-90 group-hover:opacity-100 transition-opacity")}>
+      <div
+        className={clsx(
+          'min-w-0 flex-1',
+          !isNeobrutalism && 'opacity-90 group-hover:opacity-100 transition-opacity',
+        )}
+      >
         <p
           className={clsx(
             'truncate text-[14px]',
-            isNeobrutalism ? 'font-black uppercase tracking-tight text-black/80 group-hover:text-black' : 'font-semibold text-white/90',
+            isNeobrutalism
+              ? 'font-black uppercase tracking-tight text-black/80 group-hover:text-black'
+              : 'font-semibold text-white/90',
           )}
         >
           {track.title}
@@ -921,7 +955,9 @@ const HistoryRow = memo(
         <p
           className={clsx(
             'truncate text-[12px] mt-0.5',
-            isNeobrutalism ? 'font-bold uppercase tracking-[0.06em] text-black/50' : 'font-medium text-white/60',
+            isNeobrutalism
+              ? 'font-bold uppercase tracking-[0.06em] text-black/50'
+              : 'font-medium text-white/60',
           )}
         >
           {track.artist}
@@ -931,7 +967,9 @@ const HistoryRow = memo(
       <span
         className={clsx(
           'text-[12px] tabular-nums mr-2',
-          isNeobrutalism ? 'font-mono font-black text-black/50 group-hover:text-black/70' : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
+          isNeobrutalism
+            ? 'font-mono font-black text-black/50 group-hover:text-black/70'
+            : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
         )}
       >
         {formatTime(track.duration)}
@@ -940,7 +978,9 @@ const HistoryRow = memo(
       <div
         className={clsx(
           'flex items-center gap-2',
-          isNeobrutalism ? 'opacity-100' : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+          isNeobrutalism
+            ? 'opacity-100'
+            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
@@ -949,7 +989,7 @@ const HistoryRow = memo(
           className={clsx(
             'flex h-8 w-8 items-center justify-center transition-all',
             isNeobrutalism
-              ? 'border-2 border-black bg-[#F5C518] shadow-[2px_2px_0_0_#000] hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-[var(--signal-active)] shadow-[2px_2px_0_0_#000] hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-white/[0.15] hover:text-white',
           )}
           aria-label="Replay track"
@@ -962,7 +1002,7 @@ const HistoryRow = memo(
           className={clsx(
             'flex h-8 w-8 items-center justify-center transition-all',
             isNeobrutalism
-              ? 'border-2 border-black bg-white shadow-[2px_2px_0_0_#000] hover:bg-[#E53935] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-white shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-red-500/30 hover:text-red-200',
           )}
           aria-label="Remove from queue history"
@@ -976,4 +1016,3 @@ const HistoryRow = memo(
 HistoryRow.displayName = 'HistoryRow';
 
 QueueView.displayName = 'QueueView';
-

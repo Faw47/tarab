@@ -1,6 +1,6 @@
+import { memo } from 'react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/store/settings-store';
-import { memo } from 'react';
 
 interface BentoCardProps {
   children: React.ReactNode;
@@ -38,9 +38,7 @@ export const BentoCard = memo(function BentoCard({
           <div className="min-w-0 space-y-1">
             {title && (
               <div className="flex items-center gap-2">
-                {isNeobrutalism && (
-                  <span className="h-2.5 w-2.5 shrink-0 bg-black" aria-hidden />
-                )}
+                {isNeobrutalism && <span className="h-2.5 w-2.5 shrink-0 bg-black" aria-hidden />}
                 <h3
                   className={cn(
                     isNeobrutalism
@@ -56,7 +54,9 @@ export const BentoCard = memo(function BentoCard({
               <p
                 className={cn(
                   'text-xs leading-relaxed',
-                  isNeobrutalism ? 'font-bold uppercase tracking-[0.08em] text-black/65' : 'text-text-muted',
+                  isNeobrutalism
+                    ? 'font-bold uppercase tracking-[0.08em] text-black/65'
+                    : 'text-text-muted',
                 )}
               >
                 {description}

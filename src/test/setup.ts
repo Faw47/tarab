@@ -9,6 +9,9 @@ vi.mock('../platform/tauri-zustand-storage', () => ({
     removeItem: async () => undefined,
   }),
 }));
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: vi.fn(async () => undefined),
+}));
 
 afterEach(() => {
   cleanup();

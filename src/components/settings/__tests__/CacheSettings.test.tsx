@@ -1,10 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-
-import { CacheSettings } from '../CacheSettings';
-import { useSettingsStore } from '../../../store/settings-store';
-
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cacheClear, cacheEnforceLimit } from '../../../lib/tauri-commands';
+import { useSettingsStore } from '../../../store/settings-store';
+import { CacheSettings } from '../CacheSettings';
 
 vi.mock('../../../lib/tauri-commands', () => ({
   cacheGetStats: vi.fn(async () => ({
@@ -68,4 +66,3 @@ describe('CacheSettings', () => {
     });
   });
 });
-

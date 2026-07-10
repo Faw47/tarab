@@ -1,7 +1,7 @@
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { get, set, del } from 'idb-keyval';
+import { del, get, set } from 'idb-keyval';
 import { type ReactNode, useState } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { Toaster } from 'sonner';
@@ -78,10 +78,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
           theme="dark"
           toastOptions={{
             style: {
-              background: 'rgba(23, 23, 23, 0.8)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: '#fff',
+              background: 'var(--toast-surface)',
+              backdropFilter: 'blur(var(--toast-blur))',
+              border: '1px solid var(--toast-border)',
+              color: 'var(--toast-foreground)',
             },
           }}
         />

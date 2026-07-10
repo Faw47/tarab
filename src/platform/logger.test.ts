@@ -18,9 +18,9 @@ describe('logger redaction', () => {
   });
 
   it('redacts sensitive metadata keys', () => {
-    expect(
-      safeStringify({ nested: { accessToken: 'secret-token', api_key: 'secret-key' } }),
-    ).toBe('{"nested":{"accessToken":"[redacted]","api_key":"[redacted]"}}');
+    expect(safeStringify({ nested: { accessToken: 'secret-token', api_key: 'secret-key' } })).toBe(
+      '{"nested":{"accessToken":"[redacted]","api_key":"[redacted]"}}',
+    );
   });
 
   it('omits stack traces when stack inclusion is disabled', () => {

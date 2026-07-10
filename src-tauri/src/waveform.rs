@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::database::get_cache_dir;
+use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
 const SAMPLES_PER_SECOND: u32 = 10; // 10 samples per second = 100ms resolution
 const MAX_CACHE_SIZE: usize = 1000; // Max waveforms in memory
@@ -283,15 +284,25 @@ pub fn create_waveform_generator() -> SharedWaveformGenerator {
 
 // ========== Tauri Commands ==========
 
+fn ensure_waveform_path_allowed(file_path: &str, roots: &[PathBuf]) -> Result<(), String> {
+    ensure_existing_path_allowed(&PathBuf::from(file_path), roots, "generate waveform")?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn waveform_generate(
     file_path: String,
     gen: tauri::State<'_, SharedWaveformGenerator>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<WaveformData, String> {
     let gen = gen.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || gen.generate(&file_path))
-        .await
-        .map_err(|e| e.to_string())?
+    let roots = roots_state.inner().read().roots.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_waveform_path_allowed(&file_path, &roots)?;
+        gen.generate(&file_path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -312,4 +323,54 @@ pub fn waveform_get_stats(gen: tauri::State<'_, SharedWaveformGenerator>) -> Wav
 #[tauri::command]
 pub fn waveform_clear_cache(gen: tauri::State<'_, SharedWaveformGenerator>) -> Result<u64, String> {
     gen.clear_cache()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("tarab-waveform-{}-{}", name, nonce));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn waveform_generation_rejects_paths_outside_library_roots() {
+        let allowed_root = temp_dir("allowed");
+        let outside_root = temp_dir("outside");
+        let outside_file = outside_root.join("outside.mp3");
+        fs::write(&outside_file, b"not audio").expect("write outside file");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        let result = ensure_waveform_path_allowed(&outside_file.to_string_lossy(), &roots);
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("outside configured library roots"));
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn waveform_generation_allows_existing_files_inside_library_roots() {
+        let allowed_root = temp_dir("allowed");
+        let track_file = allowed_root.join("track.mp3");
+        fs::write(&track_file, b"not audio").expect("write track file");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        ensure_waveform_path_allowed(&track_file.to_string_lossy(), &roots)
+            .expect("path should be allowed");
+
+        let _ = fs::remove_dir_all(allowed_root);
+    }
 }

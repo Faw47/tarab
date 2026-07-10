@@ -176,7 +176,8 @@
 }
 
 .library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-command-deck,
-.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-command-deck.is-scrolled {
+.library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell)
+  .library-v2-command-deck.is-scrolled {
   border-left-color: transparent;
 }
 
@@ -437,7 +438,6 @@
   font-weight: 600;
 }
 
-
 /* ─── Toolbar ────────────────────────────────────────────────────────────── */
 
 .library-v2-toolbar {
@@ -495,10 +495,6 @@
   background: var(--library-v2-control-bg-active);
   transform: translateY(1px);
 }
-
-
-
-
 
 /* ─── Detail header ──────────────────────────────────────────────────────── */
 
@@ -1020,6 +1016,22 @@
   max-width: 45ch;
   font-size: 1rem;
   color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
+}
+
+.library-v2-empty-action {
+  margin-top: 1.25rem;
+  min-height: 2.5rem;
+  border-radius: 999px;
+  padding: 0 1.25rem;
+  border: 1px solid color-mix(in oklch, var(--glass-border) 70%, transparent);
+  background: color-mix(in oklch, var(--hero-accent) 24%, var(--surface-raised));
+  color: var(--type-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.library-v2-empty-action:hover {
+  background: color-mix(in oklch, var(--hero-accent) 34%, var(--surface-raised));
 }
 
 /* ─── Loading / error states ─────────────────────────────────────────────── */

@@ -1,25 +1,20 @@
 import { clsx } from 'clsx';
 import { Home, Settings } from 'lucide-react';
-import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
-import { memo, useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
-import { applyHorizontalPillDom, useLiquidSegmentedPillHorizontal } from '@/hooks/use-liquid-segmented-pill';
+import { memo, type RefObject, useCallback, useLayoutEffect, useRef } from 'react';
+import {
+  applyHorizontalPillDom,
+  useLiquidSegmentedPillHorizontal,
+} from '@/hooks/use-liquid-segmented-pill';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from '../ui/button';
+import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
 import { BottomRim, glssDeep, LensArc } from '../ui/liquid-glass';
 
-export type NavView =
-  | 'home'
-  | 'library'
-  | 'search'
-  | 'queue'
-  | 'tags'
-  | 'settings'
-  | 'album';
+export type NavView = 'home' | 'library' | 'search' | 'queue' | 'tags' | 'settings' | 'album';
 
 interface FloatingDockProps {
   activeView: NavView;
   onNavigate: (view: NavView) => void;
-  onQueueToggle: () => void;
 }
 
 interface DockItem {
@@ -36,7 +31,7 @@ const dockItems: DockItem[] = [
   { id: 'settings', icon: <Settings className="w-5 h-5" />, label: 'Settings' },
 ];
 
-export const FloatingDock = memo(({ activeView, onNavigate, onQueueToggle }: FloatingDockProps) => {
+export const FloatingDock = memo(({ activeView, onNavigate }: FloatingDockProps) => {
   const theme = useSettingsStore((s) => s.theme);
   const isNeobrutalism = theme === 'neobrutalism';
   const shellRef = useRef<HTMLDivElement>(null);
@@ -49,10 +44,9 @@ export const FloatingDock = memo(({ activeView, onNavigate, onQueueToggle }: Flo
     (index: number) => {
       const item = dockItems[index];
       if (!item) return;
-      if (item.id === 'queue') onQueueToggle();
-      else onNavigate(item.id);
+      onNavigate(item.id);
     },
-    [onNavigate, onQueueToggle],
+    [onNavigate],
   );
 
   const {
@@ -129,7 +123,8 @@ export const FloatingDock = memo(({ activeView, onNavigate, onQueueToggle }: Flo
               ...(pillLayoutFromDom
                 ? {}
                 : { left: pillStyle.left, width: pillStyle.width, opacity: pillStyle.opacity }),
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.14) 0%, var(--surface-tint) 100%)',
+              background:
+                'linear-gradient(180deg, rgba(255,255,255,0.14) 0%, var(--surface-tint) 100%)',
               boxShadow: '0 0 22px var(--hero-glow)',
             }}
           />
@@ -146,11 +141,7 @@ export const FloatingDock = memo(({ activeView, onNavigate, onQueueToggle }: Flo
               isNeobrutalism={isNeobrutalism}
               liquidStripSuppressClickRef={liquidEnabled ? suppressNextTabClickRef : undefined}
               onClick={() => {
-                if (item.id === 'queue') {
-                  onQueueToggle();
-                } else {
-                  onNavigate(item.id);
-                }
+                onNavigate(item.id);
               }}
             />
           ))}
@@ -183,7 +174,7 @@ const DockButton = memo(
         className={clsx(
           'relative flex-1 min-w-0 h-auto items-center justify-center px-3 py-2.5 transition-all duration-200 group flex gap-2 overflow-hidden',
           isNeobrutalism
-            ? 'rounded-none border-2 border-transparent text-black hover:bg-[#F6F6F6]'
+            ? 'rounded-none border-2 border-transparent text-black hover:bg-[var(--neo-panel)]'
             : 'rounded-2xl hover:bg-transparent active:translate-x-[1px] active:translate-y-[1px]',
           !isNeobrutalism && (isActive ? 'text-primary' : 'text-text-secondary hover:text-white'),
         )}
@@ -196,27 +187,27 @@ const DockButton = memo(
         <div
           className={clsx(
             'relative flex items-center justify-center rounded-none',
-            isNeobrutalism ? 'shrink-0 transition-none' : 'h-10 w-10 transition-transform duration-200',
+            isNeobrutalism
+              ? 'shrink-0 transition-none'
+              : 'h-10 w-10 transition-transform duration-200',
             isActive
               ? isNeobrutalism
-                ? 'inline-flex bg-[#F5C518] p-[6px] text-black border-2 border-black shadow-none'
+                ? 'inline-flex bg-[var(--signal-active)] p-[6px] text-black border-2 border-black shadow-none'
                 : 'h-10 w-10 bg-white text-black ring-2 ring-primary/[0.3] translate-x-[1px] translate-y-[1px]'
               : isNeobrutalism
                 ? 'h-10 w-10 bg-white text-black border-2 border-black shadow-[4px_4px_0_0_#000]'
                 : 'bg-white/10 text-text-secondary group-hover:bg-white/[0.15] shadow-[0_10px_25px_rgba(0,0,0,0.25)]',
           )}
-          style={!isNeobrutalism && isActive ? { boxShadow: '0 0 24px var(--hero-glow)' } : undefined}
+          style={
+            !isNeobrutalism && isActive ? { boxShadow: '0 0 24px var(--hero-glow)' } : undefined
+          }
         >
           {item.icon}
         </div>
         <span
           className={clsx(
             'text-xs font-black uppercase tracking-[0.05em] transition-none truncate',
-            isNeobrutalism
-                ? 'text-black'
-                : isActive
-                ? 'text-text-primary'
-                : 'text-text-muted',
+            isNeobrutalism ? 'text-black' : isActive ? 'text-text-primary' : 'text-text-muted',
           )}
         >
           {item.label}

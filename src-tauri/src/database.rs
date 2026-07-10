@@ -1,9 +1,11 @@
 use parking_lot::Mutex;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
+
+use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
 const CURRENT_SCHEMA_VERSION: i32 = 7;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
@@ -269,11 +271,15 @@ impl Database {
 
     #[cfg(test)]
     fn cleanup_duplicates_and_normalize(&self) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        self.cleanup_duplicates_and_normalize_with_conn(&conn)
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        self.cleanup_duplicates_and_normalize_with_conn(&tx)?;
+        tx.commit()
     }
 
     fn cleanup_duplicates_and_normalize_with_conn(&self, conn: &Connection) -> SqliteResult<()> {
+        conn.execute_batch("PRAGMA defer_foreign_keys=ON;")?;
+
         // Dedupe playlist memberships that collapse to the same normalized track id.
         // This prevents primary-key conflicts when normalizing `track_id` values.
         conn.execute(
@@ -288,9 +294,15 @@ impl Database {
             [],
         )?;
 
-        // Normalize playlist track ids.
+        // Normalize playlist path fields.
         conn.execute(
-            "UPDATE playlist_tracks SET track_id = REPLACE(track_id, '\\', '/') WHERE track_id LIKE '%\\%'",
+            "UPDATE playlist_tracks
+             SET track_id = REPLACE(track_id, '\\', '/'),
+                 snapshot_file_path = CASE
+                     WHEN snapshot_file_path LIKE '%\\%' THEN REPLACE(snapshot_file_path, '\\', '/')
+                     ELSE snapshot_file_path
+                 END
+             WHERE track_id LIKE '%\\%' OR snapshot_file_path LIKE '%\\%'",
             [],
         )?;
 
@@ -311,6 +323,14 @@ impl Database {
         // Final cleanup: normalize remaining path/id values.
         conn.execute(
             "UPDATE tracks SET file_path = REPLACE(file_path, '\\', '/'), id = REPLACE(id, '\\', '/') WHERE file_path LIKE '%\\%' OR id LIKE '%\\%'",
+            [],
+        )?;
+
+        conn.execute(
+            "UPDATE lyrics_index
+             SET track_id = REPLACE(track_id, '\\', '/'),
+                 lyrics_path = REPLACE(lyrics_path, '\\', '/')
+             WHERE track_id LIKE '%\\%' OR lyrics_path LIKE '%\\%'",
             [],
         )?;
 
@@ -734,14 +754,17 @@ impl Database {
         if ids.is_empty() {
             return Ok(0);
         }
+        let normalized_ids: Vec<String> = ids.iter().map(|id| Self::normalize_path(id)).collect();
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
         let mut removed = 0;
         {
-            let mut stmt = tx.prepare_cached("DELETE FROM tracks WHERE id = ?1")?;
-            for id in ids {
-                let normalized_id = Self::normalize_path(id);
-                removed += stmt.execute([&normalized_id])?;
+            let mut delete_lyrics =
+                tx.prepare_cached("DELETE FROM lyrics_index WHERE track_id = ?1")?;
+            let mut delete_track = tx.prepare_cached("DELETE FROM tracks WHERE id = ?1")?;
+            for id in &normalized_ids {
+                delete_lyrics.execute([id])?;
+                removed += delete_track.execute([id])?;
             }
         }
         tx.commit()?;
@@ -751,11 +774,19 @@ impl Database {
     pub fn rename_track_path(&self, old_path: &str, new_path: &str) -> SqliteResult<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        tx.execute_batch("PRAGMA defer_foreign_keys=ON;")?;
         // Normalize both paths for consistent database operations
         let normalized_old = Self::normalize_path(old_path);
         let normalized_new = Self::normalize_path(new_path);
         tx.execute(
-            "UPDATE playlist_tracks SET track_id = ?1 WHERE track_id = ?2",
+            "UPDATE playlist_tracks
+             SET track_id = ?1,
+                 snapshot_file_path = CASE WHEN snapshot_file_path = ?2 THEN ?1 ELSE snapshot_file_path END
+             WHERE track_id = ?2",
+            params![normalized_new, normalized_old],
+        )?;
+        tx.execute(
+            "UPDATE lyrics_index SET track_id = ?1 WHERE track_id = ?2",
             params![normalized_new, normalized_old],
         )?;
         tx.execute(
@@ -1236,7 +1267,7 @@ impl Database {
     }
 
     pub fn delete_tracks_by_folder(&self, folder_path: &str) -> SqliteResult<usize> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
         // Normalize the folder path first
         let normalized_folder = Self::normalize_path(folder_path);
         let normalized = if normalized_folder.ends_with('/') {
@@ -1249,11 +1280,18 @@ impl Database {
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
-        // Query using normalized paths only (database should have normalized paths)
-        let count = conn.execute(
-            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, format!("{}%", escaped)],
+        let like_pattern = format!("{}%", escaped);
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM lyrics_index WHERE track_id = ?1 OR track_id LIKE ?2 ESCAPE '\\'",
+            params![normalized_folder, like_pattern],
         )?;
+        // Query using normalized paths only (database should have normalized paths)
+        let count = tx.execute(
+            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
+            params![normalized_folder, like_pattern],
+        )?;
+        tx.commit()?;
         Ok(count)
     }
 
@@ -1958,6 +1996,13 @@ pub fn create_database() -> Result<SharedDatabase, String> {
 
 // ========== Tauri Commands ==========
 
+fn ensure_upsert_tracks_allowed(tracks: &[DbTrack], roots: &[PathBuf]) -> Result<(), String> {
+    for track in tracks {
+        ensure_existing_path_allowed(Path::new(&track.file_path), roots, "upsert library track")?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn db_get_all_tracks(
     db: tauri::State<'_, SharedDatabase>,
@@ -2055,12 +2100,16 @@ pub async fn db_get_existing_paths(
 pub async fn db_upsert_tracks(
     tracks: Vec<DbTrack>,
     db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<usize, String> {
     let db = db.inner().clone();
-    spawn_blocking(move || db.upsert_tracks_batch(&tracks))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    let roots = roots_state.inner().read().roots.clone();
+    spawn_blocking(move || {
+        ensure_upsert_tracks_allowed(&tracks, &roots)?;
+        db.upsert_tracks_batch(&tracks).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2195,6 +2244,45 @@ mod tests {
         db
     }
 
+    #[test]
+    fn upsert_track_validation_rejects_paths_outside_library_roots() {
+        let allowed_root =
+            std::env::temp_dir().join(format!("tarab-db-allowed-{}", now_millis_i64_or_default()));
+        let outside_root =
+            std::env::temp_dir().join(format!("tarab-db-outside-{}", now_millis_i64_or_default()));
+        std::fs::create_dir_all(&allowed_root).expect("create allowed root");
+        std::fs::create_dir_all(&outside_root).expect("create outside root");
+        let outside_file = outside_root.join("outside.mp3");
+        std::fs::write(&outside_file, b"not audio").expect("write outside file");
+        let roots = vec![std::fs::canonicalize(&allowed_root).expect("canonical root")];
+        let track = DbTrack {
+            id: outside_file.to_string_lossy().to_string(),
+            title: "Outside".to_string(),
+            artist: "Artist".to_string(),
+            album_artist: None,
+            album: "Album".to_string(),
+            year: None,
+            duration: 1.0,
+            file_path: outside_file.to_string_lossy().to_string(),
+            has_cover_art: false,
+            cover_art_hash: None,
+            blurhash: None,
+            date_added: now_millis_i64_or_default(),
+            play_count: 0,
+            last_played: None,
+            rating: None,
+        };
+
+        let result = ensure_upsert_tracks_allowed(&[track], &roots);
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("outside configured library roots"));
+
+        let _ = std::fs::remove_dir_all(allowed_root);
+        let _ = std::fs::remove_dir_all(outside_root);
+    }
     fn sample_track(id: &str) -> DbTrack {
         DbTrack {
             id: id.to_string(),
@@ -2290,6 +2378,58 @@ mod tests {
     }
 
     #[test]
+    fn rename_track_path_updates_playlist_and_lyrics_references() {
+        let db = test_db();
+        let old_path = "/tmp/song.mp3";
+        let new_path = "/tmp/song-renamed.mp3";
+        let mut track = sample_track("song");
+        track.id = old_path.to_string();
+        track.file_path = old_path.to_string();
+
+        db.upsert_tracks_batch(&[track]).expect("seed track");
+        db.create_playlist(&sample_playlist("pl_rename"))
+            .expect("create playlist");
+        db.set_playlist_tracks(
+            "pl_rename",
+            &[old_path.to_string()],
+            now_millis_i64_or_default(),
+        )
+        .expect("set playlist tracks");
+        db.upsert_lyrics_index_batch(&[LyricsIndexEntry {
+            track_id: old_path.to_string(),
+            lyrics_path: "/tmp/song.lrc".to_string(),
+            lyrics_mtime: 1,
+            content: "hello".to_string(),
+        }])
+        .expect("seed lyrics index");
+
+        db.rename_track_path(old_path, new_path)
+            .expect("rename track");
+
+        let tracks = db
+            .get_tracks_by_ids(&[new_path.to_string()])
+            .expect("read track");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].file_path, new_path);
+        let playlist_entries = db
+            .get_playlist_track_entries("pl_rename")
+            .expect("read playlist tracks");
+        assert_eq!(playlist_entries.len(), 1);
+        assert_eq!(playlist_entries[0].track_id, new_path);
+        assert_eq!(
+            playlist_entries[0].snapshot_file_path.as_deref(),
+            Some(new_path)
+        );
+        let lyrics_ids = db
+            .get_lyrics_index_meta()
+            .expect("read lyrics index")
+            .into_iter()
+            .map(|entry| entry.track_id)
+            .collect::<Vec<_>>();
+        assert_eq!(lyrics_ids, vec![new_path.to_string()]);
+    }
+
+    #[test]
     fn deleting_tracks_keeps_playlist_references_for_unavailable_entries() {
         let db = test_db();
         db.upsert_tracks_batch(&[sample_track("a")])
@@ -2298,9 +2438,17 @@ mod tests {
             .expect("create playlist");
         db.set_playlist_tracks("pl_3", &["a".to_string()], now_millis_i64_or_default())
             .expect("set playlist tracks");
+        db.upsert_lyrics_index_batch(&[LyricsIndexEntry {
+            track_id: "a".to_string(),
+            lyrics_path: "/tmp/a.lrc".to_string(),
+            lyrics_mtime: 1,
+            content: "line".to_string(),
+        }])
+        .expect("seed lyrics index");
 
         db.delete_tracks(&["a".to_string()]).expect("delete track");
 
+        assert_eq!(db.lyrics_index_count().expect("lyrics count"), 0);
         let ids = db
             .get_playlist_track_entries("pl_3")
             .expect("read playlist tracks")
@@ -2308,6 +2456,48 @@ mod tests {
             .map(|entry| entry.track_id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn deleting_tracks_by_folder_cleans_lyrics_index() {
+        let db = test_db();
+        let mut inside = sample_track("inside");
+        inside.id = "/tmp/folder/inside.mp3".to_string();
+        inside.file_path = inside.id.clone();
+        let mut outside = sample_track("outside");
+        outside.id = "/tmp/other/outside.mp3".to_string();
+        outside.file_path = outside.id.clone();
+        db.upsert_tracks_batch(&[inside.clone(), outside.clone()])
+            .expect("seed tracks");
+        db.upsert_lyrics_index_batch(&[
+            LyricsIndexEntry {
+                track_id: inside.id.clone(),
+                lyrics_path: "/tmp/folder/inside.lrc".to_string(),
+                lyrics_mtime: 1,
+                content: "inside".to_string(),
+            },
+            LyricsIndexEntry {
+                track_id: outside.id.clone(),
+                lyrics_path: "/tmp/other/outside.lrc".to_string(),
+                lyrics_mtime: 1,
+                content: "outside".to_string(),
+            },
+        ])
+        .expect("seed lyrics index");
+
+        assert_eq!(
+            db.delete_tracks_by_folder("/tmp/folder")
+                .expect("delete folder"),
+            1
+        );
+
+        let ids = db
+            .get_lyrics_index_meta()
+            .expect("read lyrics index")
+            .into_iter()
+            .map(|entry| entry.track_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![outside.id]);
     }
 
     #[test]
@@ -2479,15 +2669,20 @@ mod tests {
             )
             .expect("insert slash track");
             conn.execute(
-                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at) VALUES (?1, ?2, 0, ?3)",
-                params!["pl_cleanup", backslash_path, now],
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_file_path) VALUES (?1, ?2, 0, ?3, ?4)",
+                params!["pl_cleanup", backslash_path, now, backslash_path],
             )
             .expect("insert backslash playlist track");
             conn.execute(
-                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at) VALUES (?1, ?2, 1, ?3)",
-                params!["pl_cleanup", slash_path, now + 1],
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_file_path) VALUES (?1, ?2, 1, ?3, ?4)",
+                params!["pl_cleanup", slash_path, now + 1, slash_path],
             )
             .expect("insert slash playlist track");
+            conn.execute(
+                "INSERT OR REPLACE INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content) VALUES (?1, ?2, 1, 'line')",
+                params![backslash_path, r"C:\music\song.lrc"],
+            )
+            .expect("insert backslash lyrics index");
         }
 
         db.cleanup_duplicates_and_normalize()
@@ -2503,5 +2698,14 @@ mod tests {
             .expect("read playlist entries");
         assert_eq!(playlist_entries.len(), 1);
         assert_eq!(playlist_entries[0].track_id, slash_path);
+        assert_eq!(
+            playlist_entries[0].snapshot_file_path.as_deref(),
+            Some(slash_path)
+        );
+
+        let lyrics_entries = db.get_lyrics_index_meta().expect("read lyrics index");
+        assert_eq!(lyrics_entries.len(), 1);
+        assert_eq!(lyrics_entries[0].track_id, slash_path);
+        assert_eq!(lyrics_entries[0].lyrics_path, "C:/music/song.lrc");
     }
 }

@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { clipboard } from '../platform/clipboard';
 
 export const APP_ERROR_EVENT = 'tarab:error';
 
@@ -41,7 +42,7 @@ export const reportError = (
       ? {
           label: 'Copy Details',
           onClick: () => {
-            navigator.clipboard.writeText(detail).catch(console.error);
+            void clipboard.writeText(detail);
           },
         }
       : undefined,

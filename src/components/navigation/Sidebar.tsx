@@ -1,17 +1,20 @@
 import { Home, type LucideIcon, Search, Settings, Tag } from 'lucide-react';
 import {
   type CSSProperties,
-  type RefObject,
   memo,
+  type RefObject,
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
-  useLayoutEffect,
 } from 'react';
+import {
+  applyVerticalPillDom,
+  useLiquidSegmentedPillVertical,
+} from '@/hooks/use-liquid-segmented-pill';
+import { cn } from '@/lib/utils';
 import { LibraryIcon, QueueIcon } from '../ui/Icons';
 import type { NavView } from './FloatingDock';
-import { useLiquidSegmentedPillVertical, applyVerticalPillDom } from '@/hooks/use-liquid-segmented-pill';
-import { cn } from '@/lib/utils';
 
 type NavMode = 'iconRail' | 'topNav';
 
@@ -127,8 +130,8 @@ const SidebarNavButton = memo(function SidebarNavButton({
         className={cn(
           'group flex items-center justify-center border-2 border-black transition-none focus-visible:outline-none rounded-none text-black hover-neo-wiggle',
           active
-            ? 'bg-[#F5C518] p-[6px] shadow-none'
-            : 'h-11 w-11 bg-white shadow-[4px_4px_0_0_#000] hover:bg-[#F6F6F6] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none',
+            ? 'bg-[var(--signal-active)] p-[6px] shadow-none'
+            : 'h-11 w-11 bg-white shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-panel)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none',
         )}
       >
         <Icon className="h-5 w-5" strokeWidth={2.5} />
@@ -243,10 +246,7 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
   return (
     <nav
       ref={navRef}
-      className={cn(
-        'relative flex flex-col items-center',
-        isNeobrutalism ? 'gap-2' : 'gap-1',
-      )}
+      className={cn('relative flex flex-col items-center', isNeobrutalism ? 'gap-2' : 'gap-1')}
       {...listProps}
     >
       {!isNeobrutalism && (
@@ -278,7 +278,8 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-3 top-0 h-px rounded-full"
             style={{
-              background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
+              background:
+                'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
               opacity: 0.7,
             }}
           />
@@ -334,7 +335,9 @@ export const Sidebar = memo(function Sidebar({
         <div
           className={cn(
             'flex flex-col items-center gap-2 p-1.5',
-            typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform) && 'pt-12',
+            typeof navigator !== 'undefined' &&
+              /Mac|iPhone|iPad|iPod/.test(navigator.platform) &&
+              'pt-12',
           )}
         >
           <div className="flex flex-col items-center py-2 px-1">

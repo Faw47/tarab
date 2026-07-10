@@ -52,7 +52,11 @@ const fuseKeys = (
 };
 
 const worker = {
-  rankTracks(tracks: SerializedTrack[], query: string, searchScope: SearchScope): SerializedTrack[] {
+  rankTracks(
+    tracks: SerializedTrack[],
+    query: string,
+    searchScope: SearchScope,
+  ): SerializedTrack[] {
     const needle = query.trim();
     if (!needle || tracks.length === 0) {
       return tracks;

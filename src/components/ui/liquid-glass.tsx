@@ -3,9 +3,11 @@ import {
   createContext,
   forwardRef,
   type HTMLAttributes,
+  lazy,
   memo,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -13,12 +15,9 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import { Canvas } from '@react-three/fiber';
-import { cn } from '@/lib/utils';
-
-import { LiquidBackgroundPlane, type LiquidBgColors } from '@/components/shell/liquid-background-mesh';
+import type { LiquidBgColors } from '@/components/shell/liquid-background-mesh';
 import { useDocumentHidden } from '@/components/shell/use-document-hidden';
+import { cn } from '@/lib/utils';
 
 export { cn };
 
@@ -178,7 +177,7 @@ export function usePointerTracker<T extends HTMLElement = HTMLElement>(
     lastTimeRef.current = now;
 
     // Spring smoothing (Exponential Decay)
-    const k = 18; 
+    const k = 18;
     const alpha = 1 - Math.exp(-k * dt);
 
     const prevX = currentPosRef.current.x;
@@ -210,16 +209,16 @@ export function usePointerTracker<T extends HTMLElement = HTMLElement>(
     const distSq =
       (targetPosRef.current.x - currentPosRef.current.x) ** 2 +
       (targetPosRef.current.y - currentPosRef.current.y) ** 2;
-    
+
     if (distSq < 0.01 && Math.abs(velEmaRef.current.x) < 1 && Math.abs(velEmaRef.current.y) < 1) {
-       // Snap to exact target to prevent micro-jitters
-       el.style.setProperty(varX, `${targetPosRef.current.x.toFixed(2)}%`);
-       el.style.setProperty(varY, `${targetPosRef.current.y.toFixed(2)}%`);
-       el.style.setProperty('--adl-liquid-stretch-x', '0');
-       el.style.setProperty('--adl-liquid-stretch-y', '0');
-       activeRef.current = false;
-       rafRef.current = null;
-       return;
+      // Snap to exact target to prevent micro-jitters
+      el.style.setProperty(varX, `${targetPosRef.current.x.toFixed(2)}%`);
+      el.style.setProperty(varY, `${targetPosRef.current.y.toFixed(2)}%`);
+      el.style.setProperty('--adl-liquid-stretch-x', '0');
+      el.style.setProperty('--adl-liquid-stretch-y', '0');
+      activeRef.current = false;
+      rafRef.current = null;
+      return;
     }
 
     rafRef.current = requestAnimationFrame(tick);
@@ -230,20 +229,20 @@ export function usePointerTracker<T extends HTMLElement = HTMLElement>(
       if (!enabled) return;
       const rect = rectRef.current ?? measure();
       if (!rect || rect.width === 0 || rect.height === 0) return;
-      
+
       const targetX = ((clientX - rect.left) / rect.width) * 100;
       const targetY = ((clientY - rect.top) / rect.height) * 100;
-      
+
       targetPosRef.current = { x: targetX, y: targetY };
 
       if (!activeRef.current) {
-        // If we were idle, snap the current pos to target immediately to avoid 
+        // If we were idle, snap the current pos to target immediately to avoid
         // the spotlight flying in from a random previous coordinate
         currentPosRef.current = { x: targetX, y: targetY };
         velEmaRef.current = { x: 0, y: 0 };
         lastTimeRef.current = performance.now();
         activeRef.current = true;
-        
+
         if (rafRef.current == null) {
           rafRef.current = requestAnimationFrame(tick);
         }
@@ -571,6 +570,9 @@ GlassCard.displayName = 'memo(GlassCard)';
 
 export type { LiquidBgColors };
 
+const LiquidBackgroundCanvas = lazy(() =>
+  import('./LiquidBackgroundCanvas').then((module) => ({ default: module.LiquidBackgroundCanvas })),
+);
 interface LiquidBgProps extends HTMLAttributes<HTMLDivElement> {
   colors?: Partial<LiquidBgColors>;
   fixed?: boolean;
@@ -611,14 +613,9 @@ export const LiquidBg = memo(function LiquidBg({
       style={style}
       {...props}
     >
-      <Canvas
-        className="absolute inset-0 z-0"
-        camera={{ position: [0, 0, 1] }}
-        orthographic
-      >
-        <LiquidBackgroundPlane colors={mergedColors} pauseAnimation={pauseAnimation} />
-      </Canvas>
-
+      <Suspense fallback={null}>
+        <LiquidBackgroundCanvas colors={mergedColors} pauseAnimation={pauseAnimation} />
+      </Suspense>
       <div
         className="absolute inset-0 z-10"
         style={{ background: 'oklch(0.08 0.005 140 / 0.55)' }}

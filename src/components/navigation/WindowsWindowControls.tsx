@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useAsyncCleanup } from '@/hooks/useAsyncCleanup';
 import { cn } from '@/lib/utils';
@@ -73,7 +73,7 @@ export const WindowsWindowControls = memo(function WindowsWindowControls({
 
   const buttonClassName = useMemo(() => {
     if (variant === 'neo') {
-      return 'h-10 w-12 border-2 border-black bg-[#F6F6F6] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[#E4C463] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+      return 'h-10 w-12 border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
     }
 
     return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-100 hover:bg-white/10 hover:text-white';
@@ -81,7 +81,7 @@ export const WindowsWindowControls = memo(function WindowsWindowControls({
 
   const closeButtonClassName = useMemo(() => {
     if (variant === 'neo') {
-      return 'h-10 w-12 border-2 border-black bg-[#F6F6F6] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[#ff5f56] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+      return 'h-10 w-12 border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[#ff5f56] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
     }
 
     return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-100 hover:bg-[#e81123] hover:text-white';

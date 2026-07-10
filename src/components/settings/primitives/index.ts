@@ -1,6 +1,6 @@
-export { SettingsBentoCard } from './SettingsBentoCard';
 export { SettingSwitch } from './SettingSwitch';
 export { SettingsActionButton } from './SettingsActionButton';
+export { SettingsBentoCard } from './SettingsBentoCard';
 export { SettingsNavTab } from './SettingsNavTab';
 export {
   SettingsControlGroup,

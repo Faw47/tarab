@@ -393,7 +393,23 @@ fn find_first_match_line(content: &str, query_lower: &str) -> Option<(String, us
     None
 }
 
-fn sync_lyrics_index_blocking(db: &SharedDatabase) -> Result<u32, String> {
+fn is_track_path_allowed_for_lyrics(track_path: &str, roots: Option<&[PathBuf]>) -> bool {
+    roots
+        .map(|roots| {
+            ensure_existing_path_allowed(Path::new(track_path), roots, "sync lyrics for track")
+                .is_ok()
+        })
+        .unwrap_or(true)
+}
+
+fn sync_lyrics_index_blocking(
+    db: &SharedDatabase,
+    roots: Option<&[PathBuf]>,
+) -> Result<u32, String> {
+    if matches!(roots, Some(roots) if roots.is_empty()) {
+        return Ok(0);
+    }
+
     const TRACK_PAGE_SIZE: u32 = 1000;
 
     let existing = db
@@ -426,6 +442,12 @@ fn sync_lyrics_index_blocking(db: &SharedDatabase) -> Result<u32, String> {
         for TrackPathRow { id, file_path } in tracks {
             track_ids.insert(id.clone());
             let existing_meta = existing_by_track.get(&id);
+            if !is_track_path_allowed_for_lyrics(&file_path, roots) {
+                if existing_meta.is_some() {
+                    deletes.push(id.clone());
+                }
+                continue;
+            }
             let lyrics_file = find_lyrics_file(&file_path);
 
             match lyrics_file {
@@ -581,6 +603,7 @@ mod tests {
         let tracks: Vec<DbTrack> = (0..1001)
             .map(|i| {
                 let path = dir.join(format!("track-{i:04}.mp3"));
+                fs::write(&path, b"audio").expect("write track");
                 fs::write(path.with_extension("lrc"), "[00:01]Line").expect("write lrc");
                 sample_track(&format!("track-{i:04}"), path.to_string_lossy().to_string())
             })
@@ -594,13 +617,72 @@ mod tests {
         })
         .expect("seed orphan");
 
-        let changed = sync_lyrics_index_blocking(&db).expect("sync lyrics");
+        let roots = vec![fs::canonicalize(&dir).expect("canonical root")];
+        let changed = sync_lyrics_index_blocking(&db, Some(&roots)).expect("sync lyrics");
 
         assert_eq!(changed, 1002);
         assert_eq!(db.lyrics_index_count().expect("lyrics count"), 1001);
 
         let _ = fs::remove_dir_all(dir);
     }
+    #[test]
+    fn sync_lyrics_index_with_empty_roots_is_noop() {
+        let db = Arc::new(Database::in_memory_for_tests().expect("create db"));
+        let dir = temp_dir("sync-empty-roots");
+        let track = dir.join("song.mp3");
+        fs::write(&track, b"audio").expect("write track");
+        fs::write(track.with_extension("lrc"), "[00:01]Line").expect("write lrc");
+        db.upsert_tracks_batch(&[sample_track("track", track.to_string_lossy().to_string())])
+            .expect("seed track");
+
+        let changed = sync_lyrics_index_blocking(&db, Some(&[])).expect("sync lyrics");
+
+        assert_eq!(changed, 0);
+        assert_eq!(db.lyrics_index_count().expect("lyrics count"), 0);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sync_lyrics_index_skips_tracks_outside_library_roots() {
+        let db = Arc::new(Database::in_memory_for_tests().expect("create db"));
+        let allowed_root = temp_dir("sync-allowed");
+        let outside_root = temp_dir("sync-outside");
+        let allowed_track = allowed_root.join("allowed.mp3");
+        let outside_track = outside_root.join("outside.mp3");
+        fs::write(&allowed_track, b"audio").expect("write allowed track");
+        fs::write(&outside_track, b"audio").expect("write outside track");
+        fs::write(allowed_track.with_extension("lrc"), "[00:01]Allowed")
+            .expect("write allowed lrc");
+        fs::write(outside_track.with_extension("lrc"), "[00:01]Outside")
+            .expect("write outside lrc");
+        db.upsert_tracks_batch(&[
+            sample_track("allowed", allowed_track.to_string_lossy().to_string()),
+            sample_track("outside", outside_track.to_string_lossy().to_string()),
+        ])
+        .expect("seed tracks");
+        db.upsert_lyrics_index_batch(&[LyricsIndexEntry {
+            track_id: "outside".to_string(),
+            lyrics_path: outside_track
+                .with_extension("lrc")
+                .to_string_lossy()
+                .to_string(),
+            lyrics_mtime: 1,
+            content: "stale outside".to_string(),
+        }])
+        .expect("seed outside lyrics index");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        sync_lyrics_index_blocking(&db, Some(&roots)).expect("sync lyrics");
+
+        let entries = db.get_lyrics_index_meta().expect("read lyrics index");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].track_id, "allowed");
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
+
     #[test]
     fn clean_lrc_line_removes_millisecond_line_and_word_timestamps() {
         let line = "[00:01.234]<00:01.250>Hello <00:02.000>world";
@@ -610,9 +692,13 @@ mod tests {
 }
 
 #[tauri::command]
-pub async fn sync_lyrics_index(db: State<'_, SharedDatabase>) -> Result<u32, String> {
+pub async fn sync_lyrics_index(
+    db: State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<u32, String> {
     let db_clone = db.inner().clone();
-    spawn_blocking(move || sync_lyrics_index_blocking(&db_clone))
+    let roots = roots_state.inner().read().roots.clone();
+    spawn_blocking(move || sync_lyrics_index_blocking(&db_clone, Some(&roots)))
         .await
         .map_err(|e| format!("Lyrics sync task failed: {}", e))?
 }
@@ -622,12 +708,14 @@ pub async fn search_lyrics(
     query: String,
     limit: u32,
     db: State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Vec<LyricsSearchResult>, String> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
 
     let db_clone = db.inner().clone();
+    let roots = roots_state.inner().read().roots.clone();
     let query_lower = query.to_lowercase();
     let query_for_db = query.clone();
 
@@ -637,7 +725,7 @@ pub async fn search_lyrics(
             .map_err(|e| format!("Failed to read lyrics index count: {}", e))?
             == 0
         {
-            let _ = sync_lyrics_index_blocking(&db_clone);
+            let _ = sync_lyrics_index_blocking(&db_clone, Some(&roots));
         }
 
         let candidates = db_clone

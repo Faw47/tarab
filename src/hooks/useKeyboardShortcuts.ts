@@ -14,6 +14,8 @@ interface UseKeyboardShortcutsParams {
   tagEditorTracks: Track[] | null;
   showFullPlayer: boolean;
   selectedTracks: Track[];
+  canGoBack?: boolean;
+  onBack?: () => void;
 }
 
 const INTERACTIVE_TARGET_SELECTOR = [
@@ -48,6 +50,8 @@ export const useKeyboardShortcuts = ({
   tagEditorTracks,
   showFullPlayer,
   selectedTracks,
+  canGoBack = false,
+  onBack,
 }: UseKeyboardShortcutsParams) => {
   const preMuteVolumeRef = useRef<number>(0.8);
 
@@ -173,6 +177,8 @@ export const useKeyboardShortcuts = ({
             setShowFullPlayer(false);
           } else if (selectedTracks.length > 0) {
             setSelectedTracks([]);
+          } else if (canGoBack) {
+            onBack?.();
           }
           break;
       }
@@ -189,5 +195,7 @@ export const useKeyboardShortcuts = ({
     tagEditorTracks,
     showFullPlayer,
     selectedTracks,
+    canGoBack,
+    onBack,
   ]);
 };

@@ -1,7 +1,6 @@
-import { memo } from 'react';
-
 import { Subtitles } from 'lucide-react';
-
+import { memo } from 'react';
+import { useSettingsStore } from '../../../store/settings-store';
 import {
   SettingsRow,
   SettingsSection,
@@ -9,7 +8,6 @@ import {
   SettingsSlider,
   SettingsSwitch,
 } from '../primitives';
-import { useSettingsStore } from '../../../store/settings-store';
 
 export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
   const fullscreenHideCoverArt = useSettingsStore((s) => s.fullscreenHideCoverArt);
@@ -22,7 +20,9 @@ export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
   const setFullscreenLyricAlignment = useSettingsStore((s) => s.setFullscreenLyricAlignment);
 
   const fullscreenBackgroundAnimation = useSettingsStore((s) => s.fullscreenBackgroundAnimation);
-  const setFullscreenBackgroundAnimation = useSettingsStore((s) => s.setFullscreenBackgroundAnimation);
+  const setFullscreenBackgroundAnimation = useSettingsStore(
+    (s) => s.setFullscreenBackgroundAnimation,
+  );
 
   const fullscreenBackgroundBlur = useSettingsStore((s) => s.fullscreenBackgroundBlur);
   const setFullscreenBackgroundBlur = useSettingsStore((s) => s.setFullscreenBackgroundBlur);
@@ -59,7 +59,7 @@ export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
         control={
           <SettingsSelect
             value={fullscreenLyricAlignment}
-            onChange={(e) => setFullscreenLyricAlignment(e.target.value as 'left' | 'center' | 'right')}
+            onChange={(value) => setFullscreenLyricAlignment(value as 'left' | 'center' | 'right')}
             aria-label="Fullscreen lyric alignment"
           >
             <option value="left">Left</option>
@@ -73,7 +73,9 @@ export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
         control={
           <SettingsSelect
             value={fullscreenBackgroundAnimation}
-            onChange={(e) => setFullscreenBackgroundAnimation(e.target.value as 'pan' | 'pulse' | 'none')}
+            onChange={(value) =>
+              setFullscreenBackgroundAnimation(value as 'pan' | 'pulse' | 'none')
+            }
             aria-label="Fullscreen background animation"
           >
             <option value="pan">Pan</option>

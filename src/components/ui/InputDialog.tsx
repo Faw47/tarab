@@ -4,13 +4,7 @@ import { memo, useCallback, useEffect, useId, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from './button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './dialog';
 import { IconButton } from './IconButton';
 
 export interface InputDialogProps {

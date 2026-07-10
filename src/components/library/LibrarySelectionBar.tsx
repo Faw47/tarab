@@ -24,29 +24,29 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
         <span
           className={cn(
             isNeo
-              ? 'px-2 py-0.5 border-[2px] border-black bg-[#F6F6F6] text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[2px_2px_0_0_#000]'
+              ? 'px-2 py-0.5 border-[2px] border-black bg-[var(--neo-panel)] text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[2px_2px_0_0_#000]'
               : '',
           )}
         >
           {isNeo ? 'BATCH OPS' : 'Selected'}
         </span>
         <strong
-          className={cn(
-            isNeo ? 'font-mono text-sm font-black tracking-[0.08em] text-black' : '',
-          )}
+          className={cn(isNeo ? 'font-mono text-sm font-black tracking-[0.08em] text-black' : '')}
         >
           {selectedCount} {selectedCount === 1 ? 'FILE' : 'FILES'} SELECTED
         </strong>
       </div>
 
-      <div className={cn(isNeo ? 'flex flex-wrap items-center gap-2' : 'library-v2-selection-actions')}>
+      <div
+        className={cn(isNeo ? 'flex flex-wrap items-center gap-2' : 'library-v2-selection-actions')}
+      >
         {onSelectAll && (
           <button
             type="button"
             onClick={onSelectAll}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-[#F6F6F6] px-3 text-[11px] font-black uppercase tracking-[0.08em] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[#E4C463] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-[var(--neo-panel)] px-3 text-[11px] font-black uppercase tracking-[0.08em] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >
@@ -59,7 +59,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
             onClick={onClearSelection}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-black px-3 text-[11px] font-black uppercase tracking-[0.08em] text-[#A855F7] shadow-[2px_2px_0_0_#FFF] shadow-black/80 transition-none hover:bg-[#F87171] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-black px-3 text-[11px] font-black uppercase tracking-[0.08em] text-[#A855F7] shadow-[2px_2px_0_0_#FFF] shadow-black/80 transition-none hover:bg-[var(--signal-danger)] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >

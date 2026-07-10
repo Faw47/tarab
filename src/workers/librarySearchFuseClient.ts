@@ -1,4 +1,4 @@
-import { wrap, type Remote } from 'comlink';
+import { type Remote, wrap } from 'comlink';
 import type { LibraryWorker, SearchScope, SerializedTrack } from './library.worker';
 
 let workerApi: Remote<LibraryWorker> | null = null;
