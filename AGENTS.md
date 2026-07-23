@@ -22,13 +22,17 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 2. Mini window is a controlled surface (snapshot + control intents), not a state owner.
 3. Desktop-originated actions (tray/app menu/media keys) should route through `desktop-control-action` to main window.
 4. Keep IPC payloads typed on both sides (avoid ad-hoc JSON blobs).
+5. All custom Rust commands are main-window-only at the invoke-handler boundary. Mini-player behavior must use typed snapshot/control events, not direct custom command calls.
 
 ## Persistence
 
+- **Library authority**: Rust owns persistent folder grants in app data file **`library-grants.json`**. The renderer settings list is a display cache only. Library grant creation must use `select_library_folder`; do not restore a renderer command that accepts arbitrary root paths.
+- **File associations**: native launches create opaque pending intents. **Play once** grants one exact file until playback opens it; **Import folder** creates a persistent native grant; **Cancel** discards the request.
 - **Player session** (queue, position, speed, flags): the main window persists via `@tauri-apps/plugin-store` file **`tarab-player.dat`**, key **`player-state`** (`src/features/app/player-state-store.ts`). On first load, if that key is empty, the app migrates from legacy **`session.json`** using the Rust command `load_playback_session`.
 - **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
 - **Mini player window**: declared in `tauri.conf.json` (`mini-player.html`, 320×92, transparent, undecorated). `desktop_open_mini_window` shows it and moves it with `tauri-plugin-positioner` (`Position::BottomRight`). The Vite build includes a second entry (`mini-player.html` → `src/mini-player.tsx`).
+- **Library database/cache**: app-owned files use the `com.fawaz.tarab` directory. Existing `music-player` directories migrate in place on first access.
 
 ## Desktop Integration Notes
 
@@ -56,7 +60,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 ## Liquid app-shell WebGL (single canvas)
 
 - In the **liquid-glass** layout only, [`AppShellLiquidWebGL`](src/components/shell/AppShellLiquidWebGL.tsx) mounts **one** fixed, orthographic R3F `Canvas` (`pointer-events: none`, `z-0`): full-viewport metaball background plus the top-bar aurora strip and scan particles in the same GL context. [`TopBar`](src/components/navigation/TopBar.tsx) no longer embeds its own canvas; it feeds normalized header pointer + search focus into the shell via props/refs from [`App`](src/App.tsx). CSS `backdrop-filter` on the header remains the primary glass; shaders add motion (not DOM refraction).
-- **Exceptions:** [`TiltAlbumArt`](src/components/player/TiltAlbumArt.tsx) and the mini-player HTML entry keep separate canvases / no shell layer.
+- **Exception:** The mini-player HTML entry keeps its separate rendering surface.
 - [`LiquidBg`](src/components/ui/liquid-glass.tsx) remains a **standalone** full-viewport option (second context) for demos or embeds; the main window uses the shell instead.
 - Respect **`reducedEffects`**, **`usePrefersReducedMotion`**, and **`document.visibilityState`** (shader time pauses when hidden; reduced motion / effects unmount the shell canvas). Drag uses `data-tauri-drag-region` above the WebGL layer (`TopBar` content stays `z-10` over `z-0`).
 - **Do not** add full-window post chains or render-target refraction of HTML here without an explicit product decision (cost and maintenance).

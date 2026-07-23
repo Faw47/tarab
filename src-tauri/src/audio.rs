@@ -19,7 +19,10 @@ use symphonia::core::probe::Hint;
 use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
-use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
+use crate::file_ops::{
+    consume_transient_file, ensure_existing_path_allowed, ensure_path_allowed_by_state,
+    SharedLibraryRoots,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1395,9 +1398,13 @@ pub fn play_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
-    let roots = roots_state.inner().read().roots.clone();
-    ensure_audio_file_allowed(&file_path, &roots, "play audio file")?;
-    state.play(file_path, start_pos)
+    {
+        let roots = roots_state.inner().read();
+        ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
+    }
+    state.play(file_path.clone(), start_pos)?;
+    consume_transient_file(roots_state.inner(), Path::new(&file_path));
+    Ok(())
 }
 
 #[tauri::command]

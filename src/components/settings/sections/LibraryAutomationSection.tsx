@@ -29,7 +29,7 @@ export const LibraryAutomationSection = memo(function LibraryAutomationSection()
         onChange={setAutoLyrics}
         description={
           lyricsEnabled
-            ? 'Automatically fetch missing lyrics when available.'
+            ? 'Send the track title, artist, album, and duration to LRCLIB when local lyrics are missing.'
             : 'Enable Lyrics in Appearance to display them.'
         }
       />

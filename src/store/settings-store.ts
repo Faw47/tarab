@@ -152,7 +152,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoWatch: true,
         followSymlinks: false,
         downloadArtwork: true,
-        autoLyrics: true,
+        autoLyrics: false,
         compactMode: false,
         reducedEffects: false,
         debugLiquidControlGlass: false,
@@ -312,7 +312,7 @@ export const useSettingsStore = create<SettingsState>()(
       {
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
-        version: 6,
+        version: 7,
         migrate: (persisted, version) => {
           let incoming = (persisted as Partial<SettingsState>) ?? {};
           if ((version ?? 0) < 2) {
@@ -344,6 +344,12 @@ export const useSettingsStore = create<SettingsState>()(
             incoming = {
               ...incoming,
               desktopMiniWindowEnabled: false,
+            } as Partial<SettingsState>;
+          }
+          if ((version ?? 0) < 7) {
+            incoming = {
+              ...incoming,
+              autoLyrics: false,
             } as Partial<SettingsState>;
           }
           incoming = {

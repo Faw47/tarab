@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, FolderPlus, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { useLibraryData } from '../../features/library/useLibraryData';
@@ -8,16 +8,19 @@ import {
   DesktopIntegrationForm,
   PlaybackSettingsForm,
 } from '../../features/settings/components/SettingsForms';
-import { liquidGlassSettingsTextInputClassName } from '../../lib/liquid-glass-settings-ui';
 import { useRenderLog } from '../../lib/performance';
 import { reportError } from '../../lib/report-error';
-import { dbDeleteTracksByFolder, selectFolder } from '../../lib/tauri-commands';
+import {
+  dbDeleteTracksByFolder,
+  listLibraryGrants,
+  revokeLibraryGrant,
+  selectLibraryFolder,
+} from '../../lib/tauri-commands';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../store/settings-store';
 import type { SettingsPage } from '../../types';
 import { IconButton } from '../ui';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
 import { LibraryIcon } from '../ui/Icons';
 import { CacheSettings } from './CacheSettings';
 import {
@@ -91,16 +94,13 @@ export const UnifiedSettingsView = memo(
     const libraryFolders = useSettingsStore((s) => s.libraryFolders);
     const followSymlinks = useSettingsStore((s) => s.followSymlinks);
     const downloadArtwork = useSettingsStore((s) => s.downloadArtwork);
-    const addLibraryFolder = useSettingsStore((s) => s.addLibraryFolder);
-    const removeLibraryFolder = useSettingsStore((s) => s.removeLibraryFolder);
+    const setLibraryFolders = useSettingsStore((s) => s.setLibraryFolders);
     const setFollowSymlinks = useSettingsStore((s) => s.setFollowSymlinks);
     const setDownloadArtwork = useSettingsStore((s) => s.setDownloadArtwork);
 
     const { libraryStats, tracks, setTracks, setTrackCount } = useLibraryData();
     const { isScanning, folderStatuses, scanFolder, rescanAll } = libraryScan;
 
-    const [showAddInput, setShowAddInput] = useState(false);
-    const [manualPath, setManualPath] = useState('');
     const [folderToRemove, setFolderToRemove] = useState<string | null>(null);
 
     const trackCount = libraryStats?.trackCount ?? tracks.length;
@@ -113,31 +113,30 @@ export const UnifiedSettingsView = memo(
 
     const handleSelectFolder = useCallback(async () => {
       try {
-        const folder = await selectFolder();
-        if (folder && !libraryFolders.includes(folder)) {
-          addLibraryFolder(folder);
-          void scanFolder(folder);
+        const grant = await selectLibraryFolder();
+        if (grant) {
+          const grants = await listLibraryGrants();
+          setLibraryFolders(grants.map((item) => item.path));
+          if (grant.status === 'available') {
+            void scanFolder(grant.path);
+          }
         }
       } catch (error) {
         reportError('Failed to select folder', { source: 'settings-view', error });
-        setShowAddInput(true);
       }
-    }, [addLibraryFolder, libraryFolders, scanFolder]);
-
-    const handleAddManualPath = useCallback(() => {
-      const trimmed = manualPath.trim();
-      if (!trimmed || libraryFolders.includes(trimmed)) return;
-      addLibraryFolder(trimmed);
-      setManualPath('');
-      setShowAddInput(false);
-      void scanFolder(trimmed);
-    }, [addLibraryFolder, libraryFolders, manualPath, scanFolder]);
+    }, [scanFolder, setLibraryFolders]);
 
     const handleRemoveFolder = useCallback(
       async (folder: string) => {
         try {
+          const grants = await listLibraryGrants();
+          const grant = grants.find((item) => item.path === folder);
+          if (!grant) {
+            throw new Error('The native library grant no longer exists.');
+          }
           await dbDeleteTracksByFolder(folder);
-          removeLibraryFolder(folder);
+          await revokeLibraryGrant(grant.id);
+          setLibraryFolders(grants.filter((item) => item.id !== grant.id).map((item) => item.path));
           const remaining = tracks.filter((t) => !isSameOrSubPath(t.filePath, folder));
           setTracks(remaining);
           setTrackCount(remaining.length);
@@ -151,7 +150,7 @@ export const UnifiedSettingsView = memo(
           setFolderToRemove(null);
         }
       },
-      [queryClient, removeLibraryFolder, setTrackCount, setTracks, tracks],
+      [queryClient, setLibraryFolders, setTrackCount, setTracks, tracks],
     );
 
     const currentCopy = pageCopy[page];
@@ -207,13 +206,6 @@ export const UnifiedSettingsView = memo(
                   <SettingsControlGroup>
                     <SettingsActionButton size="sm" onClick={() => void handleSelectFolder()}>
                       <Plus size={14} /> Add Folder
-                    </SettingsActionButton>
-                    <SettingsActionButton
-                      size="sm"
-                      tone="ghost"
-                      onClick={() => setShowAddInput(true)}
-                    >
-                      <FolderPlus size={14} /> Manual
                     </SettingsActionButton>
                     <SettingsActionButton
                       size="sm"
@@ -348,49 +340,6 @@ export const UnifiedSettingsView = memo(
           )}
           {page === 'storage' && <CacheSettings />}
         </div>
-
-        <Dialog
-          open={showAddInput}
-          onOpenChange={(open) => {
-            if (!open) {
-              setShowAddInput(false);
-              setManualPath('');
-            }
-          }}
-        >
-          <DialogContent
-            className={cn(
-              'w-full max-w-md p-6',
-              isNeobrutalism
-                ? 'border-2 border-black bg-white'
-                : 'rounded-2xl border border-white/[0.06] bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-xl',
-            )}
-          >
-            <DialogTitle className="mb-4 text-lg font-bold">Add Folder Path</DialogTitle>
-            <input
-              autoFocus
-              type="text"
-              value={manualPath}
-              onChange={(e) => setManualPath(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddManualPath();
-              }}
-              placeholder="/path/to/music"
-              className={cn(
-                'mb-4 w-full outline-none transition-all',
-                isNeobrutalism
-                  ? 'border-2 border-black bg-white p-3 text-black'
-                  : liquidGlassSettingsTextInputClassName('w-full'),
-              )}
-            />
-            <div className="flex justify-end gap-3">
-              <DialogClose asChild>
-                <SettingsActionButton tone="ghost">Cancel</SettingsActionButton>
-              </DialogClose>
-              <SettingsActionButton onClick={handleAddManualPath}>Add Folder</SettingsActionButton>
-            </div>
-          </DialogContent>
-        </Dialog>
 
         {folderToRemove && (
           <ConfirmDialog

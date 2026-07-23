@@ -10,7 +10,9 @@ use std::sync::OnceLock;
 use tauri::async_runtime::spawn_blocking;
 
 use crate::database::SharedDatabase;
-use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
+use crate::file_ops::{
+    ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
+};
 use crate::image_cache::SharedImageCache;
 
 #[derive(Debug, Serialize, Clone)]
@@ -375,9 +377,12 @@ pub async fn get_track_metadata(
     file_path: String,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<TrackMetadata, String> {
-    let roots = roots_state.inner().read().roots.clone();
+    let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
-        ensure_metadata_path_allowed(&file_path, &roots, "read track metadata")?;
+        {
+            let state = roots_state.read();
+            ensure_path_allowed_by_state(Path::new(&file_path), &state, "read track metadata")?;
+        }
         extract_metadata_fast(&file_path)
             .ok_or_else(|| format!("Failed to read metadata from: {}", file_path))
     })

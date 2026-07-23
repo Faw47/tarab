@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Tarab",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.fawaz.tarab",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -57,15 +57,20 @@
     }
   },
   "plugins": {
-    "deepLink": {
+    "deep-link": {
       "mobile": [],
-      "desktop": ["tarab://open"]
+      "desktop": {
+        "schemes": ["tarab"]
+      }
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": false,
     "targets": "all",
+    "category": "Music",
+    "shortDescription": "A local-first desktop music player",
+    "longDescription": "Tarab is a local-first desktop music player with native playback, library management, lyrics, playlists, and desktop controls.",
     "icon": [
       "icons/icon.png",
       "icons/32x32.png",
@@ -74,6 +79,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "digestAlgorithm": "sha256"
+    },
     "fileAssociations": [
       { "ext": ["mp3"], "name": "MP3 Audio", "description": "MP3 Audio File", "role": "Viewer" },
       { "ext": ["flac"], "name": "FLAC Audio", "description": "FLAC Audio File", "role": "Viewer" },
@@ -81,7 +93,9 @@
       { "ext": ["wav"], "name": "WAV Audio", "description": "WAV Audio File", "role": "Viewer" },
       { "ext": ["ogg"], "name": "OGG Audio", "description": "OGG Audio File", "role": "Viewer" },
       { "ext": ["m4a"], "name": "M4A Audio", "description": "M4A Audio File", "role": "Viewer" },
-      { "ext": ["aac"], "name": "AAC Audio", "description": "AAC Audio File", "role": "Viewer" }
+      { "ext": ["aac"], "name": "AAC Audio", "description": "AAC Audio File", "role": "Viewer" },
+      { "ext": ["alac"], "name": "ALAC Audio", "description": "ALAC Audio File", "role": "Viewer" },
+      { "ext": ["wma"], "name": "WMA Audio", "description": "WMA Audio File", "role": "Viewer" }
     ]
   }
 }

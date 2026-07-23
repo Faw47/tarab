@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { NavView } from './components/navigation';
-import type { ConfirmDialogProps } from './components/ui/ConfirmDialog';
+import { ConfirmDialog, type ConfirmDialogProps } from './components/ui/ConfirmDialog';
 
 // Components
 
@@ -24,6 +24,7 @@ import { useAppStartupEffects } from './features/app/useAppStartupEffects';
 import { useCacheMaintenance } from './features/app/useCacheMaintenance';
 import { useCurrentTrackLyrics } from './features/app/useCurrentTrackLyrics';
 import { useInitialLibraryBootstrap } from './features/app/useInitialLibraryBootstrap';
+import { useLaunchFileIntents } from './features/app/useLaunchFileIntents';
 import { useLibraryRootSync } from './features/app/useLibraryRootSync';
 import { usePlaybackPositionEvents } from './features/app/usePlaybackPositionEvents';
 import { usePlaybackSettingsSync } from './features/app/usePlaybackSettingsSync';
@@ -74,7 +75,6 @@ const App = () => {
   useRenderLog('App');
   // Setup lifecycle listeners
   useSingleInstanceBridge();
-  useDeepLinkBridge();
   useDesktopIntegration();
 
   // Navigation
@@ -246,19 +246,30 @@ const App = () => {
     openGlobalSearch,
     handleSearchFocusChange,
   } = useAppSearchShell({ navigate, navMode, searchQuery });
+  const handleDeepLinkSearch = useCallback(
+    (query: string) => {
+      setSearchQuery(query);
+      openGlobalSearch();
+    },
+    [openGlobalSearch, setSearchQuery],
+  );
+  useDeepLinkBridge({ onSearch: handleDeepLinkSearch });
   const { showDropOverlay } = useDroppedAudioImport({
     downloadArtwork,
     followSymlinks,
     libraryFolders,
     queryClient,
     setIsScanning,
-    setLibraryFolders,
     setScanProgress,
     setTrackCount,
     setTracks,
     startProcessing,
     updateProcessing,
     finishProcessing,
+  });
+  const launchFileDialog = useLaunchFileIntents({
+    scanFolder: libraryScan.scanFolder,
+    setLibraryFolders,
   });
 
   useEffect(() => {
@@ -293,7 +304,12 @@ const App = () => {
     generateCoverArtHashes,
     applyCoverArtHashes,
   );
-  useLibraryRootSync({ libraryFolders, libraryTracks, prefetchCoverArt });
+  useLibraryRootSync({
+    libraryFolders,
+    libraryTracks,
+    prefetchCoverArt,
+    setLibraryFolders,
+  });
 
   const { initialLibraryLoading, libraryLoadError, loadInitialLibrary } =
     useInitialLibraryBootstrap({
@@ -633,6 +649,7 @@ const App = () => {
           confirmDialog={confirmDialog}
           onCancelConfirmDialog={() => setConfirmDialog(null)}
         />
+        {launchFileDialog ? <ConfirmDialog {...launchFileDialog} /> : null}
       </SmoothTimeProvider>
     </GlassSystemProvider>
   );

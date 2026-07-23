@@ -1,21 +1,300 @@
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::database::SharedDatabase;
 
-#[derive(Default)]
+const LIBRARY_GRANTS_VERSION: u8 = 1;
+const LIBRARY_GRANTS_FILE: &str = "library-grants.json";
+const MAX_LIBRARY_GRANTS_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryGrantRecord {
+    id: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LibraryGrantFile {
+    version: u8,
+    grants: Vec<LibraryGrantRecord>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryGrantSummary {
+    pub id: String,
+    pub path: String,
+    pub display_name: String,
+    pub status: &'static str,
+}
+
+#[derive(Clone, Default)]
 pub struct LibraryRootsState {
     pub roots: Vec<PathBuf>,
+    grants: Vec<LibraryGrantRecord>,
+    transient_files: Vec<PathBuf>,
 }
 
 pub type SharedLibraryRoots = Arc<RwLock<LibraryRootsState>>;
 
 pub fn create_library_roots_state() -> SharedLibraryRoots {
     Arc::new(RwLock::new(LibraryRootsState::default()))
+}
+
+fn grants_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("App data directory not available: {}", e))?;
+    fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+    Ok(app_dir.join(LIBRARY_GRANTS_FILE))
+}
+
+fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(), String> {
+    let data = serde_json::to_vec_pretty(grant_file)
+        .map_err(|e| format!("Failed to serialize library grants: {}", e))?;
+    let temp_path = path.with_extension(format!("json.{:032x}.tmp", rand::random::<u128>()));
+    let backup_path = path.with_extension("json.bak");
+
+    let mut temp = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .map_err(|e| format!("Failed to create temporary library grants file: {}", e))?;
+    temp.write_all(&data)
+        .map_err(|e| format!("Failed to write library grants: {}", e))?;
+    temp.sync_all()
+        .map_err(|e| format!("Failed to sync library grants: {}", e))?;
+    drop(temp);
+
+    let had_existing = path.exists();
+    if had_existing {
+        let _ = fs::remove_file(&backup_path);
+        fs::rename(path, &backup_path)
+            .map_err(|e| format!("Failed to stage existing library grants: {}", e))?;
+    }
+
+    if let Err(err) = fs::rename(&temp_path, path) {
+        if had_existing {
+            let _ = fs::rename(&backup_path, path);
+        }
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("Failed to replace library grants: {}", err));
+    }
+
+    if had_existing {
+        let _ = fs::remove_file(&backup_path);
+    }
+    Ok(())
+}
+
+fn active_roots(grants: &[LibraryGrantRecord]) -> Vec<PathBuf> {
+    let roots = grants
+        .iter()
+        .filter_map(|grant| {
+            let path = PathBuf::from(&grant.path);
+            if !path.is_dir() {
+                return None;
+            }
+            let canonical = fs::canonicalize(&path).ok()?;
+            (canonical == path).then_some(canonical)
+        })
+        .collect();
+    normalize_library_roots(roots)
+}
+
+fn grant_summary(grant: &LibraryGrantRecord) -> LibraryGrantSummary {
+    let path = PathBuf::from(&grant.path);
+    let available = path.is_dir()
+        && fs::canonicalize(&path)
+            .map(|canonical| canonical == path)
+            .unwrap_or(false);
+    let display_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&grant.path)
+        .to_string();
+    LibraryGrantSummary {
+        id: grant.id.clone(),
+        path: grant.path.clone(),
+        display_name,
+        status: if available { "available" } else { "missing" },
+    }
+}
+
+pub fn load_library_roots_state(app: &AppHandle) -> Result<SharedLibraryRoots, String> {
+    let path = grants_path(app)?;
+    let grants = if path.exists() {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|e| format!("Failed to inspect library grants: {}", e))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("Library grants storage is not a regular file".to_string());
+        }
+        if metadata.len() > MAX_LIBRARY_GRANTS_BYTES {
+            return Err("Library grants storage exceeds the size limit".to_string());
+        }
+        let data = fs::read(&path).map_err(|e| format!("Failed to read library grants: {}", e))?;
+        let file: LibraryGrantFile = serde_json::from_slice(&data)
+            .map_err(|e| format!("Failed to parse library grants: {}", e))?;
+        if file.version != LIBRARY_GRANTS_VERSION {
+            return Err(format!(
+                "Unsupported library grants version: {}",
+                file.version
+            ));
+        }
+        file.grants
+    } else {
+        Vec::new()
+    };
+    let roots = active_roots(&grants);
+    Ok(Arc::new(RwLock::new(LibraryRootsState {
+        roots,
+        grants,
+        transient_files: Vec::new(),
+    })))
+}
+
+fn persist_grants(app: &AppHandle, grants: &[LibraryGrantRecord]) -> Result<(), String> {
+    write_grants_atomic(
+        &grants_path(app)?,
+        &LibraryGrantFile {
+            version: LIBRARY_GRANTS_VERSION,
+            grants: grants.to_vec(),
+        },
+    )
+}
+
+#[tauri::command]
+pub fn list_library_grants(
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Vec<LibraryGrantSummary> {
+    let mut state = roots_state.write();
+    state.roots = active_roots(&state.grants);
+    state.grants.iter().map(grant_summary).collect()
+}
+
+#[tauri::command]
+pub async fn select_library_folder(
+    app: AppHandle,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<LibraryGrantSummary>, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Select Music Folder")
+        .blocking_pick_folder();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let selected = selected
+        .into_path()
+        .map_err(|e| format!("Selected folder path is invalid: {}", e))?;
+    if !selected.is_dir() {
+        return Err("Selected library path is not a folder".to_string());
+    }
+    let canonical = fs::canonicalize(&selected)
+        .map_err(|e| format!("Failed to resolve selected library folder: {}", e))?;
+    grant_library_path(&app, roots_state.inner(), canonical).map(Some)
+}
+
+pub(crate) fn grant_library_path(
+    app: &AppHandle,
+    roots_state: &SharedLibraryRoots,
+    canonical: PathBuf,
+) -> Result<LibraryGrantSummary, String> {
+    if !canonical.is_dir() {
+        return Err("Selected library path is not a folder".to_string());
+    }
+    let canonical_string = canonical.to_string_lossy().replace('\\', "/");
+    let current = roots_state.read().grants.clone();
+    if let Some(existing) = current.iter().find(|grant| {
+        let existing_path = PathBuf::from(&grant.path);
+        canonical == existing_path || canonical.starts_with(existing_path)
+    }) {
+        return Ok(grant_summary(existing));
+    }
+
+    let mut next = current;
+    next.retain(|grant| !PathBuf::from(&grant.path).starts_with(&canonical));
+    let grant = LibraryGrantRecord {
+        id: format!("{:032x}", rand::random::<u128>()),
+        path: canonical_string,
+    };
+    next.push(grant.clone());
+    next.sort_by(|a, b| a.path.cmp(&b.path));
+    persist_grants(app, &next)?;
+
+    let mut state = roots_state.write();
+    state.grants = next;
+    state.roots = active_roots(&state.grants);
+    Ok(grant_summary(&grant))
+}
+
+pub(crate) fn authorize_transient_file(
+    roots_state: &SharedLibraryRoots,
+    path: &Path,
+) -> Result<PathBuf, String> {
+    let canonical = canonicalize_existing_path(path)?;
+    if !canonical.is_file() {
+        return Err("Launch file is not a regular file".to_string());
+    }
+    let mut state = roots_state.write();
+    if !state.transient_files.contains(&canonical) {
+        state.transient_files.push(canonical.clone());
+    }
+    Ok(canonical)
+}
+
+pub(crate) fn ensure_path_allowed_by_state(
+    path: &Path,
+    state: &LibraryRootsState,
+    action: &str,
+) -> Result<PathBuf, String> {
+    let canonical = canonicalize_existing_path(path)?;
+    if state.transient_files.contains(&canonical) {
+        return Ok(canonical);
+    }
+    ensure_path_allowed(&canonical, &state.roots, action)?;
+    Ok(canonical)
+}
+
+pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Path) {
+    if let Ok(canonical) = canonicalize_existing_path(path) {
+        roots_state
+            .write()
+            .transient_files
+            .retain(|candidate| candidate != &canonical);
+    }
+}
+
+#[tauri::command]
+pub fn revoke_library_grant(
+    app: AppHandle,
+    grant_id: String,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<bool, String> {
+    let current = roots_state.read().grants.clone();
+    let mut next = current.clone();
+    next.retain(|grant| grant.id != grant_id);
+    if next.len() == current.len() {
+        return Ok(false);
+    }
+    persist_grants(&app, &next)?;
+    let mut state = roots_state.write();
+    state.grants = next;
+    state.roots = active_roots(&state.grants);
+    Ok(true)
 }
 
 fn normalize_library_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -181,30 +460,6 @@ fn create_destination_parent_dir(target: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_library_roots(
-    roots: Vec<String>,
-    roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<(), String> {
-    let mut canonical_roots: Vec<PathBuf> = Vec::new();
-    for root in roots {
-        let root_path = PathBuf::from(&root);
-        if !root_path.exists() || !root_path.is_dir() {
-            continue;
-        }
-        let canonical = fs::canonicalize(&root_path).map_err(|e| {
-            format!(
-                "Failed to canonicalize library root {}: {}",
-                root_path.display(),
-                e
-            )
-        })?;
-        canonical_roots.push(canonical);
-    }
-    roots_state.write().roots = normalize_library_roots(canonical_roots);
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn rename_file(
     old_path: String,
     new_name: String,
@@ -355,6 +610,78 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-file-ops-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn grant_file_is_written_with_version_and_records() {
+        let temp = temp_dir("grant-file");
+        let path = temp.join(LIBRARY_GRANTS_FILE);
+        let grant = LibraryGrantRecord {
+            id: "grant-1".to_string(),
+            path: temp.to_string_lossy().to_string(),
+        };
+
+        write_grants_atomic(
+            &path,
+            &LibraryGrantFile {
+                version: LIBRARY_GRANTS_VERSION,
+                grants: vec![grant],
+            },
+        )
+        .expect("write grant file");
+
+        let stored: LibraryGrantFile =
+            serde_json::from_slice(&fs::read(&path).expect("read grant file"))
+                .expect("parse grant file");
+        assert_eq!(stored.version, LIBRARY_GRANTS_VERSION);
+        assert_eq!(stored.grants.len(), 1);
+        assert_eq!(stored.grants[0].id, "grant-1");
+        assert!(!path.with_extension("json.tmp").exists());
+        assert!(!path.with_extension("json.bak").exists());
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn active_roots_rejects_a_grant_replaced_by_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let container = temp_dir("grant-symlink");
+        let granted = container.join("Music");
+        let outside = temp_dir("grant-outside");
+        fs::create_dir_all(&granted).expect("create granted folder");
+        let stored_path = fs::canonicalize(&granted).expect("canonical grant");
+        fs::remove_dir(&granted).expect("remove granted folder");
+        symlink(&outside, &granted).expect("replace grant with symlink");
+        let grant = LibraryGrantRecord {
+            id: "grant-1".to_string(),
+            path: stored_path.to_string_lossy().to_string(),
+        };
+
+        assert!(active_roots(std::slice::from_ref(&grant)).is_empty());
+        assert_eq!(grant_summary(&grant).status, "missing");
+
+        let _ = fs::remove_dir_all(container);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn transient_authority_allows_only_the_exact_file_and_can_be_consumed() {
+        let root = temp_dir("transient");
+        let allowed = root.join("allowed.mp3");
+        let sibling = root.join("sibling.mp3");
+        fs::write(&allowed, b"audio").expect("write allowed");
+        fs::write(&sibling, b"audio").expect("write sibling");
+        let state = create_library_roots_state();
+
+        authorize_transient_file(&state, &allowed).expect("authorize exact file");
+        assert!(ensure_path_allowed_by_state(&allowed, &state.read(), "test").is_ok());
+        assert!(ensure_path_allowed_by_state(&sibling, &state.read(), "test").is_err());
+
+        consume_transient_file(&state, &allowed);
+        assert!(ensure_path_allowed_by_state(&allowed, &state.read(), "test").is_err());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

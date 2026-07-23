@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
-use std::path::PathBuf;
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
 
@@ -35,6 +35,32 @@ fn is_valid_thumbnail_hash(hash: &str) -> bool {
 
 fn is_valid_thumbnail_size(size: &str) -> bool {
     THUMBNAIL_SIZES.iter().any(|(_, name)| *name == size)
+}
+
+fn read_thumbnail_file(path: &Path, size: &str) -> Result<Option<Vec<u8>>, String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Failed to inspect thumbnail: {}", error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Thumbnail cache entry is not a regular file".to_string());
+    }
+
+    let limit = max_thumbnail_bytes(size);
+    if metadata.len() > limit as u64 {
+        return Err("Thumbnail cache entry exceeds the size limit".to_string());
+    }
+    let file =
+        fs::File::open(path).map_err(|error| format!("Failed to open thumbnail: {}", error))?;
+    let mut data = Vec::with_capacity(metadata.len() as usize);
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|error| format!("Failed to read thumbnail: {}", error))?;
+    if data.len() > limit {
+        return Err("Thumbnail cache entry exceeds the size limit".to_string());
+    }
+    Ok(Some(data))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,11 +201,9 @@ impl ImageCache {
 
         // Load from disk
         let path = self.get_thumbnail_path(hash, size);
-        if !path.exists() {
+        let Some(data) = read_thumbnail_file(&path, size)? else {
             return Ok(None);
-        }
-
-        let data = fs::read(&path).map_err(|e| format!("Failed to read thumbnail: {}", e))?;
+        };
 
         // Add to memory cache
         {
@@ -212,14 +236,7 @@ impl ImageCache {
             return Ok(None);
         }
 
-        let path = self.get_thumbnail_path(hash, size);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        fs::read(&path)
-            .map(Some)
-            .map_err(|e| format!("Failed to read thumbnail: {}", e))
+        read_thumbnail_file(&self.get_thumbnail_path(hash, size), size)
     }
 
     /// Check if thumbnail exists
@@ -436,6 +453,47 @@ mod tests {
             .expect("lookup should not error");
 
         assert!(result.is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn thumbnail_read_rejects_oversized_cache_entry() {
+        let root = temp_dir("oversized");
+        let cache_dir = root.join("covers");
+        let hash = "b".repeat(64);
+        let cache = test_cache(cache_dir);
+        let path = cache.get_thumbnail_path(&hash, "small");
+        fs::create_dir_all(path.parent().expect("thumbnail parent")).expect("create parent");
+        let file = fs::File::create(&path).expect("create thumbnail");
+        file.set_len(max_thumbnail_bytes("small") as u64 + 1)
+            .expect("set oversized length");
+
+        let result = cache.get_thumbnail_bytes(&hash, "small");
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("size limit"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn thumbnail_read_rejects_symlink_cache_entry() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("symlink");
+        let cache_dir = root.join("covers");
+        let hash = "c".repeat(64);
+        let cache = test_cache(cache_dir);
+        let path = cache.get_thumbnail_path(&hash, "small");
+        fs::create_dir_all(path.parent().expect("thumbnail parent")).expect("create parent");
+        let outside = root.join("outside.webp");
+        fs::write(&outside, b"outside").expect("write outside");
+        symlink(&outside, &path).expect("create cache symlink");
+
+        let result = cache.get_thumbnail_bytes(&hash, "small");
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("regular file"));
         let _ = fs::remove_dir_all(root);
     }
 

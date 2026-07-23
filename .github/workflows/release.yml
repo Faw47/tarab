@@ -1,0 +1,378 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release source
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 9.15.2
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+        with:
+          components: clippy,rustfmt
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install RustSec audit tool
+        run: cargo install cargo-audit --version 0.22.1 --locked
+
+      - name: Audit production dependencies
+        run: pnpm audit:dependencies
+
+      - name: Check tag and package versions
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          test "$(node -p "require('./package.json').version")" = "$expected"
+          test "$(node -p "require('./src-tauri/tauri.conf.json').version")" = "$expected"
+          test "$(sed -n 's/^version = \"\\([^\"]*\\)\"/\\1/p' src-tauri/Cargo.toml | head -1)" = "$expected"
+
+      - name: Run release gate
+        run: pnpm verify:release
+
+  macos:
+    name: macOS Universal 2
+    needs: validate
+    runs-on: macos-15
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 9.15.2
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Require Apple signing and notarization credentials
+        shell: bash
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$KEYCHAIN_PASSWORD"
+
+      - name: Import Developer ID certificate
+        shell: bash
+        run: |
+          certificate_path="$RUNNER_TEMP/tarab-release.p12"
+          keychain_path="$RUNNER_TEMP/tarab-release.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          signing_identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' |
+              head -1
+          )"
+          test -n "$signing_identity"
+          printf 'APPLE_SIGNING_IDENTITY=%s\n' "$signing_identity" >> "$GITHUB_ENV"
+          rm -f "$certificate_path"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test Rust backend on macOS
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build signed and notarized Universal 2 DMG
+        run: pnpm tauri build --target universal-apple-darwin --bundles dmg
+
+      - name: Verify signature and notarization ticket
+        shell: bash
+        run: |
+          dmg_path="$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$dmg_path"
+          attach_output="$(hdiutil attach -readonly -nobrowse "$dmg_path")"
+          device="$(
+            printf '%s\n' "$attach_output" |
+              awk -F '\t' '$3 != "" {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1)
+                sub(/s[0-9]+$/, "", $1)
+                print $1
+                exit
+              }'
+          )"
+          mount_dir="$(
+            printf '%s\n' "$attach_output" |
+              awk -F '\t' '$3 != "" {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3)
+                print $3
+                exit
+              }'
+          )"
+          test -n "$device"
+          test -d "$mount_dir"
+          trap 'hdiutil detach "$device"' EXIT
+          app_path="$(find "$mount_dir" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -d --verbose=4 "$app_path" 2>&1 |
+            grep -Eq 'flags=.*runtime'
+          lipo "$app_path/Contents/MacOS/TARAB" -verify_arch x86_64
+          lipo "$app_path/Contents/MacOS/TARAB" -verify_arch arm64
+          plutil -extract CFBundleURLTypes json -o - "$app_path/Contents/Info.plist" |
+            grep -q '"tarab"'
+          xcrun stapler validate "$app_path"
+          spctl --assess --type execute --verbose=2 "$app_path"
+          hdiutil detach "$device"
+          trap - EXIT
+          codesign --verify --verbose=2 "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg_path"
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: tarab-macos-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 9.15.2
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Windows signing certificate
+        shell: pwsh
+        run: ./scripts/prepare-windows-signing.ps1
+
+      - name: Test Rust backend on Windows
+        run: cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Build signed NSIS installer
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles nsis --config src-tauri/tauri.windows-signing.json
+
+      - name: Verify application architecture and Authenticode signatures
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if ($null -eq $installer) { throw "NSIS installer was not produced." }
+          $application = Get-Item "src-tauri/target/${{ matrix.target }}/release/TARAB.exe"
+          $expectedMachine = if ("${{ matrix.arch }}" -eq "arm64") { 0xAA64 } else { 0x8664 }
+          $stream = [IO.File]::OpenRead($application.FullName)
+          try {
+            $reader = [IO.BinaryReader]::new($stream)
+            $stream.Position = 0x3C
+            $peOffset = $reader.ReadInt32()
+            $stream.Position = $peOffset
+            if ($reader.ReadUInt32() -ne 0x00004550) { throw "The application has no valid PE signature." }
+            $machine = $reader.ReadUInt16()
+          } finally {
+            $stream.Dispose()
+          }
+          if ($machine -ne $expectedMachine) {
+            throw "Unexpected application machine type: 0x$($machine.ToString('X4'))"
+          }
+          foreach ($file in @($application, $installer)) {
+            $signature = Get-AuthenticodeSignature $file.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid Authenticode status for $($file.Name): $($signature.Status)"
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              throw "The Authenticode signature has no trusted timestamp: $($file.Name)"
+            }
+          }
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: tarab-windows-${{ matrix.arch }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 9.15.2
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@387aeee55b189f024a4f6d94890c5b18d73339cc # 1.92.0
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build AppImage and Debian package
+        run: pnpm tauri build --bundles appimage,deb
+
+      - name: Verify Linux package architecture
+        shell: bash
+        run: |
+          appimage_path="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)"
+          deb_path="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$appimage_path"
+          test -n "$deb_path"
+          test -x "$appimage_path"
+          case "${{ matrix.arch }}" in
+            x64)
+              file "$appimage_path" | grep -Eq 'x86-64|x86_64'
+              test "$(dpkg-deb --field "$deb_path" Architecture)" = "amd64"
+              ;;
+            arm64)
+              file "$appimage_path" | grep -Eq 'aarch64|ARM aarch64'
+              test "$(dpkg-deb --field "$deb_path" Architecture)" = "arm64"
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+          dpkg-deb --info "$deb_path" >/dev/null
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: tarab-linux-${{ matrix.arch }}
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Publish checksummed and attested release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Stage release assets and create SHA-256 checksums
+        run: node scripts/prepare-release-assets.mjs artifacts release-assets
+
+      - name: Attest release artifacts
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: release-assets/*
+
+      - name: Create GitHub release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mapfile -d '' assets < <(find release-assets -maxdepth 1 -type f -print0 | sort -z)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --generate-notes --title "Tarab $GITHUB_REF_NAME"
+          fi

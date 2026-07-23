@@ -694,6 +694,84 @@
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
 }
 
+/* Albums begin with the same featured-first composition used by Home. The
+ * initial nine stay in normal document flow so the lead card can span two
+ * columns; larger collections continue in the virtualized archive below. */
+.library-v2-albums-layout {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.8rem;
+  padding-bottom: 1.4rem;
+}
+
+.library-v2-albums-showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.library-v2-albums-showcase > .library-v2-album-featured-span {
+  grid-column: span 2;
+  min-height: 100%;
+}
+
+.library-v2-albums-archive {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.library-v2-albums-archive-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-inline: 0.35rem;
+}
+
+.library-v2-albums-archive-heading h3 {
+  color: var(--type-primary);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.library-v2-albums-archive-heading span {
+  color: color-mix(in oklch, var(--type-secondary) 56%, transparent);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-v2-albums-archive-grid {
+  min-height: min(46rem, 62vh);
+}
+
+.library-v2-albums-load-more {
+  align-self: center;
+  min-height: 2.35rem;
+  padding-inline: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: color-mix(in oklch, var(--type-secondary) 82%, white);
+  font-size: 0.74rem;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 120ms ease;
+}
+
+.library-v2-albums-load-more:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--type-primary);
+}
+
+.library-v2-albums-load-more:active {
+  transform: scale(0.97);
+}
+
 .library-v2-album-featured-layout {
   display: flex;
   min-height: 160px;
@@ -702,6 +780,15 @@
 .library-v2-album-featured-media {
   flex: 0 0 160px;
   width: 160px;
+}
+
+.library-v2-albums-showcase .library-v2-album-featured-layout {
+  min-height: 100%;
+}
+
+.library-v2-albums-showcase .library-v2-album-featured-media {
+  flex-basis: 50%;
+  width: 50%;
 }
 
 /* ─── Track & album tiles ─────────────────────────────────────────────────
@@ -1146,6 +1233,10 @@
     grid-template-columns: repeat(auto-fill, minmax(9.7rem, 1fr));
   }
 
+  .library-v2-albums-showcase {
+    grid-template-columns: repeat(auto-fill, minmax(9.7rem, 1fr));
+  }
+
   .library-v2-detail-header {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.62rem;
@@ -1163,6 +1254,19 @@
 }
 
 @media (max-width: 640px) {
+  .library-v2-albums-showcase > .library-v2-album-featured-span {
+    grid-column: 1 / -1;
+  }
+
+  .library-v2-albums-showcase .library-v2-album-featured-layout {
+    flex-direction: column;
+  }
+
+  .library-v2-albums-showcase .library-v2-album-featured-media {
+    width: 100%;
+    flex-basis: auto;
+  }
+
   .library-v2-toolbar {
     width: 100%;
   }

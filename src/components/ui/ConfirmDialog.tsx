@@ -19,10 +19,14 @@ export interface ConfirmDialogProps {
   message: string;
   detail?: string;
   confirmLabel?: string;
+  secondaryLabel?: string;
   cancelLabel?: string;
   variant?: 'default' | 'danger';
+  busy?: boolean;
   onConfirm: () => void;
+  onSecondary?: () => void;
   onCancel: () => void;
+  onDismiss?: () => void;
 }
 
 export const ConfirmDialog = memo(
@@ -31,10 +35,14 @@ export const ConfirmDialog = memo(
     message,
     detail,
     confirmLabel = 'Confirm',
+    secondaryLabel,
     cancelLabel = 'Cancel',
     variant = 'default',
+    busy = false,
     onConfirm,
+    onSecondary,
     onCancel,
+    onDismiss,
   }: ConfirmDialogProps) => {
     const { theme } = useSettingsStore(useShallow((s) => ({ theme: s.theme })));
     const isNeobrutalism = theme === 'neobrutalism';
@@ -42,13 +50,14 @@ export const ConfirmDialog = memo(
 
     const handleConfirm = useCallback(() => {
       onConfirm();
-      onCancel();
-    }, [onConfirm, onCancel]);
+      (onDismiss ?? onCancel)();
+    }, [onCancel, onConfirm, onDismiss]);
 
     return (
-      <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <Dialog open onOpenChange={(open) => !open && !busy && onCancel()}>
         <DialogContent
           showCloseButton={false}
+          aria-busy={busy}
           className={clsx(
             'w-full max-w-md p-6',
             isNeobrutalism
@@ -87,6 +96,7 @@ export const ConfirmDialog = memo(
               size="sm"
               variant={isNeobrutalism ? 'default' : 'ghost'}
               onClick={onCancel}
+              disabled={busy}
               aria-label="Close"
             >
               <X className="w-4 h-4" />
@@ -117,10 +127,30 @@ export const ConfirmDialog = memo(
           </div>
 
           <DialogFooter>
-            <Button variant={isNeobrutalism ? 'default' : 'ghost'} onClick={onCancel}>
+            <Button
+              variant={isNeobrutalism ? 'default' : 'ghost'}
+              onClick={onCancel}
+              disabled={busy}
+            >
               {cancelLabel}
             </Button>
-            <Button onClick={handleConfirm} variant={isDanger ? 'destructive' : 'default'}>
+            {secondaryLabel && onSecondary ? (
+              <Button
+                variant={isNeobrutalism ? 'default' : 'outline'}
+                disabled={busy}
+                onClick={() => {
+                  onSecondary();
+                  (onDismiss ?? onCancel)();
+                }}
+              >
+                {secondaryLabel}
+              </Button>
+            ) : null}
+            <Button
+              onClick={handleConfirm}
+              variant={isDanger ? 'destructive' : 'default'}
+              disabled={busy}
+            >
               {confirmLabel}
             </Button>
           </DialogFooter>

@@ -147,8 +147,23 @@ export const revealInFileManager = async (path: string): Promise<void> => {
   return invoke('reveal_in_file_manager', { path });
 };
 
-export const setLibraryRoots = async (roots: string[]): Promise<void> => {
-  return invoke('set_library_roots', { roots });
+export interface LibraryGrantSummary {
+  id: string;
+  path: string;
+  displayName: string;
+  status: 'available' | 'missing';
+}
+
+export const listLibraryGrants = async (): Promise<LibraryGrantSummary[]> => {
+  return invoke('list_library_grants');
+};
+
+export const selectLibraryFolder = async (): Promise<LibraryGrantSummary | null> => {
+  return invoke('select_library_folder');
+};
+
+export const revokeLibraryGrant = async (grantId: string): Promise<void> => {
+  return invoke('revoke_library_grant', { grantId });
 };
 
 export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
@@ -443,6 +458,7 @@ export interface SearchResult {
   duration: number;
   filePath: string;
   coverArtHash: string | null;
+  blurhash: string | null;
 }
 
 export interface LyricsSearchResult {
@@ -471,6 +487,38 @@ export const dbGetAllTracks = async (): Promise<DbTrack[]> => {
 
 export const dbGetTracksByIds = async (ids: string[]): Promise<DbTrack[]> => {
   return invoke('db_get_tracks_by_ids', { ids });
+};
+
+export const dbGetTrackByPublicId = async (publicId: string): Promise<DbTrack | null> => {
+  return invoke('db_get_track_by_public_id', { publicId });
+};
+
+export const getInitialDeepLinks = async (): Promise<string[]> => {
+  return invoke('get_initial_deep_links');
+};
+
+export interface LaunchFileIntent {
+  id: string;
+  displayName: string;
+  folderName: string;
+}
+
+export interface ResolvedLaunchFileIntent {
+  filePath: string;
+  libraryGrant: LibraryGrantSummary | null;
+}
+
+export type LaunchFileIntentAction = 'playOnce' | 'importFolder' | 'cancel';
+
+export const listLaunchFileIntents = async (): Promise<LaunchFileIntent[]> => {
+  return invoke('list_launch_file_intents');
+};
+
+export const resolveLaunchFileIntent = async (
+  intentId: string,
+  action: LaunchFileIntentAction,
+): Promise<ResolvedLaunchFileIntent | null> => {
+  return invoke('resolve_launch_file_intent', { intentId, action });
 };
 
 export const dbGetTracksByAlbumArtist = async (

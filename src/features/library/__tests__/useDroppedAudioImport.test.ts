@@ -8,7 +8,6 @@ vi.mock('../../../lib/tauri-commands', () => ({
   getBatchMetadata: vi.fn(),
   scanLibrary: vi.fn(),
   scanLibraryParallel: vi.fn(),
-  setLibraryRoots: vi.fn(),
   syncLyricsIndex: vi.fn(),
 }));
 

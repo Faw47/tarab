@@ -15,6 +15,10 @@ struct LrclibRecord {
     plain_lyrics: Option<String>,
 }
 
+const MAX_LYRICS_SIDECAR_BYTES: u64 = 1024 * 1024;
+const MAX_LRCLIB_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_LRCLIB_FIELD_CHARS: usize = 512;
+
 fn trim_nonempty(s: &str) -> Option<String> {
     let t = s.trim();
     if t.is_empty() {
@@ -25,42 +29,34 @@ fn trim_nonempty(s: &str) -> Option<String> {
 }
 
 /// Local sidecar `.lrc` / `.txt` lyrics only. Returns `None` if missing or blank.
-fn load_local_lyrics_for_track(track_path: &str) -> Option<String> {
-    let path = Path::new(track_path);
-    let canonical: PathBuf = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+fn read_allowed_sidecar(path: &Path, roots: &[PathBuf]) -> Option<String> {
+    let link_metadata = std::fs::symlink_metadata(path).ok()?;
+    if link_metadata.file_type().is_symlink()
+        || !link_metadata.is_file()
+        || link_metadata.len() > MAX_LYRICS_SIDECAR_BYTES
+    {
+        return None;
+    }
 
-    let read_nonempty = |p: &Path| -> Option<String> {
-        std::fs::read_to_string(p)
-            .ok()
-            .and_then(|c| trim_nonempty(&c))
-    };
+    let canonical = ensure_existing_path_allowed(path, roots, "read lyrics sidecar").ok()?;
+    std::fs::read_to_string(canonical)
+        .ok()
+        .and_then(|content| trim_nonempty(&content))
+}
+
+fn load_local_lyrics_for_track(track_path: &str, roots: &[PathBuf]) -> Option<String> {
+    let path = Path::new(track_path);
+    let canonical = ensure_existing_path_allowed(path, roots, "read lyrics for track").ok()?;
 
     let lrc_path = canonical.with_extension("lrc");
-    if lrc_path.exists() {
-        if let Some(content) = read_nonempty(&lrc_path) {
-            return Some(content);
-        }
+    if let Some(content) = read_allowed_sidecar(&lrc_path, roots) {
+        return Some(content);
     }
 
     let txt_path = canonical.with_extension("txt");
-    if txt_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&txt_path) {
-            if content.contains('[') && content.contains(']') {
-                if let Some(c) = trim_nonempty(&content) {
-                    return Some(c);
-                }
-            }
-        }
-    }
-
-    if let Some(stem) = canonical.file_stem() {
-        if let Some(parent) = canonical.parent() {
-            let lrc_path = parent.join(format!("{}.lrc", stem.to_string_lossy()));
-            if lrc_path.exists() {
-                if let Some(content) = read_nonempty(&lrc_path) {
-                    return Some(content);
-                }
-            }
+    if let Some(content) = read_allowed_sidecar(&txt_path, roots) {
+        if content.contains('[') && content.contains(']') {
+            return Some(content);
         }
     }
 
@@ -74,9 +70,18 @@ pub async fn fetch_lrclib(
     album: &str,
     duration_secs: f64,
 ) -> Result<Option<String>, String> {
+    if [artist, title, album]
+        .iter()
+        .any(|value| value.chars().count() > MAX_LRCLIB_FIELD_CHARS)
+    {
+        return Err("Lyrics request metadata is too long".to_string());
+    }
+
     let client = reqwest::Client::builder()
-        .user_agent("Tarab/0.1.0")
-        .timeout(std::time::Duration::from_secs(12))
+        .user_agent("Tarab/1.0.0")
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("Failed to create lyrics client: {}", e))?;
 
@@ -96,10 +101,17 @@ pub async fn fetch_lrclib(
         req = req.query(&[("duration", d.as_str())]);
     }
 
-    let resp = req
+    let mut resp = req
         .send()
         .await
         .map_err(|e| format!("Lyrics request failed: {}", e))?;
+    let response_url = resp.url();
+    if response_url.scheme() != "https"
+        || response_url.host_str() != Some("lrclib.net")
+        || response_url.port_or_known_default() != Some(443)
+    {
+        return Err("Lyrics response came from an unexpected endpoint".to_string());
+    }
     if !resp.status().is_success() {
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
@@ -110,9 +122,30 @@ pub async fn fetch_lrclib(
         ));
     }
 
-    let data: LrclibRecord = resp
-        .json()
+    if resp
+        .content_length()
+        .is_some_and(|length| length > MAX_LRCLIB_RESPONSE_BYTES as u64)
+    {
+        return Err("Lyrics response is too large".to_string());
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
+        .map_err(|e| format!("Failed to read lyrics response: {}", e))?
+    {
+        let next_len = body
+            .len()
+            .checked_add(chunk.len())
+            .ok_or_else(|| "Lyrics response is too large".to_string())?;
+        if next_len > MAX_LRCLIB_RESPONSE_BYTES {
+            return Err("Lyrics response is too large".to_string());
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    let data: LrclibRecord = serde_json::from_slice(&body)
         .map_err(|e| format!("Failed to parse lyrics response: {}", e))?;
 
     if let Some(ref s) = data.synced_lyrics {
@@ -160,7 +193,7 @@ pub async fn get_lyrics_for_track(
     {
         return Ok(None);
     }
-    if let Some(local) = load_local_lyrics_for_track(&track_path) {
+    if let Some(local) = load_local_lyrics_for_track(&track_path, &roots) {
         return Ok(Some(local));
     }
     if auto_lyrics {
@@ -199,6 +232,14 @@ fn write_lyrics_for_track_checked(
     let path = Path::new(track_path);
     let canonical = ensure_existing_path_allowed(path, roots, "write lyrics for track")?;
     let lrc_path = canonical.with_extension("lrc");
+    if let Ok(metadata) = std::fs::symlink_metadata(&lrc_path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("Lyrics destination must be a regular file".to_string());
+        }
+        ensure_existing_path_allowed(&lrc_path, roots, "write lyrics sidecar")?;
+    } else {
+        crate::file_ops::ensure_target_path_allowed(&lrc_path, roots, "write lyrics sidecar")?;
+    }
     std::fs::write(&lrc_path, content).map_err(|e| format!("Failed to write lyrics: {}", e))
 }
 
@@ -216,7 +257,7 @@ fn normalize_path_separators(path: &str) -> String {
 
 /// Helper function to find .lrc file for a track
 /// Handles Windows path normalization and tries multiple locations
-fn find_lyrics_file(track_path: &str) -> Option<PathBuf> {
+fn find_lyrics_file(track_path: &str, roots: &[PathBuf]) -> Option<PathBuf> {
     // Normalize path separators for the current platform
     let normalized_path = normalize_path_separators(track_path);
     let path = Path::new(&normalized_path);
@@ -226,24 +267,22 @@ fn find_lyrics_file(track_path: &str) -> Option<PathBuf> {
 
     // Try .lrc file with the base path
     let lrc_path = base_path.with_extension("lrc");
-    if lrc_path.exists() {
-        return Some(lrc_path);
+    if read_allowed_sidecar(&lrc_path, roots).is_some() {
+        return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
     }
 
     // Also try with the original (non-canonicalized) path
     let lrc_path_original = path.with_extension("lrc");
-    if lrc_path_original.exists() {
-        return Some(lrc_path_original);
+    if read_allowed_sidecar(&lrc_path_original, roots).is_some() {
+        return ensure_existing_path_allowed(&lrc_path_original, roots, "index lyrics sidecar")
+            .ok();
     }
 
     // Try .txt file
     let txt_path = base_path.with_extension("txt");
-    if txt_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&txt_path) {
-            // Check if it looks like LRC format
-            if content.contains('[') && content.contains(']') {
-                return Some(txt_path);
-            }
+    if let Some(content) = read_allowed_sidecar(&txt_path, roots) {
+        if content.contains('[') && content.contains(']') {
+            return ensure_existing_path_allowed(&txt_path, roots, "index lyrics sidecar").ok();
         }
     }
 
@@ -251,8 +290,8 @@ fn find_lyrics_file(track_path: &str) -> Option<PathBuf> {
     if let Some(stem) = base_path.file_stem() {
         if let Some(parent) = base_path.parent() {
             let lrc_path = parent.join(format!("{}.lrc", stem.to_string_lossy()));
-            if lrc_path.exists() {
-                return Some(lrc_path);
+            if read_allowed_sidecar(&lrc_path, roots).is_some() {
+                return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
             }
         }
     }
@@ -261,8 +300,8 @@ fn find_lyrics_file(track_path: &str) -> Option<PathBuf> {
     if let Some(stem) = path.file_stem() {
         if let Some(parent) = path.parent() {
             let lrc_path = parent.join(format!("{}.lrc", stem.to_string_lossy()));
-            if lrc_path.exists() {
-                return Some(lrc_path);
+            if read_allowed_sidecar(&lrc_path, roots).is_some() {
+                return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
             }
         }
     }
@@ -448,7 +487,7 @@ fn sync_lyrics_index_blocking(
                 }
                 continue;
             }
-            let lyrics_file = find_lyrics_file(&file_path);
+            let lyrics_file = find_lyrics_file(&file_path, roots.unwrap_or(&[]));
 
             match lyrics_file {
                 Some(path) => {
@@ -574,6 +613,59 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(allowed_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_lyrics_rejects_sidecar_symlink_outside_root() {
+        use std::os::unix::fs::symlink;
+
+        let allowed_root = temp_dir("sidecar-read-allowed");
+        let outside_root = temp_dir("sidecar-read-outside");
+        let track = allowed_root.join("song.mp3");
+        let outside_lyrics = outside_root.join("outside.lrc");
+        fs::write(&track, b"audio").expect("write track");
+        fs::write(&outside_lyrics, "[00:01]Outside").expect("write outside lyrics");
+        symlink(&outside_lyrics, track.with_extension("lrc")).expect("create sidecar symlink");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        assert_eq!(
+            load_local_lyrics_for_track(&track.to_string_lossy(), &roots),
+            None
+        );
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_lyrics_rejects_sidecar_symlink_outside_root() {
+        use std::os::unix::fs::symlink;
+
+        let allowed_root = temp_dir("sidecar-write-allowed");
+        let outside_root = temp_dir("sidecar-write-outside");
+        let track = allowed_root.join("song.mp3");
+        let outside_lyrics = outside_root.join("outside.lrc");
+        fs::write(&track, b"audio").expect("write track");
+        fs::write(&outside_lyrics, "original").expect("write outside lyrics");
+        symlink(&outside_lyrics, track.with_extension("lrc")).expect("create sidecar symlink");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+
+        let result = write_lyrics_for_track_checked(
+            &track.to_string_lossy(),
+            "[00:01]Changed".to_string(),
+            &roots,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(&outside_lyrics).expect("read outside lyrics"),
+            "original"
+        );
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
     }
 
     fn sample_track(id: &str, file_path: String) -> DbTrack {

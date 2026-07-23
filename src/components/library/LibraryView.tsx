@@ -1122,6 +1122,28 @@ export const LibraryView = memo(function LibraryView({
     }
   }, []);
 
+  const resultSectionLabel = detailScope
+    ? detailScope.type === 'album'
+      ? 'Tracks'
+      : 'Artist tracks'
+    : resultFacet === 'albums'
+      ? 'Albums'
+      : resultFacet === 'artists'
+        ? 'Artists'
+        : resultFacet === 'recent'
+          ? 'Recently added'
+          : resultFacet === 'mostPlayed'
+            ? 'Most played'
+            : 'Songs';
+
+  const resultSectionCount = detailScope
+    ? detailTracks.length
+    : resultFacet === 'albums'
+      ? facetCounts.albums
+      : resultFacet === 'artists'
+        ? facetCounts.artists
+        : resultLength;
+
   const trimmedSearchQuery = searchQuery.trim();
   const needsLongerLyricsQuery =
     searchScope === 'lyrics' && trimmedSearchQuery.length > 0 && trimmedSearchQuery.length < 3;
@@ -1253,8 +1275,8 @@ export const LibraryView = memo(function LibraryView({
             />
 
             <div className="library-v2-section-label">
-              <span className="library-v2-section-label-text">Albums</span>
-              <span className="library-v2-section-label-count">{facetCounts.albums}</span>
+              <span className="library-v2-section-label-text">{resultSectionLabel}</span>
+              <span className="library-v2-section-label-count">{resultSectionCount}</span>
             </div>
 
             {resultLength > 0 ? (

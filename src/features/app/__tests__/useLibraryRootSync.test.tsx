@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '../../../types';
 import { useLibraryRootSync } from '../useLibraryRootSync';
 
-const setLibraryRootsMock = vi.hoisted(() => vi.fn(async () => undefined));
+const listLibraryGrantsMock = vi.hoisted(() =>
+  vi.fn(async () => [
+    { id: 'grant-1', path: '/music', displayName: 'music', status: 'available' as const },
+  ]),
+);
 const syncLyricsIndexMock = vi.hoisted(() => vi.fn(async () => 0));
 const reportErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../lib/tauri-commands', () => ({
-  setLibraryRoots: setLibraryRootsMock,
+  listLibraryGrants: listLibraryGrantsMock,
   syncLyricsIndex: syncLyricsIndexMock,
 }));
 
@@ -33,42 +37,50 @@ const track: Track = {
 describe('useLibraryRootSync', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setLibraryRootsMock.mockResolvedValue(undefined);
+    listLibraryGrantsMock.mockResolvedValue([
+      { id: 'grant-1', path: '/music', displayName: 'music', status: 'available' },
+    ]);
     syncLyricsIndexMock.mockResolvedValue(0);
   });
 
   it('syncs roots before refreshing lyrics and prefetching cover art', async () => {
     const prefetchCoverArt = vi.fn(async () => undefined);
+    const setLibraryFolders = vi.fn();
 
     const { result } = renderHook(() =>
       useLibraryRootSync({
         libraryFolders: ['/music'],
         libraryTracks: [track],
         prefetchCoverArt,
+        setLibraryFolders,
       }),
     );
 
     await waitFor(() => expect(result.current.libraryRootsReady).toBe(true));
 
-    expect(setLibraryRootsMock).toHaveBeenCalledWith(['/music']);
+    expect(listLibraryGrantsMock).toHaveBeenCalled();
+    expect(setLibraryFolders).not.toHaveBeenCalled();
     expect(syncLyricsIndexMock).toHaveBeenCalledTimes(1);
     expect(prefetchCoverArt).toHaveBeenCalledWith([track]);
   });
 
   it('does not refresh lyrics or prefetch cover art when no roots are configured', async () => {
     const prefetchCoverArt = vi.fn(async () => undefined);
+    const setLibraryFolders = vi.fn();
+    listLibraryGrantsMock.mockResolvedValue([]);
 
     const { result } = renderHook(() =>
       useLibraryRootSync({
         libraryFolders: [],
         libraryTracks: [track],
         prefetchCoverArt,
+        setLibraryFolders,
       }),
     );
 
     await waitFor(() => expect(result.current.libraryRootsReady).toBe(true));
 
-    expect(setLibraryRootsMock).toHaveBeenCalledWith([]);
+    expect(setLibraryFolders).not.toHaveBeenCalled();
     expect(syncLyricsIndexMock).not.toHaveBeenCalled();
     expect(prefetchCoverArt).not.toHaveBeenCalled();
   });
@@ -76,13 +88,15 @@ describe('useLibraryRootSync', () => {
   it('does not prefetch cover art when root syncing fails', async () => {
     const error = new Error('permission denied');
     const prefetchCoverArt = vi.fn(async () => undefined);
-    setLibraryRootsMock.mockRejectedValueOnce(error);
+    const setLibraryFolders = vi.fn();
+    listLibraryGrantsMock.mockRejectedValueOnce(error);
 
     const { result } = renderHook(() =>
       useLibraryRootSync({
         libraryFolders: ['/music'],
         libraryTracks: [track],
         prefetchCoverArt,
+        setLibraryFolders,
       }),
     );
 
@@ -91,7 +105,7 @@ describe('useLibraryRootSync', () => {
     expect(result.current.libraryRootsReady).toBe(false);
     expect(syncLyricsIndexMock).not.toHaveBeenCalled();
     expect(prefetchCoverArt).not.toHaveBeenCalled();
-    expect(reportErrorMock).toHaveBeenCalledWith('Failed to sync library root allowlist', {
+    expect(reportErrorMock).toHaveBeenCalledWith('Failed to load native library grants', {
       source: 'app',
       error,
     });
@@ -99,6 +113,7 @@ describe('useLibraryRootSync', () => {
 
   it('refreshes lyrics only once for the same root set', async () => {
     const prefetchCoverArt = vi.fn(async () => undefined);
+    const setLibraryFolders = vi.fn();
 
     const { rerender } = renderHook(
       ({ tracks }) =>
@@ -106,6 +121,7 @@ describe('useLibraryRootSync', () => {
           libraryFolders: ['/music'],
           libraryTracks: tracks,
           prefetchCoverArt,
+          setLibraryFolders,
         }),
       { initialProps: { tracks: [track] } },
     );
@@ -116,5 +132,20 @@ describe('useLibraryRootSync', () => {
 
     await waitFor(() => expect(prefetchCoverArt).toHaveBeenCalledTimes(2));
     expect(syncLyricsIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces stale renderer paths with native grant paths', async () => {
+    const setLibraryFolders = vi.fn();
+
+    renderHook(() =>
+      useLibraryRootSync({
+        libraryFolders: ['/stale'],
+        libraryTracks: [],
+        prefetchCoverArt: vi.fn(),
+        setLibraryFolders,
+      }),
+    );
+
+    await waitFor(() => expect(setLibraryFolders).toHaveBeenCalledWith(['/music']));
   });
 });

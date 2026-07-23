@@ -1,6 +1,8 @@
 use base64::Engine;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "macos")]
+use tauri::image::Image;
 use tauri::{
     menu::{MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
@@ -18,6 +20,9 @@ use crate::audio::SharedAudioManager;
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const MINI_WINDOW_LABEL: &str = "mini-player";
 const TRAY_ICON_ID: &str = "desktop-status-icon";
+
+#[cfg(target_os = "macos")]
+const MACOS_TRAY_ICON_RGBA: &[u8] = include_bytes!("../icons/tray-headphones-template.rgba");
 
 const EVENT_DESKTOP_CONTROL_ACTION: &str = "desktop-control-action";
 
@@ -502,6 +507,13 @@ fn build_tray_menu(app: &AppHandle<Wry>) -> tauri::Result<DesktopTrayHandles> {
             }
         });
 
+    #[cfg(target_os = "macos")]
+    {
+        let icon = Image::new(MACOS_TRAY_ICON_RGBA, 44, 44);
+        tray_builder = tray_builder.icon(icon).icon_as_template(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray_builder = tray_builder.icon(icon.clone());
     }
@@ -720,5 +732,19 @@ mod tests {
             Some(b"hello".to_vec())
         );
         assert_eq!(decode_optional_artwork(Some(&invalid)), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_tray_icon_is_a_transparent_native_sized_template() {
+        let icon = Image::new(MACOS_TRAY_ICON_RGBA, 44, 44);
+
+        assert_eq!((icon.width(), icon.height()), (44, 44));
+        assert_eq!(MACOS_TRAY_ICON_RGBA.len(), 44 * 44 * 4);
+        assert_eq!(icon.rgba()[3], 0, "top-left pixel should be transparent");
+        assert!(
+            icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 255),
+            "template should contain opaque artwork"
+        );
     }
 }

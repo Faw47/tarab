@@ -12,7 +12,6 @@ import {
   generateCoverArtHashes,
   getBatchMetadata,
   scanLibrary,
-  setLibraryRoots,
   syncLyricsIndex,
   watchLibraryPaths,
 } from '../../lib/tauri-commands';
@@ -277,11 +276,6 @@ export function useLibraryScan(): UseLibraryScanResult {
       setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'scanning' } }));
 
       try {
-        const rootsForScan = libraryFolders.some((root) => isSameOrSubPath(folderPath, root))
-          ? libraryFolders
-          : [...libraryFolders, folderPath];
-        await setLibraryRoots(rootsForScan);
-
         const newTracks = await scanSingleFolder({
           folderPath,
           followSymlinks,
@@ -344,17 +338,6 @@ export function useLibraryScan(): UseLibraryScanResult {
 
     setIsScanning(true);
     setScanProgress(0);
-
-    try {
-      await setLibraryRoots(libraryFolders);
-    } catch (error) {
-      reportError('Failed to sync library root allowlist before rescan', {
-        source: 'useLibraryScan',
-        error,
-      });
-      setIsScanning(false);
-      return;
-    }
 
     const allTracks: Track[] = [];
     const total = libraryFolders.length;
@@ -533,18 +516,11 @@ export function useLibraryScan(): UseLibraryScanResult {
 
     let disposed = false;
 
-    void (async () => {
-      try {
-        await setLibraryRoots(libraryFolders);
-        if (!disposed) {
-          await watchLibraryPaths(libraryFolders);
-        }
-      } catch (error) {
-        if (!disposed) {
-          reportError('Failed to setup filesystem watchers', { source: 'library-scan', error });
-        }
+    void watchLibraryPaths(libraryFolders).catch((error) => {
+      if (!disposed) {
+        reportError('Failed to setup filesystem watchers', { source: 'library-scan', error });
       }
-    })();
+    });
 
     return () => {
       disposed = true;

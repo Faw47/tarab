@@ -1,5 +1,23 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Track } from '../../../types';
+
+const mocks = vi.hoisted(() => ({ tracks: [] as Track[] }));
+
+const makeTrack = (id: string, album: string, artist: string): Track => ({
+  id,
+  title: `${album} song`,
+  artist,
+  albumArtist: null,
+  album,
+  year: 2026,
+  duration: 180,
+  filePath: `/music/${id}.mp3`,
+  hasCoverArt: true,
+  coverArtHash: null,
+  dateAdded: Date.now(),
+  rating: null,
+});
 
 vi.mock('../../../store/settings-store', () => ({
   useSettingsStore: (
@@ -22,9 +40,9 @@ vi.mock('../../../features/library/useLibraryData', () => ({
     searchScope: 'all',
     setSearchScope: vi.fn(),
     setSortBy: vi.fn(),
-    getFilteredTracks: () => [],
-    trackCount: 0,
-    tracks: [],
+    getFilteredTracks: () => mocks.tracks,
+    trackCount: mocks.tracks.length,
+    tracks: mocks.tracks,
     appendTracks: vi.fn(),
     applyCoverArtHashes: vi.fn(),
     isLyricsMatch: () => false,
@@ -60,6 +78,10 @@ vi.mock('../../../lib/report-error', () => ({
 import { LibraryView } from '../LibraryView';
 
 describe('LibraryView', () => {
+  beforeEach(() => {
+    mocks.tracks = [];
+  });
+
   it('renders empty library state when there are no tracks', () => {
     render(<LibraryView selectedTrackIds={[]} />);
 
@@ -73,5 +95,21 @@ describe('LibraryView', () => {
     fireEvent.click(screen.getByRole('button', { name: /add folders/i }));
 
     expect(onNavigateToFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the featured-first album showcase', () => {
+    mocks.tracks = [
+      makeTrack('lead', 'Featured record', 'Lead artist'),
+      makeTrack('second', 'Second record', 'Second artist'),
+    ];
+
+    render(<LibraryView selectedTrackIds={[]} />);
+
+    const showcase = screen.getByRole('grid', { name: 'Featured albums' });
+    expect(showcase).toBeInTheDocument();
+    expect(screen.getByText('Featured album').closest('article')).toHaveClass(
+      'library-v2-album-featured-span',
+    );
+    expect(screen.getByText('Second record')).toBeInTheDocument();
   });
 });

@@ -26,6 +26,7 @@ const ALBUM_ROTATIONS = [
   'rotate-[0.8deg]',
 ];
 const ALBUM_TAPE_ROTATIONS = ['rotate-[-4deg]', 'rotate-[3deg]', 'rotate-[-3deg]', 'rotate-[4deg]'];
+const ALBUM_SHOWCASE_LIMIT = 9;
 
 const NEO_CARD_BASE =
   'group relative border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none cursor-pointer select-none';
@@ -368,7 +369,6 @@ const AlbumTile = memo(function AlbumTile({
           'library-v2-album-featured-span',
           getEntranceClass(index),
         )}
-        style={{ gridColumn: 'span 2' }}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -774,31 +774,79 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
       );
     }
 
+    const renderAlbumTile = (album: AlbumGroup, index: number, isFeatured = false) => (
+      <AlbumTile
+        key={`${album.track.album}-${album.track.artist}`}
+        album={album}
+        index={index}
+        searchQuery={searchQuery}
+        onOpen={onAlbumOpen}
+        onPlay={onPlayAlbum}
+        isFeatured={isFeatured}
+        isNeo={isNeo}
+        isPlayingAlbum={Boolean(
+          isPlaying &&
+            currentTrack &&
+            currentTrack.album === album.track.album &&
+            currentTrack.artist === album.track.artist,
+        )}
+      />
+    );
+
+    if (!isNeo) {
+      const showcaseAlbums = albums.slice(0, ALBUM_SHOWCASE_LIMIT);
+      const archiveAlbums = albums.slice(ALBUM_SHOWCASE_LIMIT);
+
+      return (
+        <div className="library-v2-albums-layout">
+          <div className="library-v2-albums-showcase" role="grid" aria-label="Featured albums">
+            {showcaseAlbums.map((album, index) => renderAlbumTile(album, index, index === 0))}
+          </div>
+
+          {archiveAlbums.length > 0 && (
+            <section className="library-v2-albums-archive" aria-labelledby="library-all-albums">
+              <div className="library-v2-albums-archive-heading">
+                <h3 id="library-all-albums">All albums</h3>
+                <span>{albums.length}</span>
+              </div>
+              <VirtualizedGrid
+                items={archiveAlbums}
+                minColumnWidth={180}
+                rowHeight={245}
+                className="library-v2-albums-archive-grid"
+                getItemKey={(album) => `${album.track.album}-${album.track.artist}`}
+                onRangeChange={(start, end) =>
+                  onAlbumGridRangeChange(
+                    albums,
+                    start + ALBUM_SHOWCASE_LIMIT,
+                    end + ALBUM_SHOWCASE_LIMIT,
+                  )
+                }
+                onScrollNearEnd={hasMore ? onLoadMore : undefined}
+                renderItem={(album, index) => renderAlbumTile(album, index + ALBUM_SHOWCASE_LIMIT)}
+              />
+            </section>
+          )}
+
+          {archiveAlbums.length === 0 && hasMore && onLoadMore && (
+            <button type="button" className="library-v2-albums-load-more" onClick={onLoadMore}>
+              Load more albums
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <VirtualizedGrid
         items={albums}
-        minColumnWidth={isNeo ? 165 : 155}
-        rowHeight={isNeo ? 270 : 245}
-        className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
+        minColumnWidth={165}
+        rowHeight={270}
+        className="px-1 pt-6 pb-12"
         getItemKey={(album) => `${album.track.album}-${album.track.artist}`}
         onRangeChange={(start, end) => onAlbumGridRangeChange(albums, start, end)}
         onScrollNearEnd={hasMore ? onLoadMore : undefined}
-        renderItem={(album, index) => (
-          <AlbumTile
-            album={album}
-            index={index}
-            searchQuery={searchQuery}
-            onOpen={onAlbumOpen}
-            onPlay={onPlayAlbum}
-            isNeo={isNeo}
-            isPlayingAlbum={Boolean(
-              isPlaying &&
-                currentTrack &&
-                currentTrack.album === album.track.album &&
-                currentTrack.artist === album.track.artist,
-            )}
-          />
-        )}
+        renderItem={(album, index) => renderAlbumTile(album, index)}
       />
     );
   }

@@ -25,15 +25,10 @@ import {
 } from 'lucide-react';
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useSmoothTimeSubscription } from '../../contexts/smooth-time';
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { lazyWithRetry } from '../../lib/lazy-with-retry';
 import { useRenderLog } from '../../lib/performance';
-import {
-  playAdjacentTrack,
-  seekToPosition,
-  toggleCurrentPlayback,
-} from '../../lib/playback-actions';
+import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
 import {
@@ -45,6 +40,8 @@ import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
+import { CoverArtImage } from '../shared/CoverArtImage';
+import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { IconButton } from '../ui/IconButton';
 import { QueueIcon as ListMusic, TrackIcon, VinylIcon } from '../ui/Icons';
 import { LyricsDisplay } from './LyricsDisplay';
@@ -52,7 +49,6 @@ import { LyricsSnippet } from './LyricsSnippet';
 import { ParallaxCoverArt } from './ParallaxCoverArt';
 import { PlayerProgressBar } from './PlayerProgressBar';
 import { PlayerVolume } from './PlayerVolume';
-import { TiltAlbumArt } from './TiltAlbumArt';
 
 interface PlayerContentProps {
   onClose: () => void;
@@ -67,7 +63,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   const {
     currentTrack,
     isPlaying,
-    duration,
     playbackSpeed,
     shuffleEnabled,
     loopMode,
@@ -80,7 +75,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
     useShallow((s) => ({
       currentTrack: s.currentTrack,
       isPlaying: s.isPlaying,
-      duration: s.duration,
       playbackSpeed: s.playbackSpeed,
       shuffleEnabled: s.shuffleEnabled,
       loopMode: s.loopMode,
@@ -131,28 +125,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const actionsRef = useRef<HTMLButtonElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
-  // Fullscreen cover-art progress bar (updated imperatively to avoid 60fps re-renders)
-  const progressRef = useRef<HTMLDivElement>(null);
-
-  const setCoverProgress = useCallback(
-    (timeSec: number) => {
-      if (!progressRef.current) return;
-      const clamped = Math.max(0, Math.min(timeSec, duration || 0));
-      const progress = duration > 0 ? (clamped / duration) * 100 : 0;
-      progressRef.current.style.background = `linear-gradient(to right,
-            rgba(255,255,255,0.9) ${progress}%,
-            rgba(255,255,255,0.2) ${progress}%)`;
-    },
-    [duration],
-  );
-
-  useSmoothTimeSubscription((timeSec) => {
-    setCoverProgress(timeSec);
-  });
-
-  useEffect(() => {
-    setCoverProgress(usePlayerStore.getState().currentTime || 0);
-  }, [currentTrack?.id, duration, setCoverProgress]);
 
   useEffect(() => {
     if (!showActions) return;
@@ -214,22 +186,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       reportError('Failed to play next track', { source: 'player-content', error: e });
     }
   }, []);
-
-  const handleSeekClick = useCallback(
-    async (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!progressRef.current || duration === 0) return;
-      const rect = progressRef.current.getBoundingClientRect();
-      const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const newTime = percent * duration;
-      setCoverProgress(newTime);
-      try {
-        await seekToPosition(newTime);
-      } catch (err) {
-        reportError('Failed to seek playback', { source: 'player-content', error: err });
-      }
-    },
-    [duration, setCoverProgress],
-  );
 
   const handleEditTags = useCallback(() => {
     setTagEditorInitialTab(undefined);
@@ -370,25 +326,25 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               {/* Album Art with Integrated Progress Bar */}
               <div className="relative w-full max-w-md aspect-square group">
                 {/* Cover Art Container */}
-                <div className="w-full h-full rounded-2xl relative">
+                <div className="w-full h-full rounded-2xl overflow-hidden relative">
                   {coverArt ? (
-                    <TiltAlbumArt src={coverArt} className="w-full h-full" />
+                    <CoverArtImage
+                      track={currentTrack}
+                      alt={`${currentTrack.album} cover`}
+                      lazy={false}
+                      size="large"
+                      className="w-full h-full shadow-2xl shadow-black/50"
+                      imgClassName="w-full h-full"
+                      roundedClassName="rounded-2xl"
+                      iconClassName="w-24 h-24"
+                    />
                   ) : (
                     <div className="w-full h-full bg-zinc-800 flex items-center justify-center rounded-2xl shadow-2xl shadow-black/50">
                       <VinylIcon className="w-24 h-24 text-zinc-600" />
                     </div>
                   )}
 
-                  {/* Progress Bar - Integrated at bottom of cover art, expands on hover */}
-                  <div
-                    ref={progressRef}
-                    onClick={handleSeekClick}
-                    className="absolute bottom-0 left-0 right-0 h-1 group-hover:h-2.5 cursor-pointer transition-all duration-200 z-10"
-                    style={{
-                      background:
-                        'linear-gradient(to right, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.2) 0%)',
-                    }}
-                  />
+                  <HidingProgressBar accentColor="var(--hero-accent)" />
                 </div>
               </div>
 
@@ -445,6 +401,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                   onClick={handleTogglePlay}
                   title={isPlaying ? 'Pause' : 'Play'}
                   className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/30"
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.96)', color: '#09090b' }}
                 >
                   {isPlaying ? (
                     <Pause className="w-6 h-6" fill="currentColor" />

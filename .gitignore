@@ -22,6 +22,7 @@ storybook-static/
 # Tauri generated artifacts
 src-tauri/target/
 src-tauri/gen/
+src-tauri/tauri.windows-signing.json
 
 # Local files
 *.local

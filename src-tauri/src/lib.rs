@@ -3,6 +3,7 @@ mod database;
 mod desktop_integration;
 mod file_ops;
 mod image_cache;
+mod launch_intents;
 mod library;
 mod library_watcher;
 mod lyrics;
@@ -20,15 +21,33 @@ mod waveform;
 
 use audio::{create_audio_manager, SharedAudioManager};
 use database::create_database;
-use file_ops::{create_library_roots_state, ensure_existing_path_allowed, SharedLibraryRoots};
+use file_ops::{ensure_existing_path_allowed, load_library_roots_state, SharedLibraryRoots};
 use image_cache::{create_image_cache, SharedImageCache};
 use std::path::Path;
 use std::time::Instant;
 use tauri::http;
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 use waveform::{create_waveform_generator, SharedWaveformGenerator};
 
 const MAX_IMAGE_READ_BYTES: u64 = 25 * 1024 * 1024;
+
+fn custom_command_allowed(window_label: &str) -> bool {
+    window_label == desktop_integration::MAIN_WINDOW_LABEL
+}
+
+#[tauri::command]
+fn get_initial_deep_links(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    app.deep_link()
+        .get_current()
+        .map(|urls| {
+            urls.unwrap_or_default()
+                .into_iter()
+                .map(|url| url.to_string())
+                .collect()
+        })
+        .map_err(|error| format!("Failed to read startup deep links: {}", error))
+}
 
 #[tauri::command]
 fn read_image_as_base64(
@@ -83,6 +102,357 @@ fn read_image_as_base64_checked(
     let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
 
     Ok((encoded, mime.to_string()))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let shared_image_cache: SharedImageCache = create_image_cache();
+
+    let builder = tauri::Builder::default()
+        .register_uri_scheme_protocol("cover-art", {
+            let cache = shared_image_cache.clone();
+            move |_ctx, request| {
+                let path = request.uri().path().trim_start_matches('/');
+                let path = path.strip_prefix("localhost/").unwrap_or(path);
+
+                let mut parts = path.split('/');
+                let hash = parts.find(|p| !p.is_empty()).unwrap_or_default();
+                let size = parts.next().unwrap_or("medium");
+
+                let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
+                    http::Response::builder()
+                        .status(status)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new())
+                        .unwrap_or_else(|_| http::Response::new(Vec::new()))
+                };
+
+                if hash.is_empty() {
+                    return empty_response(http::StatusCode::BAD_REQUEST);
+                }
+
+                match cache.get_thumbnail_bytes(hash, size) {
+                    Ok(Some(bytes)) => http::Response::builder()
+                        .header(http::header::CONTENT_TYPE, "image/webp")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes)
+                        .unwrap_or_else(|_| http::Response::new(Vec::new())),
+                    Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
+                    Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
+                }
+            }
+        })
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // When a second instance is launched, focus the existing main window
+            if let Some(window) = app.get_webview_window(desktop_integration::MAIN_WINDOW_LABEL) {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            if let Some(intents) = app.try_state::<launch_intents::SharedLaunchIntents>() {
+                launch_intents::queue_cli_arguments(app, intents.inner(), &argv);
+            }
+
+            // Keep the existing event for other purposes
+            let _ = app.emit(
+                "app://second-instance",
+                serde_json::json!({ "argv": argv, "cwd": _cwd }),
+            );
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_media::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_liquid_glass::init());
+
+    let app_command_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        // Audio commands
+        audio::play_track,
+        audio::crossfade_to_track,
+        audio::pause_playback,
+        audio::resume_playback,
+        audio::stop_playback,
+        audio::seek_playback,
+        audio::get_playback_position,
+        audio::get_duration,
+        audio::set_volume,
+        audio::set_volume_ramp,
+        audio::set_playback_speed,
+        audio::set_crossfade_duration,
+        audio::set_audio_booster,
+        // Library commands
+        library::scan_library,
+        library::scan_library_parallel,
+        // Metadata commands
+        metadata::get_track_metadata,
+        metadata::get_cover_art,
+        metadata::get_cover_art_with_blurhash,
+        metadata::get_cover_art_palette,
+        metadata::get_batch_metadata,
+        metadata::get_batch_metadata_with_art,
+        metadata::get_batch_cover_art,
+        metadata::generate_cover_art_hashes,
+        metadata::get_cover_art_data,
+        // Lyrics commands
+        lyrics::get_lyrics_for_track,
+        lyrics::fetch_lrclib_lyrics,
+        lyrics::write_lyrics_for_track,
+        lyrics::search_lyrics,
+        lyrics::sync_lyrics_index,
+        // Playlist commands
+        playlist::get_playlists,
+        playlist::get_playlist_detail,
+        playlist::get_all_playlists,
+        playlist::create_playlist,
+        playlist::update_playlist,
+        playlist::delete_playlist,
+        playlist::set_playlist_pinned,
+        playlist::add_tracks_to_playlist,
+        playlist::remove_tracks_from_playlist,
+        playlist::reorder_playlist_tracks,
+        playlist::sync_playlist,
+        playlist::remove_missing_from_playlist,
+        playlist::sync_folder_playlist,
+        playlist::reset_playlists_data,
+        playlist::get_playlists_data_path,
+        // Tag editor commands
+        tageditor::read_full_tags,
+        tageditor::write_tags,
+        tageditor::write_tags_batch,
+        tageditor::remove_cover_art,
+        // Database commands
+        database::db_get_all_tracks,
+        database::db_get_tracks_by_ids,
+        database::db_get_track_by_public_id,
+        database::db_get_tracks_by_album_artist,
+        database::db_get_tracks_paginated,
+        database::db_search_tracks,
+        database::db_get_existing_paths,
+        database::db_upsert_tracks,
+        database::db_get_track_count,
+        database::db_update_play_stats,
+        database::db_set_track_rating,
+        database::db_get_recently_added,
+        database::db_get_most_played,
+        database::get_smart_shuffle_queue,
+        database::db_get_library_stats,
+        database::db_delete_tracks,
+        database::db_rename_track_path,
+        database::db_delete_tracks_by_folder,
+        // Image cache commands
+        image_cache::cache_generate_thumbnail,
+        image_cache::cache_get_thumbnail,
+        image_cache::cache_get_thumbnail_bytes,
+        image_cache::cache_has_thumbnail,
+        image_cache::cache_get_stats,
+        image_cache::cache_clear,
+        image_cache::cache_enforce_limit,
+        // Waveform commands
+        waveform::waveform_generate,
+        waveform::waveform_cancel,
+        waveform::waveform_has,
+        waveform::waveform_get_stats,
+        waveform::waveform_clear_cache,
+        // File operations
+        file_ops::rename_file,
+        file_ops::move_file,
+        file_ops::delete_files,
+        file_ops::reveal_in_file_manager,
+        file_ops::list_library_grants,
+        file_ops::select_library_folder,
+        file_ops::revoke_library_grant,
+        launch_intents::list_launch_file_intents,
+        launch_intents::resolve_launch_file_intent,
+        // File dialogs
+        read_image_as_base64,
+        get_initial_deep_links,
+        // Session
+        session::load_playback_session,
+        session::save_playback_session,
+        audio::list_audio_output_devices,
+        audio::set_audio_output_device,
+        audio::preload_next_track,
+        // Desktop integration commands
+        desktop_integration::desktop_open_mini_window,
+        desktop_integration::desktop_close_mini_window,
+        desktop_integration::desktop_toggle_mini_window,
+        desktop_integration::desktop_focus_main_window,
+        desktop_integration::desktop_quit_application,
+        desktop_integration::desktop_set_native_ui_state,
+        desktop_integration::desktop_sync_media_session,
+        media_controls::update_media_metadata,
+        library_watcher::watch_library_paths,
+        #[cfg(target_os = "windows")]
+        taskbar::update_progress,
+        #[cfg(target_os = "windows")]
+        taskbar::clear_progress,
+    ];
+
+    let app = builder
+        .setup(move |app| {
+            let setup_start = Instant::now();
+            // Create audio manager with app handle for events
+            let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
+            app.manage(audio_manager);
+
+            // Create database
+            let db_start = Instant::now();
+            let database = match create_database() {
+                Ok(database) => database,
+                Err(err) => {
+                    let message = format!("Failed to initialize library database: {}", err);
+                    eprintln!("{}", message);
+                    return Err(message.into());
+                }
+            };
+            let playlist_bootstrap_db = database.clone();
+            app.manage(database);
+            eprintln!(
+                "[startup] db_init_ms={:.1}",
+                db_start.elapsed().as_secs_f64() * 1000.0
+            );
+
+            // Create image cache
+            app.manage(shared_image_cache.clone());
+
+            // Create waveform generator
+            let waveform_gen: SharedWaveformGenerator = create_waveform_generator();
+            app.manage(waveform_gen);
+
+            // Manage allowlisted library roots for filesystem operations
+            let library_roots: SharedLibraryRoots = match load_library_roots_state(app.handle()) {
+                Ok(state) => state,
+                Err(err) => {
+                    eprintln!(
+                        "Failed to load library grants; file access remains blocked: {}",
+                        err
+                    );
+                    file_ops::create_library_roots_state()
+                }
+            };
+            app.manage(library_roots);
+
+            let launch_intents = launch_intents::create_launch_intent_state();
+            let startup_arguments: Vec<String> = std::env::args().collect();
+            launch_intents::queue_cli_arguments(app.handle(), &launch_intents, &startup_arguments);
+            app.manage(launch_intents);
+
+            // Playlist write guard to serialize read-modify-write operations
+            let playlist_guard = playlist::create_playlist_guard();
+            app.manage(playlist_guard);
+
+            let playlist_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let start = Instant::now();
+                if let Err(err) =
+                    playlist::bootstrap_playlist_storage(playlist_handle, playlist_bootstrap_db)
+                {
+                    eprintln!("Playlist migration bootstrap failed: {}", err);
+                } else {
+                    eprintln!(
+                        "[startup] playlist_bootstrap_ms={:.1}",
+                        start.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+            });
+
+            let desktop_start = Instant::now();
+            if let Err(err) = desktop_integration::setup(app) {
+                eprintln!("Desktop integration setup failed: {}", err);
+            }
+            eprintln!(
+                "[startup] desktop_integration_ms={:.1}",
+                desktop_start.elapsed().as_secs_f64() * 1000.0
+            );
+
+            {
+                let media_start = Instant::now();
+                if let Ok(smtc_state) = media_controls::init_souvlaki(app.handle()) {
+                    app.manage(smtc_state);
+                }
+                eprintln!(
+                    "[startup] media_controls_init_ms={:.1}",
+                    media_start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+
+            // Watcher state
+            app.manage(std::sync::Mutex::new(None::<library_watcher::WatcherTask>));
+
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window(desktop_integration::MAIN_WINDOW_LABEL) {
+                let _ = window.set_decorations(false);
+            }
+
+            #[cfg(target_os = "macos")]
+            if let Err(err) = macos_menu::build_menu(app) {
+                eprintln!("macOS menu setup failed: {}", err);
+            }
+
+            eprintln!(
+                "[startup] setup_total_ms={:.1}",
+                setup_start.elapsed().as_secs_f64() * 1000.0
+            );
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != desktop_integration::MAIN_WINDOW_LABEL {
+                return;
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if desktop_integration::should_hide_main_window_on_close(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .invoke_handler(move |invoke| {
+            let command = invoke.message.command().to_string();
+            let window_label = invoke.message.webview_ref().window().label().to_string();
+            if !custom_command_allowed(&window_label) {
+                invoke.resolver.reject(format!(
+                    "Command `{command}` is only available to the main window"
+                ));
+                true
+            } else {
+                app_command_handler(invoke)
+            }
+        })
+        .build(tauri::generate_context!());
+
+    match app {
+        Ok(app) => app.run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                if let Some(intents) = app_handle.try_state::<launch_intents::SharedLaunchIntents>()
+                {
+                    for url in urls {
+                        if let Ok(path) = url.to_file_path() {
+                            if let Err(error) =
+                                launch_intents::queue_file_path(app_handle, intents.inner(), &path)
+                            {
+                                eprintln!("Ignored macOS file-open request: {}", error);
+                            }
+                        }
+                    }
+                }
+            }
+        }),
+        Err(error) => eprintln!("error while building Tauri application: {}", error),
+    }
 }
 
 #[cfg(test)]
@@ -152,315 +522,15 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
     }
-}
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let shared_image_cache: SharedImageCache = create_image_cache();
-
-    let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol("cover-art", {
-            let cache = shared_image_cache.clone();
-            move |_ctx, request| {
-                let path = request.uri().path().trim_start_matches('/');
-                let path = path.strip_prefix("localhost/").unwrap_or(path);
-
-                let mut parts = path.split('/');
-                let hash = parts.find(|p| !p.is_empty()).unwrap_or_default();
-                let size = parts.next().unwrap_or("medium");
-
-                let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
-                    http::Response::builder()
-                        .status(status)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Vec::new())
-                        .unwrap_or_else(|_| http::Response::new(Vec::new()))
-                };
-
-                if hash.is_empty() {
-                    return empty_response(http::StatusCode::BAD_REQUEST);
-                }
-
-                match cache.get_thumbnail_bytes(hash, size) {
-                    Ok(Some(bytes)) => http::Response::builder()
-                        .header(http::header::CONTENT_TYPE, "image/webp")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(bytes)
-                        .unwrap_or_else(|_| http::Response::new(Vec::new())),
-                    Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
-                    Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
-                }
-            }
-        })
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // When a second instance is launched, focus the existing main window
-            if let Some(window) = app.get_webview_window(desktop_integration::MAIN_WINDOW_LABEL) {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            // If argv contains a file path argument, emit an event for the frontend to handle
-            if argv.len() > 1 {
-                let _ = app.emit("open-file", argv[1].clone());
-            }
-
-            // Keep the existing event for other purposes
-            let _ = app.emit(
-                "app://second-instance",
-                serde_json::json!({ "argv": argv, "cwd": _cwd }),
-            );
-        }))
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--minimized"]),
-        ))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_log::Builder::default().build())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_media::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_liquid_glass::init());
-
-    builder
-        .setup(move |app| {
-            let setup_start = Instant::now();
-            // Initialize Sentry for error tracking
-            let _sentry = sentry::init((
-                std::env::var("SENTRY_DSN").unwrap_or_default(),
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    ..Default::default()
-                },
-            ));
-
-            // Create audio manager with app handle for events
-            let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
-            app.manage(audio_manager);
-
-            // Create database
-            let db_start = Instant::now();
-            let database = match create_database() {
-                Ok(database) => database,
-                Err(err) => {
-                    let message = format!("Failed to initialize library database: {}", err);
-                    eprintln!("{}", message);
-                    return Err(message.into());
-                }
-            };
-            let playlist_bootstrap_db = database.clone();
-            app.manage(database);
-            eprintln!(
-                "[startup] db_init_ms={:.1}",
-                db_start.elapsed().as_secs_f64() * 1000.0
-            );
-
-            // Create image cache
-            app.manage(shared_image_cache.clone());
-
-            // Create waveform generator
-            let waveform_gen: SharedWaveformGenerator = create_waveform_generator();
-            app.manage(waveform_gen);
-
-            // Manage allowlisted library roots for filesystem operations
-            let library_roots: SharedLibraryRoots = create_library_roots_state();
-            app.manage(library_roots);
-
-            // Playlist write guard to serialize read-modify-write operations
-            let playlist_guard = playlist::create_playlist_guard();
-            app.manage(playlist_guard);
-
-            let playlist_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let start = Instant::now();
-                if let Err(err) =
-                    playlist::bootstrap_playlist_storage(playlist_handle, playlist_bootstrap_db)
-                {
-                    eprintln!("Playlist migration bootstrap failed: {}", err);
-                } else {
-                    eprintln!(
-                        "[startup] playlist_bootstrap_ms={:.1}",
-                        start.elapsed().as_secs_f64() * 1000.0
-                    );
-                }
-            });
-
-            let desktop_start = Instant::now();
-            if let Err(err) = desktop_integration::setup(app) {
-                eprintln!("Desktop integration setup failed: {}", err);
-            }
-            eprintln!(
-                "[startup] desktop_integration_ms={:.1}",
-                desktop_start.elapsed().as_secs_f64() * 1000.0
-            );
-
-            {
-                let media_start = Instant::now();
-                if let Ok(smtc_state) = media_controls::init_souvlaki(app.handle()) {
-                    app.manage(smtc_state);
-                }
-                eprintln!(
-                    "[startup] media_controls_init_ms={:.1}",
-                    media_start.elapsed().as_secs_f64() * 1000.0
-                );
-            }
-
-            // Watcher state
-            app.manage(std::sync::Mutex::new(None::<library_watcher::WatcherTask>));
-
-            if let Some(window) = app.get_webview_window(desktop_integration::MAIN_WINDOW_LABEL) {
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = window.set_decorations(false);
-                }
-                // vibrancy::apply_platform_vibrancy(&window);
-            }
-
-            #[cfg(target_os = "macos")]
-            if let Err(err) = macos_menu::build_menu(app) {
-                eprintln!("macOS menu setup failed: {}", err);
-            }
-
-            eprintln!(
-                "[startup] setup_total_ms={:.1}",
-                setup_start.elapsed().as_secs_f64() * 1000.0
-            );
-
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if window.label() != desktop_integration::MAIN_WINDOW_LABEL {
-                return;
-            }
-
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if desktop_integration::should_hide_main_window_on_close(window.app_handle()) {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
-        .invoke_handler(tauri::generate_handler![
-            // Audio commands
-            audio::play_track,
-            audio::crossfade_to_track,
-            audio::pause_playback,
-            audio::resume_playback,
-            audio::stop_playback,
-            audio::seek_playback,
-            audio::get_playback_position,
-            audio::get_duration,
-            audio::set_volume,
-            audio::set_volume_ramp,
-            audio::set_playback_speed,
-            audio::set_crossfade_duration,
-            audio::set_audio_booster,
-            // Library commands
-            library::scan_library,
-            library::scan_library_parallel,
-            // Metadata commands
-            metadata::get_track_metadata,
-            metadata::get_cover_art,
-            metadata::get_cover_art_with_blurhash,
-            metadata::get_cover_art_palette,
-            metadata::get_batch_metadata,
-            metadata::get_batch_metadata_with_art,
-            metadata::get_batch_cover_art,
-            metadata::generate_cover_art_hashes,
-            metadata::get_cover_art_data,
-            // Lyrics commands
-            lyrics::get_lyrics_for_track,
-            lyrics::fetch_lrclib_lyrics,
-            lyrics::write_lyrics_for_track,
-            lyrics::search_lyrics,
-            lyrics::sync_lyrics_index,
-            // Playlist commands
-            playlist::get_playlists,
-            playlist::get_playlist_detail,
-            playlist::get_all_playlists,
-            playlist::create_playlist,
-            playlist::update_playlist,
-            playlist::delete_playlist,
-            playlist::set_playlist_pinned,
-            playlist::add_tracks_to_playlist,
-            playlist::remove_tracks_from_playlist,
-            playlist::reorder_playlist_tracks,
-            playlist::sync_playlist,
-            playlist::remove_missing_from_playlist,
-            playlist::sync_folder_playlist,
-            playlist::reset_playlists_data,
-            playlist::get_playlists_data_path,
-            // Tag editor commands
-            tageditor::read_full_tags,
-            tageditor::write_tags,
-            tageditor::write_tags_batch,
-            tageditor::remove_cover_art,
-            // Database commands
-            database::db_get_all_tracks,
-            database::db_get_tracks_by_ids,
-            database::db_get_tracks_by_album_artist,
-            database::db_get_tracks_paginated,
-            database::db_search_tracks,
-            database::db_get_existing_paths,
-            database::db_upsert_tracks,
-            database::db_get_track_count,
-            database::db_update_play_stats,
-            database::db_set_track_rating,
-            database::db_get_recently_added,
-            database::db_get_most_played,
-            database::get_smart_shuffle_queue,
-            database::db_get_library_stats,
-            database::db_delete_tracks,
-            database::db_rename_track_path,
-            database::db_delete_tracks_by_folder,
-            // Image cache commands
-            image_cache::cache_generate_thumbnail,
-            image_cache::cache_get_thumbnail,
-            image_cache::cache_get_thumbnail_bytes,
-            image_cache::cache_has_thumbnail,
-            image_cache::cache_get_stats,
-            image_cache::cache_clear,
-            image_cache::cache_enforce_limit,
-            // Waveform commands
-            waveform::waveform_generate,
-            waveform::waveform_cancel,
-            waveform::waveform_has,
-            waveform::waveform_get_stats,
-            waveform::waveform_clear_cache,
-            // File operations
-            file_ops::rename_file,
-            file_ops::move_file,
-            file_ops::delete_files,
-            file_ops::reveal_in_file_manager,
-            file_ops::set_library_roots,
-            // File dialogs
-            read_image_as_base64,
-            // Session
-            session::load_playback_session,
-            session::save_playback_session,
-            audio::list_audio_output_devices,
-            audio::set_audio_output_device,
-            audio::preload_next_track,
-            // Desktop integration commands
-            desktop_integration::desktop_open_mini_window,
-            desktop_integration::desktop_close_mini_window,
-            desktop_integration::desktop_toggle_mini_window,
-            desktop_integration::desktop_focus_main_window,
-            desktop_integration::desktop_quit_application,
-            desktop_integration::desktop_set_native_ui_state,
-            desktop_integration::desktop_sync_media_session,
-            media_controls::update_media_metadata,
-            library_watcher::watch_library_paths,
-            #[cfg(target_os = "windows")]
-            taskbar::update_progress,
-            #[cfg(target_os = "windows")]
-            taskbar::clear_progress,
-        ])
-        .run(tauri::generate_context!())
-        .unwrap_or_else(|err| eprintln!("error while running tauri application: {}", err));
+    #[test]
+    fn custom_commands_are_restricted_to_the_main_window() {
+        assert!(custom_command_allowed(
+            desktop_integration::MAIN_WINDOW_LABEL
+        ));
+        assert!(!custom_command_allowed(
+            desktop_integration::MINI_WINDOW_LABEL
+        ));
+        assert!(!custom_command_allowed("unknown-window"));
+    }
 }

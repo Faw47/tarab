@@ -11,7 +11,6 @@ import {
   getBatchMetadata,
   scanLibrary,
   scanLibraryParallel,
-  setLibraryRoots,
   syncLyricsIndex,
 } from '../../lib/tauri-commands';
 import type { Track } from '../../types';
@@ -44,9 +43,6 @@ export function mergeDroppedLibraryFolders(
   return merged;
 }
 
-const areFolderListsEqual = (a: string[], b: string[]): boolean =>
-  a.length === b.length && a.every((folder, index) => folder === b[index]);
-
 interface FileWithPath extends File {
   path?: string;
 }
@@ -57,7 +53,6 @@ interface UseDroppedAudioImportOptions {
   libraryFolders: string[];
   queryClient: QueryClient;
   setIsScanning: (isScanning: boolean) => void;
-  setLibraryFolders: (folders: string[]) => void;
   setScanProgress: (progress: number) => void;
   setTrackCount: (count: number) => void;
   setTracks: (tracks: Track[]) => void;
@@ -72,7 +67,6 @@ export function useDroppedAudioImport({
   libraryFolders,
   queryClient,
   setIsScanning,
-  setLibraryFolders,
   setScanProgress,
   setTrackCount,
   setTracks,
@@ -111,17 +105,16 @@ export function useDroppedAudioImport({
       });
       if (dirs.size === 0) return;
       const droppedFolders = Array.from(dirs);
-      const foldersToScan = mergeDroppedLibraryFolders([], droppedFolders);
-      const mergedLibraryFolders = mergeDroppedLibraryFolders(libraryFolders, droppedFolders);
-      if (!areFolderListsEqual(mergedLibraryFolders, libraryFolders)) {
-        setLibraryFolders(mergedLibraryFolders);
-      }
-      try {
-        await setLibraryRoots(mergedLibraryFolders);
-      } catch (error) {
-        reportError('Failed to sync dropped folders to library root allowlist', {
+      const foldersToScan = mergeDroppedLibraryFolders(
+        [],
+        droppedFolders.filter((folder) =>
+          libraryFolders.some((root) => isSameOrSubPath(folder, root)),
+        ),
+      );
+      if (foldersToScan.length === 0) {
+        reportError('Dropped files are outside the approved library folders', {
           source: 'app',
-          error,
+          error: new Error('Add the folder in Library settings before you import its files.'),
         });
         return;
       }
@@ -283,7 +276,6 @@ export function useDroppedAudioImport({
     libraryFolders,
     queryClient,
     setIsScanning,
-    setLibraryFolders,
     setScanProgress,
     setTrackCount,
     setTracks,

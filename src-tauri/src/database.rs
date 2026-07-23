@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
@@ -10,6 +11,8 @@ use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 const CURRENT_SCHEMA_VERSION: i32 = 7;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
+const APP_STORAGE_DIRECTORY: &str = "com.fawaz.tarab";
+const LEGACY_STORAGE_DIRECTORY: &str = "music-player";
 
 fn now_millis_i64_or_default() -> i64 {
     std::time::SystemTime::now()
@@ -134,9 +137,14 @@ impl Database {
         path.replace('\\', "/")
     }
 
-    pub fn new() -> SqliteResult<Self> {
-        let db_path = get_database_path();
+    fn public_track_id(path: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"tarab-track-v1\0");
+        hasher.update(Self::normalize_path(path).as_bytes());
+        hex::encode(hasher.finalize())
+    }
 
+    pub fn new(db_path: PathBuf) -> SqliteResult<Self> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
@@ -939,6 +947,26 @@ impl Database {
         Ok(ordered_tracks)
     }
 
+    pub fn get_track_by_public_id(&self, public_id: &str) -> SqliteResult<Option<DbTrack>> {
+        if public_id.len() != 64 || !public_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Ok(None);
+        }
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
+                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
+             FROM tracks",
+        )?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let track = Self::map_db_track_row(row)?;
+            if Self::public_track_id(&track.file_path).eq_ignore_ascii_case(public_id) {
+                return Ok(Some(track));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn get_tracks_by_album_artist(
         &self,
         album: &str,
@@ -1270,6 +1298,15 @@ impl Database {
         let mut conn = self.conn.lock();
         // Normalize the folder path first
         let normalized_folder = Self::normalize_path(folder_path);
+        let trimmed = normalized_folder.trim().trim_end_matches('/');
+        if trimmed.is_empty()
+            || matches!(trimmed, "." | "..")
+            || Path::new(&normalized_folder).parent().is_none()
+        {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "folder_path must identify a non-root folder".to_string(),
+            ));
+        }
         let normalized = if normalized_folder.ends_with('/') {
             normalized_folder.clone()
         } else {
@@ -1972,24 +2009,54 @@ pub struct LibraryStats {
     pub total_plays: i64,
 }
 
-fn get_database_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("music-player")
-        .join("library.db")
+fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
+    let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+    if app_dir.exists() {
+        return Ok(app_dir);
+    }
+
+    let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+    if legacy_dir.exists() {
+        std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
+            format!(
+                "Failed to migrate legacy Tarab data from {} to {}: {}",
+                legacy_dir.display(),
+                app_dir.display(),
+                error
+            )
+        })?;
+    } else {
+        std::fs::create_dir_all(&app_dir).map_err(|error| {
+            format!(
+                "Failed to create Tarab data directory {}: {}",
+                app_dir.display(),
+                error
+            )
+        })?;
+    }
+
+    Ok(app_dir)
+}
+
+fn get_database_path() -> Result<PathBuf, String> {
+    let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    prepare_app_directory(&base_dir).map(|directory| directory.join("library.db"))
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("music-player")
+    let base_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
+    prepare_app_directory(&base_dir).unwrap_or_else(|error| {
+        eprintln!("{}", error);
+        base_dir.join(APP_STORAGE_DIRECTORY)
+    })
 }
 
 // Shared database instance
 pub type SharedDatabase = Arc<Database>;
 
 pub fn create_database() -> Result<SharedDatabase, String> {
-    Database::new()
+    let db_path = get_database_path()?;
+    Database::new(db_path)
         .map(Arc::new)
         .map_err(|e| format!("Failed to create database: {}", e))
 }
@@ -2032,6 +2099,34 @@ pub async fn db_get_tracks_by_ids(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn db_get_track_by_public_id(
+    public_id: String,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<DbTrack>, String> {
+    let db = db.inner().clone();
+    let roots = roots_state.read().roots.clone();
+    spawn_blocking(move || {
+        let track = db
+            .get_track_by_public_id(&public_id)
+            .map_err(|error| error.to_string())?;
+        match track {
+            Some(track) => {
+                ensure_existing_path_allowed(
+                    Path::new(&track.file_path),
+                    &roots,
+                    "resolve public track link",
+                )?;
+                Ok(Some(track))
+            }
+            None => Ok(None),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2245,6 +2340,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_storage_directory_is_migrated_to_app_identifier() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-{}",
+            now_millis_i64_or_default()
+        ));
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let migrated = prepare_app_directory(&base_dir).expect("migrate legacy directory");
+
+        assert_eq!(migrated, base_dir.join(APP_STORAGE_DIRECTORY));
+        assert!(migrated.join("library.db").exists());
+        assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
     fn upsert_track_validation_rejects_paths_outside_library_roots() {
         let allowed_root =
             std::env::temp_dir().join(format!("tarab-db-allowed-{}", now_millis_i64_or_default()));
@@ -2301,6 +2415,29 @@ mod tests {
             last_played: None,
             rating: None,
         }
+    }
+
+    #[test]
+    fn public_track_id_resolves_without_exposing_the_path() {
+        let db = test_db();
+        let track = sample_track("public-link");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+        let public_id = Database::public_track_id(&track.file_path);
+
+        assert_eq!(public_id.len(), 64);
+        assert!(!public_id.contains("public-link"));
+        assert_eq!(
+            db.get_track_by_public_id(&public_id)
+                .expect("resolve public id")
+                .expect("linked track")
+                .id,
+            track.id
+        );
+        assert!(db
+            .get_track_by_public_id("../not-an-id")
+            .expect("reject invalid public id")
+            .is_none());
     }
 
     fn sample_playlist(id: &str) -> DbPlaylist {
@@ -2498,6 +2635,23 @@ mod tests {
             .map(|entry| entry.track_id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec![outside.id]);
+    }
+
+    #[test]
+    fn deleting_tracks_by_folder_rejects_empty_and_root_paths() {
+        let db = test_db();
+        let track = sample_track("kept");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+
+        for invalid in ["", " ", "/", ".", ".."] {
+            assert!(
+                db.delete_tracks_by_folder(invalid).is_err(),
+                "expected invalid folder path to fail: {invalid:?}"
+            );
+        }
+
+        assert_eq!(db.get_track_count().expect("track count"), 1);
     }
 
     #[test]

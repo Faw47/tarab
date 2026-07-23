@@ -35,6 +35,13 @@ View padding defaults:
 - Dense lists: row padding Y = 12px, X = 16px
 - Cards: 16px (compact), 24px (normal), 32px (hero)
 
+Library album composition:
+
+- The standard Library album grid starts with one featured album spanning two columns, followed by regular album cards in normal reading order.
+- Keep persistent album and artist labels beneath regular artwork; metadata must not depend on hover.
+- The featured card uses a split artwork/details composition and should remain optically aligned to the height of its neighboring cards.
+- Large collections may move albums after the initial showcase into a virtualized continuation, but the featured-first hierarchy must remain intact.
+
 ---
 
 ## 2) Radius system
