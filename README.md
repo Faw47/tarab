@@ -5,103 +5,125 @@
 <h1 align="center">Tarab</h1>
 
 <p align="center">
-  A private desktop music player for the collection you own.
+  A private desktop music player with a serious library, a lyrics-first player, and a designed interface.
 </p>
 
-Tarab plays music from folders you choose. It scans your tags, organizes your collection, restores your queue, and sends audio through a Rust playback engine. Your library, playlists, settings, and play history stay on your computer.
+Tarab gives your local music the care of a premium music app. You get album-first browsing, smart and folder-synced playlists, full-screen timed lyrics, native desktop controls, and two complete visual systems in one app.
 
-Tarab runs on macOS, Windows, and Linux. It needs no account and includes no analytics, crash reporter, or error telemetry client.
+Your files and library data stay on your computer. Tarab runs on macOS, Windows, and Linux. It needs no account and ships without analytics, crash reporting, or error telemetry.
 
-## Why choose Tarab
+![Tarab Home view in the Liquid Glass theme](docs/screenshots/tarab-home-liquid-glass.jpg)
 
-### Hear albums as one recording
+## The Tarab combination
 
-Tarab supports gapless playback and track preloading. You can set a crossfade from 0 to 12 seconds, change playback speed, and choose an audio output device from the app.
+Other local players excel at library maintenance, audio tools, or customization. Tarab brings collection depth, playback, lyrics, desktop control, and interface design into one coherent product.
 
-### Work with a collection, not a file list
+### Your library has structure
 
-Tarab groups tracks by album and artist. Search covers track data and lyrics. You can create manual playlists, rule-based smart playlists, or playlists that follow a folder. The tag editor lets you correct metadata without leaving the player.
+Tarab turns folders into an album and artist library. Search covers track metadata and lyric text. You can fix tags, rate tracks, inspect play counts, and keep missing files visible until you resolve them.
 
-### Keep the player within reach
+Three playlist types cover different jobs:
 
-Use hardware media keys, custom global shortcuts, the app menu, or the system status icon. A 320 × 92 always-on-top mini player gives you transport controls without covering your work. Tarab can hide to the status icon when you close the main window.
+- **Manual playlists** give you full control over selection and order.
+- **Smart playlists** use rules to build a collection from your metadata.
+- **Folder Sync playlists** follow the contents of a folder.
 
-### Read lyrics in time with the music
+Tarab watches approved folders and refreshes the library when files change.
 
-Tarab reads embedded lyrics and local sidecar files. The full-screen player highlights timed lines during playback. You can opt in to LRCLIB lookup when a track has no local lyrics.
+### Lyrics belong in the player
 
-### Choose a visual system
+Tarab reads embedded lyrics and local sidecar files. The full-screen player highlights timed lines and lets artwork shape the background. You control lyric size, alignment, blur, and background motion.
 
-The Liquid Glass theme uses album color, restrained WebGL motion, and glass controls. The Neobrutalism theme uses hard edges, high contrast, and mechanical controls. Tarab removes motion-heavy effects when you enable Reduced Effects or when the operating system requests less motion.
+You can enable LRCLIB lookup for tracks with no local lyrics. Tarab keeps that network option off until you choose it.
 
-## Tarab and other desktop players
+### Playback reaches the whole desktop
 
-Choose a player based on the jobs you need. Use each product link to confirm its current features.
+The Rust audio engine supports gapless playback, next-track preloading, crossfade, speed control, and audio output selection.
 
-| Player | Good fit | Product strengths | Tarab gives you |
-| --- | --- | --- | --- |
-| **Tarab** | You want a focused local player with a modern interface on macOS, Windows, or Linux. | Native playback, timed lyrics, three playlist types, desktop controls, two complete themes, and on-device data. | The full Tarab feature set with no account or telemetry client. |
-| [MusicBee](https://getmusicbee.com/) | You use Windows and want broad library maintenance tools. | Auto-tagging, CD ripping, equalizers, DSP effects, WASAPI, ASIO, podcasts, and web radio. | One interface across three desktop systems, a compact mini player, and timed lyrics. |
-| [foobar2000](https://www.foobar2000.org/) | You want format depth, DSP tools, and a component system. | Broad codec support, advanced tagging, ReplayGain, conversion, interface customization, and third-party components. | A complete interface with lyrics, smart playlists, and desktop controls in the base app. |
-| [Strawberry](https://www.strawberrymusicplayer.org/) | You manage a large collection and use radio or music servers. | Tag editing, MusicBrainz lookup, CD playback, device transfer, Subsonic support, and audio analysis. | A local-library workflow with opt-in network access and two distinct interface styles. |
+You can control Tarab through hardware media keys, custom global shortcuts, the app menu, or the system status icon. The compact always-on-top player keeps transport controls above your work. File associations and `tarab://` links can send a track or library search into the app.
 
-Choose Tarab if you want strong library tools in a complete interface. Choose MusicBee for more Windows audio tools. Choose foobar2000 for more codecs and extensions. Choose Strawberry for more tag sources, device tools, and streaming inputs.
+### The interface has two complete identities
 
-## Feature guide
+Liquid Glass uses artwork color, soft depth, restrained WebGL motion, and glass controls. Neobrutalism rebuilds the same product with hard borders, mechanical controls, paper textures, and high-contrast signals.
 
-### Playback
+These themes change navigation, cards, dialogs, settings, the player, and motion. Tarab also respects Reduced Effects and the operating system motion preference.
 
-- Gapless playback with next-track preloading
-- Crossfade from 0 to 12 seconds
-- Queue, shuffle history, repeat modes, speed, volume, and booster controls
-- Audio output device selection
-- Session restore for the current track, queue, position, volume, speed, shuffle, and repeat mode
+### Privacy controls the architecture
 
-### Library
+The native backend grants access to folders you select. Renderer code cannot grant itself a path. File-association requests use bounded **Play once**, **Import folder**, and **Cancel** choices.
 
-- The native backend controls folder grants
+Tarab stores its database, playlists, settings, and player session on your computer. Offline playback and library work make no network request. Auto-fetch lyrics sends track metadata to LRCLIB after you enable it.
+
+## The actual interface
+
+These screenshots come from the running macOS app.
+
+### Album-first library
+
+The library combines artwork, facets, sorting, search, tag tools, and a persistent player bar.
+
+![Tarab album library in the Liquid Glass theme](docs/screenshots/tarab-library-liquid-glass.jpg)
+
+### Neobrutalism
+
+Neobrutalism changes the full visual system while it keeps the same library and playback model.
+
+![Tarab Home view in the Neobrutalism theme](docs/screenshots/tarab-home-neobrutalism.jpg)
+
+## Where Tarab fits
+
+| Player | Product focus | Choose Tarab for |
+| --- | --- | --- |
+| **Tarab** | A private local library with a designed player on macOS, Windows, and Linux. | Collection tools, timed lyrics, native desktop control, and two full interfaces in one app. |
+| [MusicBee](https://getmusicbee.com/) | Windows library maintenance, auto-tagging, CD tools, DSP, and audio-driver support. | The same product model across three desktop systems, plus a lyrics-first player and two first-party visual systems. |
+| [foobar2000](https://www.foobar2000.org/) | Codec depth, tagging, ReplayGain, conversion, DSP, and a component ecosystem. | A complete experience that needs no component stack for lyrics, smart playlists, desktop controls, or interface design. |
+| [Strawberry](https://www.strawberrymusicplayer.org/) | Collection management, tag sources, radio, Subsonic servers, and device transfer. | A focused local workflow with native desktop integration, a full-screen player, and a stronger visual identity. |
+
+MusicBee gives Windows users more audio-driver and CD tools. foobar2000 gives power users more codecs and extensions. Strawberry gives collectors more tag sources, server inputs, and device tools. Tarab combines the library depth most listeners need with a player built around artwork, lyrics, privacy, and desktop use.
+
+## Feature reference
+
+### Library and playlists
+
 - Album, artist, track, playlist, and tag views
 - Search across tracks, albums, artists, and lyrics
 - Manual, smart, and folder-sync playlists
 - Tag editing, ratings, play counts, and missing-file handling
-- File watching for collection changes
+- Native folder grants and file watching
+- Session migration from older Tarab storage
 
-### Lyrics
+### Playback and lyrics
 
-- Embedded and sidecar lyric support
-- Timed line highlighting
-- Full-screen lyric view
-- Optional LRCLIB lookup after local lookup finds no lyrics
+- Gapless playback with next-track preloading
+- Crossfade from 0 to 12 seconds
+- Queue, smart shuffle, shuffle history, and repeat modes
+- Speed, volume, booster, and output-device controls
+- Embedded lyrics, sidecar lyrics, and timed line highlighting
+- Optional LRCLIB lookup
 
-### Desktop controls
+### Desktop and appearance
 
-- System status icon with playback actions
 - Hardware media keys and operating-system transport actions
-- Custom global shortcuts
-- Always-on-top mini player
-- Open at login and hide on close
-- Audio file associations and `tarab://` deep links
+- Custom global shortcuts and app-menu commands
+- System status icon and hide-on-close support
+- Always-on-top 320 × 92 mini player
+- Open at login, audio file associations, and deep links
+- Liquid Glass and Neobrutalism themes
 
 ### Privacy and security
 
-- No account
-- No analytics, crash reports, or error telemetry
-- No automatic updater
-- Native folder grants instead of renderer-supplied library paths
+- On-device library, playlist, setting, and session storage
+- No account or telemetry client
+- Native-controlled library access
 - Main-window checks for custom Rust commands
-- A production Content Security Policy that blocks third-party network hosts
+- Production Content Security Policy
+- No automatic updater
 
 ## Supported audio files
 
 Tarab scans these file types:
 
 `MP3` · `FLAC` · `WAV` · `OGG` · `M4A` · `AAC` · `AIFF` · `ALAC` · `WMA`
-
-## Network access
-
-Playback and library work need no network connection. Tarab makes a network request after you enable **Auto-fetch lyrics** and a track has no local lyrics. The request sends the track title, artist, album, and duration to [LRCLIB](https://lrclib.net/).
-
-The lyrics client accepts responses from the configured HTTPS host. It rejects redirects and limits request time, field size, and response size.
 
 ## Install
 
