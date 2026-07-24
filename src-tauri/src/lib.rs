@@ -434,15 +434,16 @@ pub fn run() {
         .build(tauri::generate_context!());
 
     match app {
-        Ok(app) => app.run(|app_handle, event| {
+        Ok(app) => app.run(|_app_handle, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = event {
-                if let Some(intents) = app_handle.try_state::<launch_intents::SharedLaunchIntents>()
+            if let tauri::RunEvent::Opened { urls } = _event {
+                if let Some(intents) =
+                    _app_handle.try_state::<launch_intents::SharedLaunchIntents>()
                 {
                     for url in urls {
                         if let Ok(path) = url.to_file_path() {
                             if let Err(error) =
-                                launch_intents::queue_file_path(app_handle, intents.inner(), &path)
+                                launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
                             {
                                 eprintln!("Ignored macOS file-open request: {}", error);
                             }
