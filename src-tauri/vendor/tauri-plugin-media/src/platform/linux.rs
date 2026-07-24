@@ -3,9 +3,11 @@ use std::error::Error as StdError;
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "linux")]
+use dbus::arg::RefArg;
+#[cfg(target_os = "linux")]
 use dbus::blocking::Connection;
 #[cfg(target_os = "linux")]
-use dbus_crossroads::{Crossroads, IfaceBuilder, IfaceToken};
+use dbus_crossroads::{Crossroads, IfaceBuilder};
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 
@@ -54,9 +56,9 @@ impl LinuxMediaController {
                 move |_, _| Ok(app_name.clone())
             });
             b.property("SupportedUriSchemes")
-                .get(|_, _| Ok(vec!["file", "http", "https"]));
+                .get(|_, _| Ok(vec!["file".to_string(), "http".to_string(), "https".to_string()]));
             b.property("SupportedMimeTypes")
-                .get(|_, _| Ok(vec!["audio/mpeg", "audio/mp4", "audio/ogg"]));
+                .get(|_, _| Ok(vec!["audio/mpeg".to_string(), "audio/mp4".to_string(), "audio/ogg".to_string()]));
         });
 
         // MediaPlayer2.Player interface
@@ -278,7 +280,6 @@ impl LinuxMediaController {
                 // For raw image data, we need to save it temporarily and provide a file:// URL
                 // This is a simplified approach - in production you might want to use a proper temp file
                 use std::fs;
-                use std::path::PathBuf;
 
                 let temp_dir = std::env::temp_dir();
                 let artwork_path = temp_dir.join(format!("mpris_artwork_{}.jpg", self.app_id));
@@ -446,8 +447,6 @@ impl super::MediaController for LinuxMediaController {
                     "/",
                     std::time::Duration::from_millis(500),
                 );
-                use dbus::blocking::stdintf::org_freedesktop_dbus::Peer;
-
                 if let Ok(names) = proxy.list_names() {
                     for name in names {
                         if name.starts_with("org.mpris.MediaPlayer2.")
@@ -464,40 +463,46 @@ impl super::MediaController for LinuxMediaController {
                             if let Ok(metadata_variant) =
                                 player_proxy.get("org.mpris.MediaPlayer2.Player", "Metadata")
                             {
-                                if let Ok(metadata) = metadata_variant.0.as_iter() {
+                                if let Some(metadata) = metadata_variant.0.as_iter() {
                                     let mut title = None;
                                     let mut artist = None;
                                     let mut album = None;
                                     let mut artwork_url = None;
 
-                                    for (key, value) in metadata {
-                                        if let Some(key_str) = key.as_str() {
-                                            match key_str {
-                                                "xesam:title" => {
-                                                    if let Some(v) = value.as_str() {
-                                                        title = Some(v.to_string());
-                                                    }
-                                                }
-                                                "xesam:artist" => {
-                                                    if let Some(arr) = value.as_iter() {
-                                                        if let Some(first) = arr.next() {
-                                                            if let Some(v) = first.1.as_str() {
-                                                                artist = Some(v.to_string());
+                                    for entry in metadata {
+                                        if let Some(mut dict_entry_iter) = entry.as_iter() {
+                                            if let (Some(key), Some(value)) =
+                                                (dict_entry_iter.next(), dict_entry_iter.next())
+                                            {
+                                                if let Some(key_str) = key.as_str() {
+                                                    match key_str {
+                                                        "xesam:title" => {
+                                                            if let Some(v) = value.as_str() {
+                                                                title = Some(v.to_string());
                                                             }
                                                         }
+                                                        "xesam:artist" => {
+                                                            if let Some(mut arr) = value.as_iter() {
+                                                                if let Some(first) = arr.next() {
+                                                                    if let Some(v) = first.as_str() {
+                                                                        artist = Some(v.to_string());
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        "xesam:album" => {
+                                                            if let Some(v) = value.as_str() {
+                                                                album = Some(v.to_string());
+                                                            }
+                                                        }
+                                                        "mpris:artUrl" => {
+                                                            if let Some(v) = value.as_str() {
+                                                                artwork_url = Some(v.to_string());
+                                                            }
+                                                        }
+                                                        _ => {}
                                                     }
                                                 }
-                                                "xesam:album" => {
-                                                    if let Some(v) = value.as_str() {
-                                                        album = Some(v.to_string());
-                                                    }
-                                                }
-                                                "mpris:artUrl" => {
-                                                    if let Some(v) = value.as_str() {
-                                                        artwork_url = Some(v.to_string());
-                                                    }
-                                                }
-                                                _ => {}
                                             }
                                         }
                                     }
