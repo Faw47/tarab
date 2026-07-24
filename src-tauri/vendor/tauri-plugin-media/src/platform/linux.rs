@@ -7,6 +7,8 @@ use dbus::arg::RefArg;
 #[cfg(target_os = "linux")]
 use dbus::blocking::Connection;
 #[cfg(target_os = "linux")]
+use dbus::channel::Sender;
+#[cfg(target_os = "linux")]
 use dbus_crossroads::{Crossroads, IfaceBuilder};
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
@@ -171,9 +173,9 @@ impl LinuxMediaController {
                         Ok(Some(value))
                     });
 
-                b.property("Metadata").get({
-                    let metadata = self.create_metadata_dict();
-                    move |_, _| Ok(metadata.clone())
+                b.property("Metadata").get(|_, _| {
+                    let map: std::collections::HashMap<String, dbus::arg::Variant<Box<dyn dbus::arg::RefArg>>> = std::collections::HashMap::new();
+                    Ok(map)
                 });
 
                 b.property("Volume")
@@ -330,7 +332,7 @@ impl super::MediaController for LinuxMediaController {
                 )
                 .append1("org.mpris.MediaPlayer2.Player")
                 .append2(
-                    vec![("Metadata", self.create_metadata_dict())]
+                    vec![("Metadata".to_string(), dbus::arg::Variant(Box::new(self.create_metadata_dict()) as Box<dyn dbus::arg::RefArg>))]
                         .into_iter()
                         .collect::<HashMap<_, _>>(),
                     Vec::<String>::new(),
@@ -356,21 +358,21 @@ impl super::MediaController for LinuxMediaController {
                     PlaybackStatus::Stopped => "Stopped",
                 };
 
-                let mut changed = HashMap::new();
-                changed.insert("PlaybackStatus", dbus::arg::Variant(status));
+                let mut changed: HashMap<String, dbus::arg::Variant<Box<dyn dbus::arg::RefArg>>> = HashMap::new();
+                changed.insert("PlaybackStatus".to_string(), dbus::arg::Variant(Box::new(status.to_string()) as Box<dyn dbus::arg::RefArg>));
                 changed.insert(
-                    "Position",
-                    dbus::arg::Variant((info.position * 1_000_000.0) as i64),
+                    "Position".to_string(),
+                    dbus::arg::Variant(Box::new((info.position * 1_000_000.0) as i64) as Box<dyn dbus::arg::RefArg>),
                 );
-                changed.insert("Rate", dbus::arg::Variant(info.playback_rate));
-                changed.insert("Shuffle", dbus::arg::Variant(info.shuffle));
+                changed.insert("Rate".to_string(), dbus::arg::Variant(Box::new(info.playback_rate) as Box<dyn dbus::arg::RefArg>));
+                changed.insert("Shuffle".to_string(), dbus::arg::Variant(Box::new(info.shuffle) as Box<dyn dbus::arg::RefArg>));
 
                 let loop_status = match info.repeat_mode {
                     RepeatMode::None => "None",
                     RepeatMode::Track => "Track",
                     RepeatMode::List => "Playlist",
                 };
-                changed.insert("LoopStatus", dbus::arg::Variant(loop_status));
+                changed.insert("LoopStatus".to_string(), dbus::arg::Variant(Box::new(loop_status.to_string()) as Box<dyn dbus::arg::RefArg>));
 
                 let msg = dbus::Message::signal(
                     &dbus::Path::from("/org/mpris/MediaPlayer2"),
@@ -417,7 +419,7 @@ impl super::MediaController for LinuxMediaController {
                 )
                 .append1("org.mpris.MediaPlayer2.Player")
                 .append2(
-                    vec![("Metadata", HashMap::new())]
+                    vec![("Metadata".to_string(), dbus::arg::Variant(Box::new(HashMap::<String, dbus::arg::Variant<Box<dyn dbus::arg::RefArg>>>::new()) as Box<dyn dbus::arg::RefArg>))]
                         .into_iter()
                         .collect::<HashMap<_, _>>(),
                     Vec::<String>::new(),
