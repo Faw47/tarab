@@ -464,64 +464,56 @@ impl super::MediaController for LinuxMediaController {
                             );
 
                             use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
-                            if let Ok(metadata_variant) =
-                                player_proxy.get("org.mpris.MediaPlayer2.Player", "Metadata")
+                            if let Ok(metadata) = player_proxy.get::<dbus::arg::PropMap>(
+                                "org.mpris.MediaPlayer2.Player",
+                                "Metadata",
+                            )
                             {
-                                if let Some(metadata) = metadata_variant.0.as_iter() {
-                                    let mut title = None;
-                                    let mut artist = None;
-                                    let mut album = None;
-                                    let mut artwork_url = None;
+                                let mut title = None;
+                                let mut artist = None;
+                                let mut album = None;
+                                let mut artwork_url = None;
 
-                                    for entry in metadata {
-                                        if let Some(mut dict_entry_iter) = entry.as_iter() {
-                                            if let (Some(key), Some(value)) =
-                                                (dict_entry_iter.next(), dict_entry_iter.next())
-                                            {
-                                                if let Some(key_str) = key.as_str() {
-                                                    match key_str {
-                                                        "xesam:title" => {
-                                                            if let Some(v) = value.as_str() {
-                                                                title = Some(v.to_string());
-                                                            }
-                                                        }
-                                                        "xesam:artist" => {
-                                                            if let Some(mut arr) = value.as_iter() {
-                                                                if let Some(first) = arr.next() {
-                                                                    if let Some(v) = first.as_str() {
-                                                                        artist = Some(v.to_string());
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                        "xesam:album" => {
-                                                            if let Some(v) = value.as_str() {
-                                                                album = Some(v.to_string());
-                                                            }
-                                                        }
-                                                        "mpris:artUrl" => {
-                                                            if let Some(v) = value.as_str() {
-                                                                artwork_url = Some(v.to_string());
-                                                            }
-                                                        }
-                                                        _ => {}
+                                for (key, value) in metadata {
+                                    match key.as_str() {
+                                        "xesam:title" => {
+                                            if let Some(v) = value.0.as_str() {
+                                                title = Some(v.to_string());
+                                            }
+                                        }
+                                        "xesam:artist" => {
+                                            if let Some(mut arr) = value.0.as_iter() {
+                                                if let Some(first) = arr.next() {
+                                                    if let Some(v) = first.as_str() {
+                                                        artist = Some(v.to_string());
                                                     }
                                                 }
                                             }
                                         }
+                                        "xesam:album" => {
+                                            if let Some(v) = value.0.as_str() {
+                                                album = Some(v.to_string());
+                                            }
+                                        }
+                                        "mpris:artUrl" => {
+                                            if let Some(v) = value.0.as_str() {
+                                                artwork_url = Some(v.to_string());
+                                            }
+                                        }
+                                        _ => {}
                                     }
+                                }
 
-                                    if title.is_some() || artist.is_some() {
-                                        return Ok(Some(MediaMetadata {
-                                            title: title.unwrap_or_else(|| "Unknown".to_string()),
-                                            artist,
-                                            album,
-                                            album_artist: None,
-                                            artwork_url,
-                                            artwork_data: None, // MPRIS doesn't provide raw data
-                                            duration: None,
-                                        }));
-                                    }
+                                if title.is_some() || artist.is_some() {
+                                    return Ok(Some(MediaMetadata {
+                                        title: title.unwrap_or_else(|| "Unknown".to_string()),
+                                        artist,
+                                        album,
+                                        album_artist: None,
+                                        artwork_url,
+                                        artwork_data: None, // MPRIS doesn't provide raw data
+                                        duration: None,
+                                    }));
                                 }
                             }
                         }
