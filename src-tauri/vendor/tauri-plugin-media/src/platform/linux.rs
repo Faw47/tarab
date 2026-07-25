@@ -7,6 +7,8 @@ use dbus::arg::RefArg;
 #[cfg(target_os = "linux")]
 use dbus::blocking::Connection;
 #[cfg(target_os = "linux")]
+use dbus::blocking::generated_org_freedesktop_dbus::DBus;
+#[cfg(target_os = "linux")]
 use dbus::channel::Sender;
 #[cfg(target_os = "linux")]
 use dbus_crossroads::{Crossroads, IfaceBuilder};
@@ -346,7 +348,7 @@ impl super::MediaController for LinuxMediaController {
     }
 
     fn set_playback_info(&mut self, info: PlaybackInfo) -> Result<(), Box<dyn StdError>> {
-        self.playback_info = Some(info);
+        self.playback_info = Some(info.clone());
 
         #[cfg(target_os = "linux")]
         {
