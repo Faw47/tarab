@@ -7,8 +7,6 @@ use dbus::arg::RefArg;
 #[cfg(target_os = "linux")]
 use dbus::blocking::Connection;
 #[cfg(target_os = "linux")]
-use dbus::blocking::generated_org_freedesktop_dbus::DBus;
-#[cfg(target_os = "linux")]
 use dbus::channel::Sender;
 #[cfg(target_os = "linux")]
 use dbus_crossroads::{Crossroads, IfaceBuilder};
@@ -451,7 +449,9 @@ impl super::MediaController for LinuxMediaController {
                     "/",
                     std::time::Duration::from_millis(500),
                 );
-                if let Ok(names) = proxy.list_names() {
+                let names_result: Result<(Vec<String>,), dbus::Error> =
+                    proxy.method_call("org.freedesktop.DBus", "ListNames", ());
+                if let Ok((names,)) = names_result {
                     for name in names {
                         if name.starts_with("org.mpris.MediaPlayer2.")
                             && !name.contains(&self.app_id)
