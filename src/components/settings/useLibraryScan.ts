@@ -2,15 +2,15 @@ import type { QueryClient } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
-import { useLibraryData } from '../../features/library/useLibraryData';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { getPathBaseName, isSameOrSubPath } from '../../lib/path-utils';
 import { reportError } from '../../lib/report-error';
 import {
-  dbDeleteTracksByFolder,
-  dbUpsertTracks,
+  cancelLibraryScan,
+  dbReconcileFolderScan,
   generateCoverArtHashes,
   getBatchMetadata,
+  type ScanReconcileResult,
   scanLibrary,
   syncLyricsIndex,
   watchLibraryPaths,
@@ -57,11 +57,13 @@ const runBatches = async <T, R>(
   batchSize: number,
   worker: (batch: T[]) => Promise<R[]>,
   onProgress?: (done: number, total: number) => void,
+  isCancelled?: () => boolean,
 ): Promise<R[]> => {
   if (items.length === 0) return [];
   const results: R[] = [];
   let done = 0;
   for (const batch of chunkArray(items, batchSize)) {
+    if (isCancelled?.()) throw new Error('Library scan cancelled');
     const batchResult = await worker(batch);
     results.push(...batchResult);
     done += batch.length;
@@ -77,7 +79,7 @@ const runBatches = async <T, R>(
  * as {} and only ever transitioned to 'scanning', 'success', or 'error' in the
  * original code. 'idle' was declared but never assigned anywhere.
  */
-export type FolderScanStatus = 'scanning' | 'success' | 'error';
+export type FolderScanStatus = 'scanning' | 'success' | 'partial' | 'error';
 
 export interface FolderStatus {
   status: FolderScanStatus;
@@ -101,6 +103,19 @@ interface ScanSingleFolderOptions {
    * operations. Callers map this ratio to their own display scale.
    */
   onProgress: (ratio: number) => void;
+  isCancelled: () => boolean;
+}
+
+interface ScanSingleFolderResult {
+  folderPath: string;
+  discoveredPaths: string[];
+  tracks: Track[];
+  metadataErrors: {
+    path: string | null;
+    code: string;
+    message: string;
+    recoverable: boolean;
+  }[];
 }
 
 /**
@@ -114,13 +129,20 @@ async function scanSingleFolder({
   followSymlinks,
   downloadArtwork,
   onProgress,
-}: ScanSingleFolderOptions): Promise<Track[]> {
+  isCancelled,
+}: ScanSingleFolderOptions): Promise<ScanSingleFolderResult> {
   const filePaths = await scanLibrary(folderPath, followSymlinks);
+  if (isCancelled()) throw new Error('Library scan cancelled');
   onProgress(0.1);
 
   if (filePaths.length === 0) {
     onProgress(1);
-    return [];
+    return {
+      folderPath,
+      discoveredPaths: [],
+      tracks: [],
+      metadataErrors: [],
+    };
   }
 
   // Metadata phase: 10-60% (with artwork) or 10-80% (without)
@@ -131,6 +153,7 @@ async function scanSingleFolder({
     METADATA_BATCH_SIZE,
     getBatchMetadata,
     (done, total) => onProgress(0.1 + metadataSpan * (done / total)),
+    isCancelled,
   );
 
   // Cover art phase: 60-85% (only when downloadArtwork is on)
@@ -147,6 +170,7 @@ async function scanSingleFolder({
           ART_BATCH_SIZE,
           generateCoverArtHashes,
           (done, total) => onProgress(coverBase + 0.25 * (done / total)),
+          isCancelled,
         );
         coverArtHashes = Object.fromEntries(hashed);
       } catch (err) {
@@ -165,6 +189,8 @@ async function scanSingleFolder({
     albumArtist: meta.album_artist ?? null,
     album: meta.album || 'Unknown Album',
     year: meta.year,
+    trackNumber: meta.track_number,
+    discNumber: meta.disc_number,
     duration: meta.duration_secs,
     filePath: meta.file_path,
     hasCoverArt: !!meta.has_cover_art,
@@ -176,49 +202,61 @@ async function scanSingleFolder({
     fileSize: meta.file_size ?? undefined,
     dateAdded: Date.now(),
   }));
+  const metadataPaths = new Set(batchMetadata.map((metadata) => metadata.file_path));
+  const metadataErrors = filePaths
+    .filter((path) => !metadataPaths.has(path))
+    .map((path) => ({
+      path,
+      code: 'metadataReadFailed',
+      message: 'Tarab found the file but could not read its metadata.',
+      recoverable: true,
+    }));
 
   onProgress(0.85);
-  return tracks;
+  return {
+    folderPath,
+    discoveredPaths: filePaths,
+    tracks,
+    metadataErrors,
+  };
 }
 
-/**
- * Writes a folder's scanned tracks to the DB: delete stale entries first,
- * then upsert the new batch, then invalidate queries.
- */
 async function persistFolderTracks(
-  folderPath: string,
-  tracks: Track[],
+  scan: ScanSingleFolderResult,
   queryClient: QueryClient,
-): Promise<void> {
-  await dbDeleteTracksByFolder(folderPath);
-
-  if (tracks.length > 0) {
-    await dbUpsertTracks(
-      tracks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        albumArtist: t.albumArtist ?? null,
-        album: t.album,
-        year: t.year,
-        duration: t.duration,
-        filePath: t.filePath,
-        hasCoverArt: t.hasCoverArt,
-        coverArtHash: t.coverArtHash ?? null,
-        blurhash: t.blurhash ?? null,
-        fileFormat: t.fileFormat ?? null,
-        bitrate: t.bitrate ?? null,
-        sampleRate: t.sampleRate ?? null,
-        fileSize: t.fileSize ?? null,
-        dateAdded: t.dateAdded,
-        playCount: 0,
-        lastPlayed: null,
-        rating: null,
-      })),
-    );
-  }
+): Promise<ScanReconcileResult> {
+  const result = await dbReconcileFolderScan({
+    folderPath: scan.folderPath,
+    discoveredPaths: scan.discoveredPaths,
+    traversalComplete: true,
+    errors: scan.metadataErrors,
+    tracks: scan.tracks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      albumArtist: t.albumArtist ?? null,
+      album: t.album,
+      year: t.year,
+      trackNumber: t.trackNumber ?? null,
+      discNumber: t.discNumber ?? null,
+      duration: t.duration,
+      filePath: t.filePath,
+      hasCoverArt: t.hasCoverArt,
+      coverArtHash: t.coverArtHash ?? null,
+      blurhash: t.blurhash ?? null,
+      fileFormat: t.fileFormat ?? null,
+      bitrate: t.bitrate ?? null,
+      sampleRate: t.sampleRate ?? null,
+      fileSize: t.fileSize ?? null,
+      dateAdded: t.dateAdded,
+      playCount: 0,
+      lastPlayed: null,
+      rating: null,
+    })),
+  });
 
   await invalidateLibraryForMutation(queryClient, 'scan');
+  return result;
 }
 
 /* ─── HOOK ───────────────────────────────────────────────────────────────── */
@@ -228,6 +266,7 @@ export interface UseLibraryScanResult {
   folderStatuses: Record<string, FolderStatus>;
   scanFolder: (folderPath: string, options?: ScanFolderOptions) => Promise<void>;
   rescanAll: () => Promise<void>;
+  cancelScan: () => Promise<void>;
 }
 
 export function useLibraryScan(): UseLibraryScanResult {
@@ -238,23 +277,12 @@ export function useLibraryScan(): UseLibraryScanResult {
   const downloadArtwork = useSettingsStore((s) => s.downloadArtwork);
   const libraryFolders = useSettingsStore((s) => s.libraryFolders);
 
-  const { tracks, setTracks, setTrackCount } = useLibraryData();
   const isScanning = useLibraryStore((s) => s.isScanning);
   const setIsScanning = useLibraryStore((s) => s.setIsScanning);
   const setScanProgress = useLibraryStore((s) => s.setScanProgress);
 
-  /*
-   * FIX [STALE_CLOSURE]: tracksRef lets scanFolder read the current track
-   * list at call time without `tracks` appearing in the useCallback dep
-   * array. The old pattern caused every track mutation to recreate the
-   * callback, which cascaded re-renders down to any memoized children that
-   * received it as a prop.
-   */
-  const tracksRef = useRef(tracks);
-  useEffect(() => {
-    tracksRef.current = tracks;
-  }, [tracks]);
   const isScanningRef = useRef(isScanning);
+  const scanCancelledRef = useRef(false);
   useEffect(() => {
     isScanningRef.current = isScanning;
   }, [isScanning]);
@@ -271,38 +299,37 @@ export function useLibraryScan(): UseLibraryScanResult {
 
   const scanFolder = useCallback(
     async (folderPath: string, options?: ScanFolderOptions): Promise<void> => {
+      scanCancelledRef.current = false;
       setIsScanning(true);
       setScanProgress(0);
       setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'scanning' } }));
 
       try {
-        const newTracks = await scanSingleFolder({
+        const scan = await scanSingleFolder({
           folderPath,
           followSymlinks,
           downloadArtwork,
           // Map 0-1 ratio to 0-85 display range, leaving 85-100 for DB writes
           onProgress: (ratio) => setScanProgress(clampProgress(ratio * 85)),
+          isCancelled: () => scanCancelledRef.current,
         });
 
-        // Merge: keep all tracks that don't belong to this folder, add new ones
-        const otherTracks = tracksRef.current.filter(
-          (t) => !isSameOrSubPath(t.filePath, folderPath),
-        );
-        const merged = [...otherTracks, ...newTracks];
-        setTracks(merged);
-        setTrackCount(merged.length);
         setScanProgress(90);
 
-        await persistFolderTracks(folderPath, newTracks, queryClient);
+        const result = await persistFolderTracks(scan, queryClient);
 
         setFolderStatuses((prev) => ({
           ...prev,
-          [folderPath]: { status: 'success', lastScanned: new Date() },
+          [folderPath]: {
+            status: result.status === 'complete' ? 'success' : 'partial',
+            lastScanned: new Date(),
+          },
         }));
         setScanProgress(100);
         recordLibraryScan();
-        if (!options?.silent) {
-          notifications.notifyScanComplete(newTracks.length);
+        if (!options?.silent && result.status === 'complete') {
+          notifications.notifyScanComplete(result.discoveredCount);
+          window.dispatchEvent(new CustomEvent('tarab:manual-scan-complete'));
         }
 
         void syncLyricsIndex().catch((err) =>
@@ -312,34 +339,31 @@ export function useLibraryScan(): UseLibraryScanResult {
           }),
         );
       } catch (e) {
+        const cancelled = e instanceof Error && e.message.toLowerCase().includes('cancel');
         reportError(`Failed to scan folder: ${folderPath}`, {
           source: 'useLibraryScan',
           error: e,
         });
-        setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'error' } }));
+        setFolderStatuses((prev) => ({
+          ...prev,
+          [folderPath]: { status: cancelled ? 'partial' : 'error' },
+        }));
       } finally {
         setIsScanning(false);
       }
     },
-    [
-      downloadArtwork,
-      followSymlinks,
-      libraryFolders,
-      queryClient,
-      setIsScanning,
-      setScanProgress,
-      setTrackCount,
-      setTracks,
-    ],
+    [downloadArtwork, followSymlinks, libraryFolders, queryClient, setIsScanning, setScanProgress],
   );
 
   const rescanAll = useCallback(async (): Promise<void> => {
     if (libraryFolders.length === 0) return;
 
     setIsScanning(true);
+    scanCancelledRef.current = false;
     setScanProgress(0);
 
-    const allTracks: Track[] = [];
+    let discoveredCount = 0;
+    let completedFolders = 0;
     const total = libraryFolders.length;
 
     for (let i = 0; i < total; i++) {
@@ -351,40 +375,51 @@ export function useLibraryScan(): UseLibraryScanResult {
       setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'scanning' } }));
 
       try {
-        const newTracks = await scanSingleFolder({
+        const scan = await scanSingleFolder({
           folderPath,
           followSymlinks,
           downloadArtwork,
           // Map folder's internal 0-1 ratio into its progress slice (85% of slice = scan, 15% = DB)
           onProgress: (ratio) =>
             setScanProgress(clampProgress((sliceStart + sliceSize * ratio * 0.85) * 100)),
+          isCancelled: () => scanCancelledRef.current,
         });
 
-        allTracks.push(...newTracks);
         setScanProgress(clampProgress((sliceStart + sliceSize * 0.9) * 100));
 
-        await persistFolderTracks(folderPath, newTracks, queryClient);
+        const result = await persistFolderTracks(scan, queryClient);
+        discoveredCount += result.discoveredCount;
+        if (result.status === 'complete') completedFolders += 1;
 
         setFolderStatuses((prev) => ({
           ...prev,
-          [folderPath]: { status: 'success', lastScanned: new Date() },
+          [folderPath]: {
+            status: result.status === 'complete' ? 'success' : 'partial',
+            lastScanned: new Date(),
+          },
         }));
       } catch (e) {
+        const cancelled = e instanceof Error && e.message.toLowerCase().includes('cancel');
         reportError(`Failed to scan folder: ${folderPath}`, {
           source: 'useLibraryScan',
           error: e,
         });
-        setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'error' } }));
+        setFolderStatuses((prev) => ({
+          ...prev,
+          [folderPath]: { status: cancelled ? 'partial' : 'error' },
+        }));
+        if (cancelled) break;
       }
     }
 
-    setTracks(allTracks);
-    setTrackCount(allTracks.length);
-    void invalidateLibraryForMutation(queryClient, 'scan');
+    await invalidateLibraryForMutation(queryClient, 'scan');
     setIsScanning(false);
     setScanProgress(100);
     recordLibraryScan();
-    notifications.notifyScanComplete(allTracks.length);
+    if (completedFolders === total) {
+      notifications.notifyScanComplete(discoveredCount);
+      window.dispatchEvent(new CustomEvent('tarab:manual-scan-complete'));
+    }
 
     void syncLyricsIndex().catch((err) =>
       reportError('Failed to refresh lyrics index', {
@@ -399,9 +434,12 @@ export function useLibraryScan(): UseLibraryScanResult {
     queryClient,
     setIsScanning,
     setScanProgress,
-    setTrackCount,
-    setTracks,
   ]);
+
+  const cancelScan = useCallback(async () => {
+    scanCancelledRef.current = true;
+    await cancelLibraryScan();
+  }, []);
 
   const clearWatchDebounces = useCallback(() => {
     watchDebounceRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -531,7 +569,7 @@ export function useLibraryScan(): UseLibraryScanResult {
   }, [autoWatch, clearWatchDebounces, libraryFolders]);
 
   return useMemo(
-    () => ({ isScanning, folderStatuses, scanFolder, rescanAll }),
-    [folderStatuses, isScanning, rescanAll, scanFolder],
+    () => ({ isScanning, folderStatuses, scanFolder, rescanAll, cancelScan }),
+    [cancelScan, folderStatuses, isScanning, rescanAll, scanFolder],
   );
 }

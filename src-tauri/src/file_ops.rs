@@ -9,11 +9,26 @@ use tauri::async_runtime::spawn_blocking;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::database::SharedDatabase;
+use crate::audio::SharedAudioManager;
+use crate::database::{DbTrack, SharedDatabase};
+use crate::tageditor::FileMutationResult;
 
 const LIBRARY_GRANTS_VERSION: u8 = 1;
 const LIBRARY_GRANTS_FILE: &str = "library-grants.json";
 const MAX_LIBRARY_GRANTS_BYTES: u64 = 1024 * 1024;
+const RECOVERABLE_TRASH_DIR: &str = "recoverable-trash";
+const TRASH_RECORD_FILE: &str = "record.json";
+const MAX_TRASH_RECORD_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashRecord {
+    version: u8,
+    token: String,
+    original_path: String,
+    stored_file_name: String,
+    track: Option<DbTrack>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +52,24 @@ pub struct LibraryGrantSummary {
     pub status: &'static str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryCachedSourceHealth {
+    pub grant_id: String,
+    pub path: String,
+    pub indexed_track_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryHealthState {
+    pub native_grants: Vec<LibraryGrantSummary>,
+    pub cached_sources: Vec<LibraryCachedSourceHealth>,
+    pub unavailable_sources: Vec<LibraryGrantSummary>,
+    pub watcher_state: &'static str,
+    pub repair_actions: Vec<&'static str>,
+}
+
 #[derive(Clone, Default)]
 pub struct LibraryRootsState {
     pub roots: Vec<PathBuf>,
@@ -58,6 +91,48 @@ fn grants_path(app: &AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&app_dir)
         .map_err(|e| format!("Failed to create app data directory: {}", e))?;
     Ok(app_dir.join(LIBRARY_GRANTS_FILE))
+}
+
+fn recoverable_trash_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("App data directory not available: {e}"))?;
+    let trash_dir = app_dir.join(RECOVERABLE_TRASH_DIR);
+    fs::create_dir_all(&trash_dir)
+        .map_err(|e| format!("Failed to create recoverable Trash directory: {e}"))?;
+    Ok(trash_dir)
+}
+
+fn valid_undo_token(token: &str) -> bool {
+    token.len() == 32 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn write_trash_record(path: &Path, record: &TrashRecord) -> Result<(), String> {
+    let bytes =
+        serde_json::to_vec(record).map_err(|e| format!("Failed to encode Trash record: {e}"))?;
+    if bytes.len() as u64 > MAX_TRASH_RECORD_BYTES {
+        return Err("Trash record exceeds the allowed size".to_string());
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("Failed to create Trash record: {e}"))?;
+    file.write_all(&bytes)
+        .map_err(|e| format!("Failed to write Trash record: {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync Trash record: {e}"))
+}
+
+fn read_trash_record(path: &Path) -> Result<TrashRecord, String> {
+    let metadata =
+        fs::metadata(path).map_err(|e| format!("Failed to inspect Trash record: {e}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_TRASH_RECORD_BYTES {
+        return Err("Trash record is invalid".to_string());
+    }
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read Trash record: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("Failed to decode Trash record: {e}"))
 }
 
 fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(), String> {
@@ -99,26 +174,28 @@ fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(),
 }
 
 fn active_roots(grants: &[LibraryGrantRecord]) -> Vec<PathBuf> {
-    let roots = grants
-        .iter()
-        .filter_map(|grant| {
-            let path = PathBuf::from(&grant.path);
-            if !path.is_dir() {
-                return None;
+    let mut roots = Vec::new();
+    for grant in grants {
+        let path = PathBuf::from(&grant.path);
+        let is_symlink = fs::symlink_metadata(&path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(true);
+        if path.is_dir() && !is_symlink {
+            if let Ok(canonical) = fs::canonicalize(&path) {
+                roots.push(canonical);
             }
-            let canonical = fs::canonicalize(&path).ok()?;
-            (canonical == path).then_some(canonical)
-        })
-        .collect();
+            roots.push(path);
+        }
+    }
     normalize_library_roots(roots)
 }
 
 fn grant_summary(grant: &LibraryGrantRecord) -> LibraryGrantSummary {
     let path = PathBuf::from(&grant.path);
-    let available = path.is_dir()
-        && fs::canonicalize(&path)
-            .map(|canonical| canonical == path)
-            .unwrap_or(false);
+    let is_symlink = fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(true);
+    let available = path.is_dir() && !is_symlink && fs::canonicalize(&path).is_ok();
     let display_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -185,6 +262,53 @@ pub fn list_library_grants(
 }
 
 #[tauri::command]
+pub fn get_library_health(
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<LibraryHealthState, String> {
+    let mut state = roots_state.write();
+    state.roots = active_roots(&state.grants);
+    let native_grants = state.grants.iter().map(grant_summary).collect::<Vec<_>>();
+    let cached_sources = state
+        .grants
+        .iter()
+        .map(|grant| {
+            Ok(LibraryCachedSourceHealth {
+                grant_id: grant.id.clone(),
+                path: grant.path.clone(),
+                indexed_track_count: db
+                    .count_tracks_by_folder(&grant.path)
+                    .map_err(|e| e.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let unavailable_sources = native_grants
+        .iter()
+        .filter(|grant| grant.status == "missing")
+        .cloned()
+        .collect::<Vec<_>>();
+    let watcher_state = if state.roots.is_empty() {
+        "inactive"
+    } else {
+        "ready"
+    };
+    let repair_actions = if native_grants.is_empty() {
+        vec!["addFolder"]
+    } else if unavailable_sources.is_empty() {
+        vec!["addFolder", "rescan"]
+    } else {
+        vec!["reauthorize", "addFolder", "viewDetails"]
+    };
+    Ok(LibraryHealthState {
+        native_grants,
+        cached_sources,
+        unavailable_sources,
+        watcher_state,
+        repair_actions,
+    })
+}
+
+#[tauri::command]
 pub async fn select_library_folder(
     app: AppHandle,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
@@ -208,6 +332,78 @@ pub async fn select_library_folder(
     grant_library_path(&app, roots_state.inner(), canonical).map(Some)
 }
 
+#[tauri::command]
+pub async fn reauthorize_library_grant(
+    app: AppHandle,
+    grant_id: String,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<LibraryGrantSummary>, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Reconnect Music Folder")
+        .blocking_pick_folder();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let selected = selected
+        .into_path()
+        .map_err(|e| format!("Selected folder path is invalid: {}", e))?;
+    let canonical = fs::canonicalize(&selected)
+        .map_err(|e| format!("Failed to resolve selected library folder: {}", e))?;
+    if !canonical.is_dir() {
+        return Err("Selected library path is not a folder".to_string());
+    }
+
+    #[cfg(windows)]
+    let canonical_string = canonical.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let canonical_string = canonical.to_string_lossy().into_owned();
+
+    let current = roots_state.read().grants.clone();
+    let grant = current
+        .iter()
+        .find(|grant| grant.id == grant_id)
+        .cloned()
+        .ok_or_else(|| "The library source no longer exists".to_string())?;
+    if current.iter().any(|candidate| {
+        candidate.id != grant_id
+            && (canonical.starts_with(Path::new(&candidate.path))
+                || Path::new(&candidate.path).starts_with(&canonical))
+    }) {
+        return Err("The selected folder overlaps another library source".to_string());
+    }
+
+    db.rebase_track_paths(&grant.path, &canonical_string)
+        .map_err(|e| format!("Failed to reconnect indexed tracks: {}", e))?;
+
+    let mut next = current;
+    if let Some(entry) = next.iter_mut().find(|entry| entry.id == grant_id) {
+        entry.path = canonical_string;
+    }
+    if let Err(error) = persist_grants(&app, &next) {
+        let _ = db.rebase_track_paths(
+            next.iter()
+                .find(|entry| entry.id == grant_id)
+                .map(|entry| entry.path.as_str())
+                .unwrap_or_default(),
+            &grant.path,
+        );
+        return Err(error);
+    }
+
+    let updated = next
+        .iter()
+        .find(|entry| entry.id == grant_id)
+        .cloned()
+        .ok_or_else(|| "The reconnected library source was lost".to_string())?;
+    let mut state = roots_state.write();
+    state.grants = next;
+    state.roots = active_roots(&state.grants);
+    Ok(Some(grant_summary(&updated)))
+}
+
 pub(crate) fn grant_library_path(
     app: &AppHandle,
     roots_state: &SharedLibraryRoots,
@@ -216,7 +412,10 @@ pub(crate) fn grant_library_path(
     if !canonical.is_dir() {
         return Err("Selected library path is not a folder".to_string());
     }
+    #[cfg(windows)]
     let canonical_string = canonical.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let canonical_string = canonical.to_string_lossy().into_owned();
     let current = roots_state.read().grants.clone();
     if let Some(existing) = current.iter().find(|grant| {
         let existing_path = PathBuf::from(&grant.path);
@@ -421,6 +620,19 @@ pub(crate) fn ensure_existing_path_allowed(
     Ok(canonical)
 }
 
+fn ensure_mutation_source_allowed(
+    path: &Path,
+    roots: &[PathBuf],
+    action: &str,
+) -> Result<PathBuf, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|e| format!("Failed to inspect path {}: {}", path.display(), e))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("Blocked {action} through a symbolic link"));
+    }
+    ensure_existing_path_allowed(path, roots, action)
+}
+
 pub(crate) fn ensure_target_path_allowed(
     path: &Path,
     roots: &[PathBuf],
@@ -431,6 +643,7 @@ pub(crate) fn ensure_target_path_allowed(
     Ok(canonical)
 }
 
+#[cfg(test)]
 pub(crate) fn collect_deletable_paths(
     file_paths: &[String],
     roots: &[PathBuf],
@@ -464,9 +677,11 @@ pub async fn rename_file(
     old_path: String,
     new_name: String,
     db: tauri::State<'_, SharedDatabase>,
+    audio: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<String, String> {
     let db = db.inner().clone();
+    let audio = audio.inner().clone();
     let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
         let source = PathBuf::from(&old_path);
@@ -474,11 +689,12 @@ pub async fn rename_file(
             return Err(format!("File does not exist: {}", old_path));
         }
         let roots = roots_state.read().roots.clone();
-        let _source_canonical = ensure_existing_path_allowed(&source, &roots, "rename source file")?;
-        let parent = source
+        let source_canonical =
+            ensure_mutation_source_allowed(&source, &roots, "rename source file")?;
+        let parent = source_canonical
             .parent()
             .ok_or_else(|| "Source has no parent directory".to_string())?;
-        let final_name = ensure_filename_with_extension(&new_name, &source)?;
+        let final_name = ensure_filename_with_extension(&new_name, &source_canonical)?;
         let target = parent.join(final_name);
         if source == target {
             return Ok(target.to_string_lossy().to_string());
@@ -488,11 +704,11 @@ pub async fn rename_file(
         }
         let _target_canonical =
             ensure_target_path_allowed(&target, &roots, "rename destination file")?;
-        fs::rename(&source, &target).map_err(|e| format!("Failed to rename: {}", e))?;
+        fs::rename(&source_canonical, &target).map_err(|e| format!("Failed to rename: {}", e))?;
         let target_str = target.to_string_lossy().to_string();
         if let Err(err) = db.rename_track_path(&old_path, &target_str) {
             // Try to restore original file path if DB update fails.
-            let rollback_result = fs::rename(&target, &source);
+            let rollback_result = fs::rename(&target, &source_canonical);
             return match rollback_result {
                 Ok(()) => Err(format!(
                     "Failed to update database after rename, operation rolled back: {}",
@@ -504,6 +720,7 @@ pub async fn rename_file(
                 )),
             };
         }
+        let _ = audio.source_renamed(old_path, target_str.clone());
         Ok(target_str)
     })
     .await
@@ -515,9 +732,11 @@ pub async fn move_file(
     old_path: String,
     new_path: String,
     db: tauri::State<'_, SharedDatabase>,
+    audio: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<String, String> {
     let db = db.inner().clone();
+    let audio = audio.inner().clone();
     let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
         let source = PathBuf::from(&old_path);
@@ -525,10 +744,10 @@ pub async fn move_file(
             return Err(format!("File does not exist: {}", old_path));
         }
         let roots = roots_state.read().roots.clone();
-        let _source_canonical = ensure_existing_path_allowed(&source, &roots, "move source file")?;
+        let source_canonical = ensure_mutation_source_allowed(&source, &roots, "move source file")?;
         let mut target = PathBuf::from(&new_path);
         if target.is_dir() || new_path.ends_with(std::path::MAIN_SEPARATOR) {
-            let file_name = source
+            let file_name = source_canonical
                 .file_name()
                 .ok_or_else(|| "Could not determine file name".to_string())?;
             target = target.join(file_name);
@@ -538,11 +757,11 @@ pub async fn move_file(
         }
         let _target_canonical = ensure_target_path_allowed(&target, &roots, "move destination file")?;
         create_destination_parent_dir(&target)?;
-        fs::rename(&source, &target).map_err(|e| format!("Failed to move file: {}", e))?;
+        fs::rename(&source_canonical, &target).map_err(|e| format!("Failed to move file: {}", e))?;
         let target_str = target.to_string_lossy().to_string();
         if let Err(err) = db.rename_track_path(&old_path, &target_str) {
             // Try to restore original file path if DB update fails.
-            let rollback_result = fs::rename(&target, &source);
+            let rollback_result = fs::rename(&target, &source_canonical);
             return match rollback_result {
                 Ok(()) => Err(format!(
                     "Failed to update database after move, operation rolled back: {}",
@@ -554,7 +773,288 @@ pub async fn move_file(
                 )),
             };
         }
+        let _ = audio.source_renamed(old_path, target_str.clone());
         Ok(target_str)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn trash_files(
+    app: AppHandle,
+    file_paths: Vec<String>,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<FileMutationResult>, String> {
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || {
+        let roots = roots_state.read().roots.clone();
+        let mut seen = std::collections::HashSet::new();
+        let mut planned = Vec::with_capacity(file_paths.len());
+        for original_path in &file_paths {
+            let source = PathBuf::from(original_path);
+            let validation = if !seen.insert(original_path.clone()) {
+                Err("The request contains the same file more than once".to_string())
+            } else if !source.exists() {
+                Err("File does not exist".to_string())
+            } else if !source.is_file() {
+                Err("Target is not a regular file".to_string())
+            } else {
+                ensure_mutation_source_allowed(&source, &roots, "move file to Trash")
+            };
+            planned.push((original_path.clone(), validation));
+        }
+
+        let mut results = Vec::with_capacity(planned.len());
+        for (original_path, validation) in planned {
+            let canonical_path = match validation {
+                Ok(path) => path,
+                Err(error) => {
+                    results.push(FileMutationResult {
+                        path: original_path,
+                        status: "failed".to_string(),
+                        operation: "trash".to_string(),
+                        error_code: Some("preflightFailed".to_string()),
+                        recoverable: true,
+                        error_message: Some(error),
+                        undo_token: None,
+                    });
+                    continue;
+                }
+            };
+            let token = format!("{:032x}", rand::random::<u128>());
+            let entry_dir = trash_root.join(&token);
+            let stored_file_name = canonical_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("audio-file")
+                .to_string();
+            let stored_path = entry_dir.join(&stored_file_name);
+            if let Err(error) = fs::create_dir(&entry_dir) {
+                results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "trash".to_string(),
+                    error_code: Some("trashStorageFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error.to_string()),
+                    undo_token: None,
+                });
+                continue;
+            }
+            let track = db
+                .get_tracks_by_ids(std::slice::from_ref(&original_path))
+                .ok()
+                .and_then(|mut tracks| tracks.pop());
+            let record = TrashRecord {
+                version: 1,
+                token: token.clone(),
+                original_path: original_path.clone(),
+                stored_file_name,
+                track,
+            };
+            if let Err(error) = write_trash_record(&entry_dir.join(TRASH_RECORD_FILE), &record) {
+                let _ = fs::remove_dir(&entry_dir);
+                results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "trash".to_string(),
+                    error_code: Some("trashStorageFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error),
+                    undo_token: None,
+                });
+                continue;
+            }
+            if let Err(error) = fs::rename(&canonical_path, &stored_path) {
+                let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
+                let _ = fs::remove_dir(&entry_dir);
+                results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "trash".to_string(),
+                    error_code: Some("fileTrashFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error.to_string()),
+                    undo_token: None,
+                });
+                continue;
+            }
+            if let Err(error) = db.delete_tracks(std::slice::from_ref(&original_path)) {
+                let rollback = fs::rename(&stored_path, &canonical_path);
+                if rollback.is_ok() {
+                    let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
+                    let _ = fs::remove_dir(&entry_dir);
+                }
+                results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "trash".to_string(),
+                    error_code: Some("databaseSyncFailed".to_string()),
+                    recoverable: rollback.is_ok(),
+                    error_message: Some(format!(
+                        "Tarab could not update the library after moving the file to Trash: {error}"
+                    )),
+                    undo_token: rollback.is_err().then_some(token),
+                });
+                continue;
+            }
+            results.push(FileMutationResult {
+                path: original_path,
+                status: "success".to_string(),
+                operation: "trash".to_string(),
+                error_code: None,
+                recoverable: true,
+                error_message: None,
+                undo_token: Some(token),
+            });
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn restore_trashed_files(
+    app: AppHandle,
+    undo_tokens: Vec<String>,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Vec<FileMutationResult>, String> {
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || {
+        let roots = roots_state.read().roots.clone();
+        let mut results = Vec::with_capacity(undo_tokens.len());
+        for token in undo_tokens {
+            if !valid_undo_token(&token) {
+                results.push(FileMutationResult {
+                    path: String::new(),
+                    status: "failed".to_string(),
+                    operation: "restore".to_string(),
+                    error_code: Some("invalidUndoToken".to_string()),
+                    recoverable: false,
+                    error_message: Some("The undo token is invalid".to_string()),
+                    undo_token: None,
+                });
+                continue;
+            }
+            let entry_dir = trash_root.join(&token);
+            let record = match read_trash_record(&entry_dir.join(TRASH_RECORD_FILE)) {
+                Ok(record) if record.version == 1 && record.token == token => record,
+                Ok(_) => {
+                    results.push(FileMutationResult {
+                        path: String::new(),
+                        status: "failed".to_string(),
+                        operation: "restore".to_string(),
+                        error_code: Some("invalidUndoToken".to_string()),
+                        recoverable: false,
+                        error_message: Some("The Trash record does not match the undo token".to_string()),
+                        undo_token: None,
+                    });
+                    continue;
+                }
+                Err(error) => {
+                    results.push(FileMutationResult {
+                        path: String::new(),
+                        status: "failed".to_string(),
+                        operation: "restore".to_string(),
+                        error_code: Some("trashRecordMissing".to_string()),
+                        recoverable: false,
+                        error_message: Some(error),
+                        undo_token: None,
+                    });
+                    continue;
+                }
+            };
+            let original_path = PathBuf::from(&record.original_path);
+            let stored_name_is_safe = matches!(
+                Path::new(&record.stored_file_name)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [Component::Normal(_)]
+            );
+            if !stored_name_is_safe {
+                results.push(FileMutationResult {
+                    path: record.original_path,
+                    status: "failed".to_string(),
+                    operation: "restore".to_string(),
+                    error_code: Some("invalidTrashRecord".to_string()),
+                    recoverable: false,
+                    error_message: Some("The Trash record contains an invalid file name".to_string()),
+                    undo_token: None,
+                });
+                continue;
+            }
+            let stored_path = entry_dir.join(&record.stored_file_name);
+            let validation = if original_path.exists() {
+                Err("A file already exists at the original path".to_string())
+            } else if !stored_path.is_file() {
+                Err("The recoverable Trash file is missing".to_string())
+            } else {
+                ensure_target_path_allowed(&original_path, &roots, "restore file from Trash")
+                    .map(|_| ())
+            };
+            if let Err(error) = validation {
+                results.push(FileMutationResult {
+                    path: record.original_path,
+                    status: "failed".to_string(),
+                    operation: "restore".to_string(),
+                    error_code: Some("restorePreflightFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error),
+                    undo_token: Some(token),
+                });
+                continue;
+            }
+            if let Err(error) = fs::rename(&stored_path, &original_path) {
+                results.push(FileMutationResult {
+                    path: record.original_path,
+                    status: "failed".to_string(),
+                    operation: "restore".to_string(),
+                    error_code: Some("fileRestoreFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error.to_string()),
+                    undo_token: Some(token),
+                });
+                continue;
+            }
+            if let Some(track) = &record.track {
+                if let Err(error) = db.upsert_tracks_batch(std::slice::from_ref(track)) {
+                    let rollback = fs::rename(&original_path, &stored_path);
+                    results.push(FileMutationResult {
+                        path: record.original_path,
+                        status: "failed".to_string(),
+                        operation: "restore".to_string(),
+                        error_code: Some("databaseSyncFailed".to_string()),
+                        recoverable: rollback.is_ok(),
+                        error_message: Some(format!(
+                            "Tarab restored the file but could not restore its library record: {error}"
+                        )),
+                        undo_token: rollback.is_ok().then_some(token),
+                    });
+                    continue;
+                }
+            }
+            let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
+            let _ = fs::remove_dir(&entry_dir);
+            results.push(FileMutationResult {
+                path: record.original_path,
+                status: "success".to_string(),
+                operation: "restore".to_string(),
+                error_code: None,
+                recoverable: false,
+                error_message: None,
+                undo_token: None,
+            });
+        }
+        Ok(results)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -565,33 +1065,82 @@ pub async fn delete_files(
     file_paths: Vec<String>,
     db: tauri::State<'_, SharedDatabase>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<usize, String> {
+) -> Result<Vec<FileMutationResult>, String> {
     let db = db.inner().clone();
     let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
-        let mut deleted = 0usize;
         let roots = roots_state.read().roots.clone();
-        let deletable_paths = collect_deletable_paths(&file_paths, &roots)?;
-
-        let mut deleted_paths: Vec<String> = Vec::new();
-        for (original_path, canonical_path) in deletable_paths {
-            fs::remove_file(&canonical_path)
-                .map_err(|e| format!("Failed to delete {}: {}", original_path, e))?;
-            deleted += 1;
-            deleted_paths.push(original_path);
+        let mut seen = std::collections::HashSet::new();
+        let mut planned = Vec::with_capacity(file_paths.len());
+        for original_path in &file_paths {
+            let source = PathBuf::from(original_path);
+            let validation = if !seen.insert(original_path.clone()) {
+                Err("The request contains the same file more than once".to_string())
+            } else if !source.exists() {
+                Err("File does not exist".to_string())
+            } else if !source.is_file() {
+                Err("Target is not a regular file".to_string())
+            } else {
+                ensure_mutation_source_allowed(&source, &roots, "delete file")
+            };
+            planned.push((original_path.clone(), validation));
         }
 
-        if !deleted_paths.is_empty() {
-            db.delete_tracks(&deleted_paths).map_err(|e| {
-                format!(
-                    "Database sync failed after deleting {} of {} requested files from disk. Please rescan the library. Details: {}",
-                    deleted,
-                    file_paths.len(),
-                    e
-                )
-            })?;
+        let mut results = Vec::with_capacity(planned.len());
+        for (original_path, validation) in planned {
+            let canonical_path = match validation {
+                Ok(path) => path,
+                Err(error) => {
+                    results.push(FileMutationResult {
+                        path: original_path,
+                        status: "failed".to_string(),
+                        operation: "delete".to_string(),
+                        error_code: Some("preflightFailed".to_string()),
+                        recoverable: true,
+                        error_message: Some(error),
+                        undo_token: None,
+                    });
+                    continue;
+                }
+            };
+
+            if let Err(error) = fs::remove_file(&canonical_path) {
+                results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "delete".to_string(),
+                    error_code: Some("fileDeleteFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error.to_string()),
+                    undo_token: None,
+                });
+                continue;
+            }
+
+            match db.delete_tracks(std::slice::from_ref(&original_path)) {
+                Ok(_) => results.push(FileMutationResult {
+                    path: original_path,
+                    status: "success".to_string(),
+                    operation: "delete".to_string(),
+                    error_code: None,
+                    recoverable: false,
+                    error_message: None,
+                    undo_token: None,
+                }),
+                Err(error) => results.push(FileMutationResult {
+                    path: original_path,
+                    status: "failed".to_string(),
+                    operation: "delete".to_string(),
+                    error_code: Some("databaseSyncFailed".to_string()),
+                    recoverable: false,
+                    error_message: Some(format!(
+                        "The file was deleted, but the database update failed. Rescan the library. {error}"
+                    )),
+                    undo_token: None,
+                }),
+            }
         }
-        Ok(deleted)
+        Ok(results)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -638,6 +1187,42 @@ mod tests {
         assert_eq!(stored.grants[0].id, "grant-1");
         assert!(!path.with_extension("json.tmp").exists());
         assert!(!path.with_extension("json.bak").exists());
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn trash_record_round_trip_preserves_restore_identity() {
+        let temp = temp_dir("trash-record");
+        let path = temp.join(TRASH_RECORD_FILE);
+        let record = TrashRecord {
+            version: 1,
+            token: "0123456789abcdef0123456789abcdef".to_string(),
+            original_path: "/Music/Album/Track.flac".to_string(),
+            stored_file_name: "Track.flac".to_string(),
+            track: None,
+        };
+
+        write_trash_record(&path, &record).expect("write Trash record");
+        let loaded = read_trash_record(&path).expect("read Trash record");
+
+        assert_eq!(loaded.token, record.token);
+        assert_eq!(loaded.original_path, record.original_path);
+        assert_eq!(loaded.stored_file_name, record.stored_file_name);
+        assert!(valid_undo_token(&loaded.token));
+        assert!(!valid_undo_token("../restore"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn trash_record_reader_rejects_oversized_records() {
+        let temp = temp_dir("trash-record-limit");
+        let path = temp.join(TRASH_RECORD_FILE);
+        fs::write(&path, vec![b'x'; MAX_TRASH_RECORD_BYTES as usize + 1])
+            .expect("write oversized record");
+
+        assert!(read_trash_record(&path).is_err());
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -740,6 +1325,24 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         let _ = fs::remove_dir_all(allowed_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_preflight_rejects_symbolic_link_sources() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("mutation-symlink");
+        let target = root.join("target.mp3");
+        let link = root.join("link.mp3");
+        fs::write(&target, b"audio").expect("write target");
+        symlink(&target, &link).expect("create symlink");
+        let roots = vec![fs::canonicalize(&root).expect("canonical root")];
+
+        assert!(ensure_mutation_source_allowed(&link, &roots, "mutate file").is_err());
+        assert!(target.exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

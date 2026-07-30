@@ -1,7 +1,17 @@
 import { match } from 'ts-pattern';
+import { setActivePlaybackGeneration } from '../features/app/playback-generation';
 import { usePlayerStore } from '../store/player-store';
 import type { Track } from '../types';
-import { pausePlayback, playTrack, resumePlayback, seekPlayback } from './tauri-commands';
+import {
+  crossfadeToTrack,
+  pausePlayback,
+  playTrack,
+  preloadNextTrack,
+  resumePlayback,
+  seekPlayback,
+  setAudioOutputDevice,
+  stopPlayback,
+} from './tauri-commands';
 
 interface StartPlaybackOptions {
   queue?: Track[];
@@ -15,7 +25,8 @@ export const startPlayback = async (
   options?: StartPlaybackOptions,
 ): Promise<void> => {
   const startPos = options?.startPos;
-  await playTrack(track.filePath, startPos);
+  const generation = await playTrack(track.filePath, startPos);
+  setActivePlaybackGeneration(generation);
 
   const state = usePlayerStore.getState();
   if (options?.queue) {
@@ -72,6 +83,34 @@ export const seekToPosition = async (positionSecs: number): Promise<void> => {
   usePlayerStore.getState().setCurrentTime(clamped);
 };
 
+export const stopCurrentPlayback = async (): Promise<void> => {
+  await stopPlayback();
+  const state = usePlayerStore.getState();
+  state.setIsPlaying(false);
+  state.setHasActivePlayback(false);
+};
+
+export const crossfadeToSource = (
+  filePath: string,
+  durationSecs: number,
+  startPos?: number,
+): Promise<number> => crossfadeToTrack(filePath, durationSecs, startPos);
+
+export const preloadGaplessSource = (filePath: string | null): Promise<number | null> =>
+  preloadNextTrack(filePath);
+
+export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
+  setAudioOutputDevice(deviceId);
+
+export const startEditorPreview = async (filePath: string): Promise<void> => {
+  const generation = await playTrack(filePath);
+  setActivePlaybackGeneration(generation);
+  const state = usePlayerStore.getState();
+  state.setCurrentTime(0);
+  state.setIsPlaying(true);
+  state.setHasActivePlayback(true);
+};
+
 export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise<Track | null> => {
   const state = usePlayerStore.getState();
 
@@ -88,7 +127,8 @@ export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise
       return previous.track;
     }
 
-    await playTrack(previous.track.filePath);
+    const generation = await playTrack(previous.track.filePath);
+    setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
     freshState.activateTrackAtIndex(previous.index);
     freshState.setDuration(previous.track.duration);
@@ -100,7 +140,8 @@ export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise
   const next = state.previewNext();
   if (!next) return null;
 
-  await playTrack(next.track.filePath);
+  const generation = await playTrack(next.track.filePath);
+  setActivePlaybackGeneration(generation);
   const freshState = usePlayerStore.getState();
   freshState.activateTrackAtIndex(next.index);
   freshState.setDuration(next.track.duration);
@@ -119,3 +160,18 @@ export const cyclePlaybackLoopMode = (): void => {
 
   setLoopMode(nextMode);
 };
+
+export const PlaybackCoordinator = Object.freeze({
+  start: startPlayback,
+  pause: pauseCurrentPlayback,
+  resume: resumeCurrentPlayback,
+  toggle: toggleCurrentPlayback,
+  stop: stopCurrentPlayback,
+  seek: seekToPosition,
+  next: () => playAdjacentTrack('next'),
+  previous: () => playAdjacentTrack('previous'),
+  crossfadeTo: crossfadeToSource,
+  preloadNext: preloadGaplessSource,
+  switchOutputDevice: switchAudioOutputDevice,
+  previewFile: startEditorPreview,
+});

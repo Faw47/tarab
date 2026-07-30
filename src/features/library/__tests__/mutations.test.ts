@@ -18,6 +18,29 @@ describe('invalidateLibraryForMutation', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['library', 'search'],
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['library', 'albums'],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['library', 'artists'],
+    });
+  });
+
+  it('invalidates aggregate and playlist data after play statistics change', async () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+
+    await invalidateLibraryForMutation(queryClient, 'play-stats');
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['library', 'albums'],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['library', 'artists'],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['playlists'],
+    });
   });
 
   it('invalidates expected query targets for rating mutations', async () => {

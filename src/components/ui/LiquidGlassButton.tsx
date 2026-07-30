@@ -26,7 +26,7 @@ const buttonVariants = cva(
   [
     'relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium',
     'isolate overflow-hidden select-none touch-manipulation outline-none',
-    'transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+    'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] ease-[cubic-bezier(0.16,1,0.3,1)]',
     'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
     'shrink-0',
     'focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
@@ -202,7 +202,8 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const prefersReducedMotion = usePrefersReducedMotion();
     const { theme, reducedEffects: contextReducedEffects } = useGlassSystem();
 
-    const finalReducedEffects = reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
+    const finalReducedEffects =
+      Boolean(reducedEffects) || Boolean(contextReducedEffects) || prefersReducedMotion;
     const isNeobrutalism = theme === 'neobrutalism';
 
     const [hovered, setHovered] = React.useState(false);
@@ -415,7 +416,8 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
           !isNeobrutalism && !pressed && !useInsetPress
             ? 'cubic-bezier(0.34, 1.56, 0.64, 1)'
             : undefined,
-        transitionDuration: !isNeobrutalism && !pressed && !useInsetPress ? '400ms' : undefined,
+        transitionDuration:
+          !isNeobrutalism && !pressed && !useInsetPress ? 'var(--motion-standard)' : undefined,
         willChange:
           !finalReducedEffects && !isNeobrutalism && (hovered || pressed) && !useInsetPress
             ? 'transform'
@@ -482,7 +484,7 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
             <span
               className={cn(
                 'pointer-events-none absolute inset-x-2 top-0 z-[1] h-px rounded-full',
-                'transition-opacity duration-300',
+                'transition-opacity duration-[var(--motion-emphasis)]',
                 pressed ? 'opacity-40' : 'opacity-80',
               )}
               style={{
@@ -495,7 +497,7 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
             {!finalReducedEffects && (
               <>
                 <span
-                  className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] transition-opacity duration-300"
+                  className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] transition-opacity duration-[var(--motion-emphasis)]"
                   aria-hidden="true"
                   style={{
                     opacity: hovered && !pressed ? 0.55 : 0,

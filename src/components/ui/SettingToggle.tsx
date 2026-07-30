@@ -63,13 +63,13 @@ export const SettingToggle = memo(function SettingToggle({
           'focus-visible:outline-none focus-visible:ring-2',
           isNeobrutalism
             ? cn(
-                'relative h-9 min-w-[4.5rem] shrink-0 overflow-visible rounded-none border-[3px] border-black px-3 text-[11px] font-black uppercase tracking-[0.14em] text-black shadow-[4px_4px_0_0_#000] transition-none',
+                'relative h-9 min-w-[4.5rem] shrink-0 overflow-visible rounded-none border-[3px] border-black px-3 text-[12px] font-black uppercase tracking-[0.14em] text-black shadow-[4px_4px_0_0_#000] transition-none',
                 'focus-visible:ring-black focus-visible:ring-offset-2 focus-visible:ring-offset-white',
                 'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
                 checked ? 'bg-[#84cc16]' : 'bg-white',
               )
             : cn(
-                'relative h-6 w-12 shrink-0 overflow-hidden transition-all duration-300',
+                'relative h-6 w-12 shrink-0 overflow-hidden transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
                 'rounded-full focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                 'border border-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.08)]',
                 checked
@@ -87,7 +87,7 @@ export const SettingToggle = memo(function SettingToggle({
           <span
             aria-hidden="true"
             className={cn(
-              'absolute top-1 left-1 z-10 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-300',
+              'absolute top-1 left-1 z-10 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-[var(--motion-emphasis)]',
               checked ? 'translate-x-5' : 'translate-x-0',
             )}
           />

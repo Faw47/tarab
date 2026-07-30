@@ -5,6 +5,8 @@ import type { SortBy, Track } from '../../types';
 import type { SearchScope } from '../../workers/library.worker';
 import { rankTracksWithFuseWorker } from '../../workers/librarySearchFuseClient';
 import {
+  fetchAlbumAggregates,
+  fetchArtistAggregates,
   fetchLibrarySearch,
   fetchLibraryStats,
   fetchLibraryTrackCount,
@@ -115,6 +117,18 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
     staleTime: 60_000,
   });
 
+  const albumAggregatesQuery = useQuery({
+    queryKey: libraryKeys.albums(),
+    queryFn: fetchAlbumAggregates,
+    staleTime: 60_000,
+  });
+
+  const artistAggregatesQuery = useQuery({
+    queryKey: libraryKeys.artists(),
+    queryFn: fetchArtistAggregates,
+    staleTime: 60_000,
+  });
+
   const recentTracksQuery = useQuery({
     queryKey: libraryKeys.recent(30, 50),
     queryFn: () => fetchRecentlyAddedTracks(30, 50),
@@ -131,6 +145,8 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
 
   const tracks = tracksQuery.data ?? [];
   const libraryStats = statsQuery.data ?? null;
+  const albumAggregates = albumAggregatesQuery.data ?? [];
+  const artistAggregates = artistAggregatesQuery.data ?? [];
   const recentTracks = recentTracksQuery.data ?? [];
   const mostPlayedTracks = mostPlayedTracksQuery.data ?? [];
   const trackCount = libraryStats?.trackCount ?? trackCountQuery.data ?? tracks.length;
@@ -298,6 +314,8 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
   return {
     tracks,
     libraryStats,
+    albumAggregates,
+    artistAggregates,
     recentTracks,
     mostPlayedTracks,
     trackCount,

@@ -46,13 +46,13 @@ import { memo, useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumKey } from '../../lib/album-key';
 import { useRenderLog } from '../../lib/performance';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 
 import { usePlayerStore } from '../../store/player-store';
-import { useSettingsStore } from '../../store/settings-store';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { Button } from '../ui/button';
 import { AlbumIcon, TrackIcon } from '../ui/Icons';
@@ -105,7 +105,7 @@ export const HomeView = memo(
     const heroGlow = 'var(--hero-glow)';
 
     const { tracks, libraryStats, albumTracksByKey, albums, playAlbum } = useHomeLibraryModel();
-    const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+    const reducedEffects = useEffectiveReducedEffects();
     const hasFinePointer = useFinePointer();
     const interactiveOn = !reducedEffects && hasFinePointer;
     const coverTilt = useCoverTilt(interactiveOn);
@@ -209,7 +209,7 @@ export const HomeView = memo(
             {onRetryLoad && (
               <Button
                 onClick={onRetryLoad}
-                className="rounded-full bg-gradient-to-b from-white/14 to-white/8 text-white hover:from-white/18 hover:to-white/10 active:scale-[0.97] h-10 px-5 font-medium transition-all duration-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                className="rounded-full bg-gradient-to-b from-white/14 to-white/8 text-white hover:from-white/18 hover:to-white/10 active:scale-[0.97] h-10 px-5 font-medium transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
               >
                 Retry
               </Button>
@@ -303,7 +303,7 @@ export const HomeView = memo(
                     {onOpenFullPlayer && (
                       <Button
                         onClick={onOpenFullPlayer}
-                        className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-all duration-200"
+                        className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                         aria-label="Fullscreen player"
                         title="Fullscreen"
                         accentColor={heroAccent}
@@ -429,7 +429,7 @@ export const HomeView = memo(
                         {/* Previous */}
                         <Button
                           onClick={handlePrevious}
-                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-all duration-200"
+                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                           aria-label="Previous track"
                           accentColor={heroAccent}
                         >
@@ -439,7 +439,7 @@ export const HomeView = memo(
                         {/* Play / Pause */}
                         <Button
                           onClick={handleTogglePlay}
-                          className="h-[60px] w-[60px] rounded-full inline-flex items-center justify-center shrink-0 bg-white text-black transition-all duration-300"
+                          className="h-[60px] w-[60px] rounded-full inline-flex items-center justify-center shrink-0 bg-white text-black transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]"
                           style={{
                             boxShadow: `
                             0 12px 40px -10px color-mix(in oklch, var(--hero-accent) 40%, transparent),
@@ -461,7 +461,7 @@ export const HomeView = memo(
                         {/* Next */}
                         <Button
                           onClick={handleNext}
-                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-all duration-200"
+                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                           aria-label="Next track"
                           accentColor={heroAccent}
                         >
@@ -507,7 +507,7 @@ export const HomeView = memo(
                   variant="ghost"
                   size="sm"
                   onClick={onNavigateToLibrary}
-                  className="flex items-center gap-1.5 text-sm text-white/35 hover:text-white/72 active:scale-[0.97] transition-all duration-200"
+                  className="flex items-center gap-1.5 text-sm text-white/35 hover:text-white/72 active:scale-[0.97] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                 >
                   View all <ArrowRight className="w-3.5 h-3.5" />
                 </Button>
@@ -639,7 +639,7 @@ export const HomeView = memo(
               </p>
               <Button
                 onClick={onNavigateToFolders}
-                className="rounded-full bg-white text-black hover:bg-white/90 active:scale-[0.97] font-semibold h-12 px-6 inline-flex items-center gap-2 transition-all duration-200"
+                className="rounded-full bg-white text-black hover:bg-white/90 active:scale-[0.97] font-semibold h-12 px-6 inline-flex items-center gap-2 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
               >
                 Add Folders <ArrowRight className="w-4 h-4" />
               </Button>

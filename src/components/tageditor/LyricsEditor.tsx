@@ -16,8 +16,13 @@ import {
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatTime } from '../../lib/format-time';
+import {
+  pauseCurrentPlayback,
+  resumeCurrentPlayback,
+  seekToPosition,
+  startEditorPreview,
+} from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
-import { pausePlayback, playTrack, resumePlayback, seekPlayback } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 
 interface LyricLine {
@@ -49,7 +54,11 @@ interface HistoryState {
   index: number;
 }
 
-type HistoryAction = { type: 'push'; lines: LyricLine[] } | { type: 'undo' } | { type: 'redo' };
+type HistoryAction =
+  | { type: 'push'; lines: LyricLine[] }
+  | { type: 'reset'; lines: LyricLine[] }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
@@ -58,6 +67,8 @@ function historyReducer(state: HistoryState, action: HistoryAction): HistoryStat
       const trimmed = state.snapshots.slice(0, state.index + 1);
       return { snapshots: [...trimmed, action.lines], index: state.index + 1 };
     }
+    case 'reset':
+      return { snapshots: [action.lines], index: 0 };
     case 'undo':
       return state.index > 0 ? { ...state, index: state.index - 1 } : state;
     case 'redo':
@@ -135,27 +146,17 @@ const REPEAT_DURATION = 5; // seconds
 
 export const LyricsEditor = memo(
   ({ trackPath, lyricsContent, onChange, onSave, isSaving }: LyricsEditorProps) => {
-    const {
-      currentTrack,
-      isPlaying,
-      currentTime,
-      duration,
-      setIsPlaying,
-      setCurrentTime,
-      hasActivePlayback,
-      setHasActivePlayback,
-    } = usePlayerStore(
-      useShallow((s) => ({
-        currentTrack: s.currentTrack,
-        isPlaying: s.isPlaying,
-        currentTime: s.currentTime,
-        duration: s.duration,
-        setIsPlaying: s.setIsPlaying,
-        setCurrentTime: s.setCurrentTime,
-        hasActivePlayback: s.hasActivePlayback,
-        setHasActivePlayback: s.setHasActivePlayback,
-      })),
-    );
+    const { currentTrack, isPlaying, currentTime, duration, setCurrentTime, hasActivePlayback } =
+      usePlayerStore(
+        useShallow((s) => ({
+          currentTrack: s.currentTrack,
+          isPlaying: s.isPlaying,
+          currentTime: s.currentTime,
+          duration: s.duration,
+          setCurrentTime: s.setCurrentTime,
+          hasActivePlayback: s.hasActivePlayback,
+        })),
+      );
 
     const [view, setView] = useState<'sync' | 'text'>('sync');
 
@@ -188,6 +189,18 @@ export const LyricsEditor = memo(
     const [editingText, setEditingText] = useState('');
     const [userScrolled, setUserScrolled] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const lastExternalLyricsRef = useRef(lyricsContent);
+
+    useEffect(() => {
+      if (lastExternalLyricsRef.current === lyricsContent) return;
+      lastExternalLyricsRef.current = lyricsContent;
+      const parsed = parseLRC(lyricsContent);
+      dispatch({ type: 'reset', lines: parsed });
+      setTextContent(lyricsContent);
+      setSelectedLineId(null);
+      setEditingId(null);
+      setEditingText('');
+    }, [lyricsContent, trackPath]);
 
     const listRef = useRef<HTMLDivElement>(null);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -231,8 +244,7 @@ export const LyricsEditor = memo(
       if (isSeekingRef.current) return;
 
       isSeekingRef.current = true;
-      seekPlayback(repeatRange.start)
-        .then(() => setCurrentTime(repeatRange.start))
+      seekToPosition(repeatRange.start)
         .catch((e) => {
           console.error('Repeat seek failed:', e);
           showError('Failed to repeat');
@@ -289,34 +301,21 @@ export const LyricsEditor = memo(
     const handleTogglePlay = useCallback(async () => {
       try {
         if (!isCurrentTrack) {
-          await playTrack(trackPath);
-          setHasActivePlayback(true);
-          setIsPlaying(true);
+          await startEditorPreview(trackPath);
         } else if (isPlaying) {
-          await pausePlayback();
-          setIsPlaying(false);
+          await pauseCurrentPlayback();
         } else {
           if (!hasActivePlayback) {
-            await playTrack(trackPath);
-            setHasActivePlayback(true);
+            await startEditorPreview(trackPath);
           } else {
-            await resumePlayback();
+            await resumeCurrentPlayback();
           }
-          setIsPlaying(true);
         }
       } catch (e) {
         console.error('Failed to toggle playback:', e);
         showError('Failed to control playback');
       }
-    }, [
-      trackPath,
-      isCurrentTrack,
-      isPlaying,
-      hasActivePlayback,
-      setIsPlaying,
-      setHasActivePlayback,
-      showError,
-    ]);
+    }, [trackPath, isCurrentTrack, isPlaying, hasActivePlayback, showError]);
 
     // Keep ref current so the keyboard handler always calls the latest version
     useEffect(() => {
@@ -354,14 +353,13 @@ export const LyricsEditor = memo(
           return;
         }
         try {
-          await seekPlayback(time);
-          setCurrentTime(time);
+          await seekToPosition(time);
         } catch (e) {
           console.error('Failed to seek:', e);
           showError('Failed to seek');
         }
       },
-      [isCurrentTrack, setCurrentTime, showError],
+      [isCurrentTrack, showError],
     );
 
     const handleLineClick = useCallback(
@@ -704,7 +702,7 @@ export const LyricsEditor = memo(
                         }}
                         disabled={!isCurrentTrack}
                         className={clsx(
-                          'shrink-0 px-2 py-1 rounded bg-white/10 text-[11px] font-mono transition',
+                          'shrink-0 px-2 py-1 rounded bg-white/10 text-xs font-mono transition',
                           isCurrentTrack
                             ? 'text-text-muted hover:bg-white/20 hover:text-primary cursor-pointer'
                             : 'text-text-muted/50 cursor-not-allowed',
@@ -811,7 +809,7 @@ export const LyricsEditor = memo(
               )}
             </div>
 
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Space: Play/Pause · Click timestamp: Set time · Click line: Jump to time · Edit: Edit
               text · Repeat: Loop line · Ctrl+Z: Undo
             </p>
@@ -828,7 +826,7 @@ export const LyricsEditor = memo(
               className="w-full panel rounded-xl px-4 py-3 text-text-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[400px]"
               aria-label="LRC lyric content"
             />
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               LRC format: [MM:SS.CS] text — CS = centiseconds (00–99), MS = milliseconds (000–999)
               also accepted. Changes auto-apply after 0.5s. Fix any errors before switching to Sync
               view.

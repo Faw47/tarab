@@ -1,20 +1,18 @@
-import { load } from '@tauri-apps/plugin-store';
 import type { StateStorage } from 'zustand/middleware';
+import { fixedStoreGet, fixedStoreRemove, fixedStoreSet } from '../lib/tauri-commands';
 import { logger } from './logger';
 
 const DOMAIN = 'TauriZustandStorage';
-const STORE_OPTIONS = { defaults: {}, autoSave: true } as const;
 
 /**
  * Custom Zustand storage implementation that uses Tauri's persistent store plugin.
  * This ensures settings are persisted to a file in the app data directory
  * rather than relying on the browser's localStorage.
  */
-export const createTauriZustandStorage = (storePath: string): StateStorage => ({
+export const createTauriZustandStorage = (_storePath: 'settings.json'): StateStorage => ({
   getItem: async (name: string): Promise<string | null> => {
     try {
-      const store = await load(storePath, STORE_OPTIONS);
-      const value = await store.get(name);
+      const value = await fixedStoreGet('settings', name);
       return value ? JSON.stringify(value) : null;
     } catch (err) {
       logger.error(DOMAIN, `Failed to get item "${name}"`, err);
@@ -23,17 +21,14 @@ export const createTauriZustandStorage = (storePath: string): StateStorage => ({
   },
   setItem: async (name: string, value: string): Promise<void> => {
     try {
-      const store = await load(storePath, STORE_OPTIONS);
-      await store.set(name, JSON.parse(value));
-      // autoSave is enabled, so we don't need to call store.save()
+      await fixedStoreSet('settings', name, JSON.parse(value));
     } catch (err) {
       logger.error(DOMAIN, `Failed to set item "${name}"`, err);
     }
   },
   removeItem: async (name: string): Promise<void> => {
     try {
-      const store = await load(storePath, STORE_OPTIONS);
-      await store.delete(name);
+      await fixedStoreRemove('settings', name);
     } catch (err) {
       logger.error(DOMAIN, `Failed to remove item "${name}"`, err);
     }

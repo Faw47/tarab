@@ -122,11 +122,11 @@ const ArtistRow = memo(function ArtistRow({
             className={cn(
               'uppercase tracking-tight inline-flex self-start',
               isNeo
-                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
             )}
           >
-            {artist.tracks.length} {artist.tracks.length === 1 ? 'Track' : 'Tracks'}
+            {artist.count} {artist.count === 1 ? 'Track' : 'Tracks'}
           </div>
         </div>
 
@@ -196,7 +196,7 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
         className={cn(
           'library-list-head grid-cols-[58px_4.1fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-black shadow-none',
         )}
       >
         <span className="text-center">#</span>

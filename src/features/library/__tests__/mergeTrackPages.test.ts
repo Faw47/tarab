@@ -35,4 +35,20 @@ describe('mergeTrackPages', () => {
 
     expect(mergeTrackPages(previous, [makeTrack('first')])).toBe(previous);
   });
+
+  it.each([500, 5_000, 50_000])('merges a %,i-track library without losing rows', (count) => {
+    const pageSize = 300;
+    let loaded: Track[] = [];
+
+    for (let offset = 0; offset < count; offset += pageSize) {
+      const page = Array.from({ length: Math.min(pageSize, count - offset) }, (_, index) =>
+        makeTrack(`track-${offset + index}`),
+      );
+      loaded = mergeTrackPages(loaded, page);
+    }
+
+    expect(loaded).toHaveLength(count);
+    expect(loaded[0]?.id).toBe('track-0');
+    expect(loaded.at(-1)?.id).toBe(`track-${count - 1}`);
+  });
 });

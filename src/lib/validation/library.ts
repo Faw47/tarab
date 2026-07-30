@@ -7,6 +7,8 @@ export const DbTrackSchema = z.object({
   albumArtist: z.string().nullable().optional(),
   album: z.string(),
   year: z.number().nullable(),
+  trackNumber: z.number().int().nonnegative().nullable().optional(),
+  discNumber: z.number().int().nonnegative().nullable().optional(),
   duration: z.number(),
   filePath: z.string(),
   hasCoverArt: z.boolean(),
@@ -32,6 +34,21 @@ export const LibraryStatsSchema = z.object({
   albumCount: z.number().int().nonnegative(),
   totalPlays: z.number().int().nonnegative(),
 });
+export const DbAlbumAggregateArraySchema = z.array(
+  z.object({
+    album: z.string(),
+    artist: z.string(),
+    trackCount: z.number().int().nonnegative(),
+    representative: DbTrackSchema,
+  }),
+);
+export const DbArtistAggregateArraySchema = z.array(
+  z.object({
+    artist: z.string(),
+    trackCount: z.number().int().nonnegative(),
+    representative: DbTrackSchema,
+  }),
+);
 
 export type ValidatedDbTrack = z.infer<typeof DbTrackSchema>;
 export type ValidatedLibraryStats = z.infer<typeof LibraryStatsSchema>;

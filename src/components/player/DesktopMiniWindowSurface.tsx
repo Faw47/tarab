@@ -209,14 +209,14 @@ export const DesktopMiniWindowSurface = ({
               <p className="truncate text-[12px] font-semibold leading-tight text-white">
                 {trackTitle}
               </p>
-              <p className="truncate text-[10px] font-medium text-white/55">{trackArtist}</p>
+              <p className="truncate text-xs font-medium text-white/55">{trackArtist}</p>
             </div>
             <div
               className="relative h-1 overflow-hidden rounded-full bg-white/10 pointer-events-auto"
               data-mini-no-drag
             >
               <div
-                className="h-full rounded-full transition-[width] duration-200"
+                className="h-full rounded-full transition-[width] duration-[var(--motion-standard)]"
                 style={{
                   width: `${progress * 100}%`,
                   background:
@@ -278,7 +278,7 @@ export const DesktopMiniWindowSurface = ({
                 aria-label="Seek"
               />
             </div>
-            <div className="pointer-events-none flex items-center justify-between text-[9px] font-medium tabular-nums text-white/45">
+            <div className="pointer-events-none flex items-center justify-between text-xs font-medium tabular-nums text-white/45">
               <span>{formatTime(displayPositionSecs)}</span>
               <span>-{formatTime(remaining)}</span>
             </div>

@@ -492,7 +492,10 @@ fn sync_lyrics_index_blocking(
             match lyrics_file {
                 Some(path) => {
                     let mtime = file_mtime_millis(&path);
+                    #[cfg(windows)]
                     let normalized_path = path.to_string_lossy().replace('\\', "/");
+                    #[cfg(not(windows))]
+                    let normalized_path = path.to_string_lossy().into_owned();
                     let unchanged = existing_meta
                         .map(|(p, t)| p == &normalized_path && *t == mtime)
                         .unwrap_or(false);
@@ -685,6 +688,12 @@ mod tests {
             play_count: 0,
             last_played: None,
             rating: None,
+            track_number: None,
+            disc_number: None,
+            file_format: Some("MP3".to_string()),
+            bitrate: None,
+            sample_rate: None,
+            file_size: None,
         }
     }
 

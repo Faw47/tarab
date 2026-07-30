@@ -23,16 +23,31 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 3. Desktop-originated actions (tray/app menu/media keys) should route through `desktop-control-action` to main window.
 4. Keep IPC payloads typed on both sides (avoid ad-hoc JSON blobs).
 5. All custom Rust commands are main-window-only at the invoke-handler boundary. Mini-player behavior must use typed snapshot/control events, not direct custom command calls.
+6. Frontend playback actions route through `PlaybackCoordinator` in `src/lib/playback-actions.ts`. Source-changing native commands return a monotonic generation. Renderer event handlers must reject events from older generations.
 
 ## Persistence
 
 - **Library authority**: Rust owns persistent folder grants in app data file **`library-grants.json`**. The renderer settings list is a display cache only. Library grant creation must use `select_library_folder`; do not restore a renderer command that accepts arbitrary root paths.
 - **File associations**: native launches create opaque pending intents. **Play once** grants one exact file until playback opens it; **Import folder** creates a persistent native grant; **Cancel** discards the request.
-- **Player session** (queue, position, speed, flags): the main window persists via `@tauri-apps/plugin-store` file **`tarab-player.dat`**, key **`player-state`** (`src/features/app/player-state-store.ts`). On first load, if that key is empty, the app migrates from legacy **`session.json`** using the Rust command `load_playback_session`.
+- **Player session** (queue, position, speed, flags): fixed native store commands persist
+  **`tarab-player.dat`**, key **`player-state`** (`src/features/app/player-state-store.ts`). The
+  renderer cannot choose a store path. On first load, if that key is empty, the app migrates from
+  legacy **`session.json`** using the Rust command `load_playback_session`.
+- Player-state writes use a monotonic revision and one serialized latest-wins queue. Do not save
+  before hydration completes. Flush queued writes before a native quit.
 - **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
+- **Library scans**: the renderer sends one `ScanReconcileRequest` after traversal. Rust applies it
+  in one transaction and deletes rows only after complete traversal proves they are missing.
+  Native traversal sends paths to the main window in bounded 500-path events. Do not restore one
+  unbounded path-array IPC response.
 - **Mini player window**: declared in `tauri.conf.json` (`mini-player.html`, 320×92, transparent, undecorated). `desktop_open_mini_window` shows it and moves it with `tauri-plugin-positioner` (`Position::BottomRight`). The Vite build includes a second entry (`mini-player.html` → `src/mini-player.tsx`).
 - **Library database/cache**: app-owned files use the `com.fawaz.tarab` directory. Existing `music-player` directories migrate in place on first access.
+- **Recoverable file removal**: normal disk removal uses app-owned recoverable Trash with one
+  persistent token per successful file. Restore must validate the token and original target,
+  restore the database snapshot, and retain the recovery record after any partial failure.
+- **Playlist retries**: add and reorder commands require a mutation ID. Repeated IDs must return
+  the cached `PlaylistDetail` without applying the database mutation again.
 
 ## Desktop Integration Notes
 

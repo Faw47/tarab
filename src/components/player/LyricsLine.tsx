@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { memo, useRef } from 'react';
-import { useSettingsStore } from '../../store/settings-store';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import type { LyricLine } from '../../types';
 
 interface GlowColors {
@@ -38,7 +38,7 @@ export const LyricsLine = memo(
     lyricSize,
     lyricAlignment,
   }: LyricsLineProps) => {
-    const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+    const reducedEffects = useEffectiveReducedEffects();
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Word animations are handled by parent LyricsDisplay via direct DOM updates
@@ -60,7 +60,7 @@ export const LyricsLine = memo(
       <div
         ref={containerRef}
         className={clsx(
-          'transition-all duration-400 ease-out w-full py-2',
+          'transition-[color,opacity,transform] duration-[var(--motion-standard)] ease-out w-full py-2',
           textAlign,
           isCurrent && 'scale-[1.02] origin-left',
           isNeighbor && 'scale-[1.0]',
@@ -88,7 +88,7 @@ export const LyricsLine = memo(
             return (
               <span
                 className={clsx(
-                  'transition-colors duration-300 block leading-tight font-bold',
+                  'transition-colors duration-[var(--motion-emphasis)] block leading-tight font-bold',
                   isCurrent ? 'text-text-primary' : 'font-semibold text-text-secondary',
                 )}
                 style={{

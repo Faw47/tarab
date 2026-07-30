@@ -188,7 +188,7 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
             aria-label={item.label}
             className={clsx(
               'w-full px-3 py-1.5 text-left text-[13px] flex items-center gap-2.5 outline-none',
-              'transition-colors duration-100 focus-visible:bg-white/10 focus-visible:text-white',
+              'transition-colors duration-[var(--motion-fast)] focus-visible:bg-white/10 focus-visible:text-white',
               item.disabled
                 ? 'text-text-muted/50 cursor-not-allowed'
                 : item.danger

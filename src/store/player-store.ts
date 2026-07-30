@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { LoopMode, ParsedLyrics, Track } from '../types';
 
+export interface PlaybackFailure {
+  generation: number;
+  filePath: string;
+  stage: 'preflight' | 'decode' | 'seek' | 'stream' | 'deviceSwitch';
+  message: string;
+  recoverable: boolean;
+}
+
 interface PlayerState {
   currentTrack: Track | null;
   queue: Track[];
@@ -22,6 +30,7 @@ interface PlayerState {
   hasActivePlayback: boolean;
   resumePositionSec: number | null;
   resumePositionTrackId: string | null;
+  playbackError: PlaybackFailure | null;
 
   // Actions
   setCurrentTrack: (track: Track | null) => void;
@@ -56,6 +65,7 @@ interface PlayerState {
   setResumePosition: (trackId: string, positionSec: number) => void;
   clearResumePosition: () => void;
   getResumePositionForTrack: (trackId?: string | null) => number | null;
+  setPlaybackError: (error: PlaybackFailure | null) => void;
 }
 
 const withQueueId = (track: Track): Track => ({
@@ -115,11 +125,12 @@ export const usePlayerStore = create<PlayerState>()(
       hasActivePlayback: false,
       resumePositionSec: null,
       resumePositionTrackId: null,
+      playbackError: null,
 
       setCurrentTrack: (track) =>
         set(
           (state) => {
-            const updates: Partial<PlayerState> = { currentTrack: track };
+            const updates: Partial<PlayerState> = { currentTrack: track, playbackError: null };
             if (track && state.shuffleEnabled) {
               const filtered = state.shuffleHistory.filter((id) => id !== track.id);
               filtered.push(track.id);
@@ -210,7 +221,9 @@ export const usePlayerStore = create<PlayerState>()(
         if (index < queueIndex) {
           newIndex = queueIndex - 1;
         } else if (index === queueIndex) {
-          newIndex = queueIndex - 1;
+          // After filter, the next track slides into this position.
+          // Keep the index so the next track becomes active.
+          newIndex = queueIndex;
         }
 
         if (newQueue.length === 0) {
@@ -284,6 +297,8 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       setCurrentTime: (time) => set({ currentTime: time }, false, 'player/setCurrentTime'),
+
+      setPlaybackError: (error) => set({ playbackError: error }, false, 'player/setPlaybackError'),
 
       setDuration: (duration) => set({ duration }, false, 'player/setDuration'),
 

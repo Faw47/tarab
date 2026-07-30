@@ -313,6 +313,11 @@ export const useSettingsStore = create<SettingsState>()(
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
         version: 7,
+        partialize: (state) => {
+          if (__DEV__) return state;
+          const { debugLiquidControlGlass: _debugState, ...productionState } = state;
+          return productionState as SettingsState;
+        },
         migrate: (persisted, version) => {
           let incoming = (persisted as Partial<SettingsState>) ?? {};
           if ((version ?? 0) < 2) {
@@ -354,6 +359,7 @@ export const useSettingsStore = create<SettingsState>()(
           }
           incoming = {
             ...incoming,
+            debugLiquidControlGlass: __DEV__ ? incoming.debugLiquidControlGlass : false,
             libraryFolders: mergeLibraryFolders([], incoming.libraryFolders ?? []),
             shortcuts: normalizeShortcuts(incoming.shortcuts),
           } as Partial<SettingsState>;

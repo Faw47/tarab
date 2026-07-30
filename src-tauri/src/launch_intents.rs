@@ -180,8 +180,13 @@ pub fn resolve_launch_file_intent(
     };
 
     state.pending_files.lock().remove(&intent_id);
+    #[cfg(windows)]
+    let file_path = intent.path.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let file_path = intent.path.to_string_lossy().into_owned();
+
     Ok(Some(ResolvedFileIntent {
-        file_path: intent.path.to_string_lossy().replace('\\', "/"),
+        file_path,
         library_grant,
     }))
 }

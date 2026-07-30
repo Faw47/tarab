@@ -2,6 +2,7 @@ mod audio;
 mod database;
 mod desktop_integration;
 mod file_ops;
+mod fixed_store;
 mod image_cache;
 mod launch_intents;
 mod library;
@@ -22,7 +23,9 @@ mod waveform;
 use audio::{create_audio_manager, SharedAudioManager};
 use database::create_database;
 use file_ops::{ensure_existing_path_allowed, load_library_roots_state, SharedLibraryRoots};
-use image_cache::{create_image_cache, SharedImageCache};
+use image_cache::{
+    create_image_cache, is_valid_thumbnail_hash, is_valid_thumbnail_size, SharedImageCache,
+};
 use std::path::Path;
 use std::time::Instant;
 use tauri::http;
@@ -104,6 +107,15 @@ fn read_image_as_base64_checked(
     Ok((encoded, mime.to_string()))
 }
 
+fn parse_cover_art_request(uri: &http::Uri) -> Option<(&str, &str)> {
+    let host = uri.host().unwrap_or_default();
+    let mut parts = uri.path().split('/').filter(|part| !part.is_empty());
+    if !host.is_empty() && host != "localhost" {
+        return Some((host, parts.next().unwrap_or("medium")));
+    }
+    Some((parts.next()?, parts.next().unwrap_or("medium")))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared_image_cache: SharedImageCache = create_image_cache();
@@ -112,31 +124,36 @@ pub fn run() {
         .register_uri_scheme_protocol("cover-art", {
             let cache = shared_image_cache.clone();
             move |_ctx, request| {
-                let path = request.uri().path().trim_start_matches('/');
-                let path = path.strip_prefix("localhost/").unwrap_or(path);
-
-                let mut parts = path.split('/');
-                let hash = parts.find(|p| !p.is_empty()).unwrap_or_default();
-                let size = parts.next().unwrap_or("medium");
+                let (hash, size) = parse_cover_art_request(request.uri()).unwrap_or_default();
 
                 let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
                     http::Response::builder()
                         .status(status)
+                        .header(http::header::CONTENT_LENGTH, "0")
                         .header("Access-Control-Allow-Origin", "*")
                         .body(Vec::new())
                         .unwrap_or_else(|_| http::Response::new(Vec::new()))
                 };
 
-                if hash.is_empty() {
+                if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
                     return empty_response(http::StatusCode::BAD_REQUEST);
                 }
 
                 match cache.get_thumbnail_bytes(hash, size) {
-                    Ok(Some(bytes)) => http::Response::builder()
-                        .header(http::header::CONTENT_TYPE, "image/webp")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(bytes)
-                        .unwrap_or_else(|_| http::Response::new(Vec::new())),
+                    Ok(Some(bytes)) => {
+                        let content_length = bytes.len().to_string();
+                        http::Response::builder()
+                            .header(http::header::CONTENT_TYPE, "image/webp")
+                            .header(http::header::CONTENT_LENGTH, content_length)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header(
+                                http::header::CACHE_CONTROL,
+                                "public, max-age=31536000, immutable",
+                            )
+                            .header(http::header::ETAG, format!("\"{}\"", hash))
+                            .body(bytes)
+                            .unwrap_or_else(|_| http::Response::new(Vec::new()))
+                    }
                     Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
                     Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
                 }
@@ -153,10 +170,10 @@ pub fn run() {
                 launch_intents::queue_cli_arguments(app, intents.inner(), &argv);
             }
 
-            // Keep the existing event for other purposes
-            let _ = app.emit(
+            let _ = app.emit_to(
+                desktop_integration::MAIN_WINDOW_LABEL,
                 "app://second-instance",
-                serde_json::json!({ "argv": argv, "cwd": _cwd }),
+                serde_json::json!({ "argumentCount": argv.len() }),
             );
         }))
         .plugin(tauri_plugin_autostart::init(
@@ -173,7 +190,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_media::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_liquid_glass::init());
 
     let app_command_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
@@ -194,10 +210,15 @@ pub fn run() {
         // Library commands
         library::scan_library,
         library::scan_library_parallel,
+        library::cancel_library_scan,
+        fixed_store::fixed_store_get,
+        fixed_store::fixed_store_set,
+        fixed_store::fixed_store_remove,
         // Metadata commands
         metadata::get_track_metadata,
         metadata::get_cover_art,
         metadata::get_cover_art_with_blurhash,
+        metadata::resolve_cover_art,
         metadata::get_cover_art_palette,
         metadata::get_batch_metadata,
         metadata::get_batch_metadata_with_art,
@@ -213,17 +234,16 @@ pub fn run() {
         // Playlist commands
         playlist::get_playlists,
         playlist::get_playlist_detail,
-        playlist::get_all_playlists,
         playlist::create_playlist,
         playlist::update_playlist,
         playlist::delete_playlist,
         playlist::set_playlist_pinned,
         playlist::add_tracks_to_playlist,
         playlist::remove_tracks_from_playlist,
+        playlist::relink_playlist_track,
         playlist::reorder_playlist_tracks,
         playlist::sync_playlist,
         playlist::remove_missing_from_playlist,
-        playlist::sync_folder_playlist,
         playlist::reset_playlists_data,
         playlist::get_playlists_data_path,
         // Tag editor commands
@@ -236,10 +256,14 @@ pub fn run() {
         database::db_get_tracks_by_ids,
         database::db_get_track_by_public_id,
         database::db_get_tracks_by_album_artist,
+        database::db_get_tracks_by_artist,
+        database::db_get_album_aggregates,
+        database::db_get_artist_aggregates,
         database::db_get_tracks_paginated,
         database::db_search_tracks,
         database::db_get_existing_paths,
         database::db_upsert_tracks,
+        database::db_reconcile_folder_scan,
         database::db_get_track_count,
         database::db_update_play_stats,
         database::db_set_track_rating,
@@ -267,10 +291,14 @@ pub fn run() {
         // File operations
         file_ops::rename_file,
         file_ops::move_file,
+        file_ops::trash_files,
+        file_ops::restore_trashed_files,
         file_ops::delete_files,
         file_ops::reveal_in_file_manager,
         file_ops::list_library_grants,
+        file_ops::get_library_health,
         file_ops::select_library_folder,
+        file_ops::reauthorize_library_grant,
         file_ops::revoke_library_grant,
         launch_intents::list_launch_file_intents,
         launch_intents::resolve_launch_file_intent,
@@ -347,6 +375,9 @@ pub fn run() {
             let startup_arguments: Vec<String> = std::env::args().collect();
             launch_intents::queue_cli_arguments(app.handle(), &launch_intents, &startup_arguments);
             app.manage(launch_intents);
+
+            app.manage(fixed_store::create_fixed_store());
+            app.manage(library::create_library_scan_control());
 
             // Playlist write guard to serialize read-modify-write operations
             let playlist_guard = playlist::create_playlist_guard();
@@ -470,6 +501,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-lib-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn cover_art_protocol_parses_hash_from_host_or_path() {
+        let hash = "a".repeat(64);
+        let host_uri: http::Uri = format!("cover-art://{}/large", hash)
+            .parse()
+            .expect("host URI");
+        let path_uri: http::Uri = format!("cover-art://localhost/{}/small", hash)
+            .parse()
+            .expect("path URI");
+
+        assert_eq!(
+            parse_cover_art_request(&host_uri),
+            Some((hash.as_str(), "large"))
+        );
+        assert_eq!(
+            parse_cover_art_request(&path_uri),
+            Some((hash.as_str(), "small"))
+        );
     }
 
     #[test]

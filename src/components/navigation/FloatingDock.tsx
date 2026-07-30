@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Home, Settings } from 'lucide-react';
+import { Home, ListMusic, Settings } from 'lucide-react';
 import { memo, type RefObject, useCallback, useLayoutEffect, useRef } from 'react';
 import {
   applyHorizontalPillDom,
@@ -10,7 +10,15 @@ import { Button } from '../ui/button';
 import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
 import { BottomRim, glssDeep, LensArc } from '../ui/liquid-glass';
 
-export type NavView = 'home' | 'library' | 'search' | 'queue' | 'tags' | 'settings' | 'album';
+export type NavView =
+  | 'home'
+  | 'library'
+  | 'search'
+  | 'queue'
+  | 'playlists'
+  | 'tags'
+  | 'settings'
+  | 'album';
 
 interface FloatingDockProps {
   activeView: NavView;
@@ -27,6 +35,7 @@ const dockItems: DockItem[] = [
   { id: 'home', icon: <Home className="w-5 h-5" />, label: 'Home' },
   { id: 'library', icon: <LibraryIcon className="w-5 h-5" />, label: 'Library' },
   { id: 'queue', icon: <QueueIcon className="w-5 h-5" />, label: 'Queue' },
+  { id: 'playlists', icon: <ListMusic className="w-5 h-5" />, label: 'Playlists' },
   { id: 'tags', icon: <TagIcon className="w-5 h-5" />, label: 'Tags' },
   { id: 'settings', icon: <Settings className="w-5 h-5" />, label: 'Settings' },
 ];
@@ -85,7 +94,7 @@ export const FloatingDock = memo(({ activeView, onNavigate }: FloatingDockProps)
       <div
         ref={shellRef}
         className={clsx(
-          'relative overflow-hidden transition-all duration-300',
+          'relative overflow-hidden transition-[background-color,border-color,box-shadow] duration-[var(--motion-standard)]',
           isNeobrutalism
             ? 'rounded-none border-2 border-black bg-[var(--surface-shell)] shadow-[4px_4px_0_0_#000]'
             : 'rounded-[28px]',
@@ -117,7 +126,7 @@ export const FloatingDock = memo(({ activeView, onNavigate }: FloatingDockProps)
               'absolute top-1 bottom-1 rounded-2xl z-0 border border-white/[0.08]',
               isDragging || pillLayoutFromDom
                 ? 'transition-none'
-                : 'transition-[left,width,opacity] duration-200 ease-out motion-reduce:transition-none',
+                : 'transition-[left,width,opacity] duration-[var(--motion-standard)] ease-out motion-reduce:transition-none',
             )}
             style={{
               ...(pillLayoutFromDom
@@ -172,7 +181,7 @@ const DockButton = memo(
           onClick();
         }}
         className={clsx(
-          'relative flex-1 min-w-0 h-auto items-center justify-center px-3 py-2.5 transition-all duration-200 group flex gap-2 overflow-hidden',
+          'relative flex-1 min-w-0 h-auto items-center justify-center px-3 py-2.5 transition-[color,background-color,transform] duration-[var(--motion-standard)] group flex gap-2 overflow-hidden',
           isNeobrutalism
             ? 'rounded-none border-2 border-transparent text-black hover:bg-[var(--neo-panel)]'
             : 'rounded-2xl hover:bg-transparent active:translate-x-[1px] active:translate-y-[1px]',
@@ -189,7 +198,7 @@ const DockButton = memo(
             'relative flex items-center justify-center rounded-none',
             isNeobrutalism
               ? 'shrink-0 transition-none'
-              : 'h-10 w-10 transition-transform duration-200',
+              : 'h-10 w-10 transition-transform duration-[var(--motion-standard)]',
             isActive
               ? isNeobrutalism
                 ? 'inline-flex bg-[var(--signal-active)] p-[6px] text-black border-2 border-black shadow-none'

@@ -17,7 +17,11 @@ import {
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
-import { fetchLibraryTracksPage } from '../../features/library/api';
+import {
+  fetchAlbumTracks,
+  fetchArtistTracks,
+  fetchLibraryTracksPage,
+} from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
 import { getAlbumArtist } from '../../lib/album-key';
@@ -116,7 +120,12 @@ export interface LibraryShellProps {
   iconRailLayout?: boolean;
 }
 
-export type ArtistGroupItem = { artist: string; tracks: Track[]; coverArt?: string };
+export type ArtistGroupItem = {
+  artist: string;
+  tracks: Track[];
+  count: number;
+  coverArt?: string;
+};
 export interface LibraryArtistsGridProps {
   items: ArtistGroupItem[];
   onRangeChange: (start: number, end: number) => void;
@@ -215,6 +224,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   const viewModePressingRef = useRef(false);
 
   const sortDropdownRef = useRef<HTMLDivElement>(null);
+  const sortTriggerRef = useRef<HTMLButtonElement>(null);
   const [showSortDropdown, setShowSortDropdown] = useState(false);
 
   useEffect(() => {
@@ -230,6 +240,29 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, [showSortDropdown]);
+
+  const handleSortMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+    );
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setShowSortDropdown(false);
+      sortTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      items[event.key === 'Home' ? 0 : items.length - 1]?.focus();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const offset = event.key === 'ArrowDown' ? 1 : -1;
+      items[(Math.max(0, current) + offset + items.length) % items.length]?.focus();
+    }
+  }, []);
 
   const activeIndex = useMemo(
     () =>
@@ -417,6 +450,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
           <div className="library-v2-tablist overflow-visible">
             <div className="library-v2-tab relative" ref={sortDropdownRef}>
               <button
+                ref={sortTriggerRef}
                 type="button"
                 className="library-v2-tab-label cursor-pointer bg-transparent border-0 outline-none flex items-center gap-2"
                 onClick={(e) => {
@@ -424,6 +458,20 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                   setShowSortDropdown((v) => !v);
                 }}
                 aria-label="Sort library"
+                aria-haspopup="menu"
+                aria-expanded={showSortDropdown}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                  event.preventDefault();
+                  setShowSortDropdown(true);
+                  queueMicrotask(() => {
+                    const items =
+                      sortDropdownRef.current?.querySelectorAll<HTMLButtonElement>(
+                        '[role="menuitemradio"]',
+                      );
+                    items?.[event.key === 'ArrowDown' ? 0 : items.length - 1]?.focus();
+                  });
+                }}
               >
                 <SortAsc className="library-v2-tab-icon h-3.5 w-3.5" />
                 <span className="text-[0.81rem] font-medium text-inherit opacity-70 hover:opacity-100 transition-opacity">
@@ -439,7 +487,12 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
               </button>
 
               {showSortDropdown && (
-                <div className="library-v2-sort-dropdown">
+                <div
+                  className="library-v2-sort-dropdown"
+                  role="menu"
+                  aria-label="Sort library"
+                  onKeyDown={handleSortMenuKeyDown}
+                >
                   {[
                     { id: 'dateAdded', label: 'Date added' },
                     { id: 'title', label: 'Title' },
@@ -449,6 +502,8 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                     <button
                       key={option.id}
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={sortBy === option.id}
                       onClick={() => {
                         onSortByChange(option.id as CommandDeckProps['sortBy']);
                         setShowSortDropdown(false);
@@ -587,6 +642,10 @@ export const LibraryView = memo(function LibraryView({
   const [viewMode, setViewMode] = useState<LibraryViewDensity>(getPersistedViewMode);
   const [activeFacet, setActiveFacet] = useState<LibraryFacet>('albums');
   const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
+  const [databaseDetailTracks, setDatabaseDetailTracks] = useState<{
+    key: string;
+    tracks: Track[];
+  } | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -602,6 +661,8 @@ export const LibraryView = memo(function LibraryView({
     setSortBy,
     getFilteredTracks,
     libraryStats,
+    albumAggregates = [],
+    artistAggregates = [],
     recentTracks = [],
     mostPlayedTracks = [],
     trackCount,
@@ -686,10 +747,17 @@ export const LibraryView = memo(function LibraryView({
     [filteredTracks, smartFilter],
   );
 
-  const detailTracks = useMemo(
-    () => buildDetailTracks(allTracks, detailScope),
-    [allTracks, detailScope],
-  );
+  const detailKey = detailScope
+    ? detailScope.type === 'album'
+      ? `album:${detailScope.artist}:${detailScope.album}`
+      : `artist:${detailScope.artist}`
+    : null;
+  const detailTracks = useMemo(() => {
+    if (detailKey && databaseDetailTracks?.key === detailKey) {
+      return databaseDetailTracks.tracks;
+    }
+    return buildDetailTracks(allTracks, detailScope);
+  }, [allTracks, databaseDetailTracks, detailKey, detailScope]);
 
   const usesFullLibraryFacetData = searchQuery.trim().length === 0 && smartFilter === null;
 
@@ -722,10 +790,31 @@ export const LibraryView = memo(function LibraryView({
     return visibleTracks;
   }, [activeFacet, mostPlayedTracks, recentTracks, usesFullLibraryFacetData, visibleTracks]);
 
-  const groupedData = useMemo(
-    () => buildFacetPayload(activeFacet, facetTracks, coverUrlFromHash),
-    [activeFacet, coverUrlFromHash, facetTracks],
-  );
+  const groupedData = useMemo(() => {
+    if (usesFullLibraryFacetData && activeFacet === 'albums' && albumAggregates.length > 0) {
+      return albumAggregates;
+    }
+
+    if (usesFullLibraryFacetData && activeFacet === 'artists' && artistAggregates.length > 0) {
+      return artistAggregates.map((aggregate) => {
+        const representative = aggregate.tracks[0];
+        return {
+          ...aggregate,
+          coverArt:
+            representative?.coverArt ?? coverUrlFromHash(representative?.coverArtHash, 'large'),
+        };
+      });
+    }
+
+    return buildFacetPayload(activeFacet, facetTracks, coverUrlFromHash);
+  }, [
+    activeFacet,
+    albumAggregates,
+    artistAggregates,
+    coverUrlFromHash,
+    facetTracks,
+    usesFullLibraryFacetData,
+  ]);
 
   const resultFacet: LibraryFacet = detailScope ? 'all' : activeFacet;
   const resultRows = detailScope ? detailTracks : groupedData;
@@ -941,61 +1030,65 @@ export const LibraryView = memo(function LibraryView({
     [detailScope, detailTracks, visibleTracks],
   );
 
-  const handlePlayAlbum = useCallback(
-    async (track: Track) => {
-      try {
-        const albumArtist = getAlbumArtist(track);
-        const albumTracks = sortAlbumTracks(
-          allTracks.filter(
-            (entry) => entry.album === track.album && getAlbumArtist(entry) === albumArtist,
-          ),
-        );
-        if (albumTracks.length === 0) return;
+  const handlePlayAlbum = useCallback(async (track: Track) => {
+    try {
+      const albumArtist = getAlbumArtist(track);
+      const albumTracks = sortAlbumTracks(await fetchAlbumTracks(track.album, albumArtist));
+      if (albumTracks.length === 0) return;
 
-        await startPlayback(albumTracks[0], {
-          queue: albumTracks,
-          queueIndex: 0,
-          shuffleEnabled: false,
-        });
-      } catch (error) {
-        reportError('Failed to play album', {
-          source: 'library-view',
-          error,
-        });
-      }
-    },
-    [allTracks],
-  );
+      await startPlayback(albumTracks[0], {
+        queue: albumTracks,
+        queueIndex: 0,
+        shuffleEnabled: false,
+      });
+    } catch (error) {
+      reportError('Failed to play album', {
+        source: 'library-view',
+        error,
+      });
+    }
+  }, []);
 
   const handleAlbumOpen = useCallback(
-    (track: Track) => {
+    async (track: Track) => {
       const albumArtist = getAlbumArtist(track);
-      const albumTracks = allTracks.filter(
-        (entry) => entry.album === track.album && getAlbumArtist(entry) === albumArtist,
-      );
+      try {
+        const albumTracks = await fetchAlbumTracks(track.album, albumArtist);
+        const coverArt =
+          track.coverArt ??
+          (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
 
-      const coverArt =
-        track.coverArt ??
-        (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
+        if (onOpenAlbumDetails) {
+          onOpenAlbumDetails({
+            album: track.album,
+            artist: albumArtist,
+            coverArt,
+            tracks: albumTracks,
+          });
+          return;
+        }
 
-      if (onOpenAlbumDetails) {
-        onOpenAlbumDetails({
-          album: track.album,
-          artist: albumArtist,
-          coverArt,
+        setDatabaseDetailTracks({
+          key: `album:${albumArtist}:${track.album}`,
           tracks: albumTracks,
         });
-        return;
+        setDetailScope({ type: 'album', album: track.album, artist: albumArtist });
+      } catch (error) {
+        reportError('Failed to open album', { source: 'library-view', error });
       }
-
-      setDetailScope({ type: 'album', album: track.album, artist: albumArtist });
     },
-    [allTracks, onOpenAlbumDetails, setDetailScope],
+    [onOpenAlbumDetails, setDetailScope],
   );
 
   const handleArtistOpen = useCallback(
-    (artist: string) => {
-      setDetailScope({ type: 'artist', artist });
+    async (artist: string) => {
+      try {
+        const tracks = await fetchArtistTracks(artist);
+        setDatabaseDetailTracks({ key: `artist:${artist}`, tracks });
+        setDetailScope({ type: 'artist', artist });
+      } catch (error) {
+        reportError('Failed to open artist', { source: 'library-view', error });
+      }
     },
     [setDetailScope],
   );
@@ -1277,6 +1370,11 @@ export const LibraryView = memo(function LibraryView({
             <div className="library-v2-section-label">
               <span className="library-v2-section-label-text">{resultSectionLabel}</span>
               <span className="library-v2-section-label-count">{resultSectionCount}</span>
+              {!detailScope && !trimmedSearchQuery && resultFacet === 'all' && (
+                <span className="library-v2-section-label-count" aria-live="polite">
+                  {loadedCount.toLocaleString()} of {trackCount.toLocaleString()} loaded
+                </span>
+              )}
             </div>
 
             {resultLength > 0 ? (

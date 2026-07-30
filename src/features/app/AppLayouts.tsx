@@ -1,4 +1,5 @@
 import { clsx } from 'clsx';
+import { AnimatePresence, motion } from 'framer-motion';
 import { type CSSProperties, lazy, type ReactNode, type RefObject, Suspense } from 'react';
 import { type NavView, Sidebar } from '../../components/navigation';
 import { type ProcessingTask, TopBar } from '../../components/navigation/TopBar';
@@ -25,6 +26,7 @@ export interface AppLayoutsProps {
   overlayMessages: ReactNode;
   compactMode: boolean;
   reducedEffects: boolean;
+  backgroundEnabled: boolean;
   shellVars: CSSProperties;
   palette: ReactivePalette;
   isScrolled: boolean;
@@ -69,6 +71,7 @@ export function AppLayouts({
   overlayMessages,
   compactMode,
   reducedEffects,
+  backgroundEnabled,
   shellVars,
   palette,
   isScrolled,
@@ -107,6 +110,7 @@ export function AppLayouts({
   if (theme === 'neobrutalism') {
     return (
       <div
+        data-compact={compactMode || undefined}
         className={clsx(
           'app-shell min-h-[100dvh] w-full text-black overflow-hidden flex bg-transparent',
           compactMode && 'text-[15px]',
@@ -157,16 +161,25 @@ export function AppLayouts({
             </div>
           </main>
 
-          {currentTrack && !showFullPlayer && (
-            <div className="h-24 border-t-2 border-black shrink-0 overflow-visible">
-              <MiniPlayer
-                onExpand={onOpenFullPlayer}
-                scheduleSleepTimer={scheduleSleepTimer}
-                cancelSleepTimer={cancelSleepTimer}
-                sleepDeadline={sleepDeadline}
-              />
-            </div>
-          )}
+          <AnimatePresence mode="popLayout">
+            {currentTrack && !showFullPlayer && (
+              <motion.div
+                key="neo-mini-player"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: '6rem', opacity: 1 }} // h-24 = 6rem
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                className="border-t-2 border-black shrink-0 overflow-visible"
+              >
+                <MiniPlayer
+                  onExpand={onOpenFullPlayer}
+                  scheduleSleepTimer={scheduleSleepTimer}
+                  cancelSleepTimer={cancelSleepTimer}
+                  sleepDeadline={sleepDeadline}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     );
@@ -176,6 +189,7 @@ export function AppLayouts({
 
   return (
     <div
+      data-compact={compactMode || undefined}
       className={clsx(
         'app-shell h-screen flex flex-col w-full bg-transparent text-text-primary overflow-hidden relative',
         !reducedEffects && 'app-shell-grain',
@@ -183,7 +197,7 @@ export function AppLayouts({
       )}
       style={shellVars}
     >
-      {reducedEffects ? (
+      {reducedEffects || !backgroundEnabled ? (
         <div className="fixed inset-0 z-0 bg-[#07070f] pointer-events-none" />
       ) : (
         <Suspense fallback={<div className="fixed inset-0 z-0 bg-[#07070f] pointer-events-none" />}>
@@ -198,7 +212,7 @@ export function AppLayouts({
         </Suspense>
       )}
 
-      <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} />
+      {backgroundEnabled ? <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} /> : null}
 
       <div className="flex h-full w-full overflow-hidden relative z-10">
         <Sidebar
@@ -257,18 +271,38 @@ export function AppLayouts({
         </div>
       </div>
 
-      {currentView !== 'home' && currentTrack && !showFullPlayer && !miniPlayerCollapsed && (
-        <MiniPlayer
-          onExpand={onOpenFullPlayer}
-          scheduleSleepTimer={scheduleSleepTimer}
-          cancelSleepTimer={cancelSleepTimer}
-          sleepDeadline={sleepDeadline}
-        />
-      )}
+      <AnimatePresence mode="popLayout">
+        {currentView !== 'home' && currentTrack && !showFullPlayer && !miniPlayerCollapsed && (
+          <motion.div
+            key="mini-player"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+            className="shrink-0 overflow-hidden"
+          >
+            <MiniPlayer
+              onExpand={onOpenFullPlayer}
+              scheduleSleepTimer={scheduleSleepTimer}
+              cancelSleepTimer={cancelSleepTimer}
+              sleepDeadline={sleepDeadline}
+            />
+          </motion.div>
+        )}
 
-      {currentView !== 'home' && currentTrack && !showFullPlayer && miniPlayerCollapsed && (
-        <PillMiniPlayer onExpand={onExpandCollapsedPlayer} />
-      )}
+        {currentView !== 'home' && currentTrack && !showFullPlayer && miniPlayerCollapsed && (
+          <motion.div
+            key="pill-player"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0, transition: { duration: 0.15 } }}
+            transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1], delay: 0.1 }}
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
+          >
+            <PillMiniPlayer onExpand={onExpandCollapsedPlayer} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -146,7 +146,7 @@ const TrackRow = memo(function TrackRow({
             isNeo ? (
               <div className="flex items-center gap-1.5 border-2 border-black bg-black p-1 px-2 text-[var(--signal-play)] shadow-[4px_4px_0_0_#000]">
                 <div className="w-1.5 h-1.5 rounded-full bg-[var(--signal-play)] animate-pulse shrink-0" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-white leading-none">
+                <span className="text-[12px] font-black uppercase tracking-widest text-white leading-none">
                   NOW
                 </span>
               </div>
@@ -216,7 +216,7 @@ const TrackRow = memo(function TrackRow({
                 <span
                   className={cn(
                     isNeo
-                      ? 'border-2 border-black bg-[var(--signal-play)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                      ? 'border-2 border-black bg-[var(--signal-play)] px-1.5 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
                       : 'library-lyrics-chip shrink-0',
                   )}
                 >
@@ -229,7 +229,7 @@ const TrackRow = memo(function TrackRow({
               className={cn(
                 'truncate mt-0.5',
                 isNeo
-                  ? 'text-[10px] font-bold uppercase tracking-[0.1em] text-black/60'
+                  ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60'
                   : 'text-xs text-text-muted',
               )}
             >
@@ -249,7 +249,7 @@ const TrackRow = memo(function TrackRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[11px] font-black uppercase tracking-[0.05em] text-black'
+                ? 'text-[12px] font-black uppercase tracking-[0.05em] text-black'
                 : 'text-sm text-text-secondary',
             )}
           >
@@ -259,8 +259,8 @@ const TrackRow = memo(function TrackRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[9px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5'
-                : 'text-[11px] text-text-muted',
+                ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5'
+                : 'text-[12px] text-text-muted',
             )}
           >
             {renderHighlightedText(track.artist, searchQuery, highlightClass)}
@@ -273,23 +273,23 @@ const TrackRow = memo(function TrackRow({
               className={cn(
                 'uppercase tracking-tight inline-flex',
                 isNeo
-                  ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                  : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                  ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                  : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
               )}
             >
               {safeGetFormatLabel}
             </span>
           </div>
           {isNeo ? (
-            <div className="text-[9px] font-mono font-black tracking-widest text-[#555] mt-1.5 truncate uppercase">
+            <div className="text-[12px] font-mono font-black tracking-widest text-[#555] mt-1.5 truncate uppercase">
               {safeFormatSize} • {track.bitrate} KBPS
             </div>
           ) : (
             <>
-              <div className="text-[11px] text-text-muted mt-1 truncate">
+              <div className="text-[12px] text-text-muted mt-1 truncate">
                 {track.bitrate ? `${track.bitrate} kbps` : 'Unknown bitrate'}
               </div>
-              <div className="text-[10px] text-text-muted font-mono truncate">{safeFormatSize}</div>
+              <div className="text-[12px] text-text-muted font-mono truncate">{safeFormatSize}</div>
             </>
           )}
         </div>
@@ -391,7 +391,7 @@ export const LibraryTracksList = memo(function LibraryTracksList({
         className={cn(
           'library-list-head grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-black shadow-none',
         )}
       >
         <span className="text-center">#</span>

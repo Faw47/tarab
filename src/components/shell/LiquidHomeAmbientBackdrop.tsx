@@ -7,7 +7,7 @@ import { clsx } from 'clsx';
 import { memo } from 'react';
 
 import { useDominantColor } from '@/hooks/use-dominant-color';
-import { useSettingsStore } from '@/store/settings-store';
+import { useEffectiveReducedEffects } from '@/hooks/useEffectiveReducedEffects';
 
 const HERO_GLOW = 'var(--hero-glow)';
 
@@ -18,7 +18,7 @@ export interface LiquidHomeAmbientBackdropProps {
 export const LiquidHomeAmbientBackdrop = memo(function LiquidHomeAmbientBackdrop({
   coverUrl,
 }: LiquidHomeAmbientBackdropProps) {
-  const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+  const reducedEffects = useEffectiveReducedEffects();
   const localAccent = useDominantColor(coverUrl ?? null);
 
   return (

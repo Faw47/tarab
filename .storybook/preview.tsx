@@ -6,6 +6,7 @@ import { type AppTheme, useSettingsStore } from '../src/store/settings-store';
 
 const withTheme: Decorator = (Story, context) => {
   const theme = (context.globals.theme ?? 'liquid-glass') as AppTheme;
+  const isFullscreen = context.parameters.layout === 'fullscreen';
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -20,8 +21,14 @@ const withTheme: Decorator = (Story, context) => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-[var(--background)] p-6 text-[var(--foreground)]">
-        <div className="mx-auto max-w-5xl">
+      <div
+        className={
+          isFullscreen
+            ? 'min-h-screen bg-[var(--background)] text-[var(--foreground)]'
+            : 'min-h-screen bg-[var(--background)] p-6 text-[var(--foreground)]'
+        }
+      >
+        <div className={isFullscreen ? undefined : 'mx-auto max-w-5xl'}>
           <Story />
         </div>
       </div>

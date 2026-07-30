@@ -18,6 +18,7 @@ interface PlayerProgressBarProps {
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 function updateNeoFill(
+  trackEl: HTMLDivElement | null,
   fillEl: HTMLDivElement | null,
   thumbEl: HTMLDivElement | null,
   labelEl: HTMLSpanElement | null,
@@ -26,6 +27,10 @@ function updateNeoFill(
   showLabels: boolean,
 ) {
   const percent = duration > 0 ? (timeSec / duration) * 100 : 0;
+  if (trackEl) {
+    trackEl.setAttribute('aria-valuenow', timeSec.toString());
+    trackEl.setAttribute('aria-valuetext', `${formatTime(timeSec)} of ${formatTime(duration)}`);
+  }
   if (fillEl) {
     fillEl.style.width = `${percent}%`;
     fillEl.style.background = 'var(--signal-play)';
@@ -63,9 +68,21 @@ export const PlayerProgressBar = memo(
       const validTime = Math.max(0, Math.min(timeSec, duration || 1));
       const percent = duration > 0 ? (validTime / duration) * 100 : 0;
 
+      const valueText = `${formatTime(validTime)} of ${formatTime(duration)}`;
+
+      if (trackRef.current) {
+        trackRef.current.setAttribute('aria-valuenow', validTime.toString());
+        trackRef.current.setAttribute('aria-valuetext', valueText);
+      }
+      if (inputRef.current) {
+        inputRef.current.setAttribute('aria-valuetext', valueText);
+      }
+
       if (fillRef.current) fillRef.current.style.width = `${percent}%`;
       if (thumbRef.current) thumbRef.current.style.left = `${percent}%`;
-      if (inputRef.current) inputRef.current.value = validTime.toString();
+      if (inputRef.current && inputRef.current.value !== validTime.toString()) {
+        inputRef.current.value = validTime.toString();
+      }
 
       if (isNeobrutalism && fillRef.current) {
         fillRef.current.style.background = 'var(--signal-play)';
@@ -90,6 +107,7 @@ export const PlayerProgressBar = memo(
     const applySeekVisual = useCallback(
       (timeSec: number) => {
         updateNeoFill(
+          trackRef.current,
           fillRef.current,
           thumbRef.current,
           currentLabelRef.current,
@@ -300,7 +318,7 @@ export const PlayerProgressBar = memo(
             </div>
           </div>
           {showLabels && (
-            <div className="flex justify-between text-[11px] font-mono text-[#888888] font-bold uppercase tracking-[0.1em] mt-1">
+            <div className="flex justify-between text-xs font-mono text-[#888888] font-bold uppercase tracking-[0.1em] mt-1">
               <span>0:00</span>
               <span>{formatTime(duration)}</span>
             </div>
@@ -349,7 +367,7 @@ export const PlayerProgressBar = memo(
           onMouseLeave={() => setIsHovering(false)}
         >
           <div className="relative w-full h-3 flex items-center cursor-pointer">
-            <div className="w-full h-[3px] bg-white/15 rounded-full overflow-hidden group-hover:h-[5px] transition-all duration-200">
+            <div className="w-full h-[3px] bg-white/15 rounded-full overflow-hidden group-hover:h-[5px] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]">
               <div
                 ref={fillRef}
                 className="h-full bg-white/80 group-hover:bg-white transition-none will-change-[width]"
@@ -359,7 +377,7 @@ export const PlayerProgressBar = memo(
             <div
               ref={thumbRef}
               className={clsx(
-                'absolute h-4 w-4 bg-white rounded-full shadow-lg top-1/2 -translate-y-1/2 -translate-x-2 pointer-events-none transition-opacity duration-200 will-change-[left]',
+                'absolute h-4 w-4 bg-white rounded-full shadow-lg top-1/2 -translate-y-1/2 -translate-x-2 pointer-events-none transition-opacity duration-[var(--motion-standard)] will-change-[left]',
                 isHovering ? 'opacity-100' : 'opacity-0',
               )}
               style={{ left: '0%' }}
@@ -380,7 +398,7 @@ export const PlayerProgressBar = memo(
             />
           </div>
           {showLabels && (
-            <div className="flex justify-between text-[11px] font-mono text-text-muted mt-1">
+            <div className="flex justify-between text-xs font-mono text-text-muted mt-1">
               <span ref={currentLabelRef}>0:00</span>
               <span>{formatTime(duration)}</span>
             </div>

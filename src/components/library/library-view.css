@@ -290,8 +290,8 @@
   font-weight: 540;
   cursor: pointer;
   transition:
-    color 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    background-color 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    color var(--motion-standard) var(--motion-ease-standard),
+    background-color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab:hover {
@@ -333,7 +333,7 @@
 
 .library-v2-tab-icon {
   color: currentColor;
-  transition: color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab.is-active .library-v2-tab-icon {
@@ -353,7 +353,7 @@
  * At 0.62rem on 1x DPI screens these were sub-9px — below comfortable legibility.
  */
 .library-v2-tab-count {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 0.1rem 0.45rem;
@@ -362,15 +362,80 @@
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.65);
   transition:
-    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    background-color var(--motion-standard) var(--motion-ease-standard),
+    color var(--motion-standard) var(--motion-ease-standard),
+    border-color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab.is-active .library-v2-tab-count {
   background: rgba(255, 255, 255, 0.18);
   color: rgba(255, 255, 255, 0.95);
   border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Neo Tab Overrides */
+.library-neo-shell .library-v2-tablist {
+  background: #ffffff;
+  border: 2px solid #000;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 0 #000;
+  padding: 0;
+  gap: 0;
+}
+
+.library-neo-shell .library-v2-tabs-pill {
+  background: var(--neo-utility-hover);
+  border: 2px solid #000;
+  border-radius: 0;
+  box-shadow: none;
+  top: -2px;
+  bottom: -2px;
+  z-index: 0;
+}
+
+.library-neo-shell .library-v2-tabs-pill::before {
+  display: none;
+}
+
+.library-neo-shell .library-v2-tab {
+  color: #000;
+  font-weight: 900;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  text-transform: uppercase;
+  border-radius: 0;
+  border-right: 2px solid #000;
+  padding: 0.5rem 1rem;
+}
+
+.library-neo-shell .library-v2-tab:last-child {
+  border-right: none;
+}
+
+.library-neo-shell .library-v2-tab:hover {
+  background: transparent;
+  color: #000;
+}
+
+.library-neo-shell .library-v2-tab.is-active {
+  color: #000;
+}
+
+.library-neo-shell .library-v2-tab.is-active::before {
+  display: none;
+}
+
+.library-neo-shell .library-v2-tab.is-active .library-v2-tab-icon {
+  color: #000;
+}
+
+.library-neo-shell .library-v2-tab-count {
+  background: #fff;
+  border: 1px solid #000;
+  color: #000;
+  padding: 0 0.25rem;
+  border-radius: 4px;
 }
 
 .library-view-mode-selector {
@@ -1392,4 +1457,35 @@
 .library-icon-action:hover {
   transform: scale(1.03);
   color: var(--type-primary);
+}
+
+.app-shell[data-compact="true"] .library-v2-page {
+  gap: 0.7rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-grid,
+.app-shell[data-compact="true"] .library-v2-albums-showcase {
+  gap: 0.75rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-grid {
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+
+.app-shell[data-compact="true"] .library-v2-albums-layout {
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-toolbar {
+  gap: 0.3rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-tile {
+  border-radius: 0.85rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-meta {
+  gap: 0.1rem;
+  padding: 0.55rem 0.65rem 0.65rem;
 }

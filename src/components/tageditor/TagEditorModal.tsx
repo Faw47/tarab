@@ -1,16 +1,15 @@
 import { clsx } from 'clsx';
+import { Clipboard, ClipboardCheck, Loader2, Save, Wand2, X } from 'lucide-react';
 import {
-  Clipboard,
-  ClipboardCheck,
-  Image,
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-  Wand2,
-  X,
-} from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { reportError } from '../../lib/report-error';
 import {
@@ -30,8 +29,12 @@ import { useMetadataClipboardStore } from '../../store/metadata-clipboard-store'
 import type { TagClearField, TagInfo, TagUpdate, Track } from '../../types';
 import { MetadataClipboard } from '../metadata/MetadataClipboard';
 import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
 import { LyricsEditor } from './LyricsEditor';
+import { TagEditorArtworkPanel } from './TagEditorArtworkPanel';
+import { TagEditorFileInfo } from './TagEditorFileInfo';
+import { TagEditorMetadataForm } from './TagEditorMetadataForm';
 
 const deriveTagsFromPath = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, '/');
@@ -243,6 +246,65 @@ export const TagEditorModal = memo(
       }
     }, []);
 
+    const applyCoverFile = useCallback(async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        setError('Choose a supported image file.');
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        setError('Artwork must be 20 MB or smaller.');
+        return;
+      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read artwork'));
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.readAsDataURL(file);
+      });
+      const separator = dataUrl.indexOf(',');
+      if (separator < 0) {
+        setError('Tarab could not read the artwork.');
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      setNewCoverArt((previous) => {
+        if (previous?.url) URL.revokeObjectURL(previous.url);
+        return { base64: dataUrl.slice(separator + 1), mime: file.type, url };
+      });
+      setRemoveCover(false);
+      setError(null);
+    }, []);
+
+    const handleCoverDrop = useCallback(
+      (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files[0];
+        if (file) void applyCoverFile(file);
+      },
+      [applyCoverFile],
+    );
+
+    const handleCoverPaste = useCallback(
+      (event: ClipboardEvent<HTMLDivElement>) => {
+        const file = Array.from(event.clipboardData.files).find((item) =>
+          item.type.startsWith('image/'),
+        );
+        if (!file) return;
+        event.preventDefault();
+        void applyCoverFile(file);
+      },
+      [applyCoverFile],
+    );
+
+    const handleCoverKeyDown = useCallback(
+      (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        void handleSelectCover();
+      },
+      [handleSelectCover],
+    );
+
     const handleRemoveCover = useCallback(() => {
       if (newCoverArt?.url) {
         URL.revokeObjectURL(newCoverArt.url);
@@ -355,7 +417,8 @@ export const TagEditorModal = memo(
 
         if (isBatchEdit) {
           const filePaths = tracks.map((t) => t.filePath);
-          const errors = await writeTagsBatch(filePaths, updates);
+          const results = await writeTagsBatch(filePaths, updates);
+          const errors = results.filter((result) => result.status === 'failed');
 
           if (errors.length > 0) {
             setError(`Failed to update ${errors.length} file(s)`);
@@ -371,9 +434,18 @@ export const TagEditorModal = memo(
               }
             }
           }
-          await refreshTracksByFilePaths(filePaths);
+          await refreshTracksByFilePaths(
+            results.filter((result) => result.status === 'success').map((result) => result.path),
+          );
+          if (errors.length > 0) {
+            setIsSaving(false);
+            return;
+          }
         } else {
-          await writeTags(tracks[0].filePath, updates);
+          const result = await writeTags(tracks[0].filePath, updates);
+          if (result.status !== 'success') {
+            throw new Error(result.errorMessage ?? 'Tarab could not write the track tags.');
+          }
 
           if (removeCover) {
             await removeCoverArt(tracks[0].filePath);
@@ -503,468 +575,226 @@ export const TagEditorModal = memo(
     }, [clipboardData, clipboardArt, newCoverArt, setClipboardMessage]);
 
     return (
-      <div className="fixed inset-0 z-50 bg-background text-text-primary">
-        <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-background-elevated/50 backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <IconButton
-                onClick={onClose}
-                className="p-2 text-text-secondary hover:text-white rounded-full transition-colors"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </IconButton>
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-text-muted">
-                  Metadata Editor
-                </p>
-                <p className="text-sm font-semibold text-text-primary">
-                  {isBatchEdit
-                    ? `Editing ${tracks.length} tracks`
-                    : tagInfo?.filePath
-                      ? 'Edit Track Info'
-                      : 'Edit Track Info'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                onClick={handleCopyMetadata}
-                disabled={isSaving || isLoading || !trackPath}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <Clipboard className="w-4 h-4" />
-                Copy
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handlePasteMetadata}
-                disabled={!canPaste() || isSaving}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <ClipboardCheck className="w-4 h-4" />
-                Paste
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handleAutoTag}
-                disabled={isSaving || isLoading || isBatchEdit}
-                title={isBatchEdit ? 'Auto-Tag is available for single-track edits' : undefined}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <Wand2 className="w-4 h-4" />
-                Auto-Tag
-              </Button>
-              <Button variant="ghost" onClick={onClose} disabled={isSaving} className="rounded-xl">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={isLoading || isSaving}
-                className="rounded-xl bg-white text-black hover:bg-white/90"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-          {clipboardMessage && (
-            <div className="px-6 pb-2 text-xs text-text-secondary">{clipboardMessage}</div>
-          )}
-
-          <div className="flex-1 flex overflow-hidden">
-            {/* Left rail */}
-            <aside className="hidden lg:flex w-80 flex-col gap-6 p-6 border-r border-white/5 bg-background-elevated/60">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                  Album Artwork
-                </p>
-                <div
-                  className={clsx(
-                    'aspect-square w-full rounded-2xl border border-dashed border-white/15',
-                    'flex items-center justify-center overflow-hidden',
-                    'bg-white/5 cursor-pointer hover:border-primary/60 transition-colors',
-                  )}
-                  onClick={handleSelectCover}
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent
+          showCloseButton={false}
+          className="inset-0 top-0 left-0 z-50 block h-screen max-h-none w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 bg-background p-0 text-text-primary shadow-none"
+        >
+          <DialogTitle className="sr-only">Metadata editor</DialogTitle>
+          <div className="h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-background-elevated/50 backdrop-blur-xl">
+              <div className="flex items-center gap-3">
+                <IconButton
+                  onClick={onClose}
+                  className="p-2 text-text-secondary hover:text-white rounded-full transition-colors"
+                  aria-label="Close"
                 >
-                  {coverPreviewUrl ? (
-                    <img src={coverPreviewUrl} alt="Cover" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="text-center text-text-muted">
-                      <Image className="w-8 h-8 mx-auto mb-2" />
-                      <span className="text-xs">Drop or click to add</span>
-                    </div>
-                  )}
-                </div>
-                {coverPreviewUrl && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleRemoveCover}
-                    className="mt-3 w-full text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 flex items-center justify-center gap-1 rounded-full h-8"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Remove artwork
-                  </Button>
-                )}
-              </div>
-
-              {!isBatchEdit && tagInfo && (
+                  <X className="w-5 h-5" />
+                </IconButton>
                 <div>
-                  <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                    File Info
+                  <p className="text-xs uppercase tracking-[0.3em] text-text-muted">
+                    Metadata Editor
                   </p>
-                  <div className="panel rounded-2xl p-4 space-y-2 text-xs text-text-muted text-mono">
-                    <div className="flex justify-between">
-                      <span>Format</span>
-                      <span className="text-text-primary">{tagInfo.fileFormat}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Duration</span>
-                      <span className="text-text-primary">
-                        {Math.floor(tagInfo.durationSecs / 60)}:
-                        {Math.floor(tagInfo.durationSecs % 60)
-                          .toString()
-                          .padStart(2, '0')}
-                      </span>
-                    </div>
-                    {tagInfo.bitrate && (
-                      <div className="flex justify-between">
-                        <span>Bitrate</span>
-                        <span className="text-text-primary">{tagInfo.bitrate} kbps</span>
-                      </div>
-                    )}
-                    {tagInfo.sampleRate && (
-                      <div className="flex justify-between">
-                        <span>Sample Rate</span>
-                        <span className="text-text-primary">{tagInfo.sampleRate} Hz</span>
-                      </div>
-                    )}
-                    {tagInfo.channels && (
-                      <div className="flex justify-between">
-                        <span>Channels</span>
-                        <span className="text-text-primary">{tagInfo.channels}</span>
-                      </div>
-                    )}
-                  </div>
+                  <p className="text-sm font-semibold text-text-primary">
+                    {isBatchEdit
+                      ? `Editing ${tracks.length} tracks`
+                      : tagInfo?.filePath
+                        ? 'Edit Track Info'
+                        : 'Edit Track Info'}
+                  </p>
                 </div>
-              )}
-            </aside>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              ) : (
-                <div className="space-y-6 max-w-3xl">
-                  <div className="lg:hidden">
-                    <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                      Album Artwork
-                    </p>
-                    <div
-                      className={clsx(
-                        'aspect-square w-full rounded-2xl border border-dashed border-white/15',
-                        'flex items-center justify-center overflow-hidden',
-                        'bg-white/5 cursor-pointer hover:border-primary/60 transition-colors',
-                      )}
-                      onClick={handleSelectCover}
-                    >
-                      {coverPreviewUrl ? (
-                        <img
-                          src={coverPreviewUrl}
-                          alt="Cover"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="text-center text-text-muted">
-                          <Image className="w-8 h-8 mx-auto mb-2" />
-                          <span className="text-xs">Drop or click to add</span>
-                        </div>
-                      )}
-                    </div>
-                    {coverPreviewUrl && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRemoveCover}
-                        className="mt-3 w-full text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 flex items-center justify-center gap-1 rounded-full h-8"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Remove artwork
-                      </Button>
-                    )}
-                  </div>
-
-                  {error && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                      {error}
-                    </div>
-                  )}
-
-                  <MetadataClipboard onPaste={handlePasteMetadata} />
-
-                  {isBatchEdit && (
-                    <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg text-primary text-sm">
-                      Only filled fields will be applied to all selected tracks.
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    {(['standard', 'extended', 'lyrics'] as const).map((tab) => {
-                      const disabled = tab === 'lyrics' && isBatchEdit;
-                      return (
-                        <Button
-                          key={tab}
-                          variant={activeTab === tab ? 'secondary' : 'ghost'}
-                          size="sm"
-                          onClick={() => !disabled && setActiveTab(tab)}
-                          disabled={disabled}
-                          className={clsx(
-                            'rounded-full text-sm font-medium transition px-4 py-2 h-auto',
-                            activeTab === tab
-                              ? 'bg-white text-black hover:bg-white/90'
-                              : 'text-text-primary hover:text-white hover:bg-white/10',
-                            disabled && 'opacity-50 cursor-not-allowed',
-                          )}
-                        >
-                          {tab === 'standard'
-                            ? 'Standard Tags'
-                            : tab === 'extended'
-                              ? 'Extended Tags'
-                              : 'Lyrics'}
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  {activeTab === 'standard' && (
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={handleCopyMetadata}
+                  disabled={isSaving || isLoading || !trackPath}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <Clipboard className="w-4 h-4" />
+                  Copy
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handlePasteMetadata}
+                  disabled={!canPaste() || isSaving}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <ClipboardCheck className="w-4 h-4" />
+                  Paste
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleAutoTag}
+                  disabled={isSaving || isLoading || isBatchEdit}
+                  title={isBatchEdit ? 'Auto-Tag is available for single-track edits' : undefined}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  Auto-Tag
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={onClose}
+                  disabled={isSaving}
+                  className="rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={isLoading || isSaving}
+                  className="rounded-xl bg-white text-black hover:bg-white/90"
+                >
+                  {isSaving ? (
                     <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm text-text-secondary mb-1">Title</label>
-                          <input
-                            type="text"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Track title'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Artist</label>
-                          <input
-                            type="text"
-                            value={artist}
-                            onChange={(e) => setArtist(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Artist name'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">
-                            Album Artist
-                          </label>
-                          <input
-                            type="text"
-                            value={albumArtist}
-                            onChange={(e) => setAlbumArtist(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className="block text-sm text-text-secondary mb-1">Album</label>
-                          <input
-                            type="text"
-                            value={album}
-                            onChange={(e) => setAlbum(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Album name'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Genre</label>
-                          <input
-                            type="text"
-                            value={genre}
-                            onChange={(e) => setGenre(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Year</label>
-                          <input
-                            type="number"
-                            value={year}
-                            onChange={(e) => setYear(e.target.value)}
-                            placeholder="YYYY"
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Track #</label>
-                          <input
-                            type="number"
-                            value={trackNumber}
-                            onChange={(e) => setTrackNumber(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Disc #</label>
-                          <input
-                            type="number"
-                            value={discNumber}
-                            onChange={(e) => setDiscNumber(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Composer</label>
-                          <input
-                            type="text"
-                            value={composer}
-                            onChange={(e) => setComposer(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm text-text-secondary mb-1">Comment</label>
-                        <textarea
-                          value={comment}
-                          onChange={(e) => setComment(e.target.value)}
-                          rows={3}
-                          className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
-                        />
-                      </div>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 mr-2" />
+                      Save Changes
                     </>
                   )}
+                </Button>
+              </div>
+            </div>
+            {clipboardMessage && (
+              <div className="px-6 pb-2 text-xs text-text-secondary">{clipboardMessage}</div>
+            )}
 
-                  {activeTab === 'extended' && (
-                    <div className="panel rounded-2xl p-4 border border-white/10 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-text-primary">Extended tags</p>
-                          <p className="text-xs text-text-muted">Vorbis / ID3v2 custom fields</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleAddExtendedField}
-                          className="flex items-center gap-2 rounded-full text-text-primary hover:text-white text-sm h-8 px-3 hover:bg-white/10"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Add field
-                        </Button>
-                      </div>
-                      <div className="border border-white/10 rounded-xl overflow-hidden">
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-white/5 text-text-subtle text-xs font-bold uppercase">
-                            <tr>
-                              <th className="p-3 w-1/3">Field</th>
-                              <th className="p-3">Value</th>
-                              <th className="p-3 w-10" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-white/5">
-                            {extendedFields.length === 0 ? (
-                              <tr>
-                                <td colSpan={3} className="p-6 text-center text-text-muted text-sm">
-                                  No extended tags found.
-                                </td>
-                              </tr>
-                            ) : (
-                              extendedFields.map((tag, i) => (
-                                <tr key={`${tag.key}-${i}`} className="group hover:bg-white/5">
-                                  <td className="p-3">
-                                    <input
-                                      value={tag.key}
-                                      onChange={(e) =>
-                                        handleUpdateExtendedField(i, 'key', e.target.value)
-                                      }
-                                      placeholder="FIELD NAME"
-                                      className="w-full bg-transparent border border-white/10 rounded-lg px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                    />
-                                  </td>
-                                  <td className="p-3">
-                                    <input
-                                      value={tag.value}
-                                      onChange={(e) =>
-                                        handleUpdateExtendedField(i, 'value', e.target.value)
-                                      }
-                                      placeholder="Value"
-                                      className="w-full bg-transparent border border-white/10 rounded-lg px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                    />
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <IconButton
-                                      className="p-1 text-text-muted hover:text-red-400 hover:bg-red-950/20 rounded-full"
-                                      onClick={() => handleRemoveExtendedField(i)}
-                                      aria-label="Remove field"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </IconButton>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p className="text-[11px] text-text-muted">
-                        These fields save alongside standard tags. Leave blank to keep current
-                        values.
-                      </p>
-                    </div>
-                  )}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left rail */}
+              <aside className="hidden lg:flex w-80 flex-col gap-6 p-6 border-r border-white/5 bg-background-elevated/60">
+                <TagEditorArtworkPanel
+                  previewUrl={coverPreviewUrl}
+                  onSelect={handleSelectCover}
+                  onKeyDown={handleCoverKeyDown}
+                  onDrop={handleCoverDrop}
+                  onPaste={handleCoverPaste}
+                  onRemove={handleRemoveCover}
+                />
 
-                  {activeTab === 'lyrics' && !isBatchEdit && (
-                    <div className="panel rounded-2xl p-4 border border-white/10">
-                      <LyricsEditor
-                        trackPath={trackPath}
-                        lyricsContent={lyricsContent}
-                        onChange={setLyricsContent}
-                        onSave={handleSaveLyrics}
-                        isSaving={isLyricsSaving}
+                {!isBatchEdit && tagInfo && <TagEditorFileInfo tagInfo={tagInfo} />}
+              </aside>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : (
+                  <div className="space-y-6 max-w-3xl">
+                    <div className="lg:hidden">
+                      <TagEditorArtworkPanel
+                        previewUrl={coverPreviewUrl}
+                        onSelect={handleSelectCover}
+                        onKeyDown={handleCoverKeyDown}
+                        onDrop={handleCoverDrop}
+                        onPaste={handleCoverPaste}
+                        onRemove={handleRemoveCover}
                       />
-                      {lyricsError && <p className="text-xs text-red-400 mt-2">{lyricsError}</p>}
                     </div>
-                  )}
 
-                  {activeTab === 'lyrics' && isBatchEdit && (
-                    <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-text-muted text-sm">
-                      Lyrics editing is available when a single track is selected.
+                    {error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                        {error}
+                      </div>
+                    )}
+
+                    <MetadataClipboard onPaste={handlePasteMetadata} />
+
+                    {isBatchEdit && (
+                      <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg text-primary text-sm">
+                        Only filled fields will be applied to all selected tracks.
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      {(['standard', 'extended', 'lyrics'] as const).map((tab) => {
+                        const disabled = tab === 'lyrics' && isBatchEdit;
+                        return (
+                          <Button
+                            key={tab}
+                            variant={activeTab === tab ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => !disabled && setActiveTab(tab)}
+                            disabled={disabled}
+                            className={clsx(
+                              'rounded-full text-sm font-medium transition px-4 py-2 h-auto',
+                              activeTab === tab
+                                ? 'bg-white text-black hover:bg-white/90'
+                                : 'text-text-primary hover:text-white hover:bg-white/10',
+                              disabled && 'opacity-50 cursor-not-allowed',
+                            )}
+                          >
+                            {tab === 'standard'
+                              ? 'Standard Tags'
+                              : tab === 'extended'
+                                ? 'Extended Tags'
+                                : 'Lyrics'}
+                          </Button>
+                        );
+                      })}
                     </div>
-                  )}
-                </div>
-              )}
+
+                    <TagEditorMetadataForm
+                      activeTab={activeTab}
+                      isBatchEdit={isBatchEdit}
+                      title={title}
+                      setTitle={setTitle}
+                      artist={artist}
+                      setArtist={setArtist}
+                      album={album}
+                      setAlbum={setAlbum}
+                      albumArtist={albumArtist}
+                      setAlbumArtist={setAlbumArtist}
+                      year={year}
+                      setYear={setYear}
+                      trackNumber={trackNumber}
+                      setTrackNumber={setTrackNumber}
+                      discNumber={discNumber}
+                      setDiscNumber={setDiscNumber}
+                      genre={genre}
+                      setGenre={setGenre}
+                      composer={composer}
+                      setComposer={setComposer}
+                      comment={comment}
+                      setComment={setComment}
+                      extendedFields={extendedFields}
+                      onAddExtendedField={handleAddExtendedField}
+                      onUpdateExtendedField={handleUpdateExtendedField}
+                      onRemoveExtendedField={handleRemoveExtendedField}
+                    />
+
+                    {activeTab === 'lyrics' && !isBatchEdit && (
+                      <div className="panel rounded-2xl p-4 border border-white/10">
+                        <LyricsEditor
+                          trackPath={trackPath}
+                          lyricsContent={lyricsContent}
+                          onChange={setLyricsContent}
+                          onSave={handleSaveLyrics}
+                          isSaving={isLyricsSaving}
+                        />
+                        {lyricsError && <p className="text-xs text-red-400 mt-2">{lyricsError}</p>}
+                      </div>
+                    )}
+
+                    {activeTab === 'lyrics' && isBatchEdit && (
+                      <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-text-muted text-sm">
+                        Lyrics editing is available when a single track is selected.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     );
   },
 );

@@ -34,10 +34,9 @@ interface LyricsDisplayProps {
 export const LyricsDisplay = memo(
   ({ lyricSize = 50, lyricAlignment = 'center' }: LyricsDisplayProps) => {
     useRenderLog('LyricsDisplay');
-    const { lyrics, currentTime, isPlaying, currentTrack } = usePlayerStore(
+    const { lyrics, isPlaying, currentTrack } = usePlayerStore(
       useShallow((s) => ({
         lyrics: s.lyrics,
-        currentTime: s.currentTime,
         isPlaying: s.isPlaying,
         currentTrack: s.currentTrack,
       })),
@@ -49,7 +48,8 @@ export const LyricsDisplay = memo(
     // Local state only for line index - updates only when line changes
     const [currentLineIndex, setCurrentLineIndex] = useState(() => {
       if (!lyrics || lyrics.lines.length === 0) return -1;
-      return getCurrentLineIndex(lyrics, currentTime * 1000);
+      const initialTime = usePlayerStore.getState().currentTime;
+      return getCurrentLineIndex(lyrics, initialTime * 1000);
     });
 
     // Word progress ref for karaoke - updated via RAF, read by LyricsLine via ref
@@ -126,9 +126,9 @@ export const LyricsDisplay = memo(
     // Sync index on seek/pause (when isPlaying might be false but time changed)
     useEffect(() => {
       if (!lyrics) return;
-      const idx = getCurrentLineIndex(lyrics, currentTime * 1000);
+      const idx = getCurrentLineIndex(lyrics, getTimeMs());
       setCurrentLineIndex(idx);
-    }, [currentTime, lyrics]);
+    }, [getTimeMs, lyrics]);
 
     // Optimize glow color variations with useMemo to avoid recalc per render
     const glowColors = useMemo(() => {

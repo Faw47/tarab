@@ -159,7 +159,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
           'pointer-events-none absolute bottom-1 top-1 rounded-full motion-reduce:transition-none',
           isDragging || pillLayoutFromDom
             ? 'transition-none'
-            : 'transition-[left,width,opacity] duration-200 ease-out',
+            : 'transition-[left,width,opacity] duration-[var(--motion-standard)] ease-out',
         )}
         style={domPillStyle}
       >
@@ -193,7 +193,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             }}
             className={cn(
               'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5',
-              'text-[13px] font-medium transition-colors duration-300 motion-reduce:transition-none',
+              'text-[13px] font-medium transition-colors duration-[var(--motion-emphasis)] motion-reduce:transition-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
               isActive ? 'text-white' : 'text-white/50 hover:bg-white/[0.04] hover:text-white/90',
             )}

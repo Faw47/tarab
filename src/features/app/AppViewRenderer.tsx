@@ -1,12 +1,8 @@
 import { lazy, type MouseEvent, memo, Suspense } from 'react';
 import { HomeView } from '../../components/home/HomeView';
 import { HomeViewNeo } from '../../components/home/HomeViewNeo';
-import { LibraryView } from '../../components/library/LibraryView';
 import type { NavView } from '../../components/navigation';
-import { QueueView } from '../../components/queue/QueueView';
 import type { useLibraryScan } from '../../components/settings/useLibraryScan';
-import { AlbumDetailsOverlay } from '../../components/shared/AlbumDetailsOverlay';
-import { AlbumDetailsOverlayNeo } from '../../components/shared/AlbumDetailsOverlayNeo';
 import type { AppTheme, NavMode } from '../../store/settings-store';
 import type { ContextMenuPosition, Track } from '../../types';
 import type { useViewRouter } from './useViewRouter';
@@ -20,6 +16,36 @@ const UnifiedSettingsView = lazy(() =>
 const TagManagerView = lazy(() =>
   import('../../components/tagmanager/TagManagerView').then((mod) => ({
     default: mod.TagManagerView,
+  })),
+);
+
+const PlaylistsView = lazy(() =>
+  import('../../components/playlist/PlaylistsView').then((mod) => ({
+    default: mod.PlaylistsView,
+  })),
+);
+
+const LibraryView = lazy(() =>
+  import('../../components/library/LibraryView').then((mod) => ({
+    default: mod.LibraryView,
+  })),
+);
+
+const QueueView = lazy(() =>
+  import('../../components/queue/QueueView').then((mod) => ({
+    default: mod.QueueView,
+  })),
+);
+
+const AlbumDetailsOverlay = lazy(() =>
+  import('../../components/shared/AlbumDetailsOverlay').then((mod) => ({
+    default: mod.AlbumDetailsOverlay,
+  })),
+);
+
+const AlbumDetailsOverlayNeo = lazy(() =>
+  import('../../components/shared/AlbumDetailsOverlayNeo').then((mod) => ({
+    default: mod.AlbumDetailsOverlayNeo,
   })),
 );
 
@@ -136,30 +162,40 @@ export const AppViewRenderer = memo(function AppViewRenderer({
     case 'library':
     case 'search':
       return (
-        <LibraryView
-          onTrackContextMenu={onTrackContextMenu}
-          onTrackSelect={onTrackSelect}
-          selectedTrackIds={selectedTrackIds}
-          onOpenTagEditor={onOpenTagEditor}
-          onSelectAll={onSelectAllTracks}
-          onClearSelection={onClearSelection}
-          onOpenAlbumDetails={onOpenAlbumDetails}
-          isLibraryLoading={initialLibraryLoading}
-          libraryError={libraryLoadError}
-          onRetryLoad={onRetryLoad}
-          onNavigateToFolders={() => onNavigate('settings')}
-          onScrollChange={onScrollChange}
-          iconRailLayout={navMode === 'iconRail' && theme !== 'neobrutalism'}
-        />
+        <Suspense fallback={viewFallback}>
+          <LibraryView
+            onTrackContextMenu={onTrackContextMenu}
+            onTrackSelect={onTrackSelect}
+            selectedTrackIds={selectedTrackIds}
+            onOpenTagEditor={onOpenTagEditor}
+            onSelectAll={onSelectAllTracks}
+            onClearSelection={onClearSelection}
+            onOpenAlbumDetails={onOpenAlbumDetails}
+            isLibraryLoading={initialLibraryLoading}
+            libraryError={libraryLoadError}
+            onRetryLoad={onRetryLoad}
+            onNavigateToFolders={() => onNavigate('settings')}
+            onScrollChange={onScrollChange}
+            iconRailLayout={navMode === 'iconRail' && theme !== 'neobrutalism'}
+          />
+        </Suspense>
       );
     case 'queue':
       return (
-        <QueueView
-          isLibraryLoading={initialLibraryLoading}
-          libraryError={libraryLoadError}
-          onRetryLoad={onRetryLoad}
-          onScrollChange={onScrollChange}
-        />
+        <Suspense fallback={viewFallback}>
+          <QueueView
+            isLibraryLoading={initialLibraryLoading}
+            libraryError={libraryLoadError}
+            onRetryLoad={onRetryLoad}
+            onScrollChange={onScrollChange}
+          />
+        </Suspense>
+      );
+    case 'playlists':
+      return (
+        <Suspense fallback={viewFallback}>
+          <PlaylistsView />
+        </Suspense>
       );
     case 'tags':
       return (
@@ -192,30 +228,32 @@ export const AppViewRenderer = memo(function AppViewRenderer({
       const AlbumOverlayComponent =
         theme === 'neobrutalism' ? AlbumDetailsOverlayNeo : AlbumDetailsOverlay;
       return (
-        <AlbumOverlayComponent
-          album={albumDetails.album}
-          artist={albumDetails.artist}
-          coverArt={albumDetails.coverArt}
-          tracks={albumDetails.tracks}
-          onClose={onBack}
-          onPlayAlbum={onPlayAlbum}
-          onPlayTrack={onPlayAlbumTrack}
-          onTrackContextMenu={(event: MouseEvent, track: Track) => {
-            onTrackContextMenu(track, { x: event.clientX, y: event.clientY });
-          }}
-          selectedTrackIds={selectedTrackIds}
-          onTrackSelect={onTrackSelect}
-          onClearSelection={onClearSelection}
-          onSelectAll={onSetSelectedTracks}
-          onOpenTagEditor={onOpenAlbumTagEditor}
-          onAddToQueue={onAddTracksToQueue}
-          onRevealInFinder={onRevealTrackInFinder}
-          onDeleteTracks={(tracks) => onRemoveTracks(tracks, { updateAlbumView: true })}
-          onShuffleAlbum={onShuffleAlbum}
-          currentlyPlayingId={currentTrackId}
-          isPlaying={isPlaying}
-          onScrollChange={onScrollChange}
-        />
+        <Suspense fallback={viewFallback}>
+          <AlbumOverlayComponent
+            album={albumDetails.album}
+            artist={albumDetails.artist}
+            coverArt={albumDetails.coverArt}
+            tracks={albumDetails.tracks}
+            onClose={onBack}
+            onPlayAlbum={onPlayAlbum}
+            onPlayTrack={onPlayAlbumTrack}
+            onTrackContextMenu={(event: MouseEvent, track: Track) => {
+              onTrackContextMenu(track, { x: event.clientX, y: event.clientY });
+            }}
+            selectedTrackIds={selectedTrackIds}
+            onTrackSelect={onTrackSelect}
+            onClearSelection={onClearSelection}
+            onSelectAll={onSetSelectedTracks}
+            onOpenTagEditor={onOpenAlbumTagEditor}
+            onAddToQueue={onAddTracksToQueue}
+            onRevealInFinder={onRevealTrackInFinder}
+            onDeleteTracks={(tracks) => onRemoveTracks(tracks, { updateAlbumView: true })}
+            onShuffleAlbum={onShuffleAlbum}
+            currentlyPlayingId={currentTrackId}
+            isPlaying={isPlaying}
+            onScrollChange={onScrollChange}
+          />
+        </Suspense>
       );
     }
     default:

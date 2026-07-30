@@ -112,7 +112,15 @@ describe('library-view-model', () => {
     );
 
     expect(Array.isArray(artists)).toBe(true);
-    expect((artists as Array<{ artist: string }>).map((entry) => entry.artist)).toEqual(['A', 'B']);
+    expect(
+      (artists as Array<{ artist: string; count: number }>).map(({ artist, count }) => ({
+        artist,
+        count,
+      })),
+    ).toEqual([
+      { artist: 'A', count: 2 },
+      { artist: 'B', count: 1 },
+    ]);
   });
 
   it('formats duration in long form', () => {

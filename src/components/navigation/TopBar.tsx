@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronLeft,
   Home,
+  ListMusic,
   Loader2,
   type LucideIcon,
   Search,
@@ -39,6 +40,7 @@ const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = 
   { view: 'home', label: 'Home', icon: Home },
   { view: 'library', label: 'Library', icon: LibraryIcon as LucideIcon },
   { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
+  { view: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 
 const SECONDARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
@@ -176,7 +178,7 @@ const BaseGlassButton = forwardRef<HTMLButtonElement, BaseGlassButtonProps>(
         aria-current={isActive ? 'page' : undefined}
         className={cn(
           'group relative flex shrink-0 items-center justify-center gap-1.5 rounded-full',
-          'transition-all duration-300 motion-reduce:transition-none',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
           isIconOnly ? 'h-8 w-8' : 'h-8 px-3.5',
           isActive ? 'text-white' : 'text-white/50 hover:text-white/90 hover:bg-white/[0.04]',
@@ -286,7 +288,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
     return (
       <div
         className={cn(
-          'group relative flex w-full items-center gap-3 overflow-hidden px-4 transition-all duration-500',
+          'group relative flex w-full items-center gap-3 overflow-hidden px-4 transition-[background-color,border-color,box-shadow] duration-[var(--motion-standard)]',
           'rounded-full border border-white/[0.04] bg-white/[0.03] backdrop-blur-none',
           'focus-within:border-white/[0.12] focus-within:bg-white/[0.07] focus-within:shadow-[0_0_24px_-4px_rgba(0,0,0,0.3)]',
           compact ? 'h-9' : 'h-10 md:h-11',
@@ -296,7 +298,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
         }}
       >
         <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-focus-within:opacity-100"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-focus-within:opacity-100"
           aria-hidden="true"
         >
           <div className="absolute inset-0 bg-gradient-to-r from-[rgb(var(--hero-accent-rgb,255_255_255)/0.08)] to-transparent" />
@@ -307,7 +309,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
           {isSearching ? (
             <Loader2 className="h-4 w-4 animate-spin text-[var(--hero-accent)]" />
           ) : (
-            <Search className="h-4 w-4 text-white/40 transition-colors duration-300 group-focus-within:text-[var(--hero-accent)]" />
+            <Search className="h-4 w-4 text-white/40 transition-colors duration-[var(--motion-emphasis)] group-focus-within:text-[var(--hero-accent)]" />
           )}
         </div>
 
@@ -342,7 +344,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
             onMouseDown={(e) => e.preventDefault()}
             onClick={onClear}
             aria-label="Clear search"
-            className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-all duration-200 hover:bg-white/20 hover:text-white"
+            className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] hover:bg-white/20 hover:text-white"
           >
             <X className="h-3 w-3" />
           </button>
@@ -350,8 +352,8 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
           <kbd
             aria-hidden="true"
             className={cn(
-              'relative z-10 hidden h-5 items-center rounded bg-white/[0.08] px-1.5 text-[10px] font-medium text-white/40 ring-1 ring-inset ring-white/[0.05]',
-              'transition-opacity duration-300 group-focus-within:opacity-0',
+              'relative z-10 hidden h-5 items-center rounded bg-white/[0.08] px-1.5 text-xs font-medium text-white/40 ring-1 ring-inset ring-white/[0.05]',
+              'transition-opacity duration-[var(--motion-emphasis)] group-focus-within:opacity-0',
               compact ? 'sm:hidden' : 'md:flex',
             )}
           >
@@ -391,7 +393,7 @@ const StatusIndicator = memo(function StatusIndicator({
       <div
         aria-hidden={status ? 'false' : 'true'}
         className={cn(
-          'relative overflow-hidden rounded-full border border-white/[0.06] bg-black/40 backdrop-blur-none transition-all duration-300 motion-reduce:transition-none',
+          'relative overflow-hidden rounded-full border border-white/[0.06] bg-black/40 backdrop-blur-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
           'h-8',
           status
             ? cn(compact ? 'max-w-[88px] px-2.5' : 'max-w-[186px] px-3', 'opacity-100')
@@ -411,7 +413,7 @@ const StatusIndicator = memo(function StatusIndicator({
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--hero-accent,white)]" />
 
             {compact ? (
-              <span className="truncate text-[11px] font-semibold text-white/60">
+              <span className="truncate text-xs font-semibold text-white/60">
                 {display.shortLabel}
               </span>
             ) : (
@@ -424,7 +426,7 @@ const StatusIndicator = memo(function StatusIndicator({
             )}
 
             {display.progressText && (
-              <span className="shrink-0 text-[11px] font-bold text-[var(--hero-accent,white)]">
+              <span className="shrink-0 text-xs font-bold text-[var(--hero-accent,white)]">
                 {display.progressText}
               </span>
             )}
@@ -434,7 +436,7 @@ const StatusIndicator = memo(function StatusIndicator({
         {display?.progressValue != null && (
           <div className="absolute inset-x-0 bottom-0 h-px bg-white/[0.04]">
             <div
-              className="h-full bg-[var(--hero-accent)] transition-[width] duration-300 motion-reduce:transition-none"
+              className="h-full bg-[var(--hero-accent)] transition-[width] duration-[var(--motion-emphasis)] motion-reduce:transition-none"
               style={{ width: `${display.progressValue}%` }}
             />
           </div>
@@ -631,7 +633,7 @@ export const TopBar = memo(function TopBar({
       onPointerMove={handleHeaderPointerMove}
       onPointerLeave={handleHeaderPointerLeave}
       className={cn(
-        'relative isolate z-50 h-14 shrink-0 overflow-hidden transition-all duration-500',
+        'relative isolate z-50 h-14 shrink-0 overflow-hidden transition-[background-color,border-color,box-shadow,opacity] duration-[var(--motion-emphasis)]',
         !hideBorder && navMode !== 'iconRail' && 'border-b border-white/[0.04]',
         isScrolled && 'shadow-none',
         isTransparent && !isScrolled && 'border-transparent bg-transparent shadow-none',
@@ -717,7 +719,7 @@ export const TopBar = memo(function TopBar({
         >
           <div
             className={cn(
-              'w-full transition-all duration-500 ease-out motion-reduce:transition-none',
+              'w-full transition-[opacity,transform] duration-[var(--motion-emphasis)] ease-out motion-reduce:transition-none',
               isSearchFocused ? 'scale-[1.01]' : 'scale-100',
             )}
           >

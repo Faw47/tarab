@@ -251,7 +251,7 @@ export const QueueView = memo(
               <div className="mt-5 h-4 border-2 border-black bg-white p-[2px]">
                 {/* Brutalist striped progress bar */}
                 <div
-                  className="h-full bg-[var(--signal-play)] transition-[width] duration-500 ease-out"
+                  className="h-full bg-[var(--signal-play)] transition-[width] duration-[var(--motion-standard)] ease-out"
                   style={{
                     width: `${playedRatio * 100}%`,
                     backgroundImage:
@@ -287,7 +287,7 @@ export const QueueView = memo(
                     alt={nowPlayingTrack.album}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
+                    <p className="text-[12px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
                       Now playing
                     </p>
                     <p className="mt-1 truncate text-lg font-black uppercase tracking-tight text-black">
@@ -435,7 +435,7 @@ export const QueueView = memo(
                   variant="ghost"
                   size="sm"
                   onClick={clearQueue}
-                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-all hover:bg-red-500/20 hover:text-red-200"
+                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-red-500/20 hover:text-red-200"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Clear queue
@@ -451,7 +451,7 @@ export const QueueView = memo(
 
             <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/[0.08] shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]">
               <div
-                className="h-full rounded-full transition-all duration-500 ease-out"
+                className="h-full rounded-full transition-[width,background-color] duration-[var(--motion-standard)] ease-out"
                 style={{
                   width: `${Math.max(2, playedRatio * 100)}%`,
                   background:
@@ -500,7 +500,7 @@ export const QueueView = memo(
 
                   <div className="relative z-10 min-w-0 flex-1">
                     <div className="mb-2 flex items-center gap-2.5">
-                      <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.15em] text-white/90 shadow-[0_0_10px_var(--hero-glow)] backdrop-blur-md">
+                      <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.15em] text-white/90 shadow-[0_0_10px_var(--hero-glow)] backdrop-blur-md">
                         <span className="h-1.5 w-1.5 rounded-full bg-[var(--hero-accent)] animate-pulse shadow-[0_0_8px_var(--hero-accent)]" />
                         Now playing
                       </span>
@@ -521,7 +521,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={handleToggleCurrent}
-                    className="relative z-10 flex h-14 w-14 items-center justify-center shrink-0 rounded-full bg-white text-black shadow-[0_0_20px_var(--hero-glow)] transition-all hover:scale-[1.05] active:scale-[0.95]"
+                    className="relative z-10 flex h-14 w-14 items-center justify-center shrink-0 rounded-full bg-white text-black shadow-[0_0_20px_var(--hero-glow)] transition-transform duration-[var(--motion-fast)] hover:scale-[1.05] active:scale-[0.95]"
                     aria-label={isPlaying ? 'Pause current track' : 'Play current track'}
                   >
                     {isPlaying ? (
@@ -663,15 +663,15 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
       'bg-gradient-to-b from-white/[0.08] to-white/[0.03]',
       'hover:from-white/[0.12] hover:to-white/[0.05]',
-      'transition-all duration-300',
+      'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
     )}
   >
     <div
-      className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-500"
+      className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-[var(--motion-emphasis)]"
       style={{ background: 'var(--hero-accent)' }}
     />
     <div
-      className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.07]"
+      className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.07]"
       style={{
         background: `linear-gradient(180deg, color-mix(in oklch, var(--hero-accent) 40%, rgba(255,255,255,0.15)) 0%, color-mix(in oklch, var(--hero-accent) 20%, rgba(255,255,255,0.05)) 100%)`,
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.2)`,
@@ -688,7 +688,7 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       </p>
     </div>
     <div
-      className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+      className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--motion-emphasis)]"
       style={{ background: `linear-gradient(90deg, transparent, var(--hero-accent), transparent)` }}
     />
   </div>
@@ -703,7 +703,7 @@ interface NeoSummaryBoxProps {
 
 const NeoSummaryBox = memo(({ label, value, icon: Icon }: NeoSummaryBoxProps) => (
   <div className="border-2 border-black bg-white px-3 py-2.5 shadow-[4px_4px_0_0_#000]">
-    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.08em] text-black/60">
+    <div className="flex items-center gap-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black/60">
       <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
       <span>{label}</span>
     </div>
@@ -734,7 +734,7 @@ const QueueRowBase = memo(
   }: QueueRowBaseProps) => (
     <article
       className={clsx(
-        'group relative flex h-[72px] items-center gap-4 px-4 transition-all duration-200',
+        'group relative flex h-[72px] items-center gap-4 px-4 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
         isNeobrutalism
           ? [
               'border-2 border-black bg-white',
@@ -758,7 +758,8 @@ const QueueRowBase = memo(
             ? 'border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000]'
             : 'rounded-full text-white/40 transition-colors hover:bg-white/[0.12] group-hover:text-white/80 focus-visible:text-white/80',
         )}
-        aria-label={`Drag track ${position}`}
+        aria-label={`Drag track ${position}. Press Space to lift, Arrow keys to move, and Space to drop.`}
+        aria-roledescription="sortable"
         {...dragHandle}
       >
         <GripVertical className="h-4 w-4" strokeWidth={isNeobrutalism ? 2.5 : 2} />
@@ -787,7 +788,7 @@ const QueueRowBase = memo(
         />
         <span
           className={clsx(
-            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-200 group-hover:opacity-100',
+            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] group-hover:opacity-100',
             isNeobrutalism ? 'bg-black/40' : 'rounded-[10px] bg-black/40 backdrop-blur-[2px]',
           )}
         >
@@ -834,14 +835,14 @@ const QueueRowBase = memo(
           'flex items-center gap-2',
           isNeobrutalism
             ? 'opacity-100'
-            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+            : 'opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
           type="button"
           onClick={onRemove}
           className={clsx(
-            'flex h-9 w-9 items-center justify-center transition-all',
+            'flex h-9 w-9 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
               ? 'border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] hover:bg-red-500/30 hover:text-red-200 text-white/60',
@@ -904,7 +905,7 @@ const HistoryRow = memo(
   ({ track, onReplay, onRemove, isNeobrutalism = false }: HistoryRowProps) => (
     <article
       className={clsx(
-        'group flex h-[64px] items-center gap-4 px-4 transition-all duration-200',
+        'group flex h-[64px] items-center gap-4 px-4 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
         isNeobrutalism
           ? 'border-2 border-black bg-[#EAEAEA] shadow-[2px_2px_0_0_#000] hover:bg-white hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[4px_4px_0_0_#000]'
           : 'rounded-[16px] border border-transparent bg-transparent hover:border-white/[0.06] hover:bg-white/[0.02]',
@@ -920,7 +921,8 @@ const HistoryRow = memo(
           )}
           imgClassName={clsx(
             'h-full w-full object-cover transition-transform group-hover:scale-105',
-            isNeobrutalism && 'grayscale group-hover:grayscale-0 transition-all',
+            isNeobrutalism &&
+              'grayscale group-hover:grayscale-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
           )}
           roundedClassName={isNeobrutalism ? '' : 'rounded-[10px]'}
           iconClassName="h-4 w-4"
@@ -928,7 +930,7 @@ const HistoryRow = memo(
         />
         <span
           className={clsx(
-            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-200 group-hover:opacity-100',
+            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] group-hover:opacity-100',
             isNeobrutalism ? 'bg-black/40' : 'rounded-[10px] bg-black/40 backdrop-blur-[2px]',
           )}
         >
@@ -980,14 +982,14 @@ const HistoryRow = memo(
           'flex items-center gap-2',
           isNeobrutalism
             ? 'opacity-100'
-            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+            : 'opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
           type="button"
           onClick={onReplay}
           className={clsx(
-            'flex h-8 w-8 items-center justify-center transition-all',
+            'flex h-8 w-8 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
               ? 'border-2 border-black bg-[var(--signal-active)] shadow-[2px_2px_0_0_#000] hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-white/[0.15] hover:text-white',
@@ -1000,7 +1002,7 @@ const HistoryRow = memo(
           type="button"
           onClick={onRemove}
           className={clsx(
-            'flex h-8 w-8 items-center justify-center transition-all',
+            'flex h-8 w-8 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
               ? 'border-2 border-black bg-white shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-red-500/30 hover:text-red-200',

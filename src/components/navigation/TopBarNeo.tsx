@@ -80,6 +80,7 @@ const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = 
   { view: 'home', label: 'Home', icon: Home },
   { view: 'library', label: 'Library', icon: Library },
   { view: 'queue', label: 'Queue', icon: ListMusic },
+  { view: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 
 const SECONDARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
@@ -160,7 +161,7 @@ const NeoNavButton = memo(function NeoNavButton({
       className={cn(
         BUTTON_BASE_CLASS,
         primaryButtonStateClass(isActive),
-        'h-10 px-0 pr-5 text-[12px] overflow-hidden hover-neo-wiggle',
+        'h-10 px-0 pr-5 text-[12px] overflow-hidden',
       )}
     >
       <div
@@ -195,11 +196,7 @@ const NeoSecondaryAction = memo(function NeoSecondaryAction({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={cn(
-        BUTTON_BASE_CLASS,
-        secondaryButtonStateClass(active),
-        'h-10 px-4 text-[12px] hover-neo-wiggle',
-      )}
+      className={cn(BUTTON_BASE_CLASS, secondaryButtonStateClass(active), 'h-10 px-4 text-[12px]')}
     >
       {icon}
       <span className="hidden lg:inline-block">{label}</span>
@@ -425,7 +422,7 @@ export const TopBarNeo = memo(function TopBarNeo({
               </button>
             ) : (
               <kbd className="hidden h-6 items-center border-2 border-black bg-[var(--neo-panel)] px-2 shadow-[2px_2px_0_0_#000] md:inline-flex">
-                <span className="text-[10px] font-black">{PLATFORM_SHORTCUT.shortcutLabel}</span>
+                <span className="text-xs font-black">{PLATFORM_SHORTCUT.shortcutLabel}</span>
               </kbd>
             )}
           </div>

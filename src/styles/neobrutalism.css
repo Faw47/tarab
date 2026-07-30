@@ -678,24 +678,6 @@
   }
 }
 
-@keyframes neo-wiggle {
-  0% {
-    transform: rotate(0deg);
-  }
-  25% {
-    transform: rotate(-3deg);
-  }
-  50% {
-    transform: rotate(3deg);
-  }
-  75% {
-    transform: rotate(-1deg);
-  }
-  100% {
-    transform: rotate(0deg);
-  }
-}
-
 @keyframes neo-slide-up-pop {
   0% {
     transform: translateY(20px) scale(0.95);
@@ -722,31 +704,6 @@
 
 [data-theme="neobrutalism"] .animate-neo-slide-up {
   animation: neo-slide-up-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-}
-
-[data-theme="neobrutalism"] .animate-neo-wiggle {
-  animation: neo-wiggle 0.4s ease-in-out;
-}
-
-[data-theme="neobrutalism"] .hover-neo-wiggle:hover {
-  animation: neo-wiggle 0.3s ease-in-out;
-}
-
-/* Stagger utilities for list items */
-[data-theme="neobrutalism"] .neo-stagger-1 {
-  animation-delay: 50ms;
-}
-[data-theme="neobrutalism"] .neo-stagger-2 {
-  animation-delay: 100ms;
-}
-[data-theme="neobrutalism"] .neo-stagger-3 {
-  animation-delay: 150ms;
-}
-[data-theme="neobrutalism"] .neo-stagger-4 {
-  animation-delay: 200ms;
-}
-[data-theme="neobrutalism"] .neo-stagger-5 {
-  animation-delay: 250ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

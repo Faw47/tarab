@@ -107,7 +107,7 @@ export const InputDialog = memo(
               placeholder={placeholder}
               aria-label={label ?? title}
               className={clsx(
-                'w-full px-4 py-3 outline-none transition-all duration-200',
+                'w-full px-4 py-3 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 isNeobrutalism
                   ? 'bg-white border-2 border-black rounded-none shadow-[4px_4px_0_0_#000] focus:shadow-[6px_6px_0_0_#000] focus:-translate-x-0.5 focus:-translate-y-0.5 text-black font-bold placeholder:text-black/40'
                   : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',

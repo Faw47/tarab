@@ -9,7 +9,7 @@ import {
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import type { AlbumDetailsState } from './app-state-types';
-import { loadPlayerStateFromStore } from './player-state-store';
+import { loadPlayerStateFromStore, markPlayerStateHydrated } from './player-state-store';
 
 const toTrack = (track: {
   id: string;
@@ -53,7 +53,7 @@ export function usePlayerSessionRestore({
 
     const restoreSession = async () => {
       const session = await loadPlayerStateFromStore();
-      if (cancelled || !session || session.version !== 1) return;
+      if (cancelled || !session) return;
 
       const player = usePlayerStore.getState();
       const queueIds = Array.isArray(session.queueIds) ? session.queueIds : [];
@@ -131,6 +131,7 @@ export function usePlayerSessionRestore({
         value === 'library' ||
         value === 'search' ||
         value === 'queue' ||
+        value === 'playlists' ||
         value === 'tags' ||
         value === 'settings' ||
         value === 'album';
@@ -182,18 +183,22 @@ export function usePlayerSessionRestore({
     };
 
     const restoreSessionWithRetry = async () => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          await restoreSession();
-          return;
-        } catch (err) {
-          if (cancelled) return;
-          if (attempt === 1) {
-            console.error('Failed to restore session:', err);
+      try {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await restoreSession();
             return;
+          } catch (err) {
+            if (cancelled) return;
+            if (attempt === 1) {
+              console.error('Failed to restore session:', err);
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 120));
           }
-          await new Promise((resolve) => setTimeout(resolve, 120));
         }
+      } finally {
+        if (!cancelled) markPlayerStateHydrated();
       }
     };
 

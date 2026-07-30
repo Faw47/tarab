@@ -2,6 +2,10 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
+import {
+  resetPlaybackGenerationForTests,
+  setActivePlaybackGeneration,
+} from '../playback-generation';
 import { usePlaybackLifecycle } from '../usePlaybackLifecycle';
 
 const {
@@ -24,7 +28,7 @@ const {
         };
       },
     ),
-    crossfadeToTrackMock: vi.fn(async () => undefined),
+    crossfadeToTrackMock: vi.fn(async () => 2),
     dbUpdatePlayStatsMock: vi.fn(async () => undefined),
     preloadNextTrackMock: vi.fn(async () => undefined),
     playAdjacentTrackMock: vi.fn(async () => undefined),
@@ -45,13 +49,13 @@ vi.mock('../../../platform/tauri-zustand-storage', () => ({
 }));
 
 vi.mock('../../../lib/tauri-commands', () => ({
-  crossfadeToTrack: crossfadeToTrackMock,
   dbUpdatePlayStats: dbUpdatePlayStatsMock,
-  preloadNextTrack: preloadNextTrackMock,
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  crossfadeToSource: crossfadeToTrackMock,
   playAdjacentTrack: playAdjacentTrackMock,
+  preloadGaplessSource: preloadNextTrackMock,
 }));
 
 vi.mock('../../../lib/report-error', () => ({
@@ -100,6 +104,8 @@ describe('usePlaybackLifecycle', () => {
 
     usePlayerStore.setState(initialPlayerState, true);
     useSettingsStore.setState(initialSettingsState, true);
+    resetPlaybackGenerationForTests();
+    setActivePlaybackGeneration(1);
 
     usePlayerStore.setState({
       currentTrack: queue[0],
@@ -133,6 +139,18 @@ describe('usePlaybackLifecycle', () => {
     await handler?.({ payload: 0.2 });
 
     expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-2.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+
     expect(usePlayerStore.getState().currentTrack?.id).toBe('track-2');
     expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
@@ -223,9 +241,7 @@ describe('usePlaybackLifecycle', () => {
     });
   });
 
-  it('reports fallback playback failures after unrecoverable playback errors', async () => {
-    const error = new Error('next failed');
-    playAdjacentTrackMock.mockRejectedValueOnce(error);
+  it('keeps an unrecoverable playback error visible for user recovery', async () => {
     render(<Harness />);
 
     await waitFor(() => {
@@ -241,12 +257,17 @@ describe('usePlaybackLifecycle', () => {
       },
     });
 
-    await waitFor(() => {
-      expect(reportErrorMock).toHaveBeenCalledWith(
-        'Failed to play next track after playback error',
-        { source: 'app', error },
-      );
+    expect(reportErrorMock).toHaveBeenCalledWith('Playback failed at stream', {
+      source: 'audio-backend',
+      detail: 'stream failed (/music/track-1.mp3)',
     });
+    expect(usePlayerStore.getState().playbackError).toMatchObject({
+      filePath: '/music/track-1.mp3',
+      stage: 'stream',
+      message: 'stream failed',
+      recoverable: false,
+    });
+    expect(playAdjacentTrackMock).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().isPlaying).toBe(false);
     expect(usePlayerStore.getState().hasActivePlayback).toBe(false);
   });
@@ -270,5 +291,54 @@ describe('usePlaybackLifecycle', () => {
     expect(playAdjacentTrackMock).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().isPlaying).toBe(true);
     expect(usePlayerStore.getState().hasActivePlayback).toBe(true);
+  });
+
+  it('ignores delayed position and ended events from an old generation', async () => {
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-position')).toBe(true);
+      expect(listeners.has('playback-ended')).toBe(true);
+    });
+
+    await listeners.get('playback-position')?.({
+      payload: { generation: 0, position: 120 },
+    });
+    await listeners.get('playback-ended')?.({
+      payload: {
+        generation: 0,
+        path: '/music/track-1.mp3',
+        seamless: false,
+        nextGeneration: null,
+      },
+    });
+
+    expect(dbUpdatePlayStatsMock).not.toHaveBeenCalled();
+    expect(playAdjacentTrackMock).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
+  it('stops after the current track for the active generation', async () => {
+    usePlayerStore.setState({ stopAfterCurrent: true });
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-ended')).toBe(true);
+    });
+
+    await listeners.get('playback-ended')?.({
+      payload: {
+        generation: 1,
+        path: '/music/track-1.mp3',
+        seamless: false,
+        nextGeneration: null,
+      },
+    });
+
+    expect(playAdjacentTrackMock).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().stopAfterCurrent).toBe(false);
+    expect(usePlayerStore.getState().isPlaying).toBe(false);
+    expect(usePlayerStore.getState().hasActivePlayback).toBe(false);
   });
 });

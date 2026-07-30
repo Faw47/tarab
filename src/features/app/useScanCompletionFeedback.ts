@@ -1,58 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 
-const LAST_SCAN_KEY = 'tarab-last-scan-v1';
-
-interface UseScanCompletionFeedbackOptions {
-  isScanning: boolean;
-  scanProgress: number;
-  totalTracks: number;
-}
-
-export function useScanCompletionFeedback({
-  isScanning,
-  scanProgress,
-  totalTracks,
-}: UseScanCompletionFeedbackOptions) {
-  const wasScanning = useRef(false);
-  const confettiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+export function useScanCompletionFeedback() {
+  const completionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [shellScanBurstKey, setShellScanBurstKey] = useState(0);
-  const [showConfetti, setShowConfetti] = useState(false);
-
-  useEffect(
-    () => () => {
-      if (confettiTimerRef.current) {
-        clearTimeout(confettiTimerRef.current);
-      }
-    },
-    [],
-  );
+  const [showScanComplete, setShowScanComplete] = useState(false);
 
   useEffect(() => {
-    if (isScanning && confettiTimerRef.current) {
-      clearTimeout(confettiTimerRef.current);
-      confettiTimerRef.current = null;
-      setShowConfetti(false);
-    }
-
-    if (wasScanning.current && !isScanning) {
-      if (totalTracks > 0) {
-        setShowConfetti(true);
-        confettiTimerRef.current = setTimeout(() => {
-          setShowConfetti(false);
-          confettiTimerRef.current = null;
-        }, 3500);
+    const handleManualScanComplete = () => {
+      if (completionTimerRef.current) {
+        clearTimeout(completionTimerRef.current);
       }
+      setShowScanComplete(true);
+      completionTimerRef.current = setTimeout(() => {
+        setShowScanComplete(false);
+        completionTimerRef.current = null;
+      }, 1800);
       setShellScanBurstKey((key) => key + 1);
-      if (scanProgress >= 100) {
-        try {
-          localStorage.setItem(LAST_SCAN_KEY, Date.now().toString());
-        } catch {
-          // ignore storage errors
-        }
-      }
-    }
-    wasScanning.current = isScanning;
-  }, [isScanning, scanProgress, totalTracks]);
+    };
+    window.addEventListener('tarab:manual-scan-complete', handleManualScanComplete);
+    return () => {
+      window.removeEventListener('tarab:manual-scan-complete', handleManualScanComplete);
+      if (completionTimerRef.current) clearTimeout(completionTimerRef.current);
+    };
+  }, []);
 
-  return { shellScanBurstKey, showConfetti };
+  return { shellScanBurstKey, showScanComplete };
 }

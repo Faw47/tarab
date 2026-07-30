@@ -130,7 +130,7 @@ export const SettingsShell = memo(function SettingsShell({
           </p>
           <p
             className={cn(
-              'text-[11px]',
+              'text-xs',
               isNeobrutalism
                 ? 'font-bold uppercase tracking-[0.1em] text-black/55'
                 : 'text-white/40',
@@ -159,7 +159,7 @@ export const SettingsShell = memo(function SettingsShell({
                   'absolute left-0 right-0 rounded-xl pointer-events-none motion-reduce:transition-none',
                   isDragging || pillLayoutFromDom
                     ? 'transition-none'
-                    : 'transition-[top,height,opacity] duration-200 ease-out',
+                    : 'transition-[top,height,opacity] duration-[var(--motion-standard)] ease-out',
                 )}
                 style={{
                   ...(pillLayoutFromDom

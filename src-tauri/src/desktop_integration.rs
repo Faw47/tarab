@@ -87,26 +87,47 @@ impl Default for DesktopNativeUiStatePayload {
     }
 }
 
+fn default_repeat_mode() -> DesktopRepeatMode {
+    DesktopRepeatMode::Off
+}
+
+fn default_playback_rate() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopMediaSessionSyncPayload {
+    #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
     pub artist: Option<String>,
+    #[serde(default)]
     pub album: Option<String>,
+    #[serde(default)]
     pub album_artist: Option<String>,
+    #[serde(default)]
     pub artwork_data_base64: Option<String>,
+    #[serde(default)]
     pub is_playing: bool,
+    #[serde(default)]
     pub position: f64,
+    #[serde(default)]
     pub duration: Option<f64>,
+    #[serde(default)]
     pub shuffle: bool,
+    #[serde(default = "default_repeat_mode")]
     pub repeat_mode: DesktopRepeatMode,
+    #[serde(default = "default_playback_rate")]
     pub playback_rate: f64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DesktopRepeatMode {
+    #[default]
     Off,
     One,
     All,
@@ -193,7 +214,7 @@ pub fn should_hide_main_window_on_close(app: &AppHandle<Wry>) -> bool {
 }
 
 #[tauri::command]
-pub fn desktop_open_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
+pub fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<DesktopIntegrationState>() else {
         return Err("Desktop integration state is unavailable".to_string());
     };
@@ -230,7 +251,7 @@ pub fn desktop_open_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
 
 /// Hides the mini player webview so it can be shown again (does not destroy the window).
 #[tauri::command]
-pub fn desktop_close_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
+pub fn desktop_close_mini_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(MINI_WINDOW_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
     }
@@ -238,7 +259,7 @@ pub fn desktop_close_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn desktop_toggle_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
+pub fn desktop_toggle_mini_window(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<DesktopIntegrationState>() else {
         return Err("Desktop integration state is unavailable".to_string());
     };
@@ -260,12 +281,12 @@ pub fn desktop_toggle_mini_window(app: AppHandle<Wry>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn desktop_focus_main_window(app: AppHandle<Wry>) -> Result<(), String> {
+pub fn desktop_focus_main_window(app: AppHandle) -> Result<(), String> {
     focus_main_window(&app)
 }
 
 #[tauri::command]
-pub fn desktop_quit_application(app: AppHandle<Wry>) -> Result<(), String> {
+pub fn desktop_quit_application(app: AppHandle) -> Result<(), String> {
     app.exit(0);
     Ok(())
 }
@@ -273,7 +294,7 @@ pub fn desktop_quit_application(app: AppHandle<Wry>) -> Result<(), String> {
 #[tauri::command]
 pub fn desktop_set_native_ui_state(
     payload: DesktopNativeUiStatePayload,
-    app: AppHandle<Wry>,
+    app: AppHandle,
     state: tauri::State<'_, DesktopIntegrationState>,
 ) -> Result<(), String> {
     {
@@ -292,9 +313,17 @@ pub fn desktop_set_native_ui_state(
 
 #[tauri::command]
 pub fn desktop_sync_media_session(
-    payload: DesktopMediaSessionSyncPayload,
-    app: AppHandle<Wry>,
+    payload: serde_json::Value,
+    app: AppHandle,
 ) -> Result<(), String> {
+    let payload: DesktopMediaSessionSyncPayload = match serde_json::from_value(payload.clone()) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("[desktop_sync_media_session] Payload parsing fallback triggered: {} | Raw payload: {:?}", err, payload);
+            return Ok(());
+        }
+    };
+
     if !payload.enabled {
         let _ = app.media().set_playback_status(PlaybackStatus::Stopped);
         let _ = app.media().clear_metadata();

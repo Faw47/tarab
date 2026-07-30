@@ -9,8 +9,13 @@ export const invoke = async <T>(command: string): Promise<T> => {
     case 'list_audio_output_devices':
       return audioDevices as T;
     case 'set_audio_output_device':
+    case 'set_audio_booster':
+    case 'set_playback_speed':
     case 'revoke_library_grant':
+    case 'plugin:log|log':
       return undefined as T;
+    case 'get_cover_art':
+      return null as T;
     case 'list_library_grants':
       return [] as T;
     case 'select_library_folder':

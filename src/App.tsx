@@ -6,7 +6,7 @@ import { ConfirmDialog, type ConfirmDialogProps } from './components/ui/ConfirmD
 // Components
 
 import { useQueryClient } from '@tanstack/react-query';
-import { GlassSystemProvider } from './components/ui/liquid-glass';
+import { GlassSystemProvider, usePrefersReducedMotion } from './components/ui/liquid-glass';
 import { SmoothTimeProvider } from './contexts/smooth-time';
 import { AppDialogHost } from './features/app/AppDialogHost';
 import { AppLayouts } from './features/app/AppLayouts';
@@ -16,6 +16,7 @@ import {
   preloadGlobalCommandPalette,
 } from './features/app/AppTransientSurfaces';
 import { AppViewRenderer } from './features/app/AppViewRenderer';
+import { useAppCommandActions } from './features/app/useAppCommandActions';
 import { useAppErrorEvent } from './features/app/useAppErrorEvent';
 import { useAppSearchShell } from './features/app/useAppSearchShell';
 import { useAppSessionPersistence } from './features/app/useAppSessionPersistence';
@@ -26,6 +27,7 @@ import { useCurrentTrackLyrics } from './features/app/useCurrentTrackLyrics';
 import { useInitialLibraryBootstrap } from './features/app/useInitialLibraryBootstrap';
 import { useLaunchFileIntents } from './features/app/useLaunchFileIntents';
 import { useLibraryRootSync } from './features/app/useLibraryRootSync';
+import { useNativeMenuActions } from './features/app/useNativeMenuActions';
 import { usePlaybackPositionEvents } from './features/app/usePlaybackPositionEvents';
 import { usePlaybackSettingsSync } from './features/app/usePlaybackSettingsSync';
 import { usePlayerSessionRestore } from './features/app/usePlayerSessionRestore';
@@ -35,7 +37,6 @@ import { useSleepTimer } from './features/app/useSleepTimer';
 import { useTrackOperations } from './features/app/useTrackOperations';
 import { useTrackSelection } from './features/app/useTrackSelection';
 import { useViewRouter } from './features/app/useViewRouter';
-import { loadTracksForShuffle, shuffleTracks } from './features/library/loadTracksForShuffle';
 import { useDroppedAudioImport } from './features/library/useDroppedAudioImport';
 import { useAlbumActions } from './hooks/useAlbumActions';
 import { useContextMenuBuilder } from './hooks/useContextMenuBuilder';
@@ -43,13 +44,8 @@ import { useCoverArtPrefetching } from './hooks/useCoverArtPrefetching';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 // Utils
 import { useRenderLog } from './lib/performance';
-import { playAdjacentTrack, startPlayback, toggleCurrentPlayback } from './lib/playback-actions';
 import { reportError } from './lib/report-error';
-import {
-  generateCoverArtHashes,
-  getSmartShuffleQueue,
-  revealInFileManager,
-} from './lib/tauri-commands';
+import { generateCoverArtHashes } from './lib/tauri-commands';
 import { refreshTracksByFilePaths } from './lib/track-refresh';
 import { useLibraryStore } from './store/library-store';
 // Stores
@@ -193,11 +189,7 @@ const App = () => {
     })),
   );
 
-  const { shellScanBurstKey, showConfetti } = useScanCompletionFeedback({
-    isScanning,
-    scanProgress,
-    totalTracks,
-  });
+  const { shellScanBurstKey, showScanComplete } = useScanCompletionFeedback();
   const { sleepDeadline, scheduleSleepTimer, cancelSleepTimer } = useSleepTimer({ setIsPlaying });
 
   const queryClient = useQueryClient();
@@ -212,6 +204,7 @@ const App = () => {
   const {
     compactMode,
     reducedEffects,
+    backgroundEnabled,
     downloadArtwork,
     followSymlinks,
     libraryFolders,
@@ -225,6 +218,7 @@ const App = () => {
     useShallow((s) => ({
       compactMode: s.compactMode,
       reducedEffects: s.reducedEffects,
+      backgroundEnabled: s.backgroundEnabled,
       downloadArtwork: s.downloadArtwork,
       followSymlinks: s.followSymlinks,
       libraryFolders: s.libraryFolders,
@@ -236,6 +230,8 @@ const App = () => {
       autoLyrics: s.autoLyrics,
     })),
   );
+  const systemReducedMotion = usePrefersReducedMotion();
+  const effectiveReducedEffects = reducedEffects || systemReducedMotion;
   const {
     showSearchShell,
     searchFocusNonce,
@@ -375,97 +371,37 @@ const App = () => {
     [closeSearchShell, navigate],
   );
 
+  useNativeMenuActions({
+    navigate: handleNavigate,
+    openSearch: openSearchShell,
+    setFullPlayerVisible: setShowFullPlayer,
+    libraryFolders,
+    setLibraryFolders,
+    scanFolder: libraryScan.scanFolder,
+  });
+
   const handleBack = useCallback(() => {
     goBack();
   }, [goBack]);
 
-  // Shuffle all tracks in library
-  const handleShuffleAll = useCallback(async () => {
-    if (libraryTracks.length === 0) return;
-
-    let allTracks = libraryTracks;
-    try {
-      allTracks = await loadTracksForShuffle({ loadedTracks: libraryTracks, totalTracks });
-    } catch (err) {
-      reportError('Failed to load tracks for shuffle', { source: 'app', error: err });
-    }
-
-    let shuffled: typeof allTracks;
-    if (useSettingsStore.getState().smartShuffleEnabled) {
-      try {
-        const order = await getSmartShuffleQueue(allTracks.map((t) => t.id));
-        const byId = new Map(allTracks.map((t) => [t.id, t] as const));
-        shuffled = order
-          .map((id) => byId.get(id))
-          .filter((track): track is Track => Boolean(track));
-        if (shuffled.length !== allTracks.length) {
-          shuffled = shuffleTracks(allTracks);
-        }
-      } catch {
-        shuffled = shuffleTracks(allTracks);
-      }
-    } else {
-      shuffled = shuffleTracks(allTracks);
-    }
-
-    if (shuffled.length === 0) return;
-    const first = shuffled[0];
-    try {
-      await startPlayback(first, {
-        queue: shuffled,
-        queueIndex: 0,
-        shuffleEnabled: true,
-      });
-    } catch (err) {
-      reportError('Failed to shuffle all tracks', { source: 'app', error: err });
-    }
-  }, [libraryTracks, totalTracks]);
-
-  const handleTogglePlaybackFromPalette = useCallback(async () => {
-    await toggleCurrentPlayback();
-  }, []);
-
-  const handleNextTrackFromPalette = useCallback(async () => {
-    await playAdjacentTrack('next');
-  }, []);
-
-  const handlePreviousTrackFromPalette = useCallback(async () => {
-    await playAdjacentTrack('previous');
-  }, []);
-
-  const handleRescanFromPalette = useCallback(async () => {
-    if (isScanning) return;
-    await libraryScan.rescanAll();
-  }, [isScanning, libraryScan]);
-
-  const handleOpenAlbumTagEditor = useCallback((tracks: Track[]) => {
-    setTagEditorTracks(tracks);
-  }, []);
-
-  const handleAddTracksToQueue = useCallback(
-    (tracks: Track[]) => {
-      tracks.forEach((t) => addToQueue(t));
-    },
-    [addToQueue],
-  );
-
-  const handleRevealTrackInFinder = useCallback(async (track: Track) => {
-    try {
-      await revealInFileManager(track.filePath);
-    } catch (err) {
-      reportError('Failed to reveal track in folder', { source: 'app', error: err });
-    }
-  }, []);
-
-  const handleRevealTracks = useCallback(async (tracks: Track[]) => {
-    if (!tracks || tracks.length === 0) return;
-    const first = tracks[0];
-    try {
-      await revealInFileManager(first.filePath);
-    } catch (err) {
-      reportError('Failed to reveal track in folder', { source: 'app', error: err });
-    }
-  }, []);
+  const {
+    handleShuffleAll,
+    handleTogglePlayback: handleTogglePlaybackFromPalette,
+    handleNextTrack: handleNextTrackFromPalette,
+    handlePreviousTrack: handlePreviousTrackFromPalette,
+    handleRescan: handleRescanFromPalette,
+    handleOpenTagEditor: handleOpenAlbumTagEditor,
+    handleAddTracksToQueue,
+    handleRevealTrack: handleRevealTrackInFinder,
+    handleRevealTracks,
+  } = useAppCommandActions({
+    libraryTracks,
+    totalTracks,
+    isScanning,
+    rescanAll: libraryScan.rescanAll,
+    addToQueue,
+    openTagEditor: setTagEditorTracks,
+  });
 
   const {
     handleRemoveTracks,
@@ -570,7 +506,8 @@ const App = () => {
       currentViewContent={currentViewContent}
       overlayMessages={overlayMessages}
       compactMode={compactMode}
-      reducedEffects={reducedEffects}
+      reducedEffects={effectiveReducedEffects}
+      backgroundEnabled={backgroundEnabled}
       shellVars={shellVars}
       palette={reactivePalette}
       isScrolled={isScrolled}
@@ -608,7 +545,7 @@ const App = () => {
     />
   );
   return (
-    <GlassSystemProvider reducedEffects={reducedEffects} theme={theme}>
+    <GlassSystemProvider reducedEffects={effectiveReducedEffects} theme={theme}>
       <SmoothTimeProvider>
         <HotkeysBootstrap onSearch={openGlobalSearch} />
         {appLayout}
@@ -618,7 +555,7 @@ const App = () => {
           theme={theme}
           showDropOverlay={showDropOverlay}
           showFullPlayer={showFullPlayer}
-          showConfetti={showConfetti}
+          showScanComplete={showScanComplete}
           hasCurrentTrack={Boolean(currentTrack)}
           isPlaying={isPlaying}
           isScanning={isScanning}

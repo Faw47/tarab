@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ipcBatchLimit } from '../lib/ipc-concurrency';
-import { cacheGetThumbnailBytes, getCoverArt } from '../lib/tauri-commands';
+import { cacheGetThumbnailBytes, getCoverArt, resolveCoverArt } from '../lib/tauri-commands';
 
 type CoverArtSize = 'small' | 'medium' | 'large';
 
-const MAX_CACHE = 300;
+const MAX_URL_CACHE_ENTRIES = 300;
+const MAX_FALLBACK_BLOB_BYTES = 64 * 1024 * 1024;
 const IPC_FALLBACK_WINDOW_MS = 15_000;
 const IPC_FALLBACK_MAX_REQUESTS = 1000;
+const PROTOCOL_FAILURE_TTL_MS = 5 * 60_000;
 const coverArtCache = new Map<string, string | null>();
-const fallbackBlobCache = new Map<string, string>();
+const fallbackBlobCache = new Map<string, { url: string; byteLength: number }>();
+let fallbackBlobCacheBytes = 0;
 const inflight = new Map<string, Promise<string | null>>();
 const ipcFallbackRequests: number[] = [];
 const failedIpcFallbacks = new Set<string>();
@@ -31,23 +34,28 @@ const revokeBlobUrl = (url: string) => {
   URL.revokeObjectURL(url);
 };
 
-const rememberFallbackBlob = (key: string, url: string) => {
+const rememberFallbackBlob = (key: string, url: string, byteLength: number) => {
   const previous = fallbackBlobCache.get(key);
-  if (previous && previous !== url) {
-    revokeBlobUrl(previous);
-    removeCachedBlobUrl(previous);
+  if (previous && previous.url !== url) {
+    revokeBlobUrl(previous.url);
+    removeCachedBlobUrl(previous.url);
   }
-  if (previous) fallbackBlobCache.delete(key);
-  fallbackBlobCache.set(key, url);
+  if (previous) {
+    fallbackBlobCache.delete(key);
+    fallbackBlobCacheBytes -= previous.byteLength;
+  }
+  fallbackBlobCache.set(key, { url, byteLength });
+  fallbackBlobCacheBytes += byteLength;
 
-  while (fallbackBlobCache.size > MAX_CACHE) {
+  while (fallbackBlobCacheBytes > MAX_FALLBACK_BLOB_BYTES) {
     const firstKey = fallbackBlobCache.keys().next().value;
     if (!firstKey) break;
     const evicted = fallbackBlobCache.get(firstKey);
     fallbackBlobCache.delete(firstKey);
     if (evicted) {
-      removeCachedBlobUrl(evicted);
-      revokeBlobUrl(evicted);
+      fallbackBlobCacheBytes -= evicted.byteLength;
+      removeCachedBlobUrl(evicted.url);
+      revokeBlobUrl(evicted.url);
     }
   }
 };
@@ -56,7 +64,7 @@ const setWithLimit = (key: string, value: string | null) => {
   if (coverArtCache.has(key)) coverArtCache.delete(key);
   coverArtCache.set(key, value);
 
-  while (coverArtCache.size > MAX_CACHE) {
+  while (coverArtCache.size > MAX_URL_CACHE_ENTRIES) {
     const firstKey = coverArtCache.keys().next().value;
     if (firstKey !== undefined) {
       coverArtCache.delete(firstKey);
@@ -91,7 +99,17 @@ const writeSessionCoverArt = (key: string, value: string) => {
 
 const protocolFailed = (hash: string, size: CoverArtSize): boolean => {
   try {
-    return sessionStorage.getItem(`coverart:protocol_failed:${hash}:${size}`) === 'true';
+    const key = `coverart:protocol_failed:${hash}:${size}`;
+    const value = Number(sessionStorage.getItem(key));
+    if (!Number.isFinite(value) || value <= 0) {
+      sessionStorage.removeItem(key);
+      return false;
+    }
+    if (Date.now() - value >= PROTOCOL_FAILURE_TTL_MS) {
+      sessionStorage.removeItem(key);
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -107,7 +125,9 @@ const allowIpcFallbackRequest = (): boolean => {
   return true;
 };
 
-const bytesToBlobUrl = (bytes: number[] | Uint8Array): string | null => {
+const bytesToBlobUrl = (
+  bytes: number[] | Uint8Array,
+): { url: string; byteLength: number } | null => {
   if (
     typeof Blob === 'undefined' ||
     typeof URL === 'undefined' ||
@@ -116,15 +136,41 @@ const bytesToBlobUrl = (bytes: number[] | Uint8Array): string | null => {
     return null;
   }
   const body = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return URL.createObjectURL(new Blob([body], { type: 'image/webp' }));
+  return {
+    url: URL.createObjectURL(new Blob([body], { type: 'image/webp' })),
+    byteLength: body.byteLength,
+  };
 };
 
 export const markCoverArtProtocolFailed = (hash: string, size: CoverArtSize = 'large') => {
   try {
-    sessionStorage.setItem(`coverart:protocol_failed:${hash}:${size}`, 'true');
+    sessionStorage.setItem(`coverart:protocol_failed:${hash}:${size}`, String(Date.now()));
   } catch {
     // ignore storage errors
   }
+};
+
+export const clearCoverArtProtocolFailed = (hash: string, size: CoverArtSize = 'large') => {
+  try {
+    sessionStorage.removeItem(`coverart:protocol_failed:${hash}:${size}`);
+  } catch {
+    // ignore storage errors
+  }
+};
+
+export const repairCoverArt = async (
+  filePath: string,
+  coverArtHash: string | null,
+  size: CoverArtSize,
+): Promise<string | null> => {
+  const resolution = await resolveCoverArt(filePath, coverArtHash, size);
+  if (resolution.status !== 'ready' || !resolution.hash || !resolution.cacheAvailable) {
+    return null;
+  }
+
+  clearCoverArtProtocolFailed(resolution.hash, size);
+  failedIpcFallbacks.delete(fallbackKey(resolution.hash, size));
+  return resolution.hash;
 };
 
 export const getCoverArtBlobFallback = async (
@@ -133,7 +179,11 @@ export const getCoverArtBlobFallback = async (
 ): Promise<string | null> => {
   const key = fallbackKey(hash, size);
   const cached = fallbackBlobCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    fallbackBlobCache.delete(key);
+    fallbackBlobCache.set(key, cached);
+    return cached.url;
+  }
   if (failedIpcFallbacks.has(key)) return null;
   if (!allowIpcFallbackRequest()) return null;
 
@@ -143,13 +193,13 @@ export const getCoverArtBlobFallback = async (
       failedIpcFallbacks.add(key);
       return null;
     }
-    const url = bytesToBlobUrl(bytes);
-    if (!url) {
+    const blob = bytesToBlobUrl(bytes);
+    if (!blob) {
       failedIpcFallbacks.add(key);
       return null;
     }
-    rememberFallbackBlob(key, url);
-    return url;
+    rememberFallbackBlob(key, blob.url, blob.byteLength);
+    return blob.url;
   } catch {
     failedIpcFallbacks.add(key);
     return null;
@@ -165,11 +215,12 @@ export const invalidateCoverArtCache = (filePath: string, coverArtHash?: string 
   if (coverArtHash) {
     for (const size of ['small', 'medium', 'large'] as const) {
       const key = fallbackKey(coverArtHash, size);
-      const blobUrl = fallbackBlobCache.get(key);
-      if (blobUrl) {
+      const blob = fallbackBlobCache.get(key);
+      if (blob) {
         fallbackBlobCache.delete(key);
-        removeCachedBlobUrl(blobUrl);
-        revokeBlobUrl(blobUrl);
+        fallbackBlobCacheBytes -= blob.byteLength;
+        removeCachedBlobUrl(blob.url);
+        revokeBlobUrl(blob.url);
       }
       failedIpcFallbacks.delete(key);
       try {

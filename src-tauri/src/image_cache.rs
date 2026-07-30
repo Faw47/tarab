@@ -19,6 +19,9 @@ const THUMBNAIL_SIZES: [(u32, &str); 3] = [
 ];
 
 const MAX_CACHE_SIZE_MB: u64 = 500;
+const MAX_SOURCE_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_SOURCE_IMAGE_PIXELS: u64 = 50_000_000;
+const MAX_SOURCE_IMAGE_DIMENSION: u32 = 16_384;
 
 fn max_thumbnail_bytes(size: &str) -> usize {
     match size {
@@ -29,11 +32,11 @@ fn max_thumbnail_bytes(size: &str) -> usize {
     }
 }
 
-fn is_valid_thumbnail_hash(hash: &str) -> bool {
+pub(crate) fn is_valid_thumbnail_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn is_valid_thumbnail_size(size: &str) -> bool {
+pub(crate) fn is_valid_thumbnail_size(size: &str) -> bool {
     THUMBNAIL_SIZES.iter().any(|(_, name)| *name == size)
 }
 
@@ -75,7 +78,7 @@ pub struct ImageCache {
     cache_dir: PathBuf,
     // In-memory LRU for recently accessed hashes
     memory_cache: RwLock<HashMap<String, (Vec<u8>, std::time::Instant)>>,
-    max_memory_items: usize,
+    max_memory_bytes: usize,
 }
 
 impl ImageCache {
@@ -86,7 +89,7 @@ impl ImageCache {
         Self {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
-            max_memory_items: 100,
+            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -119,6 +122,9 @@ impl ImageCache {
 
     /// Generate all thumbnail sizes from raw image data
     pub fn generate_thumbnails(&self, image_data: &[u8]) -> Result<String, String> {
+        if image_data.is_empty() || image_data.len() > MAX_SOURCE_IMAGE_BYTES {
+            return Err("Cover image exceeds the encoded byte limit".to_string());
+        }
         let hash = Self::hash_image_data(image_data);
 
         // Check if already cached and square; otherwise regenerate
@@ -129,6 +135,14 @@ impl ImageCache {
         // Decode image
         let img = image::load_from_memory(image_data)
             .map_err(|e| format!("Failed to decode image: {}", e))?;
+        let width = u64::from(img.width());
+        let height = u64::from(img.height());
+        if img.width() > MAX_SOURCE_IMAGE_DIMENSION
+            || img.height() > MAX_SOURCE_IMAGE_DIMENSION
+            || width.saturating_mul(height) > MAX_SOURCE_IMAGE_PIXELS
+        {
+            return Err("Cover image exceeds the decoded pixel limit".to_string());
+        }
 
         // Generate each size
         for (size, name) in THUMBNAIL_SIZES {
@@ -208,20 +222,22 @@ impl ImageCache {
         // Add to memory cache
         {
             let mut cache = self.memory_cache.write();
-            if cache.len() >= self.max_memory_items {
-                let mut oldest_key = String::new();
-                let mut oldest_time = std::time::Instant::now();
-                for (k, (_, t)) in cache.iter() {
-                    if *t < oldest_time {
-                        oldest_time = *t;
-                        oldest_key = k.clone();
-                    }
-                }
-                if !oldest_key.is_empty() {
-                    cache.remove(&oldest_key);
+            let mut current_bytes: usize = cache.values().map(|(bytes, _)| bytes.len()).sum();
+            while current_bytes.saturating_add(data.len()) > self.max_memory_bytes {
+                let Some(oldest_key) = cache
+                    .iter()
+                    .min_by_key(|(_, (_, accessed))| *accessed)
+                    .map(|(key, _)| key.clone())
+                else {
+                    break;
+                };
+                if let Some((removed, _)) = cache.remove(&oldest_key) {
+                    current_bytes = current_bytes.saturating_sub(removed.len());
                 }
             }
-            cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
+            if data.len() <= self.max_memory_bytes {
+                cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
+            }
         }
 
         Ok(Some(base64::Engine::encode(
@@ -242,6 +258,25 @@ impl ImageCache {
     /// Check if thumbnail exists
     pub fn has_thumbnail(&self, hash: &str) -> bool {
         self.thumbnails_valid(hash)
+    }
+
+    pub fn has_valid_thumbnail(&self, hash: &str, size: &str) -> bool {
+        if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
+            return false;
+        }
+
+        let expected_size = THUMBNAIL_SIZES
+            .iter()
+            .find_map(|(pixels, name)| (*name == size).then_some(*pixels));
+        let Some(expected_size) = expected_size else {
+            return false;
+        };
+        let path = self.get_thumbnail_path(hash, size);
+
+        match (read_thumbnail_file(&path, size), image_dimensions(&path)) {
+            (Ok(Some(_)), Ok((width, height))) => width == expected_size && height == expected_size,
+            _ => false,
+        }
     }
 
     /// Get cache statistics
@@ -400,7 +435,7 @@ mod tests {
         ImageCache {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
-            max_memory_items: 100,
+            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -503,6 +538,39 @@ mod tests {
         assert_eq!(max_thumbnail_bytes("medium"), 700_000);
         assert_eq!(max_thumbnail_bytes("large"), 1_800_000);
         assert_eq!(max_thumbnail_bytes("unexpected"), 700_000);
+    }
+
+    #[test]
+    fn source_image_rejects_oversized_encoded_input() {
+        let root = temp_dir("oversized-source");
+        let cache = test_cache(root.join("covers"));
+        let data = vec![0_u8; MAX_SOURCE_IMAGE_BYTES + 1];
+
+        let result = cache.generate_thumbnails(&data);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("encoded byte limit"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn requested_thumbnail_validation_rejects_wrong_dimensions() {
+        let root = temp_dir("wrong-dimensions");
+        let cache_dir = root.join("covers");
+        fs::create_dir_all(&cache_dir).expect("create cache directory");
+        let cache = test_cache(cache_dir);
+        let image = DynamicImage::new_rgb8(16, 16);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, ImageFormat::WebP)
+            .expect("encode test image");
+        let hash = ImageCache::hash_image_data(encoded.get_ref());
+        cache
+            .save_thumbnail(&hash, "large", &image)
+            .expect("save wrong-sized thumbnail");
+
+        assert!(!cache.has_valid_thumbnail(&hash, "large"));
+        let _ = fs::remove_dir_all(root);
     }
 }
 

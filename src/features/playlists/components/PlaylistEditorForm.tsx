@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '../../../components/ui/button';
 import { reportError } from '../../../lib/report-error';
-import { selectFolder } from '../../../lib/tauri-commands';
+import { selectLibraryFolder } from '../../../lib/tauri-commands';
 import { zodResolver } from '../../../lib/validation/resolver';
 import { useSettingsStore } from '../../../store/settings-store';
 import type { BackendSmartPlaylistRule, PlaylistType } from '../../../types';
@@ -59,9 +59,9 @@ export const PlaylistEditorForm = memo(
 
     const handleBrowseFolder = async () => {
       try {
-        const selected = await selectFolder();
+        const selected = await selectLibraryFolder();
         if (selected) {
-          setValue('folderPath', selected, { shouldValidate: true, shouldDirty: true });
+          setValue('folderPath', selected.path, { shouldValidate: true, shouldDirty: true });
         }
       } catch (error) {
         reportError('Failed to select folder for playlist', {
@@ -102,7 +102,7 @@ export const PlaylistEditorForm = memo(
             {...register('name')}
             type="text"
             className={clsx(
-              'w-full px-3 py-2 outline-none transition-all duration-200',
+              'w-full px-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
               isNeobrutalism
                 ? 'bg-white border-2 border-black rounded-none shadow-[3px_3px_0_0_#000] focus:shadow-[5px_5px_0_0_#000] focus:-translate-x-0.5 focus:-translate-y-0.5 text-black font-bold placeholder:text-black/40'
                 : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
@@ -139,7 +139,7 @@ export const PlaylistEditorForm = memo(
                   setValue('playlistType', type, { shouldValidate: true, shouldDirty: true })
                 }
                 className={clsx(
-                  'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-all',
+                  'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
                   isNeobrutalism
                     ? [
                         'rounded-none border-2 border-black font-black uppercase tracking-tight',
@@ -182,7 +182,7 @@ export const PlaylistEditorForm = memo(
             <select
               {...register('ruleKind')}
               className={clsx(
-                'w-full px-3 py-2 outline-none transition-all duration-200',
+                'w-full px-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 isNeobrutalism
                   ? 'bg-white border-2 border-black rounded-none text-black font-bold appearance-none cursor-pointer hover:bg-[#fffef0]'
                   : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
@@ -412,7 +412,7 @@ export const PlaylistEditorForm = memo(
               <input
                 {...register('folderPath')}
                 className={clsx(
-                  'flex-1 px-3 py-2 outline-none transition-all duration-200',
+                  'flex-1 px-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                   isNeobrutalism
                     ? 'bg-white border-2 border-black rounded-none text-black font-bold placeholder:text-black/40'
                     : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',

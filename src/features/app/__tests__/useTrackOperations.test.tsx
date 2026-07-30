@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import type { SetStateAction } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { moveFile, renameFile } from '../../../lib/tauri-commands';
 import { usePlayerStore } from '../../../store/player-store';
 import type { ContextMenuPosition, Track } from '../../../types';
 import { libraryKeys } from '../../library/queryKeys';
@@ -17,7 +18,9 @@ vi.mock('../../../lib/tauri-commands', () => ({
   pausePlayback: vi.fn(async () => undefined),
   readFullTags: vi.fn(async () => ({})),
   renameFile: vi.fn(async () => ''),
+  restoreTrashedFiles: vi.fn(async () => []),
   stopPlayback: vi.fn(async () => undefined),
+  trashFiles: vi.fn(async () => []),
   writeTagsBatch: vi.fn(async () => undefined),
 }));
 
@@ -193,5 +196,63 @@ describe('useTrackOperations', () => {
     expect(state.currentTrack?.id).toBe(tracks[2].id);
     expect(state.queueIndex).toBe(1);
     expect(state.queue[state.queueIndex]?.id).toBe(tracks[2].id);
+  });
+
+  it('preserves active playback state when the current source is renamed and moved', async () => {
+    const queryClient = new QueryClient();
+    const original = makeTrack('/music/album/one.mp3', { title: 'One' });
+    queryClient.setQueryData(libraryKeys.tracks(), [original]);
+    const setTracks = vi.fn((nextTracks: Track[]) => {
+      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
+    });
+    usePlayerStore.setState({
+      currentTrack: original,
+      queue: [original],
+      queueIndex: 0,
+      currentTime: 47,
+      duration: 180,
+      isPlaying: false,
+      hasActivePlayback: true,
+    });
+
+    const { result } = renderHook(() =>
+      useTrackOperations({
+        queryClient,
+        libraryTracks: [original],
+        albumDetails: null,
+        setAlbumDetails: vi.fn(),
+        setTracks,
+        setTrackCount: vi.fn(),
+        setSelectedTracks: vi.fn(),
+        setTagEditorTracks: vi.fn(),
+        setContextMenuTrack: vi.fn(),
+        setContextMenuPosition: vi.fn(),
+        setConfirmDialog: vi.fn(),
+        handleClearSelection: vi.fn(),
+      }),
+    );
+
+    vi.mocked(renameFile).mockResolvedValueOnce('/music/album/renamed.mp3');
+    await act(async () => {
+      await result.current.handleRenameTrack(original, 'renamed');
+    });
+
+    let state = usePlayerStore.getState();
+    expect(state.currentTrack?.filePath).toBe('/music/album/renamed.mp3');
+    expect(state.currentTime).toBe(47);
+    expect(state.isPlaying).toBe(false);
+    expect(state.hasActivePlayback).toBe(true);
+
+    vi.mocked(moveFile).mockResolvedValueOnce('/music/archive/renamed.mp3');
+    await act(async () => {
+      await result.current.handleMoveTracks([state.currentTrack as Track], '/music/archive');
+    });
+
+    state = usePlayerStore.getState();
+    expect(state.currentTrack?.filePath).toBe('/music/archive/renamed.mp3');
+    expect(state.queueIndex).toBe(0);
+    expect(state.currentTime).toBe(47);
+    expect(state.isPlaying).toBe(false);
+    expect(state.hasActivePlayback).toBe(true);
   });
 });

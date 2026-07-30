@@ -1,14 +1,21 @@
 import { normalizePath } from '../../lib/path-utils';
 import {
+  dbGetAlbumAggregates,
+  dbGetArtistAggregates,
   dbGetLibraryStats,
   dbGetMostPlayed,
   dbGetRecentlyAdded,
   dbGetTrackCount,
+  dbGetTracksByAlbumArtist,
+  dbGetTracksByArtist,
+  dbGetTracksByIds,
   dbGetTracksPaginated,
   dbSearchTracks,
   searchLyrics,
 } from '../../lib/tauri-commands';
 import {
+  DbAlbumAggregateArraySchema,
+  DbArtistAggregateArraySchema,
   DbTrackArraySchema,
   LibraryStatsSchema,
   TrackCountSchema,
@@ -27,7 +34,7 @@ interface SearchLike {
   album: string;
   duration: number;
   filePath: string;
-  coverArtHash: string | null;
+  coverArtHash?: string | null;
   blurhash?: string | null;
 }
 
@@ -43,6 +50,8 @@ export const mapDbTrackToTrack = (track: {
   albumArtist?: string | null;
   album: string;
   year: number | null;
+  trackNumber?: number | null;
+  discNumber?: number | null;
   duration: number;
   filePath: string;
   hasCoverArt: boolean;
@@ -65,6 +74,8 @@ export const mapDbTrackToTrack = (track: {
     albumArtist: track.albumArtist ?? null,
     album: track.album,
     year: track.year,
+    trackNumber: track.trackNumber ?? null,
+    discNumber: track.discNumber ?? null,
     duration: track.duration,
     filePath,
     hasCoverArt: track.hasCoverArt,
@@ -89,8 +100,8 @@ export const mapSearchResultToTrack = (result: SearchLike): Track => ({
   year: null,
   duration: result.duration,
   filePath: normalizePath(result.filePath),
-  hasCoverArt: result.coverArtHash !== null,
-  coverArtHash: result.coverArtHash,
+  hasCoverArt: Boolean(result.coverArtHash),
+  coverArtHash: result.coverArtHash ?? null,
   blurhash: result.blurhash,
   dateAdded: Date.now(),
 });
@@ -132,6 +143,35 @@ export async function fetchMostPlayedTracks(limit = 100): Promise<Track[]> {
   return parsed.map(mapDbTrackToTrack);
 }
 
+export async function fetchAlbumTracks(album: string, artist: string): Promise<Track[]> {
+  const raw = await dbGetTracksByAlbumArtist(album, artist);
+  return DbTrackArraySchema.parse(raw).map(mapDbTrackToTrack);
+}
+
+export async function fetchArtistTracks(artist: string): Promise<Track[]> {
+  const raw = await dbGetTracksByArtist(artist);
+  return DbTrackArraySchema.parse(raw).map(mapDbTrackToTrack);
+}
+
+export async function fetchAlbumAggregates() {
+  const raw = DbAlbumAggregateArraySchema.parse(await dbGetAlbumAggregates());
+  return raw.map((aggregate) => ({
+    album: aggregate.album,
+    artist: aggregate.artist,
+    count: aggregate.trackCount,
+    track: mapDbTrackToTrack(aggregate.representative),
+  }));
+}
+
+export async function fetchArtistAggregates() {
+  const raw = DbArtistAggregateArraySchema.parse(await dbGetArtistAggregates());
+  return raw.map((aggregate) => ({
+    artist: aggregate.artist,
+    count: aggregate.trackCount,
+    tracks: [mapDbTrackToTrack(aggregate.representative)],
+  }));
+}
+
 export async function fetchLibrarySearch(
   query: string,
   limit: number = 100,
@@ -144,9 +184,26 @@ export async function fetchLibrarySearch(
   const metadataPromise = includeMetadata ? dbSearchTracks(query, limit) : Promise.resolve([]);
   const lyricsPromise = includeLyrics ? searchLyrics(query, limit) : Promise.resolve([]);
   const [metadataRaw, lyricsRaw] = await Promise.all([metadataPromise, lyricsPromise]);
+  const metadataResults = SearchResultArraySchema.parse(metadataRaw);
+  const lyricsResults = LyricsSearchResultArraySchema.parse(lyricsRaw);
+  const ids = Array.from(
+    new Set([
+      ...metadataResults.map((result) => result.id),
+      ...lyricsResults.map((result) => result.id),
+    ]),
+  );
+  const hydratedRaw = ids.length > 0 ? await dbGetTracksByIds(ids) : [];
+  const hydrated = DbTrackArraySchema.parse(hydratedRaw).map(mapDbTrackToTrack);
+  const hydratedById = new Map(hydrated.map((track) => [track.id, track]));
 
   return {
-    metadata: SearchResultArraySchema.parse(metadataRaw),
-    lyrics: LyricsSearchResultArraySchema.parse(lyricsRaw),
+    metadata: metadataResults.map(
+      (result) => hydratedById.get(normalizePath(result.id)) ?? mapSearchResultToTrack(result),
+    ),
+    lyrics: lyricsResults.map((result) => ({
+      ...(hydratedById.get(normalizePath(result.id)) ?? mapSearchResultToTrack(result)),
+      matchedLine: result.matchedLine,
+      matchedLineIndex: result.matchedLineIndex,
+    })),
   };
 }

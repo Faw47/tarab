@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
-import { lazy, Suspense } from 'react';
-import ConfettiExplosion from 'react-confetti-explosion';
+import { Check } from 'lucide-react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { FloatingDock, type NavView } from '../../components/navigation';
 import type { AppTheme } from '../../store/settings-store';
 
@@ -19,7 +19,7 @@ interface AppTransientSurfacesProps {
   theme: AppTheme;
   showDropOverlay: boolean;
   showFullPlayer: boolean;
-  showConfetti: boolean;
+  showScanComplete: boolean;
   hasCurrentTrack: boolean;
   isPlaying: boolean;
   isScanning: boolean;
@@ -38,7 +38,7 @@ export function AppTransientSurfaces({
   theme,
   showDropOverlay,
   showFullPlayer,
-  showConfetti,
+  showScanComplete,
   hasCurrentTrack,
   isPlaying,
   isScanning,
@@ -51,6 +51,44 @@ export function AppTransientSurfaces({
   onOpenFullPlayer,
   onCloseFullPlayer,
 }: AppTransientSurfacesProps) {
+  const fullPlayerReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (showFullPlayer) {
+      fullPlayerReturnFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-collapse-player]')?.focus();
+      });
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onCloseFullPlayer();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const root = document.querySelector<HTMLElement>('[data-full-player-dialog]');
+        const focusable = root?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+    fullPlayerReturnFocusRef.current?.focus();
+    fullPlayerReturnFocusRef.current = null;
+  }, [onCloseFullPlayer, showFullPlayer]);
+
   return (
     <>
       <Suspense fallback={null}>
@@ -74,7 +112,8 @@ export function AppTransientSurfaces({
         <div
           className={clsx(
             'fixed inset-0 z-40 pointer-events-none',
-            theme !== 'neobrutalism' && 'transition-all duration-200',
+            theme !== 'neobrutalism' &&
+              'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
           )}
         >
           <div
@@ -111,19 +150,20 @@ export function AppTransientSurfaces({
 
       {showFullPlayer && (
         <Suspense fallback={null}>
-          <PlayerView onClose={onCloseFullPlayer} />
+          <div data-full-player-dialog role="dialog" aria-modal="true" aria-label="Full player">
+            <PlayerView onClose={onCloseFullPlayer} />
+          </div>
         </Suspense>
       )}
 
-      {showConfetti && (
-        <div className="fixed inset-0 pointer-events-none z-[999] flex items-center justify-center">
-          <ConfettiExplosion
-            force={0.8}
-            duration={3000}
-            particleCount={250}
-            width={1600}
-            colors={['#A091D0', '#A4B680', '#DAB852', '#D88274', '#000000', '#FFFFFF']}
-          />
+      {showScanComplete && (
+        <div
+          className="fixed right-6 top-20 z-[999] flex items-center gap-2 rounded-full border border-white/15 bg-black/75 px-3 py-2 text-sm font-semibold text-white shadow-xl backdrop-blur-md motion-safe:animate-fade-in-up"
+          role="status"
+          aria-live="polite"
+        >
+          <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+          Library scan complete
         </div>
       )}
 

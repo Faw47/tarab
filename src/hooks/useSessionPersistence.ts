@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { NavView } from '../components/navigation';
-import { savePlayerStateToStore } from '../features/app/player-state-store';
+import { isPlayerStateHydrated, savePlayerStateToStore } from '../features/app/player-state-store';
 import { getAlbumKeyFromParts } from '../lib/album-key';
 import { usePlayerStore } from '../store/player-store';
 
@@ -68,6 +68,7 @@ export function useSessionPersistence(
 
   const scheduleSessionSave = useCallback(
     (immediate = false) => {
+      if (!isPlayerStateHydrated()) return;
       if (immediate) {
         if (sessionSaveTimeoutRef.current) {
           clearTimeout(sessionSaveTimeoutRef.current);
@@ -90,6 +91,7 @@ export function useSessionPersistence(
 
   return {
     scheduleSessionSave,
+    flushSessionSave,
     lastSavedPositionRef,
     lastSessionSaveRef,
   };

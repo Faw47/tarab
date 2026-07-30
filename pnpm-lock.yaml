@@ -83,9 +83,6 @@ importers:
       '@tauri-apps/plugin-positioner':
         specifier: ^2.3.1
         version: 2.3.1
-      '@tauri-apps/plugin-store':
-        specifier: ^2.4.2
-        version: 2.4.2
       '@tauri-apps/plugin-window-state':
         specifier: ^2.4.1
         version: 2.4.1
@@ -128,9 +125,6 @@ importers:
       react-blurhash:
         specifier: ^0.3.0
         version: 0.3.0(blurhash@2.0.5)(react@19.2.3)
-      react-confetti-explosion:
-        specifier: ^3.0.3
-        version: 3.0.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react-dom:
         specifier: ^19.1.0
         version: 19.2.3(react@19.2.3)
@@ -2385,9 +2379,6 @@ packages:
   '@tauri-apps/plugin-positioner@2.3.1':
     resolution: {integrity: sha512-9JiNO3tpHhz91VUG/sncGha4CL1qQHlftnfkwWJIquAR7rhLA9GUdW1oIdZLbNswNzkkd9qVywFmh658eFEL2Q==}
 
-  '@tauri-apps/plugin-store@2.4.2':
-    resolution: {integrity: sha512-0ClHS50Oq9HEvLPhNzTNFxbWVOqoAp3dRvtewQBeqfIQ0z5m3JRnOISIn2ZVPCrQC0MyGyhTS9DWhHjpigQE7A==}
-
   '@tauri-apps/plugin-window-state@2.4.1':
     resolution: {integrity: sha512-OuvdrzyY8Q5Dbzpj+GcrnV1iCeoZbcFdzMjanZMMcAEUNy/6PH5pxZPXpaZLOR7whlzXiuzx0L9EKZbH7zpdRw==}
 
@@ -3306,12 +3297,6 @@ packages:
     peerDependencies:
       blurhash: ^2.0.3
       react: '>=15'
-
-  react-confetti-explosion@3.0.3:
-    resolution: {integrity: sha512-ow5ns/1ttzXsIlbbfJmWJNiyQK8lTHBL6lRSUXGaK44K/3NIMngR57Ja96l+D6txTeFhfe0BfXGvORMxhtRDng==}
-    peerDependencies:
-      react: '>=16.8.0'
-      react-dom: '>=16.8.0'
 
   react-docgen-typescript@2.4.0:
     resolution: {integrity: sha512-ZtAp5XTO5HRzQctjPU0ybY0RRCQO19X/8fxn3w7y2VVTUbGHDKULPTL4ky3vB05euSgG5NpALhEhDPvQ56wvXg==}
@@ -6207,10 +6192,6 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.11.1
 
-  '@tauri-apps/plugin-store@2.4.2':
-    dependencies:
-      '@tauri-apps/api': 2.11.1
-
   '@tauri-apps/plugin-window-state@2.4.1':
     dependencies:
       '@tauri-apps/api': 2.11.1
@@ -7225,11 +7206,6 @@ snapshots:
     dependencies:
       blurhash: 2.0.5
       react: 19.2.3
-
-  react-confetti-explosion@3.0.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
-    dependencies:
-      react: 19.2.3
-      react-dom: 19.2.3(react@19.2.3)
 
   react-docgen-typescript@2.4.0(typescript@5.8.3):
     dependencies:

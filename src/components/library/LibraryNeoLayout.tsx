@@ -302,10 +302,10 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                           <Icon className="h-3.5 w-3.5" strokeWidth={3} />
                         </div>
                         <div className="flex flex-col items-start pr-1">
-                          <strong className="text-[11px] leading-tight font-black tracking-[0.05em]">
+                          <strong className="text-[12px] leading-tight font-black tracking-[0.05em]">
                             {facet.label}
                           </strong>
-                          <span className="font-mono text-[9px] leading-none font-black opacity-70">
+                          <span className="font-mono text-[12px] leading-none font-black opacity-70">
                             {facet.count > 999 ? `${Math.floor(facet.count / 1000)}K` : facet.count}
                           </span>
                         </div>
@@ -321,7 +321,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                     type="button"
                     className={cn(
                       NEO_BUTTON_BASE,
-                      'h-10 px-2.5 text-[11px]',
+                      'h-10 px-2.5 text-[12px]',
                       viewMode === 'grid' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT,
                     )}
                     onClick={() => onViewModeChange('grid')}
@@ -345,7 +345,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                     type="button"
                     className={cn(
                       NEO_BUTTON_BASE,
-                      'h-10 px-2.5 text-[11px]',
+                      'h-10 px-2.5 text-[12px]',
                       viewMode === 'list' ? NEO_BUTTON_ACTIVE : NEO_BUTTON_DEFAULT,
                     )}
                     onClick={() => onViewModeChange('list')}
@@ -374,7 +374,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
               aria-label="Sort order"
             >
               <div className="flex px-3 items-center gap-2">
-                <span className="text-[11px] font-black uppercase leading-tight tracking-[0.05em] whitespace-nowrap">
+                <span className="text-[12px] font-black uppercase leading-tight tracking-[0.05em] whitespace-nowrap">
                   SORT: {SORT_LABELS[sortBy]}
                 </span>
                 <ChevronDown className="h-3.5 w-3.5" strokeWidth={3} />
@@ -470,7 +470,7 @@ export const LibraryNeoLayout = memo(function LibraryNeoLayout(props: LibraryNeo
                     : 'bg-[var(--neo-panel)]',
               )}
             >
-              <span className="text-[9px] font-black uppercase tracking-[0.1em] truncate">
+              <span className="text-[12px] font-black uppercase tracking-[0.1em] truncate">
                 {metric.label}
               </span>
               <strong className="font-mono text-xl md:text-[min(1.8vw,1.65rem)] font-black leading-none truncate block">

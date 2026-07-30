@@ -1,38 +1,63 @@
-import { load } from '@tauri-apps/plugin-store';
-import { loadPlaybackSession, type PlaybackSessionPayload } from '../../lib/tauri-commands';
+import {
+  fixedStoreGet,
+  fixedStoreSet,
+  loadPlaybackSession,
+  type PlaybackSessionPayload,
+} from '../../lib/tauri-commands';
 
-const STORE_PATH = 'tarab-player.dat';
 const KEY = 'player-state';
+const CURRENT_VERSION = 2;
 
-let storePromise: ReturnType<typeof load> | null = null;
-
-const getPlayerStore = () => {
-  if (!storePromise) {
-    storePromise = load(STORE_PATH, { autoSave: true, defaults: {} });
-  }
-  return storePromise;
-};
+let hydrated = false;
+let latestRevision = 0;
+let saveQueue: Promise<void> = Promise.resolve();
 
 /**
- * Loads persisted player session from the plugin store (`tarab-player.dat`, key `player-state`).
+ * Loads persisted player session from the fixed native store (`tarab-player.dat`, key `player-state`).
  * Migrates once from legacy Rust `session.json` via `load_playback_session` if the store is empty.
  */
 export async function loadPlayerStateFromStore(): Promise<PlaybackSessionPayload | null> {
-  const store = await getPlayerStore();
-  const raw = await store.get(KEY);
+  const raw = await fixedStoreGet<PlaybackSessionPayload>('player', KEY);
   if (raw && typeof raw === 'object' && 'version' in (raw as object)) {
-    return raw as PlaybackSessionPayload;
+    const session = raw as PlaybackSessionPayload;
+    latestRevision = Math.max(latestRevision, session.revision ?? 0);
+    return {
+      ...session,
+      version: CURRENT_VERSION,
+      revision: session.revision ?? 0,
+    };
   }
 
   const legacy = await loadPlaybackSession();
   if (legacy) {
-    await store.set(KEY, legacy);
-    return legacy;
+    const migrated = { ...legacy, version: CURRENT_VERSION, revision: 0 };
+    await fixedStoreSet('player', KEY, migrated);
+    return migrated;
   }
   return null;
 }
 
-export async function savePlayerStateToStore(session: PlaybackSessionPayload): Promise<void> {
-  const store = await getPlayerStore();
-  await store.set(KEY, session);
+export function markPlayerStateHydrated(): void {
+  hydrated = true;
+}
+
+export function isPlayerStateHydrated(): boolean {
+  return hydrated;
+}
+
+export function savePlayerStateToStore(session: PlaybackSessionPayload): Promise<void> {
+  if (!hydrated) return Promise.resolve();
+
+  const revision = ++latestRevision;
+  const next = { ...session, version: CURRENT_VERSION, revision };
+  saveQueue = saveQueue.then(async () => {
+    const persisted = await fixedStoreGet<PlaybackSessionPayload>('player', KEY);
+    if ((persisted?.revision ?? -1) >= revision) return;
+    await fixedStoreSet('player', KEY, next);
+  });
+  return saveQueue;
+}
+
+export async function flushPlayerStateWrites(): Promise<void> {
+  await saveQueue;
 }

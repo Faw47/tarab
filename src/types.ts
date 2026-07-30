@@ -228,6 +228,8 @@ export interface TrackMetadata {
   album_artist?: string | null;
   album: string;
   year: number | null;
+  track_number: number | null;
+  disc_number: number | null;
   duration_secs: number;
   file_path: string;
   has_cover_art: boolean;
@@ -249,6 +251,8 @@ export type DesktopControlAction =
   | 'pause'
   | 'next'
   | 'previous'
+  | 'toggle-shuffle'
+  | 'cycle-repeat'
   | 'show-main'
   | 'toggle-mini'
   | 'quit';

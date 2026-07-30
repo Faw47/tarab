@@ -38,6 +38,12 @@
   --stroke-subtle: oklch(0.3 0.02 140 / 0.4);
   --field-surface: oklch(0.22 0.02 140);
   --focus-ring: var(--signal-play);
+  --motion-fast: 120ms;
+  --motion-standard: 180ms;
+  --motion-emphasis: 240ms;
+  --motion-slow: 320ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-springy: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* Compatibility aliases (existing utility classes depend on these names) */
   --background: var(--surface-shell);
@@ -74,8 +80,13 @@
   --sidebar-border: oklch(0.3 0.02 140 / 0.3);
   --sidebar-ring: var(--focus-ring);
 
+  /* Glass tiers — spec §5: subtle, medium, strong */
+  --glass-subtle: oklch(0.2 0.015 140 / 0.06);
+  --glass-medium: oklch(0.2 0.015 140 / 0.1);
+  --glass-strong: oklch(0.2 0.015 140 / 0.18);
+  /* Legacy alias — used for opaque panels that need higher fill */
   --glass: oklch(0.2 0.015 140 / 0.52);
-  --glass-border: oklch(0.5 0.03 130 / 0.2);
+  --glass-border: oklch(0.5 0.03 130 / 0.14);
   --glass-highlight: oklch(0.95 0.01 100 / 0.06);
   --glass-shadow: oklch(0 0 0 / 0.4);
   --shell-blob-a: oklch(0.42 0.09 72 / 0.78);
@@ -665,36 +676,37 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
-/* Staggered entry delays */
-.stagger-1 {
-  animation-delay: 0ms;
-}
-
-.stagger-2 {
-  animation-delay: 60ms;
-}
-
-.stagger-3 {
-  animation-delay: 120ms;
-}
-
-.stagger-4 {
-  animation-delay: 180ms;
-}
-
-.stagger-5 {
-  animation-delay: 240ms;
-}
-
-.stagger-6 {
-  animation-delay: 300ms;
-}
-
 /* Fade in up animation */
 .animate-fade-in-up {
-  animation: enter-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: enter-up var(--motion-emphasis) var(--motion-ease-standard) both;
 }
 
+@layer utilities {
+  .tarab-fade-up {
+    animation: fade-in-up var(--motion-standard) var(--motion-ease-standard) forwards;
+    opacity: 0;
+  }
+
+  /* Spec §4: Icon Sizing Tokens */
+  .icon-i1 {
+    @apply w-3 h-3;
+  } /* 12px */
+  .icon-i2 {
+    @apply w-4 h-4;
+  } /* 16px */
+  .icon-i3 {
+    @apply w-5 h-5;
+  } /* 20px */
+  .icon-i4 {
+    @apply w-6 h-6;
+  } /* 24px */
+  .icon-i5 {
+    @apply w-8 h-8;
+  } /* 32px */
+  .icon-i6 {
+    @apply w-12 h-12;
+  } /* 48px */
+}
 /* Player background animations */
 @keyframes player-pan-slow {
   0% {

@@ -143,7 +143,7 @@ export const LibraryFileInfoModal = ({
                 >
                   File properties
                 </h3>
-                <p id="file-info-description" className="mt-1 text-[11px] text-text-muted">
+                <p id="file-info-description" className="mt-1 text-[12px] text-text-muted">
                   Technical details for{' '}
                   <span className="font-medium text-text-primary">
                     {track.title || 'Untitled track'}
@@ -162,7 +162,7 @@ export const LibraryFileInfoModal = ({
 
             <div className="space-y-4">
               <div className="volumetric-glass relative p-3 rounded-2xl border border-white/10 bg-white/[0.03]">
-                <div className="text-[10px] text-text-subtle uppercase tracking-[0.18em] mb-1.5">
+                <div className="text-[12px] text-text-subtle uppercase tracking-[0.18em] mb-1.5">
                   Path
                 </div>
                 <div className="text-xs font-mono text-text-primary break-all leading-relaxed">
@@ -172,15 +172,15 @@ export const LibraryFileInfoModal = ({
 
               <div className="grid grid-cols-2 gap-3 text-sm text-text-primary">
                 <div>
-                  <div className="text-[10px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
+                  <div className="text-[12px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
                     Format
                   </div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/15 bg-white/[0.02] text-[11px] font-semibold">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/15 bg-white/[0.02] text-[12px] font-semibold">
                     {getFormatLabel(track)}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
+                  <div className="text-[12px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
                     Bitrate
                   </div>
                   <div className="text-xs text-text-primary">
@@ -188,7 +188,7 @@ export const LibraryFileInfoModal = ({
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
+                  <div className="text-[12px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
                     Sample Rate
                   </div>
                   <div className="text-xs text-text-primary">
@@ -196,14 +196,14 @@ export const LibraryFileInfoModal = ({
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
+                  <div className="text-[12px] text-text-subtle uppercase tracking-[0.18em] mb-0.5">
                     Size
                   </div>
                   <div className="text-xs text-text-primary">{formatSize(track.fileSize)}</div>
                 </div>
               </div>
 
-              <p className="text-center text-[10px] text-text-subtle pt-1">
+              <p className="text-center text-[12px] text-text-subtle pt-1">
                 Press Esc to close this window
               </p>
 

@@ -4,8 +4,10 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Blurhash } from 'react-blurhash';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  clearCoverArtProtocolFailed,
   getCoverArtBlobFallback,
   markCoverArtProtocolFailed,
+  repairCoverArt,
   useCoverArt,
 } from '../../hooks/useCoverArt';
 import { getCoverArt } from '../../lib/tauri-commands';
@@ -48,6 +50,7 @@ export const CoverArtImage = memo(
     const [inView, setInView] = useState(!lazy);
     const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
     const errorCount = useRef(0);
+    const identity = `${track.filePath}::${track.coverArtHash ?? 'nohash'}::${size}`;
 
     useEffect(() => {
       if (!lazy || inView) return;
@@ -81,9 +84,15 @@ export const CoverArtImage = memo(
     );
     const src = overrideSrc ?? art ?? null;
 
+    useEffect(() => {
+      setOverrideSrc(null);
+      setIsLoaded(false);
+      errorCount.current = 0;
+    }, [identity]);
+
     const handleError = async () => {
       if (!track.hasCoverArt || !track.filePath) return;
-      if (errorCount.current > 1) return;
+      if (errorCount.current > 2) return;
       errorCount.current += 1;
 
       // Mark protocol as failed for this hash/size combination
@@ -94,6 +103,16 @@ export const CoverArtImage = memo(
       // If we have a hash, try IPC fallback (protocol likely failed)
       if (track.coverArtHash) {
         try {
+          const repairedHash = await repairCoverArt(track.filePath, track.coverArtHash, size);
+          if (repairedHash) {
+            const blobUrl = await getCoverArtBlobFallback(repairedHash, size);
+            if (blobUrl) {
+              clearCoverArtProtocolFailed(repairedHash, size);
+              setOverrideSrc(blobUrl);
+              return;
+            }
+          }
+
           const blobUrl = await getCoverArtBlobFallback(track.coverArtHash, size);
           if (blobUrl) {
             setOverrideSrc(blobUrl);
@@ -146,7 +165,7 @@ export const CoverArtImage = memo(
         )}
         style={viewTransitionName ? { viewTransitionName } : undefined}
       >
-        {!src && !track.blurhash && (
+        {!isLoaded && !track.blurhash && (
           <CoverArtSkeleton
             className="absolute inset-0"
             roundedClassName={effectiveRoundedClassName}
@@ -171,12 +190,13 @@ export const CoverArtImage = memo(
             src={src}
             alt={alt || track.album || 'Album art'}
             className={clsx(
-              'object-cover relative z-10 transition-opacity duration-300',
+              'object-cover relative z-10 transition-opacity duration-[var(--motion-emphasis)]',
               isLoaded ? 'opacity-100' : 'opacity-0',
               effectiveRoundedClassName,
               imgClassName,
             )}
-            loading="lazy"
+            fetchPriority={lazy ? 'auto' : 'high'}
+            loading={lazy ? 'lazy' : 'eager'}
             decoding="async"
             onLoad={() => setIsLoaded(true)}
             onError={handleError}

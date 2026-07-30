@@ -1,4 +1,4 @@
-import { Home, type LucideIcon, Search, Settings, Tag } from 'lucide-react';
+import { Home, ListMusic, type LucideIcon, Search, Settings, Tag } from 'lucide-react';
 import {
   type CSSProperties,
   memo,
@@ -58,6 +58,7 @@ const PRIMARY_NAV_ITEMS: SidebarNavItem[] = [
   { view: 'library', label: 'Search', icon: Search, segment: 'search' },
   { view: 'library', label: 'Library', icon: LibraryIcon as LucideIcon, segment: 'libraryBrowse' },
   { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
+  { view: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 
 const UTILITY_NAV_ITEMS: SidebarNavItem[] = [{ view: 'tags', label: 'Tags', icon: Tag }];
@@ -128,7 +129,7 @@ const SidebarNavButton = memo(function SidebarNavButton({
         aria-label={label}
         aria-pressed={active}
         className={cn(
-          'group flex items-center justify-center border-2 border-black transition-none focus-visible:outline-none rounded-none text-black hover-neo-wiggle',
+          'group flex items-center justify-center border-2 border-black transition-none focus-visible:outline-none rounded-none text-black',
           active
             ? 'bg-[var(--signal-active)] p-[6px] shadow-none'
             : 'h-11 w-11 bg-white shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-panel)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none',
@@ -149,7 +150,7 @@ const SidebarNavButton = memo(function SidebarNavButton({
       aria-pressed={active}
       className={cn(
         'group relative z-10 flex h-11 w-11 items-center justify-center',
-        'rounded-full transition-all duration-300',
+        'rounded-full transition-[color,background-color,transform] duration-[var(--motion-standard)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-inset',
         active ? 'text-white' : 'text-white/50 hover:text-white/90',
       )}
@@ -160,7 +161,7 @@ const SidebarNavButton = memo(function SidebarNavButton({
     >
       <span
         className={cn(
-          'transition-all duration-300',
+          'transition-[transform,filter] duration-[var(--motion-standard)]',
           active
             ? 'scale-110 drop-shadow-[0_0_12px_rgba(255,255,255,0.2)]'
             : 'group-hover:scale-110 group-active:scale-95',
@@ -256,7 +257,7 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
             'absolute left-1/2 -translate-x-1/2 w-11 h-11 rounded-full pointer-events-none motion-reduce:transition-none',
             isDragging || pillLayoutFromDom
               ? 'transition-none'
-              : 'transition-[top,height,opacity] duration-200 ease-out',
+              : 'transition-[top,height,opacity] duration-[var(--motion-standard)] ease-out',
           )}
           style={{
             ...(pillLayoutFromDom

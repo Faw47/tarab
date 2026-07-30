@@ -79,6 +79,16 @@ Tag changes feed directly back into Tarab’s:
 * playlists
 * library organization
 
+Track number, disc number, format, bitrate, sample rate, and file size persist in the library
+database. A rescan updates media metadata without resetting ratings, play history, or playlist
+membership.
+Scan paths cross the desktop boundary in bounded 500-path chunks. Rust applies the final folder
+reconciliation in one database transaction.
+
+File removal uses Tarab Trash by default. Tarab stores a bounded recovery record and returns one
+undo token per successful file. Permanent deletion is a separate action with a second
+confirmation.
+
 ### A modern interface for a serious library
 
 Tarab is designed as a complete desktop application rather than a utility wrapped around a track list.
@@ -133,6 +143,8 @@ Neobrutalism rebuilds the interface with:
 Both systems preserve the same library, playback, lyric, and editing features.
 
 Tarab also respects the operating system’s reduced-motion preference and includes a Reduced Effects setting.
+The system preference always wins. The Background setting also stops animated and cover-driven
+background layers instead of only hiding their controls.
 
 ## Your library has structure
 
@@ -151,10 +163,15 @@ You can:
 * watch approved folders for changes
 
 Tarab supports three playlist types.
+Open **Playlists** from the primary navigation to create a collection, inspect its tracks, see
+unavailable entries, or refresh a folder-synced source.
 
 ### Manual playlists
 
 Choose tracks directly and control their order.
+
+Add and reorder requests carry an idempotency key. A repeated request returns the first completed
+playlist result instead of applying the mutation twice.
 
 ### Smart playlists
 
@@ -163,6 +180,9 @@ Build collections from rules based on your library metadata.
 ### Folder Sync playlists
 
 Keep a playlist synchronized with the contents of a selected folder.
+Tarab creates a native library grant when you choose the folder. Manual sync validates that grant,
+uses all indexed tracks below the folder, preserves missing-track snapshots, and reports files that
+still need a library scan.
 
 When an approved music folder changes, Tarab can refresh the library automatically.
 
@@ -178,6 +198,11 @@ Tarab uses a Rust audio engine and supports:
 * volume boost
 * audio output selection
 * queue management
+
+The in-app playback surface is the **Now Playing bar**. The separate always-on-top window is the
+**Floating mini window**. The full player uses the same edge-mounted seek control as the Home hero.
+It resolves packaged cover art from Tarab’s validated app-owned cache and repairs missing cached
+thumbnails from an authorized source file when possible.
 * smart shuffle
 * shuffle history
 * repeat modes

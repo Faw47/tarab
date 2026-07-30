@@ -25,6 +25,8 @@ const toTrack = (metadata: Awaited<ReturnType<typeof getTrackMetadata>>): Track 
   albumArtist: metadata.album_artist,
   album: metadata.album,
   year: metadata.year,
+  trackNumber: metadata.track_number,
+  discNumber: metadata.disc_number,
   duration: metadata.duration_secs,
   filePath: metadata.file_path,
   hasCoverArt: metadata.has_cover_art,

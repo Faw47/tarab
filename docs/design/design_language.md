@@ -72,6 +72,8 @@ Contrast/readability rules:
 
 - Section labels over glass should not drop below `text-white/40`.
 - Decorative metadata can be dimmer, but actionable text should remain clearly legible.
+- Supporting text must be at least 12 px. Dense interactive labels should use 13 to 14 px when
+  the available surface permits it.
 
 ---
 
@@ -194,7 +196,22 @@ Mini window:
 
 Selection toolbar entrance:
 
-- Preferred motion: short vertical rise with fade (`~220ms`, springy easing)
+- Preferred motion: short vertical rise with fade using the 180 ms standard token.
+
+Motion tokens:
+
+- Fast feedback: 120 ms
+- Standard controls: 180 ms
+- Emphasized surface changes: 240 ms
+- Use `cubic-bezier(0.2, 0, 0, 1)` for standard UI transitions.
+- The operating-system Reduce Motion preference or Tarab Reduced Effects disables decorative motion.
+- Do not stagger routine card entry. Animate only the surface or result state that changed.
+- Declare each transitioned property. Do not use `transition-all`.
+
+Supporting text:
+
+- Use 12 px as the minimum size.
+- Use 13–14 px for dense interactive labels.
 
 Back/Sticky choreography:
 
@@ -206,8 +223,23 @@ Back/Sticky choreography:
 
 - Hero art should scale responsively across phone/desktop.
 - If art URL is pending, render shimmer placeholder.
-- If art load fails, render explicit icon fallback.
+- Use the shared cover-art resolver in every surface.
+- Show the icon fallback only after native resolution confirms that the track has no art.
+- Cache, permission, and protocol failures are repair states, not no-art states.
 - Optional blur diffusion layer is disabled when reduced effects are enabled.
+
+Full-player seek:
+
+- Mount the shared seek bar on the top edge of the cover card.
+- Keep the visible rail at 2 px and the pointer target at least 20 px.
+- Reveal the rail, knob, and time tooltip on hover, focus, or drag.
+- Clamp the dot, knob, and tooltip within the card corners.
+
+Playback recovery:
+
+- Keep playback failures visible until the listener chooses a recovery action.
+- Offer Retry, Skip, Reveal in Finder, and Remove from Queue.
+- Do not present a decode failure as normal track completion.
 
 ---
 

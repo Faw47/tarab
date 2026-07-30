@@ -172,7 +172,7 @@ const TrackRow = memo(
             )}
             {track.title}
           </div>
-          <div className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5">
+          <div className="truncate text-[12px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5">
             {track.artist}
           </div>
         </div>
@@ -217,6 +217,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
   const [playlistPickerIds, setPlaylistPickerIds] = useState<string[] | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const firstTrack = tracks[0] ?? null;
   const coverFromTrack = useCoverArt(
@@ -260,6 +261,11 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
   useEffect(() => {
     if (!menuOpen) return;
+    queueMicrotask(() => {
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+        ?.focus();
+    });
     const handleOutsideClick = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setMenuOpen(false);
@@ -269,6 +275,29 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [menuOpen]);
+
+  const handleMenuKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
+    );
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setMenuOpen(false);
+      menuTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      items[event.key === 'Home' ? 0 : items.length - 1]?.focus();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const offset = event.key === 'ArrowDown' ? 1 : -1;
+      items[(Math.max(0, current) + offset + items.length) % items.length]?.focus();
+    }
+  }, []);
 
   const openPlaylistPicker = useCallback(() => {
     if (targetTracks.length === 0) return;
@@ -331,7 +360,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
               <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-black/60">
+              <p className="text-[12px] font-black uppercase tracking-[0.16em] text-black/60">
                 Library Archive
               </p>
               <h2 className="truncate text-sm md:text-base font-black uppercase tracking-[0.08em] text-black">
@@ -344,7 +373,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             <button
               type="button"
               onClick={() => onShuffleAlbum?.()}
-              className={cn(neoActionButtonClass(), 'hover-neo-wiggle')}
+              className={neoActionButtonClass()}
               disabled={!canShuffleAlbum}
             >
               <Shuffle className="h-4 w-4" />
@@ -353,7 +382,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             <button
               type="button"
               onClick={() => onPlayAlbum?.()}
-              className={cn(neoActionButtonClass(true), 'hover-neo-wiggle')}
+              className={neoActionButtonClass(true)}
               disabled={!canPlayAlbum}
             >
               <Play className="h-4 w-4 fill-current" />
@@ -370,11 +399,11 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
             <section className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr] md:gap-8">
               <div className="rounded-none border-2 border-black bg-white p-2 shadow-[4px_4px_0_0_#000] animate-neo-pop">
                 <div className="neo-album-art-wrap relative aspect-square overflow-hidden bg-[var(--neo-muted)]">
-                  <div className="absolute left-2 top-2 z-30 border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase text-black">
+                  <div className="absolute left-2 top-2 z-30 border-2 border-black bg-white px-2 py-1 text-[12px] font-black uppercase text-black">
                     {coverFormatSticker}
                   </div>
                   {coverMetaSticker && (
-                    <div className="absolute bottom-2 right-2 z-30 -rotate-2 border-2 border-black bg-[var(--signal-active)] px-2 py-1 text-[10px] font-black uppercase text-black">
+                    <div className="absolute bottom-2 right-2 z-30 -rotate-2 border-2 border-black bg-[var(--signal-active)] px-2 py-1 text-[12px] font-black uppercase text-black">
                       {coverMetaSticker}
                     </div>
                   )}
@@ -412,26 +441,26 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
                 <div className="mt-8 flex flex-wrap items-center gap-3">
                   {releaseYear && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                       <Calendar className="h-3.5 w-3.5" />
                       {releaseYear}
                     </span>
                   )}
-                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                     <ListMusic className="h-3.5 w-3.5" />
                     {tracks.length} {tracks.length === 1 ? 'Track' : 'Tracks'}
                   </span>
-                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                  <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                     <Clock className="h-3.5 w-3.5" />
                     {formatTime(totalDuration)}
                   </span>
                   {firstTrack?.fileFormat && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                       {firstTrack.fileFormat}
                     </span>
                   )}
                   {firstTrack?.bitrate && (
-                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                    <span className="inline-flex items-center gap-1.5 border-[2px] border-black bg-[var(--neo-muted)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                       {Math.round(firstTrack.bitrate / 1000)} kbps
                     </span>
                   )}
@@ -439,6 +468,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
                 <div className="mt-8 flex md:hidden items-center gap-3">
                   <button
+                    ref={menuTriggerRef}
                     type="button"
                     onClick={() => onPlayAlbum?.()}
                     className={cn(neoActionButtonClass(true), 'flex-1')}
@@ -466,7 +496,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                   <h3 className="text-[13px] font-black uppercase tracking-[0.16em] text-black">
                     Track Roster
                   </h3>
-                  <span className="border-[2px] border-black bg-white px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                  <span className="border-[2px] border-black bg-white px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] text-black">
                     {tracks.length}
                   </span>
                 </div>
@@ -510,6 +540,8 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                   {menuOpen && (
                     <div
                       role="menu"
+                      aria-label="Album actions"
+                      onKeyDown={handleMenuKeyDown}
                       className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[220px] rounded-none border-2 border-black bg-white p-3 shadow-[4px_4px_0_0_#000]"
                     >
                       <button
@@ -596,7 +628,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                     role="row"
                     className={cn(
                       TRACK_GRID,
-                      'px-4 md:px-6 py-3 text-[11px] font-black uppercase tracking-[0.1em]',
+                      'px-4 md:px-6 py-3 text-[12px] font-black uppercase tracking-[0.1em]',
                     )}
                   >
                     <div role="columnheader" className="flex justify-center">
@@ -660,7 +692,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
         {someSelected && (
           <div className="pointer-events-none fixed bottom-8 left-0 right-0 z-40 flex justify-center px-4">
             <div className="pointer-events-auto flex w-full max-w-[800px] flex-wrap items-center justify-center gap-3 border-2 border-black bg-white p-4 shadow-[4px_4px_0_0_#000]">
-              <span className="border-[2px] border-black bg-black text-[var(--signal-active)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.08em]">
+              <span className="border-[2px] border-black bg-black text-[var(--signal-active)] px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.08em]">
                 {selectedCount} Selected
               </span>
 

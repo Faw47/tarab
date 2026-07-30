@@ -36,10 +36,8 @@ export function useAppSessionPersistence({
     })),
   );
 
-  const { scheduleSessionSave, lastSavedPositionRef, lastSessionSaveRef } = useSessionPersistence(
-    currentView,
-    albumDetails,
-  );
+  const { scheduleSessionSave, flushSessionSave, lastSavedPositionRef, lastSessionSaveRef } =
+    useSessionPersistence(currentView, albumDetails);
 
   useEffect(() => {
     scheduleSessionSave(true);
@@ -65,5 +63,5 @@ export function useAppSessionPersistence({
     return unsubscribe;
   }, [scheduleSessionSave]);
 
-  return { scheduleSessionSave, lastSavedPositionRef, lastSessionSaveRef };
+  return { scheduleSessionSave, flushSessionSave, lastSavedPositionRef, lastSessionSaveRef };
 }

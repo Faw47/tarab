@@ -122,7 +122,7 @@ export const PlaylistPickerDialog = memo(
                 placeholder="Search playlists"
                 aria-label="Search playlists"
                 className={clsx(
-                  'w-full pl-9 pr-3 py-2 outline-none transition-all duration-200',
+                  'w-full pl-9 pr-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                   isNeobrutalism
                     ? 'bg-white border-2 border-black radius-r2 shadow-[4px_4px_0_0_#000] focus:shadow-[6px_6px_0_0_#000] focus:-translate-x-0.5 focus:-translate-y-0.5 text-black font-bold placeholder:text-black/40'
                     : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
@@ -154,7 +154,7 @@ export const PlaylistPickerDialog = memo(
                       onClick={() => handleAdd(playlist.id)}
                       disabled={isSaving}
                       className={clsx(
-                        'w-full text-left px-3 py-3 transition-all disabled:opacity-50',
+                        'w-full text-left px-3 py-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] disabled:opacity-50',
                         isNeobrutalism
                           ? 'bg-white border-2 border-transparent hover:border-black hover:bg-[var(--signal-active)] radius-r1 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[2px_2px_0_0_#000]'
                           : 'rounded-lg hover:bg-white/10',

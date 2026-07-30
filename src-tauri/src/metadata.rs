@@ -13,7 +13,7 @@ use crate::database::SharedDatabase;
 use crate::file_ops::{
     ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
 };
-use crate::image_cache::SharedImageCache;
+use crate::image_cache::{is_valid_thumbnail_size, SharedImageCache};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TrackMetadata {
@@ -22,6 +22,8 @@ pub struct TrackMetadata {
     pub album_artist: Option<String>,
     pub album: String,
     pub year: Option<i32>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
     pub duration_secs: f64,
     pub file_path: String,
     pub has_cover_art: bool,
@@ -40,6 +42,8 @@ pub struct TrackMetadataWithArt {
     pub album_artist: Option<String>,
     pub album: String,
     pub year: Option<i32>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
     pub duration_secs: f64,
     pub file_path: String,
     pub cover_art: Option<String>,
@@ -56,7 +60,28 @@ pub struct CoverArtPalette {
     pub secondary: String,
 }
 
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverArtResolution {
+    pub status: String,
+    pub hash: Option<String>,
+    pub size: String,
+    pub cache_available: bool,
+    pub regenerated: bool,
+    pub failure_reason: Option<String>,
+}
+
 const MAX_METADATA_THREADS: usize = 4;
+
+#[cfg(windows)]
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+#[cfg(not(windows))]
+fn normalize_path(path: &str) -> String {
+    path.to_string()
+}
 const MAX_ART_THREADS: usize = 2;
 type CoverArtHashResult = (String, Option<(String, Option<String>)>);
 
@@ -120,46 +145,57 @@ fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
-    let (title, artist, album_artist, album, year) = if let Some(tag) = tag {
-        let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
-            path.file_stem()
+    let (title, artist, album_artist, album, year, track_number, disc_number) =
+        if let Some(tag) = tag {
+            let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Unknown")
+                    .to_string()
+            });
+
+            let artist = tag
+                .artist()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+            let album_artist = tag
+                .get_string(&lofty::tag::ItemKey::AlbumArtist)
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty());
+
+            let album = tag
+                .album()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown Album".to_string());
+
+            let year = tag.year().map(|y| y as i32);
+
+            (
+                title,
+                artist,
+                album_artist,
+                album,
+                year,
+                tag.track(),
+                tag.disk(),
+            )
+        } else {
+            let title = path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("Unknown")
-                .to_string()
-        });
+                .to_string();
 
-        let artist = tag
-            .artist()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "Unknown Artist".to_string());
-        let album_artist = tag
-            .get_string(&lofty::tag::ItemKey::AlbumArtist)
-            .map(|s| s.to_string())
-            .filter(|s| !s.trim().is_empty());
-
-        let album = tag
-            .album()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "Unknown Album".to_string());
-
-        let year = tag.year().map(|y| y as i32);
-
-        (title, artist, album_artist, album, year)
-    } else {
-        let title = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-
-        (
-            title,
-            "Unknown Artist".to_string(),
-            None,
-            "Unknown Album".to_string(),
-            None,
-        )
-    };
+            (
+                title,
+                "Unknown Artist".to_string(),
+                None,
+                "Unknown Album".to_string(),
+                None,
+                None,
+                None,
+            )
+        };
     let picture = first_picture(&tagged_file);
     let has_cover_art = picture.is_some();
     let blurhash = picture.and_then(|pic| generate_blurhash_from_bytes(pic.data()));
@@ -177,6 +213,8 @@ fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
         album_artist,
         album,
         year,
+        track_number,
+        disc_number,
         duration_secs,
         file_path: file_path.to_string(),
         has_cover_art,
@@ -204,46 +242,57 @@ fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
-    let (title, artist, album_artist, album, year) = if let Some(tag) = tag {
-        let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
-            path.file_stem()
+    let (title, artist, album_artist, album, year, track_number, disc_number) =
+        if let Some(tag) = tag {
+            let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Unknown")
+                    .to_string()
+            });
+
+            let artist = tag
+                .artist()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+            let album_artist = tag
+                .get_string(&lofty::tag::ItemKey::AlbumArtist)
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty());
+
+            let album = tag
+                .album()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown Album".to_string());
+
+            let year = tag.year().map(|y| y as i32);
+
+            (
+                title,
+                artist,
+                album_artist,
+                album,
+                year,
+                tag.track(),
+                tag.disk(),
+            )
+        } else {
+            let title = path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("Unknown")
-                .to_string()
-        });
+                .to_string();
 
-        let artist = tag
-            .artist()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "Unknown Artist".to_string());
-        let album_artist = tag
-            .get_string(&lofty::tag::ItemKey::AlbumArtist)
-            .map(|s| s.to_string())
-            .filter(|s| !s.trim().is_empty());
-
-        let album = tag
-            .album()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "Unknown Album".to_string());
-
-        let year = tag.year().map(|y| y as i32);
-
-        (title, artist, album_artist, album, year)
-    } else {
-        let title = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-
-        (
-            title,
-            "Unknown Artist".to_string(),
-            None,
-            "Unknown Album".to_string(),
-            None,
-        )
-    };
+            (
+                title,
+                "Unknown Artist".to_string(),
+                None,
+                "Unknown Album".to_string(),
+                None,
+                None,
+                None,
+            )
+        };
     let picture = first_picture(&tagged_file);
     let cover_art = picture.map(|pic| STANDARD.encode(pic.data()));
     let blurhash = picture.and_then(|pic| generate_blurhash_from_bytes(pic.data()));
@@ -261,6 +310,8 @@ fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
         album_artist,
         album,
         year,
+        track_number,
+        disc_number,
         duration_secs,
         file_path: file_path.to_string(),
         cover_art,
@@ -403,7 +454,7 @@ pub async fn get_cover_art_with_blurhash(
 
     spawn_blocking(move || {
         ensure_metadata_path_allowed(&file_path, &roots, "read cover art")?;
-        let normalized_path = file_path.replace('\\', "/");
+        let normalized_path = normalize_path(&file_path);
 
         if let Some(hash) = db.get_cover_art_hash(&normalized_path).unwrap_or(None) {
             if cache.has_thumbnail(&hash) {
@@ -434,6 +485,105 @@ pub async fn get_cover_art_with_blurhash(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn resolve_cover_art(
+    file_path: String,
+    preferred_hash: Option<String>,
+    size: String,
+    cache: tauri::State<'_, SharedImageCache>,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<CoverArtResolution, String> {
+    if !is_valid_thumbnail_size(&size) {
+        return Ok(CoverArtResolution {
+            status: "invalidRequest".to_string(),
+            hash: None,
+            size,
+            cache_available: false,
+            regenerated: false,
+            failure_reason: Some("unsupportedSize".to_string()),
+        });
+    }
+
+    let cache = cache.inner().clone();
+    let db = db.inner().clone();
+    let roots = roots_state.inner().read().roots.clone();
+
+    spawn_blocking(move || {
+        if let Some(hash) = preferred_hash.as_deref() {
+            if cache.has_valid_thumbnail(hash, &size) {
+                return Ok(CoverArtResolution {
+                    status: "ready".to_string(),
+                    hash: Some(hash.to_string()),
+                    size,
+                    cache_available: true,
+                    regenerated: false,
+                    failure_reason: None,
+                });
+            }
+        }
+
+        let normalized_path = normalize_path(&file_path);
+        if let Some(hash) = db.get_cover_art_hash(&normalized_path).unwrap_or(None) {
+            if cache.has_valid_thumbnail(&hash, &size) {
+                return Ok(CoverArtResolution {
+                    status: "ready".to_string(),
+                    hash: Some(hash),
+                    size,
+                    cache_available: true,
+                    regenerated: false,
+                    failure_reason: None,
+                });
+            }
+        }
+
+        if let Err(error) = ensure_metadata_path_allowed(&file_path, &roots, "repair cover art") {
+            return Ok(CoverArtResolution {
+                status: "sourceUnavailable".to_string(),
+                hash: preferred_hash,
+                size,
+                cache_available: false,
+                regenerated: false,
+                failure_reason: Some(if error.contains("no library roots") {
+                    "missingLibraryGrant".to_string()
+                } else {
+                    "sourceAccessDenied".to_string()
+                }),
+            });
+        }
+
+        let tagged_file = Probe::open(Path::new(&file_path))
+            .map_err(|error| format!("Failed to open cover art source: {}", error))?
+            .read()
+            .map_err(|error| format!("Failed to read cover art source: {}", error))?;
+        let Some(picture) = first_picture(&tagged_file) else {
+            return Ok(CoverArtResolution {
+                status: "noArt".to_string(),
+                hash: None,
+                size,
+                cache_available: false,
+                regenerated: false,
+                failure_reason: None,
+            });
+        };
+
+        let hash = cache.generate_thumbnails(picture.data())?;
+        db.set_cover_art_hash(&normalized_path, &hash)
+            .map_err(|error| format!("Failed to persist repaired cover art hash: {}", error))?;
+
+        Ok(CoverArtResolution {
+            status: "ready".to_string(),
+            hash: Some(hash),
+            size,
+            cache_available: true,
+            regenerated: true,
+            failure_reason: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 // Batch metadata loading - fast, no cover art
@@ -576,7 +726,7 @@ pub async fn generate_cover_art_hashes(
             file_paths
                 .par_iter()
                 .map(|path| {
-                    let normalized_path = path.replace('\\', "/");
+                    let normalized_path = normalize_path(path);
 
                     if let Some(existing) = db.get_cover_art_hash(&normalized_path).unwrap_or(None)
                     {

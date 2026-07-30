@@ -17,6 +17,7 @@ export interface AlbumGroup {
 export interface ArtistGroup {
   artist: string;
   tracks: Track[];
+  count: number;
   coverArt?: string;
 }
 
@@ -97,6 +98,7 @@ export function buildArtistGroups(
 
     if (existing) {
       existing.tracks.push(track);
+      existing.count += 1;
       if (!existing.coverArt) {
         existing.coverArt = track.coverArt ?? resolveCover(track.coverArtHash, 'large');
       }
@@ -106,6 +108,7 @@ export function buildArtistGroups(
     artistMap.set(track.artist, {
       artist: track.artist,
       tracks: [track],
+      count: 1,
       coverArt: track.coverArt ?? resolveCover(track.coverArtHash, 'large'),
     });
   });

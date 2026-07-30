@@ -76,6 +76,18 @@ pub struct TagInfo {
     pub extra_tags: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMutationResult {
+    pub path: String,
+    pub status: String,
+    pub operation: String,
+    pub error_code: Option<String>,
+    pub recoverable: bool,
+    pub error_message: Option<String>,
+    pub undo_token: Option<String>,
+}
+
 #[tauri::command]
 pub async fn read_full_tags(
     file_path: String,
@@ -213,11 +225,16 @@ pub async fn write_tags(
     file_path: String,
     updates: TagUpdate,
     roots_state: State<'_, SharedLibraryRoots>,
-) -> Result<(), String> {
+) -> Result<FileMutationResult, String> {
     let roots = roots_state.read().roots.clone();
-    spawn_blocking(move || write_tags_checked(&file_path, updates, &roots))
-        .await
-        .map_err(|e| e.to_string())?
+    spawn_blocking(move || {
+        write_tags_batch_checked(vec![file_path], updates, &roots)
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Tag write did not produce a result".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn write_tags_checked(
@@ -335,20 +352,49 @@ pub async fn write_tags_batch(
     file_paths: Vec<String>,
     updates: TagUpdate,
     roots_state: State<'_, SharedLibraryRoots>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<FileMutationResult>, String> {
     let roots = roots_state.read().roots.clone();
 
-    spawn_blocking(move || {
-        let mut errors = Vec::new();
-        for path in file_paths {
-            if let Err(e) = write_tags_checked(&path, updates.clone(), &roots) {
-                errors.push(format!("{}: {}", path, e));
-            }
+    spawn_blocking(move || Ok(write_tags_batch_checked(file_paths, updates, &roots)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn write_tags_batch_checked(
+    file_paths: Vec<String>,
+    updates: TagUpdate,
+    roots: &[PathBuf],
+) -> Vec<FileMutationResult> {
+    let mut results = Vec::with_capacity(file_paths.len());
+    for path in file_paths {
+        match write_tags_checked(&path, updates.clone(), roots) {
+            Ok(()) => results.push(FileMutationResult {
+                path,
+                status: "success".to_string(),
+                operation: "writeTags".to_string(),
+                error_code: None,
+                recoverable: false,
+                error_message: None,
+                undo_token: None,
+            }),
+            Err(error) => results.push(FileMutationResult {
+                path,
+                status: "failed".to_string(),
+                operation: "writeTags".to_string(),
+                error_code: Some(if error.contains("outside configured library roots") {
+                    "sourceAccessDenied".to_string()
+                } else if error.contains("Failed to save tags") {
+                    "writeFailed".to_string()
+                } else {
+                    "metadataUpdateFailed".to_string()
+                }),
+                recoverable: true,
+                error_message: Some(error),
+                undo_token: None,
+            }),
         }
-        Ok(errors)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
+    results
 }
 
 #[tauri::command]
@@ -405,6 +451,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-tags-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    fn minimal_wav() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&38_u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&16_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes
     }
 
     #[test]
@@ -474,6 +538,37 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("outside configured library roots"));
+
+        let _ = fs::remove_dir_all(allowed_root);
+        let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn batch_tag_write_returns_one_result_for_success_and_failure() {
+        let allowed_root = temp_dir("batch-allowed");
+        let outside_root = temp_dir("batch-outside");
+        let valid_track = allowed_root.join("valid.wav");
+        let blocked_track = outside_root.join("blocked.wav");
+        fs::write(&valid_track, minimal_wav()).expect("write valid wave");
+        fs::write(&blocked_track, minimal_wav()).expect("write blocked wave");
+        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+        let update: TagUpdate = serde_json::from_str(r#"{"title":"Updated"}"#).expect("tag update");
+
+        let results = write_tags_batch_checked(
+            vec![
+                valid_track.to_string_lossy().to_string(),
+                blocked_track.to_string_lossy().to_string(),
+            ],
+            update,
+            &roots,
+        );
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[0].operation, "writeTags");
+        assert_eq!(results[1].status, "failed");
+        assert_eq!(results[1].error_code.as_deref(), Some("sourceAccessDenied"));
+        assert!(results[1].recoverable);
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);

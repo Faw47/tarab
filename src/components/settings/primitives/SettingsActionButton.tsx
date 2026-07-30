@@ -24,13 +24,13 @@ export const SettingsActionButton = forwardRef<HTMLButtonElement, SettingsAction
         type={type}
         disabled={disabled}
         className={cn(
-          'group relative inline-flex items-center justify-center gap-2 transition-all duration-300 motion-reduce:transition-none',
+          'group relative inline-flex items-center justify-center gap-2 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
           'focus-visible:outline-none',
           disabled && 'opacity-50 cursor-not-allowed',
           isNeobrutalism
             ? cn(
                 'font-black uppercase tracking-[0.08em] rounded-none border-2 border-black shadow-[2px_2px_0_0_#000] text-black bg-white hover:bg-[var(--surface-highlight)] focus-visible:ring-2 focus-visible:ring-black transition-none active:translate-x-[2px] active:translate-y-[2px] active:shadow-none',
-                size === 'sm' ? 'h-9 px-3 text-[11px]' : 'h-10 px-4 text-xs',
+                size === 'sm' ? 'h-9 px-3 text-xs' : 'h-10 px-4 text-sm',
               )
             : cn(
                 'h-8 rounded-full border border-white/[0.06] backdrop-blur-md font-medium focus-visible:ring-2 focus-visible:ring-white/30',

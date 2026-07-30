@@ -92,7 +92,7 @@ const AlbumRow = memo(function AlbumRow({
               className={cn(
                 'truncate mt-0.5',
                 isNeo
-                  ? 'text-[10px] font-bold uppercase tracking-[0.1em] text-black/60'
+                  ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60'
                   : 'text-xs text-text-muted',
               )}
             >
@@ -106,7 +106,7 @@ const AlbumRow = memo(function AlbumRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[11px] font-black uppercase tracking-[0.05em] text-black'
+                ? 'text-[12px] font-black uppercase tracking-[0.05em] text-black'
                 : 'text-sm text-text-secondary',
             )}
           >
@@ -119,8 +119,8 @@ const AlbumRow = memo(function AlbumRow({
             className={cn(
               'uppercase tracking-tight inline-flex self-start',
               isNeo
-                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
             )}
           >
             {album.count} {album.count === 1 ? 'Track' : 'Tracks'}
@@ -191,7 +191,7 @@ export const LibraryAlbumsList = memo(function LibraryAlbumsList({
         className={cn(
           'library-list-head grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-black shadow-none',
         )}
       >
         <span className="text-center">#</span>

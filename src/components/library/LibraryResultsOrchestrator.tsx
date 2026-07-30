@@ -54,11 +54,6 @@ function getAlbumTapeRotationClass(i: number): string {
   return ALBUM_TAPE_ROTATIONS[i % ALBUM_TAPE_ROTATIONS.length];
 }
 
-function getEntranceClass(index: number): string {
-  if (index >= 12) return '';
-  return `animate-fade-in-up stagger-${(index % 6) + 1}`;
-}
-
 interface TrackTileProps {
   track: Track;
   index: number;
@@ -158,20 +153,20 @@ const TrackTile = memo(function TrackTile({
             <Play className="h-3 w-3" fill="currentColor" strokeWidth={3} />
           </button>
         </div>
-        <div className="text-[11px] font-black uppercase tracking-tight truncate leading-tight">
+        <div className="text-[12px] font-black uppercase tracking-tight truncate leading-tight">
           {renderHighlightedText(track.title, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[9px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
           {matchedLyricLine
             ? `“${matchedLyricLine}”`
             : renderHighlightedText(track.artist, searchQuery, highlightClass)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1">
-          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest">
+          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest">
             {renderHighlightedText(track.album, searchQuery, highlightClass)}
           </span>
           {isLyricsMatch && (
-            <span className="border border-black/20 bg-[var(--signal-play)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#000]">
+            <span className="border border-black/20 bg-[var(--signal-play)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest text-[#000]">
               LYR
             </span>
           )}
@@ -187,7 +182,7 @@ const TrackTile = memo(function TrackTile({
       draggable
       aria-selected={isSelected}
       aria-label={`${track.title} by ${track.artist}`}
-      className={cn('library-v2-track-tile', isSelected && 'is-selected', getEntranceClass(index))}
+      className={cn('library-v2-track-tile', isSelected && 'is-selected')}
       onClick={(event) => {
         const multi = event.metaKey || event.ctrlKey || event.shiftKey;
         onTrackSelect?.(track, multi);
@@ -337,19 +332,19 @@ const AlbumTile = memo(function AlbumTile({
           >
             <Play className="h-4 w-4" fill="currentColor" strokeWidth={3} />
           </button>
-          <div className="absolute left-2 top-2 z-20 border border-white bg-black px-1 py-0.5 text-[8px] font-black leading-none tracking-widest text-white shadow-[2px_2px_0_0_#000]">
+          <div className="absolute left-2 top-2 z-20 border border-white bg-black px-1 py-0.5 text-[12px] font-black leading-none tracking-widest text-white shadow-[2px_2px_0_0_#000]">
             {album.count} {album.count === 1 ? 'FILE' : 'FILES'}
           </div>
         </div>
         <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
           {renderHighlightedText(album.track.album, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
           {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
         </div>
         {album.track.year && (
           <div className="mt-auto flex flex-wrap gap-1.5 pt-2">
-            <span className="border border-black bg-[var(--neo-muted)] px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.05em] text-black/70">
+            <span className="border border-black bg-[var(--neo-muted)] px-1.5 py-0.5 text-[12px] font-black uppercase tracking-[0.05em] text-black/70">
               {String(album.track.year)}
             </span>
           </div>
@@ -367,7 +362,6 @@ const AlbumTile = memo(function AlbumTile({
           'library-v2-album-tile group relative overflow-hidden rounded-[22px] border border-white/10 bg-black/25',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
           'library-v2-album-featured-span',
-          getEntranceClass(index),
         )}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
@@ -384,7 +378,7 @@ const AlbumTile = memo(function AlbumTile({
               track={album.track}
               size="large"
               className="w-full h-full"
-              imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+              imgClassName="w-full h-full object-cover transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.05]"
               roundedClassName=""
               iconClassName="w-8 h-8"
               alt={album.track.album}
@@ -398,7 +392,7 @@ const AlbumTile = memo(function AlbumTile({
             />
             <button
               type="button"
-              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 onPlay(album.track);
@@ -408,7 +402,7 @@ const AlbumTile = memo(function AlbumTile({
               <Button
                 variant="ghost"
                 size="icon"
-                className="w-11 h-11 rounded-full bg-white text-black shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-all duration-250 hover:scale-[1.12] active:scale-[0.92] pointer-events-none"
+                className="w-11 h-11 rounded-full bg-white text-black shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] hover:scale-[1.12] active:scale-[0.92] pointer-events-none"
                 tabIndex={-1}
               >
                 <Play className="w-4 h-4 ml-0.5" fill="currentColor" />
@@ -418,7 +412,7 @@ const AlbumTile = memo(function AlbumTile({
 
           <div className="flex-1 min-w-0 p-4 flex flex-col justify-between bg-black/25">
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">
                 Featured album
               </p>
               <p className="font-bold text-white leading-tight truncate text-[1.05rem] mt-1">
@@ -452,7 +446,6 @@ const AlbumTile = memo(function AlbumTile({
       className={cn(
         'library-v2-album-tile group relative overflow-hidden rounded-[18px]',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
-        getEntranceClass(index),
       )}
       onClick={() => onOpen(album.track)}
       onKeyDown={(event) => {
@@ -468,22 +461,22 @@ const AlbumTile = memo(function AlbumTile({
           track={album.track}
           size="large"
           className="w-full h-full"
-          imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+          imgClassName="w-full h-full object-cover transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.05]"
           roundedClassName=""
           iconClassName="w-8 h-8"
           alt={album.track.album}
         />
         <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-250 group-hover:opacity-100"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-hover:opacity-100"
           style={{
             background:
               'linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.18) 52%, rgba(0,0,0,0.90) 100%)',
           }}
         />
-        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-200 group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-[var(--motion-standard)] group-hover:opacity-100 group-hover:translate-y-0">
           {album.count} {album.count === 1 ? 'track' : 'tracks'}
         </div>
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-all duration-250 group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] group-hover:opacity-100 group-hover:translate-y-0">
           <Button
             variant="ghost"
             size="icon"
@@ -491,7 +484,7 @@ const AlbumTile = memo(function AlbumTile({
               event.stopPropagation();
               onPlay(album.track);
             }}
-            className="pointer-events-auto shrink-0 rounded-full bg-white text-black inline-flex items-center justify-center shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-all duration-250 hover:scale-[1.12] active:scale-[0.92] w-9 h-9"
+            className="pointer-events-auto shrink-0 rounded-full bg-white text-black inline-flex items-center justify-center shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] hover:scale-[1.12] active:scale-[0.92] w-9 h-9"
             aria-label={`Play ${album.track.album}`}
           >
             <Play className="w-3.5 h-3.5 ml-0.5" fill="currentColor" />
@@ -602,8 +595,8 @@ const ArtistTile = memo(function ArtistTile({
         <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
           {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wide opacity-60 leading-tight">
-          {artist.tracks.length} {artist.tracks.length === 1 ? 'FILE' : 'FILES'}
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+          {artist.count} {artist.count === 1 ? 'FILE' : 'FILES'}
         </div>
       </article>
     );
@@ -613,7 +606,7 @@ const ArtistTile = memo(function ArtistTile({
     <article
       role="button"
       tabIndex={0}
-      className={cn('library-v2-track-tile', getEntranceClass(index))}
+      className="library-v2-track-tile"
       onClick={() => onOpen(artist.artist)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -659,7 +652,7 @@ const ArtistTile = memo(function ArtistTile({
           {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
         </p>
         <p className="library-v2-track-subtitle truncate">
-          {artist.tracks.length} {artist.tracks.length === 1 ? 'track' : 'tracks'}
+          {artist.count} {artist.count === 1 ? 'track' : 'tracks'}
         </p>
       </div>
     </article>

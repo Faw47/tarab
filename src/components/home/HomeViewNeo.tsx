@@ -137,7 +137,7 @@ const NeoVolumeControl = memo(() => {
         className={cn(
           'flex items-center overflow-hidden ease-out',
           expanded ? 'w-auto opacity-100' : 'w-0 opacity-0',
-          'transition-[width,opacity] duration-200',
+          'transition-[width,opacity] duration-[var(--motion-standard)]',
         )}
       >
         <div className={cn(BORDER, SHADOW_COMP, 'bg-white px-2 py-1.5')}>
@@ -318,7 +318,7 @@ const NeoAlbumCard = memo(
         <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[9px] font-bold uppercase tracking-[0.15em] text-black/50">
+        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-black/50">
           {track.artist}
         </p>
       </div>

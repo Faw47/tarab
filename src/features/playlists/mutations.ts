@@ -4,6 +4,7 @@ import {
   addTracksToPlaylist,
   createPlaylist,
   deletePlaylist,
+  relinkPlaylistTrack,
   removeMissingFromPlaylist,
   removeTracksFromPlaylist,
   reorderPlaylistTracks,
@@ -91,6 +92,26 @@ export function useRemoveTracksMutation() {
   return useMutation({
     mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
       removeTracksFromPlaylist(playlistId, trackIds),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
+      queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
+    },
+  });
+}
+
+export function useRelinkPlaylistTrackMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      playlistId,
+      oldTrackId,
+      newTrackId,
+    }: {
+      playlistId: string;
+      oldTrackId: string;
+      newTrackId: string;
+    }) => relinkPlaylistTrack(playlistId, oldTrackId, newTrackId),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
       queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);

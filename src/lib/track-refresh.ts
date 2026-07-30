@@ -65,6 +65,8 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
       albumArtist: meta.album_artist ?? existing?.albumArtist ?? null,
       album: meta.album || existing?.album || 'Unknown Album',
       year: meta.year,
+      trackNumber: meta.track_number,
+      discNumber: meta.disc_number,
       duration: meta.duration_secs,
       filePath: meta.file_path,
       hasCoverArt: !!meta.has_cover_art,
@@ -115,6 +117,8 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
         albumArtist: meta.album_artist ?? dbTrack?.albumArtist ?? null,
         album: meta.album || dbTrack?.album || 'Unknown Album',
         year: meta.year,
+        trackNumber: meta.track_number,
+        discNumber: meta.disc_number,
         duration: meta.duration_secs,
         filePath: meta.file_path,
         hasCoverArt: !!meta.has_cover_art,
@@ -124,6 +128,10 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
         lastPlayed: dbTrack?.lastPlayed ?? null,
         rating: dbTrack?.rating ?? null,
         blurhash: meta.blurhash || dbTrack?.blurhash || null,
+        fileFormat: meta.file_format,
+        bitrate: meta.bitrate,
+        sampleRate: meta.sample_rate,
+        fileSize: meta.file_size,
       };
     });
     await dbUpsertTracks(updates);

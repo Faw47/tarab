@@ -49,7 +49,7 @@ const ProgressRing = memo(() => {
         strokeLinecap="round"
         strokeDasharray={RING_CIRCUMFERENCE}
         strokeDashoffset={dashOffset}
-        className="transition-[stroke-dashoffset] duration-300 ease-out"
+        className="transition-[stroke-dashoffset] duration-[var(--motion-emphasis)] ease-out"
       />
     </svg>
   );
@@ -90,7 +90,7 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
         onClick={onExpand}
         className={clsx(
           'relative overflow-hidden',
-          'transition-all duration-200',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
           isHovered && 'scale-110',
           isPlaying && !isHovered && 'animate-breathe',
         )}
@@ -128,13 +128,13 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
           <div
             className={clsx(
               'absolute inset-0 flex items-center justify-center bg-black/[0.42] backdrop-blur-md',
-              'transition-opacity duration-200',
+              'transition-opacity duration-[var(--motion-standard)]',
               isHovered ? 'opacity-100' : 'opacity-0',
             )}
           >
             <button
               onClick={handleTogglePlay}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.18] hover:bg-white/[0.28] transition-colors duration-200 active:scale-[0.9] shadow-[0_0_18px_var(--hero-glow)]"
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.18] hover:bg-white/[0.28] transition-colors duration-[var(--motion-standard)] active:scale-[0.9] shadow-[0_0_18px_var(--hero-glow)]"
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
               {isPlaying ? (
@@ -153,7 +153,7 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
           'absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-2',
           'backdrop-blur-xl rounded-xl text-xs whitespace-nowrap',
           'border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.42)]',
-          'transition-all duration-200',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
           isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none',
         )}
         style={{
@@ -161,12 +161,10 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
           boxShadow: '0 8px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.08)',
         }}
       >
-        <p className="text-white font-medium text-[11px] truncate max-w-[160px]">
+        <p className="text-white font-medium text-xs truncate max-w-[160px]">
           {currentTrack.title}
         </p>
-        <p className="text-white/[0.55] text-[10px] truncate max-w-[160px]">
-          {currentTrack.artist}
-        </p>
+        <p className="text-white/[0.55] text-xs truncate max-w-[160px]">{currentTrack.artist}</p>
       </div>
     </div>
   );

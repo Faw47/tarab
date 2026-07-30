@@ -12,7 +12,7 @@ The current 1.0.0 proof matrix is in `docs/release-evidence-1.0.0.md`.
 | `core-mini` | `mini-player` | Snapshot/control events plus mini-window drag and minimize. | Mini only. No app/menu/tray/image/path/webview defaults and no direct backend/library ownership. |
 | `opener` | `main` | Reveal files in the system file manager from reviewed main-window flows. | Main only and reveal-only. Do not add open-url/open-path permission unless a reviewed user-facing flow needs it. |
 | `dialog` | `main` | Native open dialogs for library grants, playlist folders, audio, and image selection. | Main only and `dialog:allow-open` only. Library authority is created by the Rust picker command, not by a renderer path. |
-| `store` | `main` | Player session persistence in `tarab-player.dat`. | Main only with load/get-store/get/set/save. No renderer delete, clear, reset, list, values, entries, length, or reload permissions. Mini gets snapshots from main, not persistent ownership. |
+| `store` | none | Renderer store access is disabled. | Fixed main-window Rust commands own `settings.json` and `tarab-player.dat`. Mini gets snapshots from main, not persistent ownership. |
 | `deep-link` | `main` | Rust reads cold-start URLs and forwards running-instance events. | Main only with empty plugin command permissions. The custom startup command returns only URLs registered for the `tarab` scheme. |
 | `shortcuts` | `main` | Register, unregister, clear, and check custom global shortcuts. | Main only, exact global-shortcut permissions, and best-effort. Registration failure must log, not abort. |
 | `autostart` | `main` | Read and update open-at-login state from settings. | Main only with explicit is-enabled/enable/disable permissions. Mini player must not read or change login startup state. |
@@ -27,13 +27,18 @@ The current 1.0.0 proof matrix is in `docs/release-evidence-1.0.0.md`.
 The current invoke handler exposes these groups from `src-tauri/src/lib.rs`:
 
 - Audio: playback, seek, volume, speed, crossfade, booster, output devices, gapless preload.
-- Library and metadata: scan, batch metadata, cover art, palettes, image data.
+- Library and metadata: bounded scan-path streaming, transactional reconciliation, batch metadata,
+  cover art, palettes, and image data. Scan path chunks go only to the main window.
 - Lyrics: read/fetch/write/search/sync.
-- Playlists: read/create/update/delete/pin/add/remove/reorder/sync/repair/data-path.
+- Playlists: read/create/update/delete/pin/add/remove/reorder/sync/repair/data-path. Folder playlist
+  creation, edits, and sync require an active native library grant.
 - Tag editor: read/write/batch-write/remove cover art.
 - Database: track pagination/search/stats/play stats/ratings/delete/path updates/folder deletes/smart shuffle.
 - Image cache and waveform cache: generate/read/stats/clear/cancel.
-- File operations: rename/move/delete/reveal, list/select/revoke native library grants, and resolve native file-open intents.
+- File operations: rename/move/recoverable Trash/restore/permanent delete/reveal,
+  list/select/revoke native library grants, and resolve native file-open intents. Recoverable
+  Trash uses bounded persistent records. Restore validates the token, stored file name, original
+  library root, destination conflict, and database update before it removes the recovery record.
 - Session: load/save playback session.
 - Desktop integration: mini window open/close/toggle, focus main, quit, native UI state, media session sync.
 - Watcher/taskbar/media controls: library path watching, Windows taskbar progress, media metadata.
@@ -43,12 +48,17 @@ Release rule: main-window code may call these as needed; mini-player code should
 ## Filesystem and IPC stance
 
 - Renderer filesystem permission is not enabled. Persistent grants are stored in the app data directory as `library-grants.json`. The Rust native picker is the only normal grant-creation path.
+- Settings and player persistence use fixed native store names. The renderer cannot select a store
+  path.
 - Renderer settings contain a display cache of granted paths. They are not an authority source. Startup replaces that cache from the native grant store.
 - File associations create opaque pending intents. **Play once** authorizes one exact file until playback opens it. **Import folder** creates a persistent native grant. **Cancel** removes the pending intent.
 - Drag-and-drop cannot create grants. Files outside current grants are rejected and the user must add their folder through Library settings.
 - Library watching uses `watch_library_paths`, which validates paths against native grants before it starts.
 - File reads/writes/deletes should stay behind Rust commands that validate paths against configured library roots or app-owned data locations.
 - Artwork/image reads must stay bounded by the allowed-root checks in Rust.
+- Cover-art protocol requests validate the hash and size. Cached files must be regular WebP files
+  within the size and dimension limits. Source images have encoded-byte and decoded-pixel limits.
+- Audio decoding rejects invalid sample rates and unreasonable packet sample allocations.
 - Library watcher setup failure should report/log and degrade gracefully; it must not crash startup.
 - IPC payloads should stay typed on both sides. Avoid ad-hoc JSON blobs for new commands.
 
@@ -66,6 +76,8 @@ Release rule: main-window code may call these as needed; mini-player code should
 - The library database and generated caches use the app-specific directory `com.fawaz.tarab`.
 - On first launch after upgrading, an existing legacy `music-player` directory is renamed in place before the database or cache is opened.
 - Release QA must verify that an existing library, artwork cache, and waveform cache remain available after this migration.
+- Packaged-app QA must cold-launch the `.app`, open the full player, verify embedded art, restart,
+  disconnect the source grant, and verify that the validated app-owned thumbnail remains visible.
 
 ## Privacy and outbound network policy
 

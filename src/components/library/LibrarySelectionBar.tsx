@@ -24,7 +24,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
         <span
           className={cn(
             isNeo
-              ? 'px-2 py-0.5 border-[2px] border-black bg-[var(--neo-panel)] text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[2px_2px_0_0_#000]'
+              ? 'px-2 py-0.5 border-[2px] border-black bg-[var(--neo-panel)] text-[12px] font-black uppercase tracking-[0.12em] text-black shadow-[2px_2px_0_0_#000]'
               : '',
           )}
         >
@@ -46,7 +46,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
             onClick={onSelectAll}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-[var(--neo-panel)] px-3 text-[11px] font-black uppercase tracking-[0.08em] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-[var(--neo-panel)] px-3 text-[12px] font-black uppercase tracking-[0.08em] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >
@@ -59,7 +59,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
             onClick={onClearSelection}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-black px-3 text-[11px] font-black uppercase tracking-[0.08em] text-[#A855F7] shadow-[2px_2px_0_0_#FFF] shadow-black/80 transition-none hover:bg-[var(--signal-danger)] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-black px-3 text-[12px] font-black uppercase tracking-[0.08em] text-[#A855F7] shadow-[2px_2px_0_0_#FFF] shadow-black/80 transition-none hover:bg-[var(--signal-danger)] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >

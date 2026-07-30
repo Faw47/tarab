@@ -35,6 +35,7 @@ import {
   EVENT_DESKTOP_SNAPSHOT_REQUEST,
   MINI_WINDOW_LABEL,
 } from './desktop-events';
+import { flushPlayerStateWrites } from './player-state-store';
 
 const MEDIA_ARTWORK_CACHE_LIMIT = 200;
 
@@ -244,6 +245,8 @@ export function useDesktopIntegration() {
     if (!isPlaying) return;
     if (!miniWindowEnabled && !mediaKeysEnabled) return;
 
+    // 2 s is sufficient for macOS Now Playing position updates and
+    // mini-window snapshots. 1 s was needlessly chatty over IPC.
     const timer = setInterval(() => {
       if (miniWindowEnabled) {
         void emitDesktopSnapshotToMini();
@@ -251,7 +254,7 @@ export function useDesktopIntegration() {
       if (mediaKeysEnabled) {
         void syncDesktopMediaSessionNow();
       }
-    }, 1000);
+    }, 2000);
 
     return () => clearInterval(timer);
   }, [
@@ -300,6 +303,12 @@ export function useDesktopIntegration() {
             case 'previous':
               await playAdjacentTrack('previous');
               return;
+            case 'toggle-shuffle':
+              usePlayerStore.getState().toggleShuffle();
+              return;
+            case 'cycle-repeat':
+              usePlayerStore.getState().cycleLoopMode();
+              return;
             case 'show-main':
               await desktopFocusMainWindow();
               return;
@@ -309,6 +318,7 @@ export function useDesktopIntegration() {
               }
               return;
             case 'quit':
+              await flushPlayerStateWrites();
               await desktopQuitApplication();
               return;
             default:
@@ -347,12 +357,14 @@ export function useDesktopIntegration() {
   useTauriEvent<void>(
     'menu-quit',
     () => {
-      void desktopQuitApplication().catch((error) => {
-        reportError('Failed to quit from menu', {
-          source: 'desktop-bridge',
-          error,
+      void flushPlayerStateWrites()
+        .then(desktopQuitApplication)
+        .catch((error) => {
+          reportError('Failed to quit from menu', {
+            source: 'desktop-bridge',
+            error,
+          });
         });
-      });
     },
     [],
     (error) =>

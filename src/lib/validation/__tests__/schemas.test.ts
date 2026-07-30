@@ -82,6 +82,8 @@ describe('Zod Schemas', () => {
         artist: 'Artist',
         album: 'Album',
         year: 2024,
+        trackNumber: 7,
+        discNumber: 2,
         duration: 245,
         filePath: '/music/song.mp3',
         hasCoverArt: true,
@@ -94,6 +96,10 @@ describe('Zod Schemas', () => {
 
       const result = DbTrackSchema.safeParse(validDbTrack);
       expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.trackNumber).toBe(7);
+        expect(result.data.discNumber).toBe(2);
+      }
     });
   });
 

@@ -1,7 +1,5 @@
-use cpal::traits::{DeviceTrait, HostTrait};
 use parking_lot::Mutex;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
-use serde::Serialize;
 use std::fs::File;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,75 +22,37 @@ use crate::file_ops::{
     SharedLibraryRoots,
 };
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AudioOutputDeviceInfo {
-    pub id: String,
-    pub name: String,
-}
+mod crossfade;
+mod device;
+mod events;
+mod source;
+mod state;
 
-pub fn enumerate_output_devices() -> Result<Vec<AudioOutputDeviceInfo>, String> {
-    let host = cpal::default_host();
-    let mut list = vec![AudioOutputDeviceInfo {
-        id: "system".to_string(),
-        name: "System default".to_string(),
-    }];
-    let devices = host
-        .output_devices()
-        .map_err(|e| format!("Failed to list output devices: {}", e))?;
-    for device in devices {
-        let name = match device.name() {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("Skipping audio device (name error): {}", e);
-                continue;
-            }
-        };
-        list.push(AudioOutputDeviceInfo {
-            id: name.clone(),
-            name,
-        });
-    }
-    Ok(list)
-}
-
-fn open_output_stream(
-    device_name: Option<&str>,
-) -> Result<(OutputStream, OutputStreamHandle), String> {
-    match device_name {
-        None | Some("") | Some("system") => OutputStream::try_default()
-            .map_err(|e| format!("Failed to open default audio output: {}", e)),
-        Some(name) => {
-            let host = cpal::default_host();
-            let devices = host
-                .output_devices()
-                .map_err(|e| format!("Failed to list output devices: {}", e))?;
-            for device in devices {
-                let dev_name = match device.name() {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
-                if dev_name == name {
-                    return OutputStream::try_from_device(&device)
-                        .map_err(|e| format!("Failed to open audio device \"{}\": {}", name, e));
-                }
-            }
-            eprintln!(
-                "Audio device \"{}\" not found; falling back to system default",
-                name
-            );
-            OutputStream::try_default()
-                .map_err(|e| format!("Failed to open default audio output: {}", e))
-        }
-    }
-}
+use crossfade::{
+    apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
+    CrossfadeState,
+};
+use device::open_output_stream;
+pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
+pub use events::PlaybackEndedPayload;
+use events::{
+    emit_playback_error, emit_playback_transition, PlaybackNearEndEvent, PlaybackPositionEvent,
+    PlaybackTransition,
+};
+use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
+pub use state::PlaybackState;
 
 enum AudioCommand {
-    Play(String, Option<f64>),
+    Play {
+        file_path: String,
+        start_pos: Option<f64>,
+        generation: u64,
+    },
     CrossfadeTo {
         file_path: String,
         start_pos: Option<f64>,
         duration_ms: u64,
+        generation: u64,
     },
     Pause,
     Resume,
@@ -108,94 +68,23 @@ enum AudioCommand {
     SetCrossfade(f32),
     SetBooster(f32),
     SetOutputDevice(Option<String>),
-    PreloadNext(Option<String>),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlaybackEndedPayload {
-    pub path: Option<String>,
-    #[serde(default)]
-    pub seamless: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PlaybackErrorEvent {
-    file_path: String,
-    stage: &'static str,
-    message: String,
-    recoverable: bool,
-}
-
-fn emit_playback_error(
-    app: &AppHandle,
-    file_path: impl Into<String>,
-    stage: &'static str,
-    message: impl Into<String>,
-    recoverable: bool,
-) {
-    let payload = PlaybackErrorEvent {
-        file_path: file_path.into(),
-        stage,
-        message: message.into(),
-        recoverable,
-    };
-    let _ = app.emit("playback-error", payload);
-}
-
-// Shared state for position tracking
-pub struct PlaybackState {
-    pub current_file: Option<String>,
-    pub duration: f64,
-    pub start_position: f64,
-    pub position_sample_rate: u32,
-    pub position_channels: u16,
-    pub speed: f32,
-    pub volume: f32,
-    // Used as threshold for the "playback-near-end" event.
-    // Backend sample-mixing crossfade is intentionally disabled for now.
-    pub crossfade_secs: f32,
-    pub booster: f32,
-    pub is_paused: bool,
-    pub is_playing: bool,
-    pub warned_near_end: bool,
-}
-
-impl Default for PlaybackState {
-    fn default() -> Self {
-        Self {
-            current_file: None,
-            duration: 0.0,
-            start_position: 0.0,
-            position_sample_rate: 0,
-            position_channels: 0,
-            speed: 1.0,
-            volume: 0.8,
-            crossfade_secs: 0.0,
-            booster: 1.0,
-            is_paused: false,
-            is_playing: false,
-            warned_near_end: false,
-        }
-    }
+    PreloadNext(Option<(String, u64)>),
+    SourceRenamed {
+        old_path: String,
+        new_path: String,
+    },
 }
 
 pub struct AudioManager {
     command_sender: Sender<AudioCommand>,
     pub playback_state: Arc<Mutex<PlaybackState>>,
     active_emitted_samples: Arc<Mutex<Arc<AtomicU64>>>,
+    next_generation: AtomicU64,
 }
 
 struct VolumeRampState {
     from: f32,
     to: f32,
-    start: Instant,
-    duration: Duration,
-}
-
-struct CrossfadeState {
-    outgoing_sink: Sink,
     start: Instant,
     duration: Duration,
 }
@@ -245,54 +134,6 @@ fn apply_volume_ramp_step(
     }
 }
 
-fn normalized_progress(elapsed: Duration, duration: Duration) -> f32 {
-    let duration_secs = duration.as_secs_f32();
-    if duration_secs <= 0.0 {
-        1.0
-    } else {
-        (elapsed.as_secs_f32() / duration_secs).clamp(0.0, 1.0)
-    }
-}
-
-fn crossfade_progress(active: &CrossfadeState) -> f32 {
-    normalized_progress(active.start.elapsed(), active.duration)
-}
-
-fn apply_crossfade_mix(active: &CrossfadeState, incoming_sink: Option<&Sink>, target_volume: f32) {
-    let progress = crossfade_progress(active);
-    let target = target_volume.clamp(0.0, 1.0);
-    let incoming_volume = (target * progress).clamp(0.0, 1.0);
-    let outgoing_volume = (target * (1.0 - progress)).clamp(0.0, 1.0);
-
-    if let Some(incoming) = incoming_sink {
-        incoming.set_volume(incoming_volume);
-    }
-    active.outgoing_sink.set_volume(outgoing_volume);
-}
-
-fn apply_crossfade_step(
-    crossfade: &mut Option<CrossfadeState>,
-    state: &Arc<Mutex<PlaybackState>>,
-    incoming_sink: Option<&Sink>,
-) {
-    let target_volume = { state.lock().volume.clamp(0.0, 1.0) };
-    let mut should_finish = false;
-
-    if let Some(active) = crossfade.as_ref() {
-        apply_crossfade_mix(active, incoming_sink, target_volume);
-        should_finish = crossfade_progress(active) >= 1.0;
-    }
-
-    if should_finish {
-        if let Some(active) = crossfade.take() {
-            active.outgoing_sink.stop();
-        }
-        if let Some(incoming) = incoming_sink {
-            incoming.set_volume(target_volume);
-        }
-    }
-}
-
 impl AudioManager {
     pub fn new(app: AppHandle) -> Self {
         let (sender, receiver) = channel::<AudioCommand>();
@@ -317,6 +158,9 @@ impl AudioManager {
                 {
                     let mut state = position_state_clone.lock();
                     if !state.is_playing || state.is_paused {
+                        drop(state);
+                        // Sleep longer while idle to reduce CPU wakeups.
+                        thread::sleep(Duration::from_millis(400));
                         continue;
                     }
 
@@ -338,20 +182,26 @@ impl AudioManager {
                         && state.duration > 0.0
                     {
                         state.warned_near_end = true;
-                        near_end_to_emit = Some(remaining.max(0.0));
+                        near_end_to_emit = Some(PlaybackNearEndEvent {
+                            generation: state.generation,
+                            remaining: remaining.max(0.0),
+                        });
                     }
 
                     if (current_pos - last_emitted).abs() >= 0.05 {
-                        position_to_emit = Some(current_pos);
+                        position_to_emit = Some(PlaybackPositionEvent {
+                            generation: state.generation,
+                            position: current_pos,
+                        });
                         last_emitted = current_pos;
                     }
                 }
 
-                if let Some(pos) = position_to_emit {
-                    let _ = app_clone.emit("playback-position", pos);
+                if let Some(payload) = position_to_emit {
+                    let _ = app_clone.emit("playback-position", payload);
                 }
-                if let Some(remaining) = near_end_to_emit {
-                    let _ = app_clone.emit("playback-near-end", remaining);
+                if let Some(payload) = near_end_to_emit {
+                    let _ = app_clone.emit("playback-near-end", payload);
                 }
             }
         });
@@ -371,6 +221,7 @@ impl AudioManager {
                         emit_playback_error(
                             &app_for_audio,
                             "",
+                            0,
                             "stream",
                             format!("Failed to create audio stream: {}", e),
                             false,
@@ -390,12 +241,25 @@ impl AudioManager {
             loop {
                 match receiver.recv_timeout(Duration::from_millis(20)) {
                     Ok(command) => match command {
-                        AudioCommand::Play(file_path, start_pos) => {
+                        AudioCommand::Play {
+                            file_path,
+                            start_pos,
+                            generation,
+                        } => {
+                            emit_playback_transition(
+                                &app_for_audio,
+                                generation,
+                                PlaybackTransition::Loading,
+                                Some(file_path.clone()),
+                                None,
+                                true,
+                            );
                             *pending_gapless_path_thread.lock() = None;
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
                                     "",
+                                    generation,
                                     "stream",
                                     "Audio output is not available",
                                     false,
@@ -418,10 +282,13 @@ impl AudioManager {
                                         stream_handle,
                                         source,
                                         &state_clone,
-                                        &file_path,
-                                        duration,
-                                        actual_start,
-                                        None,
+                                        PlaybackStart {
+                                            file_path: &file_path,
+                                            duration,
+                                            start_secs: actual_start,
+                                            generation,
+                                            initial_volume: None,
+                                        },
                                     ) {
                                         if let Some(sink) = current_sink.take() {
                                             sink.stop();
@@ -432,10 +299,19 @@ impl AudioManager {
                                             Arc::clone(&emitted_for_play),
                                         );
                                         volume_ramp = None;
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::Playing,
+                                            Some(file_path.clone()),
+                                            None,
+                                            true,
+                                        );
                                     } else {
                                         emit_playback_error(
                                             &app_for_audio,
                                             file_path.clone(),
+                                            generation,
                                             "stream",
                                             "Failed to initialize audio output stream",
                                             false,
@@ -447,8 +323,17 @@ impl AudioManager {
                                     emit_playback_error(
                                         &app_for_audio,
                                         file_path.clone(),
+                                        generation,
                                         "decode",
-                                        err,
+                                        err.clone(),
+                                        false,
+                                    );
+                                    emit_playback_transition(
+                                        &app_for_audio,
+                                        generation,
+                                        PlaybackTransition::DecodeFailed,
+                                        Some(file_path.clone()),
+                                        Some(err),
                                         false,
                                     );
                                 }
@@ -458,12 +343,22 @@ impl AudioManager {
                             file_path,
                             start_pos,
                             duration_ms,
+                            generation,
                         } => {
+                            emit_playback_transition(
+                                &app_for_audio,
+                                generation,
+                                PlaybackTransition::Loading,
+                                Some(file_path.clone()),
+                                None,
+                                true,
+                            );
                             *pending_gapless_path_thread.lock() = None;
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
                                     "",
+                                    generation,
                                     "stream",
                                     "Audio output is not available",
                                     false,
@@ -471,6 +366,24 @@ impl AudioManager {
                                 continue;
                             };
                             if crossfade_state.is_some() {
+                                let message =
+                                    "A crossfade transition is already active".to_string();
+                                emit_playback_error(
+                                    &app_for_audio,
+                                    file_path.clone(),
+                                    generation,
+                                    "stream",
+                                    message.clone(),
+                                    true,
+                                );
+                                emit_playback_transition(
+                                    &app_for_audio,
+                                    generation,
+                                    PlaybackTransition::DecodeFailed,
+                                    Some(file_path),
+                                    Some(message),
+                                    true,
+                                );
                                 continue;
                             }
 
@@ -495,10 +408,13 @@ impl AudioManager {
                                         stream_handle,
                                         source,
                                         &state_clone,
-                                        &file_path,
-                                        duration,
-                                        actual_start,
-                                        initial_volume,
+                                        PlaybackStart {
+                                            file_path: &file_path,
+                                            duration,
+                                            start_secs: actual_start,
+                                            generation,
+                                            initial_volume,
+                                        },
                                     ) {
                                         if should_fallback_to_play {
                                             if let Some(sink) = current_sink.take() {
@@ -511,6 +427,8 @@ impl AudioManager {
                                                 outgoing_sink,
                                                 start: Instant::now(),
                                                 duration: Duration::from_millis(duration_ms.max(1)),
+                                                generation,
+                                                incoming_path: file_path.clone(),
                                             });
                                             apply_crossfade_step(
                                                 &mut crossfade_state,
@@ -526,10 +444,23 @@ impl AudioManager {
                                             Arc::clone(&emitted_for_crossfade),
                                         );
                                         volume_ramp = None;
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            if should_fallback_to_play {
+                                                PlaybackTransition::Playing
+                                            } else {
+                                                PlaybackTransition::CrossfadeStarted
+                                            },
+                                            Some(file_path.clone()),
+                                            None,
+                                            true,
+                                        );
                                     } else {
                                         emit_playback_error(
                                             &app_for_audio,
                                             file_path.clone(),
+                                            generation,
                                             "stream",
                                             "Failed to initialize audio output stream",
                                             true,
@@ -540,19 +471,30 @@ impl AudioManager {
                                     emit_playback_error(
                                         &app_for_audio,
                                         file_path.clone(),
+                                        generation,
                                         "decode",
-                                        err,
+                                        err.clone(),
+                                        true,
+                                    );
+                                    emit_playback_transition(
+                                        &app_for_audio,
+                                        generation,
+                                        PlaybackTransition::DecodeFailed,
+                                        Some(file_path.clone()),
+                                        Some(err),
                                         true,
                                     );
                                 }
                             }
                         }
                         AudioCommand::Seek(position_secs) => {
+                            let generation = state_clone.lock().generation;
                             *pending_gapless_path_thread.lock() = None;
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
                                     "",
+                                    generation,
                                     "stream",
                                     "Audio output is not available",
                                     false,
@@ -610,10 +552,13 @@ impl AudioManager {
                                         stream_handle,
                                         source,
                                         &state_clone,
-                                        &active_path,
-                                        updated_duration,
-                                        actual_start,
-                                        None,
+                                        PlaybackStart {
+                                            file_path: &active_path,
+                                            duration: updated_duration,
+                                            start_secs: actual_start,
+                                            generation,
+                                            initial_volume: None,
+                                        },
                                     ) {
                                         if was_paused {
                                             sink.pause();
@@ -631,6 +576,7 @@ impl AudioManager {
                                         emit_playback_error(
                                             &app_for_audio,
                                             active_path.clone(),
+                                            generation,
                                             "stream",
                                             "Failed to resume audio stream after seek",
                                             true,
@@ -641,6 +587,7 @@ impl AudioManager {
                                     emit_playback_error(
                                         &app_for_audio,
                                         active_path.clone(),
+                                        generation,
                                         "seek",
                                         format!("Failed to seek playback: {}", err),
                                         true,
@@ -657,6 +604,14 @@ impl AudioManager {
                                         active.outgoing_sink.pause();
                                     }
                                     state.is_paused = true;
+                                    emit_playback_transition(
+                                        &app_for_audio,
+                                        state.generation,
+                                        PlaybackTransition::Paused,
+                                        state.current_file.clone(),
+                                        None,
+                                        true,
+                                    );
                                 }
                             }
                         }
@@ -669,6 +624,14 @@ impl AudioManager {
                                         active.outgoing_sink.play();
                                     }
                                     state.is_paused = false;
+                                    emit_playback_transition(
+                                        &app_for_audio,
+                                        state.generation,
+                                        PlaybackTransition::Playing,
+                                        state.current_file.clone(),
+                                        None,
+                                        true,
+                                    );
                                 }
                             }
                         }
@@ -768,14 +731,14 @@ impl AudioManager {
                             let mut state = state_clone.lock();
                             state.booster = level.clamp(1.0, 2.0);
                         }
-                        AudioCommand::PreloadNext(maybe_path) => match maybe_path {
+                        AudioCommand::PreloadNext(maybe_source) => match maybe_source {
                             None => {
                                 *pending_gapless_path_thread.lock() = None;
                             }
-                            Some(path) if path.is_empty() => {
+                            Some((path, _)) if path.is_empty() => {
                                 *pending_gapless_path_thread.lock() = None;
                             }
-                            Some(path) => {
+                            Some((path, next_generation)) => {
                                 let Some(sink) = current_sink.as_ref() else {
                                     continue;
                                 };
@@ -793,6 +756,7 @@ impl AudioManager {
                                 }
                                 let out_path =
                                     state_clone.lock().current_file.clone().unwrap_or_default();
+                                let outgoing_generation = state_clone.lock().generation;
                                 if out_path.is_empty() {
                                     continue;
                                 }
@@ -820,6 +784,7 @@ impl AudioManager {
                                     {
                                         let mut s = state_emit.lock();
                                         s.current_file = Some(next_clone.clone());
+                                        s.generation = next_generation;
                                         s.duration = duration2;
                                         s.start_position = actual_start2;
                                         s.position_sample_rate = sr2;
@@ -828,9 +793,19 @@ impl AudioManager {
                                     }
                                     let payload = PlaybackEndedPayload {
                                         path: Some(out_clone),
+                                        generation: outgoing_generation,
                                         seamless: true,
+                                        next_generation: Some(next_generation),
                                     };
                                     let _ = app_emit.emit("playback-ended", payload);
+                                    emit_playback_transition(
+                                        &app_emit,
+                                        next_generation,
+                                        PlaybackTransition::Playing,
+                                        Some(next_clone.clone()),
+                                        None,
+                                        true,
+                                    );
                                     *pending_slot.lock() = None;
                                 });
 
@@ -838,34 +813,135 @@ impl AudioManager {
                                 *pending_gapless_path_thread.lock() = Some(path);
                             }
                         },
+                        AudioCommand::SourceRenamed { old_path, new_path } => {
+                            let mut state = state_clone.lock();
+                            if state.current_file.as_deref() == Some(old_path.as_str()) {
+                                state.current_file = Some(new_path.clone());
+                                emit_playback_transition(
+                                    &app_for_audio,
+                                    state.generation,
+                                    PlaybackTransition::SourceRenamed,
+                                    Some(new_path),
+                                    None,
+                                    true,
+                                );
+                            }
+                        }
                         AudioCommand::SetOutputDevice(device_id) => {
-                            *pending_gapless_path_thread.lock() = None;
-                            if let Some(sink) = current_sink.take() {
-                                sink.stop();
-                            }
-                            if let Some(active) = crossfade_state.take() {
-                                active.outgoing_sink.stop();
-                            }
-                            volume_ramp = None;
-                            reset_active_counter(&active_emitted_for_audio);
-                            {
-                                let mut state = state_clone.lock();
-                                state.is_playing = false;
-                                state.is_paused = false;
-                                state.current_file = None;
-                                state.duration = 0.0;
-                                state.start_position = 0.0;
-                                state.position_sample_rate = 0;
-                                state.position_channels = 0;
-                                state.warned_near_end = false;
-                            }
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {
-                                Ok(pair) => {
-                                    stream_bundle = Some(pair);
+                                Ok(new_stream_bundle) => {
+                                    let (active_path, position, was_paused, had_playback) = {
+                                        let state = state_clone.lock();
+                                        let emitted = {
+                                            let counter = active_emitted_for_audio.lock().clone();
+                                            counter.load(Ordering::Relaxed)
+                                        };
+                                        (
+                                            state.current_file.clone(),
+                                            position_from_samples(&state, emitted),
+                                            state.is_paused,
+                                            state.is_playing,
+                                        )
+                                    };
+
+                                    let replacement = if had_playback {
+                                        active_path.as_ref().and_then(|path| {
+                                            let emitted_for_replacement =
+                                                Arc::new(AtomicU64::new(0));
+                                            let (source, duration, actual_start) =
+                                                match prepare_source(
+                                                    path,
+                                                    position,
+                                                    &state_clone,
+                                                    &emitted_for_replacement,
+                                                ) {
+                                                    Ok(prepared) => prepared,
+                                                    Err(error) => {
+                                                        emit_playback_error(
+                                                            &app_for_audio,
+                                                            path,
+                                                            state_clone.lock().generation,
+                                                            "deviceSwitch",
+                                                            error.clone(),
+                                                            true,
+                                                        );
+                                                        emit_playback_transition(
+                                                            &app_for_audio,
+                                                            state_clone.lock().generation,
+                                                            PlaybackTransition::DeviceSwitchFailed,
+                                                            Some(path.clone()),
+                                                            Some(error),
+                                                            true,
+                                                        );
+                                                        return None;
+                                                    }
+                                                };
+                                            let current_generation = state_clone.lock().generation;
+                                            let sink = play_with_source(
+                                                &new_stream_bundle.1,
+                                                source,
+                                                &state_clone,
+                                                PlaybackStart {
+                                                    file_path: path,
+                                                    duration,
+                                                    start_secs: actual_start,
+                                                    generation: current_generation,
+                                                    initial_volume: None,
+                                                },
+                                            )?;
+                                            if was_paused {
+                                                sink.pause();
+                                                let mut state = state_clone.lock();
+                                                state.is_paused = true;
+                                                state.is_playing = true;
+                                            }
+                                            Some((sink, emitted_for_replacement))
+                                        })
+                                    } else {
+                                        None
+                                    };
+
+                                    if had_playback && replacement.is_none() {
+                                        continue;
+                                    }
+
+                                    *pending_gapless_path_thread.lock() = None;
+                                    if let Some(active) = crossfade_state.take() {
+                                        active.outgoing_sink.stop();
+                                    }
+                                    if let Some(old_sink) = current_sink.take() {
+                                        old_sink.stop();
+                                    }
+                                    if let Some((new_sink, counter)) = replacement {
+                                        current_sink = Some(new_sink);
+                                        set_active_counter(
+                                            &active_emitted_for_audio,
+                                            Arc::clone(&counter),
+                                        );
+                                    } else {
+                                        reset_active_counter(&active_emitted_for_audio);
+                                    }
+                                    volume_ramp = None;
+                                    stream_bundle = Some(new_stream_bundle);
                                 }
                                 Err(e) => {
-                                    emit_playback_error(&app_for_audio, "", "stream", e, true);
+                                    emit_playback_error(
+                                        &app_for_audio,
+                                        "",
+                                        state_clone.lock().generation,
+                                        "deviceSwitch",
+                                        e.clone(),
+                                        true,
+                                    );
+                                    emit_playback_transition(
+                                        &app_for_audio,
+                                        state_clone.lock().generation,
+                                        PlaybackTransition::DeviceSwitchFailed,
+                                        state_clone.lock().current_file.clone(),
+                                        Some(e),
+                                        true,
+                                    );
                                 }
                             }
                         }
@@ -892,11 +968,13 @@ impl AudioManager {
                             }
                             current_sink = None;
                             let mut ended_path = None;
+                            let mut ended_generation = 0;
                             let mut should_emit_ended = false;
                             {
                                 let mut state = state_clone.lock();
                                 if state.is_playing {
                                     ended_path = state.current_file.clone();
+                                    ended_generation = state.generation;
                                     state.start_position = state.duration;
                                     state.is_playing = false;
                                     state.is_paused = false;
@@ -908,9 +986,19 @@ impl AudioManager {
                             if should_emit_ended {
                                 let payload = PlaybackEndedPayload {
                                     path: ended_path,
+                                    generation: ended_generation,
                                     seamless: false,
+                                    next_generation: None,
                                 };
                                 let _ = app_for_audio.emit("playback-ended", payload);
+                                emit_playback_transition(
+                                    &app_for_audio,
+                                    ended_generation,
+                                    PlaybackTransition::Ended,
+                                    state_clone.lock().current_file.clone(),
+                                    None,
+                                    true,
+                                );
                             }
                         }
                     }
@@ -921,8 +1009,22 @@ impl AudioManager {
                 }
 
                 if crossfade_state.is_some() {
+                    let completed_crossfade = crossfade_state.as_ref().and_then(|active| {
+                        (crossfade_progress(active) >= 1.0)
+                            .then(|| (active.generation, active.incoming_path.clone()))
+                    });
                     apply_volume_ramp_step(&mut volume_ramp, &state_clone, None);
                     apply_crossfade_step(&mut crossfade_state, &state_clone, current_sink.as_ref());
+                    if let Some((generation, path)) = completed_crossfade {
+                        emit_playback_transition(
+                            &app_for_audio,
+                            generation,
+                            PlaybackTransition::CrossfadeCompleted,
+                            Some(path),
+                            None,
+                            true,
+                        );
+                    }
                 } else {
                     apply_volume_ramp_step(&mut volume_ramp, &state_clone, current_sink.as_ref());
                 }
@@ -933,13 +1035,24 @@ impl AudioManager {
             command_sender: sender,
             playback_state,
             active_emitted_samples,
+            next_generation: AtomicU64::new(0),
         }
     }
 
-    pub fn play(&self, file_path: String, start_pos: Option<f64>) -> Result<(), String> {
+    fn allocate_generation(&self) -> u64 {
+        next_playback_generation(&self.next_generation)
+    }
+
+    pub fn play(&self, file_path: String, start_pos: Option<f64>) -> Result<u64, String> {
+        let generation = self.allocate_generation();
         self.command_sender
-            .send(AudioCommand::Play(file_path, start_pos))
-            .map_err(|e| format!("Failed to send play command: {}", e))
+            .send(AudioCommand::Play {
+                file_path,
+                start_pos,
+                generation,
+            })
+            .map_err(|e| format!("Failed to send play command: {}", e))?;
+        Ok(generation)
     }
 
     pub fn pause(&self) -> Result<(), String> {
@@ -971,15 +1084,18 @@ impl AudioManager {
         file_path: String,
         start_pos: Option<f64>,
         duration_secs: f32,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         let duration_ms = (duration_secs.clamp(0.0, 12.0) * 1000.0).round() as u64;
+        let generation = self.allocate_generation();
         self.command_sender
             .send(AudioCommand::CrossfadeTo {
                 file_path,
                 start_pos,
                 duration_ms,
+                generation,
             })
-            .map_err(|e| format!("Failed to send crossfade command: {}", e))
+            .map_err(|e| format!("Failed to send crossfade command: {}", e))?;
+        Ok(generation)
     }
 
     pub fn set_volume(&self, volume: f32) -> Result<(), String> {
@@ -1022,10 +1138,19 @@ impl AudioManager {
             .map_err(|e| format!("Failed to set output device: {}", e))
     }
 
-    pub fn preload_next(&self, file_path: Option<String>) -> Result<(), String> {
+    pub fn preload_next(&self, file_path: Option<String>) -> Result<Option<u64>, String> {
+        let source = file_path.map(|path| (path, self.allocate_generation()));
+        let generation = source.as_ref().map(|(_, generation)| *generation);
         self.command_sender
-            .send(AudioCommand::PreloadNext(file_path))
-            .map_err(|e| format!("Failed to preload next track: {}", e))
+            .send(AudioCommand::PreloadNext(source))
+            .map_err(|e| format!("Failed to preload next track: {}", e))?;
+        Ok(generation)
+    }
+
+    pub fn source_renamed(&self, old_path: String, new_path: String) -> Result<(), String> {
+        self.command_sender
+            .send(AudioCommand::SourceRenamed { old_path, new_path })
+            .map_err(|e| format!("Failed to update active playback source: {}", e))
     }
 
     pub fn get_position(&self) -> f64 {
@@ -1046,334 +1171,8 @@ impl AudioManager {
     }
 }
 
-const MAX_REFILL_ATTEMPTS: usize = 64;
-
-type OpenedDecoder = (Box<dyn FormatReader>, Box<dyn SymphoniaDecoder>, f64);
-
-fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
-    let file = File::open(file_path).map_err(|e| format!("open error: {}", e))?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(file_path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-
-    let probed = get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions {
-                enable_gapless: true,
-                ..Default::default()
-            },
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| format!("probe error: {}", e))?;
-    let reader = probed.format;
-    let track = reader
-        .default_track()
-        .ok_or_else(|| "no default track".to_string())?;
-    let decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("decoder error: {}", e))?;
-
-    let duration = if let (Some(tb), Some(frames)) =
-        (track.codec_params.time_base, track.codec_params.n_frames)
-    {
-        let t = tb.calc_time(frames);
-        t.seconds as f64 + t.frac / tb.denom as f64
-    } else {
-        0.0
-    };
-
-    Ok((reader, decoder, duration))
-}
-
-fn prepare_source(
-    file_path: &str,
-    requested_start: f64,
-    state: &Arc<Mutex<PlaybackState>>,
-    emitted_samples: &Arc<AtomicU64>,
-) -> Result<(SymphoniaSource, f64, f64), String> {
-    let (mut format, mut decoder, mut duration) = open_decoder_for_file(file_path)?;
-    let mut actual_start = requested_start.max(0.0);
-    if duration > 0.0 {
-        actual_start = actual_start.min(duration);
-    }
-
-    if actual_start > 0.0 {
-        if let Err(seek_err) = seek_decoder(decoder.as_mut(), format.as_mut(), actual_start) {
-            eprintln!(
-                "Seek to {} failed for {} ({}); reopening from start",
-                actual_start, file_path, seek_err
-            );
-            let reopened = open_decoder_for_file(file_path)?;
-            format = reopened.0;
-            decoder = reopened.1;
-            duration = reopened.2;
-            actual_start = 0.0;
-        }
-    }
-
-    let source = SymphoniaSource::new(
-        decoder,
-        format,
-        state.clone(),
-        emitted_samples.clone(),
-        file_path.to_string(),
-    )
-    .ok_or_else(|| "missing channels or sample rate in codec params".to_string())?;
-
-    Ok((source, duration, actual_start))
-}
-
-fn seek_decoder(
-    decoder: &mut dyn SymphoniaDecoder,
-    format: &mut dyn FormatReader,
-    position_secs: f64,
-) -> Result<(), String> {
-    let tb = format
-        .default_track()
-        .and_then(|t| t.codec_params.time_base)
-        .ok_or_else(|| "no time base".to_string())?;
-    let ts = (position_secs * tb.denom as f64 / tb.numer as f64) as u64;
-
-    format
-        .seek(
-            SeekMode::Coarse,
-            SeekTo::Time {
-                time: tb.calc_time(ts),
-                track_id: None,
-            },
-        )
-        .map_err(|e| format!("seek error: {}", e))?;
-    decoder.reset();
-    Ok(())
-}
-
-fn play_with_source(
-    stream_handle: &OutputStreamHandle,
-    source: SymphoniaSource,
-    state: &Arc<Mutex<PlaybackState>>,
-    file_path: &str,
-    duration: f64,
-    start_secs: f64,
-    initial_volume: Option<f32>,
-) -> Option<Sink> {
-    let sink = Sink::try_new(stream_handle).ok()?;
-    let channels = source.channels();
-    let sample_rate = source.sample_rate();
-    {
-        let s = state.lock();
-        sink.set_volume(initial_volume.unwrap_or(s.volume).clamp(0.0, 1.0));
-        sink.set_speed(s.speed);
-    }
-
-    sink.append(source);
-    if sink.len() == 0 {
-        return None;
-    }
-
-    {
-        let mut s = state.lock();
-        s.current_file = Some(file_path.to_string());
-        s.duration = duration;
-        s.start_position = start_secs;
-        s.position_sample_rate = sample_rate;
-        s.position_channels = channels;
-        s.is_playing = true;
-        s.is_paused = false;
-        s.warned_near_end = false;
-    }
-    Some(sink)
-}
-
-struct SymphoniaSource {
-    decoder: Box<dyn SymphoniaDecoder>,
-    format: Box<dyn FormatReader>,
-    state: Arc<Mutex<PlaybackState>>,
-    emitted_samples: Arc<AtomicU64>,
-    file_path: String,
-    buffer: Vec<f32>,
-    buf_pos: usize,
-    channels: u16,
-    sample_rate: u32,
-}
-
-impl SymphoniaSource {
-    fn new(
-        decoder: Box<dyn SymphoniaDecoder>,
-        format: Box<dyn FormatReader>,
-        state: Arc<Mutex<PlaybackState>>,
-        emitted_samples: Arc<AtomicU64>,
-        file_path: String,
-    ) -> Option<Self> {
-        let channels = decoder.codec_params().channels?.count() as u16;
-        let sample_rate = decoder.codec_params().sample_rate?;
-
-        Some(Self {
-            decoder,
-            format,
-            state,
-            emitted_samples,
-            file_path,
-            buffer: Vec::new(),
-            buf_pos: 0,
-            channels,
-            sample_rate,
-        })
-    }
-
-    fn refill(&mut self) -> Option<()> {
-        let mut attempts = 0;
-        loop {
-            if attempts >= MAX_REFILL_ATTEMPTS {
-                eprintln!(
-                    "Decoder refill exceeded {} attempts for {}",
-                    MAX_REFILL_ATTEMPTS, self.file_path
-                );
-                return None;
-            }
-
-            let packet = match self.format.next_packet() {
-                Ok(packet) => packet,
-                Err(_) => return None,
-            };
-
-            match self.decoder.decode(&packet) {
-                Ok(decoded) => {
-                    if let Some((out, chans, rate)) = convert_to_f32(decoded) {
-                        self.channels = chans;
-                        self.sample_rate = rate;
-                        self.buffer = out;
-                        self.buf_pos = 0;
-                        return Some(());
-                    }
-                    attempts += 1;
-                    eprintln!(
-                        "Decoded packet yielded no samples for {}; retrying",
-                        self.file_path
-                    );
-                }
-                Err(symphonia::core::errors::Error::DecodeError(_)) => {
-                    attempts += 1;
-                }
-                Err(_) => {
-                    attempts += 1;
-                }
-            }
-        }
-    }
-}
-
-impl Iterator for SymphoniaSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.buf_pos >= self.buffer.len() {
-            self.refill()?;
-        }
-
-        let mut sample = *self.buffer.get(self.buf_pos)?;
-        self.buf_pos += 1;
-        let gain = {
-            let state = self.state.lock();
-            state.booster
-        };
-        sample = (sample * gain).clamp(-1.0, 1.0);
-        self.emitted_samples.fetch_add(1, Ordering::Relaxed);
-        Some(sample)
-    }
-}
-
-impl Source for SymphoniaSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        self.channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
-}
-
-/// Runs a one-shot callback on the first audio sample of the appended segment (gapless handoff).
-struct GaplessHandoffSource {
-    inner: SymphoniaSource,
-    on_first_sample: Option<Box<dyn FnOnce() + Send>>,
-    started: bool,
-}
-
-impl GaplessHandoffSource {
-    fn new(inner: SymphoniaSource, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
-        Self {
-            inner,
-            on_first_sample: Some(Box::new(on_first_sample)),
-            started: false,
-        }
-    }
-}
-
-impl Iterator for GaplessHandoffSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let sample = self.inner.next()?;
-        if !self.started {
-            self.started = true;
-            if let Some(cb) = self.on_first_sample.take() {
-                cb();
-            }
-        }
-        Some(sample)
-    }
-}
-
-impl Source for GaplessHandoffSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.inner.current_frame_len()
-    }
-
-    fn channels(&self) -> u16 {
-        self.inner.channels()
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.inner.sample_rate()
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        self.inner.total_duration()
-    }
-}
-
-fn convert_to_f32(buf: AudioBufferRef) -> Option<(Vec<f32>, u16, u32)> {
-    let chans = buf.spec().channels.count() as u16;
-    let rate = buf.spec().rate;
-    let frames = buf.frames();
-    if chans == 0 || frames == 0 {
-        return None;
-    }
-
-    let mut converted = buf.make_equivalent::<f32>();
-    buf.convert(&mut converted);
-    let mut out = Vec::with_capacity(frames * chans as usize);
-    for frame_idx in 0..frames {
-        for chan_idx in 0..chans as usize {
-            out.push(*converted.chan(chan_idx).get(frame_idx)?);
-        }
-    }
-    Some((out, chans, rate))
+fn next_playback_generation(counter: &AtomicU64) -> u64 {
+    counter.fetch_add(1, Ordering::Relaxed) + 1
 }
 
 pub type SharedAudioManager = Arc<AudioManager>;
@@ -1397,14 +1196,14 @@ pub fn play_track(
     start_pos: Option<f64>,
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     {
         let roots = roots_state.inner().read();
         ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
     }
-    state.play(file_path.clone(), start_pos)?;
+    let generation = state.play(file_path.clone(), start_pos)?;
     consume_transient_file(roots_state.inner(), Path::new(&file_path));
-    Ok(())
+    Ok(generation)
 }
 
 #[tauri::command]
@@ -1414,7 +1213,7 @@ pub fn crossfade_to_track(
     duration_secs: f32,
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let roots = roots_state.inner().read().roots.clone();
     ensure_audio_file_allowed(&file_path, &roots, "crossfade audio file")?;
     state.crossfade_to(file_path, start_pos, duration_secs)
@@ -1515,7 +1314,7 @@ pub fn preload_next_track(
     file_path: Option<String>,
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     if let Some(path) = file_path.as_deref() {
         let roots = roots_state.inner().read().roots.clone();
         ensure_audio_file_allowed(path, &roots, "preload audio file")?;
@@ -1525,6 +1324,7 @@ pub fn preload_next_track(
 
 #[cfg(test)]
 mod tests {
+    use super::source::{validate_decoded_packet, MAX_DECODED_SAMPLES_PER_PACKET};
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -1599,5 +1399,26 @@ mod tests {
         set_active_counter(&slot, Arc::clone(&replacement));
         assert_eq!(replacement.load(Ordering::Relaxed), 0);
         assert!(Arc::ptr_eq(&slot.lock(), &replacement));
+    }
+
+    #[test]
+    fn playback_generations_are_monotonic() {
+        let counter = AtomicU64::new(0);
+
+        assert_eq!(next_playback_generation(&counter), 1);
+        assert_eq!(next_playback_generation(&counter), 2);
+        assert_eq!(next_playback_generation(&counter), 3);
+    }
+
+    #[test]
+    fn decoded_packet_limits_reject_invalid_media_parameters() {
+        assert_eq!(validate_decoded_packet(2, 1_024, 48_000), Some(2_048));
+        assert_eq!(validate_decoded_packet(2, 1_024, 0), None);
+        assert_eq!(validate_decoded_packet(0, 1_024, 48_000), None);
+        assert_eq!(
+            validate_decoded_packet(2, MAX_DECODED_SAMPLES_PER_PACKET, 48_000),
+            None
+        );
+        assert_eq!(validate_decoded_packet(2, 1_024, 768_000), None);
     }
 }
