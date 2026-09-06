@@ -272,9 +272,9 @@ const MenuButton = ({
       'w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-colors text-left rounded-lg',
       disabled && 'opacity-50 cursor-not-allowed',
       flash
-        ? 'bg-emerald-500/10 text-emerald-400'
+        ? 'bg-[var(--state-success-surface)] text-[var(--state-success-ink)]'
         : danger
-          ? 'text-red-400 hover:bg-red-400/10 hover:text-red-300'
+          ? 'text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)] hover:text-[var(--state-error-ink)]'
           : 'text-text-secondary hover:text-white hover:bg-white/10',
     )}
   >

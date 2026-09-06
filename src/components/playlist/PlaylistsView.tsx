@@ -456,7 +456,10 @@ export function PlaylistsView() {
                               <X className="h-4 w-4" />
                             </button>
                             {inlineRenameError ? (
-                              <p className="basis-full text-xs text-red-400" role="alert">
+                              <p
+                                className="basis-full text-xs text-[var(--state-error-ink)]"
+                                role="alert"
+                              >
                                 {inlineRenameError}
                               </p>
                             ) : null}
@@ -488,7 +491,9 @@ export function PlaylistsView() {
                           </>
                         ) : null}
                         {detail.data.syncError ? (
-                          <p className="mt-2 text-sm text-red-400">{detail.data.syncError}</p>
+                          <p className="mt-2 text-sm text-[var(--state-error-ink)]" role="alert">
+                            {detail.data.syncError}
+                          </p>
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -655,7 +660,9 @@ export function PlaylistsView() {
                             <span className="flex items-center gap-1">
                               {!entry.available && canEditTracks ? (
                                 <>
-                                  <span className="mr-2 text-xs text-amber-400">Unavailable</span>
+                                  <span className="mr-2 text-xs text-[var(--state-warning-ink)]">
+                                    Unavailable
+                                  </span>
                                   <Button
                                     variant="secondary"
                                     disabled={relinkingTrackId === entry.trackId}

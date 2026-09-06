@@ -152,10 +152,10 @@ export function TagManagerMetadataFields({
               <button
                 type="button"
                 onClick={onStageRemoveCoverArt}
-                className="p-2 bg-red-500/20 rounded-full hover:bg-red-500/40"
+                className="p-2 bg-[var(--state-error-surface)] rounded-full hover:bg-[var(--state-error-surface)]"
                 title="Remove artwork (saved on Save)"
               >
-                <Trash2 className="w-4 h-4 text-red-400" />
+                <Trash2 className="w-4 h-4 text-[var(--state-error-ink)]" />
               </button>
             </div>
           </div>

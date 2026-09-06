@@ -202,7 +202,7 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
               item.disabled
                 ? 'text-text-muted/50 cursor-not-allowed'
                 : item.danger
-                  ? 'text-red-400 hover:bg-red-500/10 hover:text-red-300'
+                  ? 'text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)] hover:text-[var(--state-error-ink)]'
                   : 'text-text-secondary hover:bg-white/5 hover:text-white',
             )}
           >

@@ -364,7 +364,9 @@ export const UnifiedSettingsView = memo(
                         <span
                           className={cn(
                             'text-xs font-semibold',
-                            grant.status === 'available' ? 'text-emerald-400' : 'text-amber-300',
+                            grant.status === 'available'
+                              ? 'text-[var(--state-success-ink)]'
+                              : 'text-[var(--state-warning-ink)]',
                           )}
                         >
                           {grant.status === 'available' ? 'Available' : 'Needs access'}
@@ -478,7 +480,7 @@ export const UnifiedSettingsView = memo(
                               className={
                                 isNeobrutalism
                                   ? 'rounded-none border-2 border-black bg-[var(--signal-danger)] text-white shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--neo-danger-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
-                                  : 'text-red-400 hover:bg-red-500/10'
+                                  : 'text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)]'
                               }
                             >
                               <Trash2 size={14} />

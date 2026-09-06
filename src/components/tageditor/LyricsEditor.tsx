@@ -549,7 +549,7 @@ export const LyricsEditor = memo(
         {errorMessage && (
           <div
             role="alert"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-sm"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--state-error-surface)] border border-[var(--state-error-border)] text-[var(--state-error-ink)] text-sm"
           >
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
@@ -705,7 +705,7 @@ export const LyricsEditor = memo(
           aria-live="polite"
           className={clsx(
             'flex justify-end text-xs font-mono tabular-nums',
-            isOverSizeLimit ? 'text-red-400' : 'text-text-muted',
+            isOverSizeLimit ? 'text-[var(--state-error-ink)]' : 'text-text-muted',
           )}
         >
           {isOverSizeLimit
@@ -793,7 +793,7 @@ export const LyricsEditor = memo(
                               e.stopPropagation();
                               handleSaveEdit();
                             }}
-                            className="p-1.5 rounded hover:bg-green-500/20 text-green-400"
+                            className="p-1.5 rounded hover:bg-[var(--state-success-surface)] text-[var(--state-success-ink)]"
                             title="Save (Enter)"
                             aria-label="Save edit"
                           >
@@ -804,7 +804,7 @@ export const LyricsEditor = memo(
                               e.stopPropagation();
                               handleCancelEdit();
                             }}
-                            className="p-1.5 rounded hover:bg-red-500/20 text-red-400"
+                            className="p-1.5 rounded hover:bg-[var(--state-error-surface)] text-[var(--state-error-ink)]"
                             title="Cancel (Escape)"
                             aria-label="Cancel edit"
                           >
@@ -854,7 +854,7 @@ export const LyricsEditor = memo(
                                 e.stopPropagation();
                                 handleDeleteLine(line);
                               }}
-                              className="p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
+                              className="p-1.5 rounded hover:bg-[var(--state-error-surface)] text-text-muted hover:text-[var(--state-error-ink)]"
                               title="Delete line"
                               aria-label="Delete line"
                             >

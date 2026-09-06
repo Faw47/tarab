@@ -104,11 +104,14 @@ export const ConfirmDialog = memo(
                     'flex items-center justify-center w-10 h-10',
                     isNeobrutalism
                       ? 'border-2 border-black bg-[var(--signal-danger)] radius-r1'
-                      : 'rounded-full bg-red-500/20',
+                      : 'rounded-full bg-[var(--state-error-surface)]',
                   )}
                 >
                   <AlertTriangle
-                    className={clsx('w-5 h-5', isNeobrutalism ? 'text-black' : 'text-red-400')}
+                    className={clsx(
+                      'w-5 h-5',
+                      isNeobrutalism ? 'text-black' : 'text-[var(--state-error-ink)]',
+                    )}
                   />
                 </div>
               )}

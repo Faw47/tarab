@@ -931,7 +931,7 @@ export const TagManagerView = ({
                     : 'Track Properties'}
                 </span>
                 {hasChanges && (
-                  <span className="text-xs bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20">
+                  <span className="text-xs bg-[var(--state-warning-surface)] text-[var(--state-warning-ink)] px-2 py-0.5 rounded border border-[var(--state-warning-border)]">
                     UNSAVED
                   </span>
                 )}
@@ -985,7 +985,7 @@ export const TagManagerView = ({
                     <button
                       onClick={requestDeleteFiles}
                       disabled={selectedTracks.length === 0}
-                      className="flex items-center justify-center gap-2 py-2 rounded-lg bg-red-500/5 hover:bg-red-500/10 text-xs text-red-400 border border-red-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="flex items-center justify-center gap-2 py-2 rounded-lg bg-[var(--state-error-surface)] hover:bg-[var(--state-error-surface)] text-xs text-[var(--state-error-ink)] border border-[var(--state-error-border)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       <Trash2 className="w-3.5 h-3.5" /> Delete File
                     </button>

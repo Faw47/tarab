@@ -212,7 +212,7 @@ export function AppTransientSurfaces({
             role="status"
             aria-live="polite"
           >
-            <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+            <Check className="h-4 w-4 text-[var(--state-success-ink)]" aria-hidden="true" />
             Library scan complete
           </motion.div>
         )}

@@ -56,7 +56,7 @@ export function TagEditorArtworkPanel({
           variant="ghost"
           size="sm"
           onClick={onRemove}
-          className="mt-3 w-full text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 flex items-center justify-center gap-1 rounded-full h-8"
+          className="mt-3 w-full text-xs text-[var(--state-error-ink)] hover:text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)] flex items-center justify-center gap-1 rounded-full h-8"
         >
           <Trash2 className="w-3 h-3" aria-hidden="true" />
           Remove artwork

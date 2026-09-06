@@ -761,7 +761,7 @@ export const TagEditorModal = memo(
                   </div>
                 ) : !hasTracks ? (
                   <div
-                    className="mx-auto max-w-lg rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"
+                    className="mx-auto max-w-lg rounded-xl border border-[var(--state-error-border)] bg-[var(--state-error-surface)] p-4 text-sm text-[var(--state-error-ink)]"
                     role="status"
                   >
                     No tracks selected. Close this editor and choose at least one track.
@@ -780,7 +780,7 @@ export const TagEditorModal = memo(
                     </div>
 
                     {error && (
-                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                      <div className="p-3 bg-[var(--state-error-surface)] border border-[var(--state-error-border)] rounded-lg text-[var(--state-error-ink)] text-sm">
                         {error}
                       </div>
                     )}
@@ -859,7 +859,11 @@ export const TagEditorModal = memo(
                           onSave={handleSaveLyrics}
                           isSaving={isLyricsSaving}
                         />
-                        {lyricsError && <p className="text-xs text-red-400 mt-2">{lyricsError}</p>}
+                        {lyricsError && (
+                          <p className="text-xs text-[var(--state-error-ink)] mt-2">
+                            {lyricsError}
+                          </p>
+                        )}
                       </div>
                     )}
 

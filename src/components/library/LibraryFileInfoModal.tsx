@@ -220,7 +220,7 @@ export const LibraryFileInfoModal = ({
                   variant="ghost"
                   size="sm"
                   onClick={onClose}
-                  className="flex-1 text-xs h-8 rounded-full text-text-secondary hover:text-red-200 hover:bg-red-950/40"
+                  className="flex-1 text-xs h-8 rounded-full text-text-secondary hover:text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)]"
                 >
                   Close
                 </Button>

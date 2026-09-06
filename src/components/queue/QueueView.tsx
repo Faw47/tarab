@@ -436,7 +436,7 @@ export const QueueView = memo(
                   variant="ghost"
                   size="sm"
                   onClick={clearQueue}
-                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-red-500/20 hover:text-red-200"
+                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-[var(--state-error-surface)] hover:text-[var(--state-error-ink)]"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Clear queue
@@ -846,7 +846,7 @@ const QueueRowBase = memo(
             'flex h-9 w-9 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
               ? 'border-2 border-black bg-white text-black shadow-[var(--neo-shadow-xs)] hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
-              : 'rounded-full bg-white/[0.06] hover:bg-red-500/30 hover:text-red-200 text-white/60',
+              : 'rounded-full bg-white/[0.06] hover:bg-[var(--state-error-surface)] hover:text-[var(--state-error-ink)] text-white/60',
           )}
           aria-label="Remove from queue"
         >
@@ -1006,7 +1006,7 @@ const HistoryRow = memo(
             'flex h-8 w-8 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
               ? 'border-2 border-black bg-white shadow-[var(--neo-shadow-xs)] hover:bg-[var(--signal-danger)] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
-              : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-red-500/30 hover:text-red-200',
+              : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-[var(--state-error-surface)] hover:text-[var(--state-error-ink)]',
           )}
           aria-label="Remove from queue history"
         >

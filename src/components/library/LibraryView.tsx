@@ -1541,7 +1541,7 @@ export const LibraryView = memo(function LibraryView({
             ) : searchError && trimmedSearchQuery ? (
               <div className="library-v2-empty-wrap" role="alert">
                 <div className="library-v2-empty-icon" aria-hidden="true">
-                  <TrackIcon className="h-10 w-10 text-amber-300" />
+                  <TrackIcon className="h-10 w-10 text-[var(--state-warning-ink)]" />
                 </div>
                 <div className="library-v2-empty-copy">
                   <h3>Search unavailable</h3>

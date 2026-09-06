@@ -61,16 +61,18 @@ export class AppErrorBoundary extends React.Component<
 
     return (
       <div className="min-h-[100dvh] w-full bg-background text-text-primary flex items-center justify-center px-6">
-        <div className="w-full max-w-xl rounded-2xl border border-red-400/40 bg-red-950/35 p-6 shadow-xl backdrop-blur-sm">
-          <h1 className="text-xl font-semibold text-red-100">Something went wrong</h1>
-          <p className="mt-2 text-sm text-red-200/90">
+        <div className="w-full max-w-xl rounded-2xl border border-[var(--state-error-border)] bg-[var(--state-error-surface)] p-6 shadow-xl backdrop-blur-sm">
+          <h1 className="text-xl font-semibold text-[var(--state-error-ink)]">
+            Something went wrong
+          </h1>
+          <p className="mt-2 text-sm text-[var(--state-error-ink)]">
             Tarab hit an unexpected error and cannot continue in this state.
           </p>
-          <p className="mt-3 rounded-lg bg-black/30 p-3 text-xs text-red-100/90 font-mono break-all">
+          <p className="mt-3 rounded-lg bg-black/30 p-3 text-xs text-[var(--state-error-ink)] font-mono break-all">
             {this.state.error.message}
           </p>
           {this.state.stack && (
-            <p className="mt-2 text-[12px] text-red-200/70 font-mono whitespace-pre-wrap max-h-28 overflow-auto custom-scrollbar">
+            <p className="mt-2 text-[12px] text-[var(--state-error-ink)] font-mono whitespace-pre-wrap max-h-28 overflow-auto custom-scrollbar">
               {this.state.stack}
             </p>
           )}

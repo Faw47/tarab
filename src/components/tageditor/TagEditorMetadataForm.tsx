@@ -270,7 +270,7 @@ export function TagEditorMetadataForm({
                       </td>
                       <td className="p-3 text-right">
                         <IconButton
-                          className="p-1 text-text-muted hover:text-red-400 hover:bg-red-950/20 rounded-full"
+                          className="p-1 text-text-muted hover:text-[var(--state-error-ink)] hover:bg-[var(--state-error-surface)] rounded-full"
                           onClick={() => handleRemoveExtendedField(i)}
                           aria-label="Remove field"
                         >

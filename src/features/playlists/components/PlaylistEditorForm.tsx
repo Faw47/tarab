@@ -108,12 +108,20 @@ export const PlaylistEditorForm = memo(
             id={fieldId('name')}
             {...register('name')}
             type="text"
+            aria-invalid={Boolean(errors.name)}
+            aria-describedby={errors.name ? fieldId('name-error') : undefined}
             theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
             className="w-full px-3 py-2"
             placeholder="My playlist"
           />
           {errors.name && (
-            <p className="text-xs text-red-500 font-bold mt-1">{errors.name.message}</p>
+            <p
+              id={fieldId('name-error')}
+              className="mt-1 text-xs font-bold text-[var(--state-error-ink)]"
+              role="alert"
+            >
+              {errors.name.message}
+            </p>
           )}
         </div>
 
@@ -191,6 +199,7 @@ export const PlaylistEditorForm = memo(
             <select
               id={fieldId('rule-kind')}
               {...register('ruleKind')}
+              aria-describedby={errors.ruleValues?.root ? fieldId('rule-values-error') : undefined}
               className={clsx(
                 'w-full px-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 isNeobrutalism
@@ -399,7 +408,11 @@ export const PlaylistEditorForm = memo(
               </div>
             )}
             {errors.ruleValues?.root?.message && (
-              <p className="text-xs text-red-500 font-bold mt-1">
+              <p
+                id={fieldId('rule-values-error')}
+                className="mt-1 text-xs font-bold text-[var(--state-error-ink)]"
+                role="alert"
+              >
                 {errors.ruleValues.root.message}
               </p>
             )}
@@ -428,6 +441,8 @@ export const PlaylistEditorForm = memo(
               <Input
                 id={fieldId('folder-path')}
                 {...register('folderPath')}
+                aria-invalid={Boolean(errors.folderPath)}
+                aria-describedby={errors.folderPath ? fieldId('folder-path-error') : undefined}
                 theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
                 className="flex-1 px-3 py-2"
                 placeholder="/Music/Arabic"
@@ -441,12 +456,22 @@ export const PlaylistEditorForm = memo(
               </Button>
             </div>
             {errors.folderPath && (
-              <p className="text-xs text-red-500 font-bold mt-1">{errors.folderPath.message}</p>
+              <p
+                id={fieldId('folder-path-error')}
+                className="mt-1 text-xs font-bold text-[var(--state-error-ink)]"
+                role="alert"
+              >
+                {errors.folderPath.message}
+              </p>
             )}
           </div>
         )}
 
-        {errors.root && <p className="text-sm text-red-500 font-bold">{errors.root.message}</p>}
+        {errors.root && (
+          <p className="text-sm font-bold text-[var(--state-error-ink)]" role="alert">
+            {errors.root.message}
+          </p>
+        )}
 
         <footer className="mt-6 flex items-center justify-end gap-3">
           <Button

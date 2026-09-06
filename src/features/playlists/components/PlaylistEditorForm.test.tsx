@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PlaylistEditorForm } from './PlaylistEditorForm';
 
@@ -19,6 +19,21 @@ describe('PlaylistEditorForm labels', () => {
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Type' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Manual' })).toBeInTheDocument();
+  });
+
+  it('announces name validation errors with the semantic state contract', async () => {
+    render(<PlaylistEditorForm mode="create" onCancel={vi.fn()} onSave={vi.fn()} />);
+
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Night Routes' } });
+    fireEvent.change(name, { target: { value: '' } });
+
+    await waitFor(() => expect(name).toHaveAttribute('aria-invalid', 'true'));
+
+    const error = screen.getByRole('alert');
+    expect(error).toHaveTextContent('Name is required');
+    expect(error).toHaveClass('text-[var(--state-error-ink)]');
+    expect(name).toHaveAttribute('aria-describedby', error.id);
   });
 
   it('associates conditional smart-rule fields with their labels', () => {

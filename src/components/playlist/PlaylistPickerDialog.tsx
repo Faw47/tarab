@@ -152,7 +152,7 @@ export const PlaylistPickerDialog = memo(
                   Loading playlists...
                 </div>
               ) : isError ? (
-                <div className="p-6 text-center text-sm text-red-400" role="alert">
+                <div className="p-6 text-center text-sm text-[var(--state-error-ink)]" role="alert">
                   Tarab could not load playlists.
                   <Button className="mt-3" size="sm" onClick={() => void refetch()}>
                     Retry

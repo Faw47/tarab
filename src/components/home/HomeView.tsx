@@ -183,8 +183,8 @@ export const HomeView = memo(
       return (
         <div className="h-full overflow-y-auto pb-32 custom-scrollbar" onScroll={handleScroll}>
           <div className="max-w-2xl mx-auto px-6 py-20 text-center" role="alert">
-            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-5 shadow-[0_0_24px_-8px_rgba(239,68,68,0.35)]">
-              <Music2 className="w-7 h-7 text-red-400/70" />
+            <div className="w-16 h-16 rounded-full bg-[var(--state-error-surface)] flex items-center justify-center mx-auto mb-5">
+              <Music2 className="w-7 h-7 text-[var(--state-error-ink)]" />
             </div>
             <h2 className="text-xl font-semibold text-white mb-2">Library failed to load</h2>
             <p className="text-white/45 mb-6 text-sm">{libraryError}</p>
