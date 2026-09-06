@@ -141,7 +141,7 @@ exception when adding commands.
 | Linux x64 | `ubuntu-22.04` | AppImage and Debian package | Ubuntu 22.04 or Debian 12 |
 | Linux arm64 | `ubuntu-22.04-arm` | AppImage and Debian package | Ubuntu 22.04 or Debian 12 |
 
-The arm64 Linux and Windows labels are standard GitHub-hosted runner labels. Review the current GitHub-hosted runner reference before each release because GitHub can change images, labels, and installed tools.
+As of 2026-09-05, GitHub lists `ubuntu-22.04-arm` and `windows-11-arm` as hosted ARM64 labels; ARM hosted runners remain in public preview. Review the [GitHub-hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) before each release because GitHub can change images, labels, availability, and installed tools.
 The macOS verification uses BSD-compatible `base64 -D` and `find` predicates; do not replace them with GNU-only flags.
 
 ### Required release secrets
