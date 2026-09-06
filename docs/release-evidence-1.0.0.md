@@ -69,14 +69,13 @@ The earlier runtime test used an isolated temporary HOME. The 2026-07-28 package
 
 ## Release decision
 
-The current source gates, dependency audits, historical macOS evidence, and local unsigned Windows package evidence are ready for a hosted release candidate. Tarab 1.0.0 is not yet approved for public release because the current Apple Silicon DMG cannot be created on this host, the current application is not Developer ID signed, and hosted signed cross-platform packages, notarization, published checksums, and GitHub attestations do not exist.
+The current source gates, dependency audits, historical macOS evidence, and local unsigned Windows package evidence are ready for a hosted release candidate. The reviewed source is already pushed to Faw47/tarab on branch agent/product-quality-audit. Tarab 1.0.0 is not yet approved for public release because the current Apple Silicon DMG cannot be created on this host, the current application is not Developer ID signed, and hosted signed cross-platform packages, notarization, published checksums, and GitHub attestations do not exist.
 
 To complete the decision:
 
-1. Create or connect the intended GitHub repository.
-2. Configure Apple Developer ID and notarization secrets.
-3. Configure the Windows code-signing certificate and RFC 3161 timestamp endpoint.
-4. Push the reviewed source and create the exact `v1.0.0` tag.
-5. Require every release workflow job to pass.
-6. Download each published asset and verify `SHA256SUMS.txt`.
-7. Verify GitHub attestations and perform clean-install and upgrade tests on each supported operating system.
+1. Configure Apple Developer ID and notarization secrets.
+2. Configure the Windows code-signing certificate and RFC 3161 timestamp endpoint.
+3. Create the exact `v1.0.0` tag from the reviewed source once release credentials and workflow readiness are confirmed.
+4. Require every release workflow job to pass.
+5. Download each published asset and verify `SHA256SUMS.txt`.
+6. Verify GitHub attestations and perform clean-install and upgrade tests on each supported operating system.
