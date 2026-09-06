@@ -31,13 +31,13 @@ This file records the evidence available on 2026-09-05. The macOS sections retai
 | Notarization and stapling | Apple notarization credentials are not available in this workspace. | Missing external credential |
 | Gatekeeper distribution acceptance | The release workflow checks the application and DMG after signing and stapling. | Not proven on a Developer ID artifact |
 
-## Windows package evidence (local unsigned 2026-09-02)
+## Windows package evidence (local unsigned 2026-09-05)
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| Windows x64 application | `pnpm build:app` produced `src-tauri/target/release/TARAB.exe`; size 16,290,816 bytes; SHA-256 `49D5E01424BE80AE19464A7ED16008B9BCF5F751E1696333341C5AB6DA002322`. | Proven locally |
-| Windows x64 MSI installer | `pnpm build:app` produced `src-tauri/target/release/bundle/msi/Tarab_1.0.0_x64_en-US.msi`; size 7,929,856 bytes; SHA-256 `00719AD79D6C9E9EA30C80AFC73F780CE92352D5044CB3DF1883DA267CD840D5`. | Proven locally |
-| Windows x64 NSIS installer | `pnpm build:app` produced `src-tauri/target/release/bundle/nsis/Tarab_1.0.0_x64-setup.exe`; size 5,929,202 bytes; SHA-256 `EC7141ED7766CA48291B5A28804F301670815E3709B4119A92EDEC0B91FA7B81`. | Proven locally |
+| Windows x64 application | `pnpm build:app` produced `src-tauri/target/release/TARAB.exe`; size 16,290,816 bytes; SHA-256 `94F0A2F066096C2746290C6090FC67A3F5358356FF0D1B33B4F46602C511483C`. | Proven locally |
+| Windows x64 MSI installer | `pnpm build:app` produced `src-tauri/target/release/bundle/msi/Tarab_1.0.0_x64_en-US.msi`; size 7,933,952 bytes; SHA-256 `F800FCCF544D268C2BB9BD8A164DA003A7FDD768B7DF3963239A0AC9347BB9FD`. | Proven locally |
+| Windows x64 NSIS installer | `pnpm build:app` produced `src-tauri/target/release/bundle/nsis/Tarab_1.0.0_x64-setup.exe`; size 5,931,104 bytes; SHA-256 `ABE4CBEFBAB39B814D8F9643E48F3A45070276B0F163A15F8D4DE2F0DF6EDFD9`. | Proven locally |
 | Windows Authenticode | The local application, MSI installer, and NSIS installer all report `NotSigned`, as expected for a build without the hosted certificate secrets. | Not distribution-ready |
 
 ## macOS runtime evidence (historical 2026-07-28)
