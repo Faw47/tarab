@@ -2,6 +2,31 @@
 
 All notable changes to Tarab are recorded in this file.
 
+## Unreleased - 2026-09-05
+
+### Added
+
+- Cursor-based library loading, cancellable large-library shuffle planning, virtualized keyboard navigation, and progressive Tag Manager hydration.
+- Retryable loading and recovery states across library, playlists, scans, imports, output devices, and file restoration.
+- Storybook review states for shared controls, navigation, player surfaces, playlists, Tag Manager, and both visual themes.
+
+### Changed
+
+- Navigation now shares one view and label model across the top bar, sidebar, dock, search, and album views.
+- Playback and session restore reject stale generations and preserve queue, position, and playback settings more reliably.
+- Error, warning, success, loading, and destructive surfaces use theme-aware semantic tokens.
+- Playlist validation exposes accessible field errors and associates them with the relevant controls.
+- Optional desktop integrations degrade gracefully when media keys, shortcuts, or output devices are unavailable.
+- Release checks now cover typed IPC parity, capabilities, dependency audits, Storybook, packaging configuration, and current Windows artifact hashes.
+
+### Fixed
+
+- Missing Queue and Shuffle settings icon.
+- Context-menu focus, keyboard navigation, typeahead, collision positioning, and focus restoration.
+- Windows-compatible atomic metadata and lyric replacement behavior.
+- Library search races, stale playlist mutations, file-association authority, and app-owned artwork fallback behavior.
+
+
 ## 1.0.0 - 2026-07-23
 
 ### Added
