@@ -35,9 +35,9 @@ This file records the evidence available on 2026-09-05. The macOS sections retai
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| Windows x64 application | `pnpm build:app` produced `src-tauri/target/release/TARAB.exe`; size 16,290,816 bytes; SHA-256 `94F0A2F066096C2746290C6090FC67A3F5358356FF0D1B33B4F46602C511483C`. | Proven locally |
-| Windows x64 MSI installer | `pnpm build:app` produced `src-tauri/target/release/bundle/msi/Tarab_1.0.0_x64_en-US.msi`; size 7,933,952 bytes; SHA-256 `F800FCCF544D268C2BB9BD8A164DA003A7FDD768B7DF3963239A0AC9347BB9FD`. | Proven locally |
-| Windows x64 NSIS installer | `pnpm build:app` produced `src-tauri/target/release/bundle/nsis/Tarab_1.0.0_x64-setup.exe`; size 5,931,104 bytes; SHA-256 `ABE4CBEFBAB39B814D8F9643E48F3A45070276B0F163A15F8D4DE2F0DF6EDFD9`. | Proven locally |
+| Windows x64 application | `pnpm build:app` produced `src-tauri/target/release/TARAB.exe`; size 16,290,816 bytes; SHA-256 `EAC64D5BDDB8AD2F9358809B79D5AEFB2F110E90BE1992AB22A9359FC8579FE2`. | Proven locally on 2026-09-05 |
+| Windows x64 MSI installer | `pnpm build:app` produced `src-tauri/target/release/bundle/msi/Tarab_1.0.0_x64_en-US.msi`; size 7,933,952 bytes; SHA-256 `519E97968C84B0CD7524E5259E28771B1685702D396ED8CF41E0C0C849CE2557`. | Proven locally on 2026-09-05 |
+| Windows x64 NSIS installer | `pnpm build:app` produced `src-tauri/target/release/bundle/nsis/Tarab_1.0.0_x64-setup.exe`; size 5,929,963 bytes; SHA-256 `58A67D1A6FEEAD7392B148B001A0AAEEF4633E52DF96DAFC2F933FA496BECCCD`. | Proven locally on 2026-09-05 |
 | Windows Authenticode | The local application, MSI installer, and NSIS installer all report `NotSigned`, as expected for a build without the hosted certificate secrets. | Not distribution-ready |
 
 ## macOS runtime evidence (historical 2026-07-28)
