@@ -185,6 +185,11 @@ describe('workflow supply-chain policy', () => {
     expect(rebuildCommands).toEqual(['run: pnpm rebuild esbuild@0.27.3 @swc/core@1.15.18']);
   });
 
+  it('runs CI on the repository branch conventions', () => {
+    expect(ciWorkflow).toContain("      - 'agent/**'");
+    expect(ciWorkflow).toContain("      - 'codex/**'");
+  });
+
   it('pins cargo-audit in CI and release workflows', () => {
     for (const workflow of [releaseWorkflow, ciWorkflow]) {
       const auditCommands = workflow

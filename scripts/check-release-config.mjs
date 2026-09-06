@@ -188,6 +188,18 @@ const checkLifecycleCommands = (workflow, workflowName, requireInstall = true) =
 checkLifecycleCommands(releaseWorkflow, 'release');
 checkLifecycleCommands(ciWorkflow, 'CI');
 
+const requiredCiPushBranches = [
+  '      - main',
+  '      - master',
+  "      - 'agent/**'",
+  "      - 'codex/**'",
+];
+for (const branchTrigger of requiredCiPushBranches) {
+  if (!ciWorkflow.includes(branchTrigger)) {
+    failures.push('CI must run on push to ' + branchTrigger.trim() + '.');
+  }
+}
+
 const expectedCargoAuditCommand = 'run: cargo install cargo-audit --version 0.22.1 --locked';
 for (const [workflowName, workflow] of [
   ['release', releaseWorkflow],
