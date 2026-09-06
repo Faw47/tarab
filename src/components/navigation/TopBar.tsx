@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronLeft,
   Home,
+  ListMusic,
   Loader2,
   type LucideIcon,
   Search,
@@ -18,50 +19,62 @@ import {
   type RefObject,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react';
 import { cn } from '@/lib/utils';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { Button } from '../ui/button';
 import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
-import type { NavView } from './FloatingDock';
+import { type NavView, normalizeDockActiveView } from './navigation-model';
 import { SlidingTabGroup } from './SlidingTabGroup';
-import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
+import {
+  TOP_BAR_PRIMARY_VIEWS,
+  TOP_BAR_SECONDARY_VIEWS,
+  type TopBarProcessingTask,
+  type TopBarStatus,
+} from './top-bar-model';
+
+export type { TopBarProcessingTask as ProcessingTask } from './top-bar-model';
+
+import { useTopBarController } from './useTopBarController';
 import { WindowsWindowControls } from './WindowsWindowControls';
 
 /* ─── CONSTANTS ──────────────────────────────────────────────────────────── */
 
 const SEARCH_INPUT_ID = 'global-library-search';
+const MOBILE_SEARCH_INPUT_ID = 'global-library-search-mobile';
+const SEARCH_INPUT_IDS = [SEARCH_INPUT_ID, MOBILE_SEARCH_INPUT_ID] as const;
 
-const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
-  { view: 'home', label: 'Home', icon: Home },
-  { view: 'library', label: 'Library', icon: LibraryIcon as LucideIcon },
-  { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
-];
+const PRIMARY_TABS = TOP_BAR_PRIMARY_VIEWS.map((item) => ({
+  ...item,
+  icon: {
+    home: Home,
+    library: LibraryIcon as LucideIcon,
+    queue: QueueIcon as LucideIcon,
+    playlists: ListMusic,
+  }[item.view],
+}));
 
-const SECONDARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
-  { view: 'tags', label: 'Tags', icon: TagIcon as LucideIcon },
-  { view: 'settings', label: 'Settings', icon: Settings },
-];
+const SECONDARY_TABS = TOP_BAR_SECONDARY_VIEWS.map((item) => ({
+  ...item,
+  icon: {
+    tags: TagIcon as LucideIcon,
+    settings: Settings,
+  }[item.view],
+}));
 
 /* ─── TYPES ──────────────────────────────────────────────────────────────── */
 
-export interface ProcessingTask {
-  label: string;
-  progress?: number;
-}
-
 interface TopBarProps {
   navMode: 'iconRail' | 'topNav';
-  currentView: string;
+  currentView: NavView;
   onNavigate: (view: NavView) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   isScanning: boolean;
   scanProgress: number;
-  activeProcessing?: ProcessingTask;
+  activeProcessing?: TopBarProcessingTask;
   titlebarInsetLeft?: number;
   onShuffleAll?: () => void;
   isSearching?: boolean;
@@ -82,19 +95,8 @@ interface TopBarProps {
   className?: string;
 }
 
-interface PlatformShortcuts {
-  shortcutLabel: string;
-  ariaShortcut: string;
-}
-
-interface StatusData {
-  label: string;
-  shortLabel: string;
-  progressText: string | null;
-  progressValue: number | null;
-}
-
 interface SearchBarProps {
+  inputId: string;
   value: string;
   onChange: (query: string) => void;
   onFocus: () => void;
@@ -118,13 +120,14 @@ interface ActionNavIconProps {
   view: NavView;
   label: string;
   icon: LucideIcon;
-  currentView: string;
+  currentView: NavView;
   onNavigate: (view: NavView) => void;
 }
 
 interface StatusIndicatorProps {
-  status: StatusData | null;
+  status: TopBarStatus | null;
   compact?: boolean;
+  reducedEffects: boolean;
 }
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────── */
@@ -145,19 +148,6 @@ const titleDragStyle = {
 
 /* ─── HOOKS ──────────────────────────────────────────────────────────────── */
 
-const usePlatformShortcuts = (): PlatformShortcuts => {
-  const cached = useRef<PlatformShortcuts | null>(null);
-
-  if (cached.current === null) {
-    cached.current = {
-      shortcutLabel: '/',
-      ariaShortcut: 'Slash',
-    };
-  }
-
-  return cached.current;
-};
-
 /* ─── SHARED BASE GLASS BUTTON ───────────────────────────────────────────── */
 
 interface BaseGlassButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -176,7 +166,7 @@ const BaseGlassButton = forwardRef<HTMLButtonElement, BaseGlassButtonProps>(
         aria-current={isActive ? 'page' : undefined}
         className={cn(
           'group relative flex shrink-0 items-center justify-center gap-1.5 rounded-full',
-          'transition-all duration-300 motion-reduce:transition-none',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
           isIconOnly ? 'h-8 w-8' : 'h-8 px-3.5',
           isActive ? 'text-white' : 'text-white/50 hover:text-white/90 hover:bg-white/[0.04]',
@@ -270,6 +260,7 @@ ActionNavIcon.displayName = 'ActionNavIcon';
 const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
   (
     {
+      inputId,
       value,
       onChange,
       onFocus,
@@ -286,7 +277,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
     return (
       <div
         className={cn(
-          'group relative flex w-full items-center gap-3 overflow-hidden px-4 transition-all duration-500',
+          'group relative flex w-full items-center gap-3 overflow-hidden px-4 transition-[background-color,border-color,box-shadow] duration-[var(--motion-standard)]',
           'rounded-full border border-white/[0.04] bg-white/[0.03] backdrop-blur-none',
           'focus-within:border-white/[0.12] focus-within:bg-white/[0.07] focus-within:shadow-[0_0_24px_-4px_rgba(0,0,0,0.3)]',
           compact ? 'h-9' : 'h-10 md:h-11',
@@ -296,7 +287,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
         }}
       >
         <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-focus-within:opacity-100"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-focus-within:opacity-100"
           aria-hidden="true"
         >
           <div className="absolute inset-0 bg-gradient-to-r from-[rgb(var(--hero-accent-rgb,255_255_255)/0.08)] to-transparent" />
@@ -307,13 +298,13 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
           {isSearching ? (
             <Loader2 className="h-4 w-4 animate-spin text-[var(--hero-accent)]" />
           ) : (
-            <Search className="h-4 w-4 text-white/40 transition-colors duration-300 group-focus-within:text-[var(--hero-accent)]" />
+            <Search className="h-4 w-4 text-white/40 transition-colors duration-[var(--motion-emphasis)] group-focus-within:text-[var(--hero-accent)]" />
           )}
         </div>
 
         <input
           ref={ref}
-          id={SEARCH_INPUT_ID}
+          id={inputId}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -342,7 +333,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
             onMouseDown={(e) => e.preventDefault()}
             onClick={onClear}
             aria-label="Clear search"
-            className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-all duration-200 hover:bg-white/20 hover:text-white"
+            className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] hover:bg-white/20 hover:text-white"
           >
             <X className="h-3 w-3" />
           </button>
@@ -350,8 +341,8 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
           <kbd
             aria-hidden="true"
             className={cn(
-              'relative z-10 hidden h-5 items-center rounded bg-white/[0.08] px-1.5 text-[10px] font-medium text-white/40 ring-1 ring-inset ring-white/[0.05]',
-              'transition-opacity duration-300 group-focus-within:opacity-0',
+              'relative z-10 hidden h-5 items-center rounded bg-white/[0.08] px-1.5 text-xs font-medium text-white/40 ring-1 ring-inset ring-white/[0.05]',
+              'transition-opacity duration-[var(--motion-emphasis)] group-focus-within:opacity-0',
               compact ? 'sm:hidden' : 'md:flex',
             )}
           >
@@ -370,8 +361,9 @@ const SearchBar = memo(SearchBarBase);
 const StatusIndicator = memo(function StatusIndicator({
   status,
   compact = false,
+  reducedEffects,
 }: StatusIndicatorProps) {
-  const prevStatus = useRef<StatusData | null>(status);
+  const prevStatus = useRef<TopBarStatus | null>(status);
 
   useEffect(() => {
     if (status) prevStatus.current = status;
@@ -391,7 +383,7 @@ const StatusIndicator = memo(function StatusIndicator({
       <div
         aria-hidden={status ? 'false' : 'true'}
         className={cn(
-          'relative overflow-hidden rounded-full border border-white/[0.06] bg-black/40 backdrop-blur-none transition-all duration-300 motion-reduce:transition-none',
+          'relative overflow-hidden rounded-full border border-white/[0.06] bg-black/40 backdrop-blur-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
           'h-8',
           status
             ? cn(compact ? 'max-w-[88px] px-2.5' : 'max-w-[186px] px-3', 'opacity-100')
@@ -408,10 +400,15 @@ const StatusIndicator = memo(function StatusIndicator({
       >
         {display && (
           <div className="flex h-full items-center gap-2">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--hero-accent,white)]" />
+            <Loader2
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 text-[var(--hero-accent,white)]',
+                !reducedEffects && 'animate-spin',
+              )}
+            />
 
             {compact ? (
-              <span className="truncate text-[11px] font-semibold text-white/60">
+              <span className="truncate text-xs font-semibold text-white/60">
                 {display.shortLabel}
               </span>
             ) : (
@@ -424,7 +421,7 @@ const StatusIndicator = memo(function StatusIndicator({
             )}
 
             {display.progressText && (
-              <span className="shrink-0 text-[11px] font-bold text-[var(--hero-accent,white)]">
+              <span className="shrink-0 text-xs font-bold text-[var(--hero-accent,white)]">
                 {display.progressText}
               </span>
             )}
@@ -434,7 +431,7 @@ const StatusIndicator = memo(function StatusIndicator({
         {display?.progressValue != null && (
           <div className="absolute inset-x-0 bottom-0 h-px bg-white/[0.04]">
             <div
-              className="h-full bg-[var(--hero-accent)] transition-[width] duration-300 motion-reduce:transition-none"
+              className="h-full bg-[var(--hero-accent)] transition-[width] duration-[var(--motion-emphasis)] motion-reduce:transition-none"
               style={{ width: `${display.progressValue}%` }}
             />
           </div>
@@ -471,12 +468,37 @@ export const TopBar = memo(function TopBar({
   canGoBack = false,
   className,
 }: TopBarProps) {
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const reducedEffects = useEffectiveReducedEffects();
   const headerRef = useRef<HTMLElement>(null);
   const fallbackPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pointerNormRef = headerPointerRef ?? fallbackPointerRef;
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const { shortcutLabel, ariaShortcut } = usePlatformShortcuts();
+  const {
+    registerSearchInput,
+    isSearchFocused,
+    shortcutLabel,
+    ariaShortcut,
+    status,
+    showShuffle,
+    handleSearchChange,
+    handleSearchFocus,
+    handleSearchBlur,
+    handleSearchEscape,
+    handleClearAndRefocus,
+  } = useTopBarController({
+    inputId: SEARCH_INPUT_ID,
+    inputIds: SEARCH_INPUT_IDS,
+    currentView,
+    searchQuery,
+    onSearchChange,
+    onNavigate,
+    isScanning,
+    scanProgress,
+    activeProcessing,
+    onShuffleAll,
+    focusSearchNonce,
+    onSearchFocusChange,
+    autoFocusSearchSurface: true,
+  });
 
   const handleHeaderPointerMove = useCallback((e: PointerEvent<HTMLElement>) => {
     const el = headerRef.current;
@@ -494,110 +516,7 @@ export const TopBar = memo(function TopBar({
     pointerNormRef.current = null;
   }, []);
 
-  const isSearchSurface = currentView === 'library' || currentView === 'search';
   const isWindowsDesktop = /Win/i.test(navigator.platform);
-
-  const focusSearchInput = useCallback(() => {
-    requestAnimationFrame(() => {
-      const input = searchInputRef.current;
-      if (!input) return;
-      input.focus();
-      input.select();
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!focusSearchNonce) return;
-    focusSearchInput();
-  }, [focusSearchNonce, focusSearchInput]);
-
-  const handleSearchShortcutFocus = useCallback(() => {
-    setIsSearchFocused(true);
-    onSearchFocusChange?.(true);
-    focusSearchInput();
-  }, [focusSearchInput, onSearchFocusChange]);
-
-  // Auto-focus search on mount if in a search surface
-  useEffect(() => {
-    if (isSearchSurface && !searchQuery) {
-      focusSearchInput();
-    }
-  }, [isSearchSurface, focusSearchInput, searchQuery]);
-
-  const handleClearSearch = useCallback(() => {
-    onSearchChange('');
-  }, [onSearchChange]);
-
-  useTopBarSearchShortcuts({
-    inputId: SEARCH_INPUT_ID,
-    inputRef: searchInputRef,
-    onFocusSearch: handleSearchShortcutFocus,
-    onClearSearch: handleClearSearch,
-  });
-
-  const handleSearchChange = useCallback(
-    (query: string) => {
-      onSearchChange(query);
-      if (query.trim() && !isSearchSurface) {
-        onNavigate('library');
-      }
-    },
-    [isSearchSurface, onNavigate, onSearchChange],
-  );
-
-  const handleSearchFocus = useCallback(() => {
-    setIsSearchFocused(true);
-    onSearchFocusChange?.(true);
-  }, [onSearchFocusChange]);
-
-  const handleSearchBlur = useCallback(() => {
-    setIsSearchFocused(false);
-    onSearchFocusChange?.(false);
-  }, [onSearchFocusChange]);
-
-  const handleSearchEscape = useCallback(() => {
-    if (searchQuery) {
-      onSearchChange('');
-      searchInputRef.current?.focus();
-      return;
-    }
-    searchInputRef.current?.blur();
-  }, [onSearchChange, searchQuery]);
-
-  const handleClearAndRefocus = useCallback(() => {
-    onSearchChange('');
-    searchInputRef.current?.focus();
-  }, [onSearchChange]);
-
-  const status = useMemo<StatusData | null>(() => {
-    if (isScanning) {
-      const progressValue = scanProgress > 0 ? clamp(Math.round(scanProgress), 0, 100) : null;
-      return {
-        label: activeProcessing?.label ?? 'Scanning library',
-        shortLabel: 'Scanning',
-        progressText: progressValue != null ? `${progressValue}%` : null,
-        progressValue,
-      };
-    }
-
-    if (activeProcessing) {
-      const progressValue =
-        typeof activeProcessing.progress === 'number'
-          ? clamp(Math.round(activeProcessing.progress), 0, 100)
-          : null;
-      return {
-        label: activeProcessing.label,
-        shortLabel: 'Working',
-        progressText: progressValue != null ? `${progressValue}%` : null,
-        progressValue,
-      };
-    }
-
-    return null;
-  }, [activeProcessing, isScanning, scanProgress]);
-
-  const showShuffle =
-    onShuffleAll != null && (currentView === 'library' || currentView === 'search');
 
   const headerVarStyle = useMemo(() => {
     const style: CSSProperties = {};
@@ -631,7 +550,7 @@ export const TopBar = memo(function TopBar({
       onPointerMove={handleHeaderPointerMove}
       onPointerLeave={handleHeaderPointerLeave}
       className={cn(
-        'relative isolate z-50 h-14 shrink-0 overflow-hidden transition-all duration-500',
+        'relative isolate z-50 h-14 shrink-0 overflow-hidden transition-[background-color,border-color,box-shadow,opacity] duration-[var(--motion-emphasis)]',
         !hideBorder && navMode !== 'iconRail' && 'border-b border-white/[0.04]',
         isScrolled && 'shadow-none',
         isTransparent && !isScrolled && 'border-transparent bg-transparent shadow-none',
@@ -686,7 +605,6 @@ export const TopBar = memo(function TopBar({
                   contentClassName="flex items-center justify-center p-0"
                   aria-label="Go back"
                   title="Back"
-                  reducedEffects={false}
                 >
                   <ChevronLeft className="h-5 w-5 -translate-x-[0.5px]" />
                 </Button>
@@ -697,7 +615,7 @@ export const TopBar = memo(function TopBar({
           {navMode === 'topNav' && (
             <SlidingTabGroup
               tabs={PRIMARY_TABS}
-              currentView={currentView}
+              currentView={normalizeDockActiveView(currentView)}
               onNavigate={onNavigate}
             />
           )}
@@ -717,12 +635,13 @@ export const TopBar = memo(function TopBar({
         >
           <div
             className={cn(
-              'w-full transition-all duration-500 ease-out motion-reduce:transition-none',
+              'w-full transition-[opacity,transform] duration-[var(--motion-emphasis)] ease-out motion-reduce:transition-none',
               isSearchFocused ? 'scale-[1.01]' : 'scale-100',
             )}
           >
             <SearchBar
-              ref={searchInputRef}
+              inputId={SEARCH_INPUT_ID}
+              ref={registerSearchInput(0)}
               value={searchQuery}
               onChange={handleSearchChange}
               onFocus={handleSearchFocus}
@@ -741,7 +660,7 @@ export const TopBar = memo(function TopBar({
           className="flex h-full flex-1 items-center justify-end gap-3"
           style={chromeNoDragStyle}
         >
-          <StatusIndicator status={status} />
+          <StatusIndicator status={status} reducedEffects={reducedEffects} />
 
           {showShuffle && onShuffleAll && (
             <ActionIconButton
@@ -759,7 +678,7 @@ export const TopBar = memo(function TopBar({
                   view={item.view}
                   label={item.label}
                   icon={item.icon}
-                  currentView={currentView}
+                  currentView={normalizeDockActiveView(currentView)}
                   onNavigate={onNavigate}
                 />
               ))}
@@ -784,31 +703,16 @@ export const TopBar = memo(function TopBar({
       {/* Mobile layout */}
       <div className="relative z-10 flex h-full min-w-0 items-stretch gap-2 px-2 md:hidden">
         <div
-          className="flex shrink-0 items-center gap-0.5 overflow-x-auto"
-          style={chromeNoDragStyle}
-        >
-          {PRIMARY_TABS.map((item) => (
-            <ActionNavIcon
-              key={item.view}
-              view={item.view}
-              label={item.label}
-              icon={item.icon}
-              currentView={currentView}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </div>
-
-        <div
           data-tauri-drag-region
-          className="min-w-[8px] flex-1"
+          className="hidden min-w-[8px] flex-1 sm:block"
           aria-hidden="true"
           style={titleDragStyle}
         />
 
-        <div className="flex min-w-0 flex-[2] items-center" style={chromeNoDragStyle}>
+        <div className="flex min-w-0 flex-1 items-center sm:flex-[2]" style={chromeNoDragStyle}>
           <SearchBar
-            ref={searchInputRef}
+            inputId={MOBILE_SEARCH_INPUT_ID}
+            ref={registerSearchInput(1)}
             value={searchQuery}
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}
@@ -830,7 +734,7 @@ export const TopBar = memo(function TopBar({
         />
 
         <div className="flex shrink-0 items-center gap-1" style={chromeNoDragStyle}>
-          <StatusIndicator status={status} compact />
+          <StatusIndicator status={status} compact reducedEffects={reducedEffects} />
           {showShuffle && onShuffleAll && (
             <ActionIconButton
               label="Shuffle all"

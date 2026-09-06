@@ -1,14 +1,10 @@
 import { memo, useMemo } from 'react';
-import { useShallow } from 'zustand/react/shallow';
+import { useSmoothTimeState } from '../../contexts/smooth-time';
 import { usePlayerStore } from '../../store/player-store';
 
 export const LyricsSnippet = memo(() => {
-  const { lyrics, currentTime } = usePlayerStore(
-    useShallow((s) => ({
-      lyrics: s.lyrics,
-      currentTime: s.currentTime,
-    })),
-  );
+  const lyrics = usePlayerStore((s) => s.lyrics);
+  const currentTime = useSmoothTimeState();
 
   const activeLine = useMemo(() => {
     if (!lyrics || !lyrics.lines.length) return null;

@@ -1,16 +1,27 @@
 #[cfg(target_os = "macos")]
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-    App, Emitter, Runtime,
+    App, Emitter, Wry,
 };
 
 #[cfg(target_os = "macos")]
-pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
+use crate::desktop_integration::{
+    replace_menu_handles, request_desktop_control_action, DesktopControlAction,
+};
+
+#[cfg(target_os = "macos")]
+pub fn build_menu(app: &App<Wry>) -> tauri::Result<()> {
     let pkg_info = app.package_info();
     let app_name = &pkg_info.name;
 
     let app_menu = SubmenuBuilder::new(app, app_name)
         .about(None)
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("settings", "Settings…")
+                .accelerator("Cmd+,")
+                .build(app)?,
+        )
         .separator()
         .hide()
         .hide_others()
@@ -18,6 +29,25 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         .item(
             &MenuItemBuilder::with_id("quit", format!("Quit {}", app_name))
                 .accelerator("Cmd+Q")
+                .build(app)?,
+        )
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(
+            &MenuItemBuilder::with_id("file.add-folder", "Add Folder…")
+                .accelerator("Cmd+Shift+O")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("file.import", "Import Audio Files…")
+                .accelerator("Cmd+O")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("file.new-playlist", "New Playlist")
+                .accelerator("Cmd+N")
                 .build(app)?,
         )
         .build()?;
@@ -30,6 +60,58 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         .copy()
         .paste()
         .select_all()
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("find", "Find")
+                .accelerator("Cmd+F")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("command-palette", "Command Palette")
+                .accelerator("Cmd+K")
+                .build(app)?,
+        )
+        .build()?;
+
+    let play_pause = MenuItemBuilder::with_id("playback.toggle", "Play").build(app)?;
+    let previous = MenuItemBuilder::with_id("playback.previous", "Previous")
+        .accelerator("Cmd+Left")
+        .build(app)?;
+    let next = MenuItemBuilder::with_id("playback.next", "Next")
+        .accelerator("Cmd+Right")
+        .build(app)?;
+    let playback_menu = SubmenuBuilder::new(app, "Playback")
+        .item(&play_pause)
+        .item(&previous)
+        .item(&next)
+        .item(
+            &MenuItemBuilder::with_id("playback.seek-backward", "Seek Backward 10 Seconds")
+                .accelerator("Cmd+Shift+Left")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("playback.seek-forward", "Seek Forward 10 Seconds")
+                .accelerator("Cmd+Shift+Right")
+                .build(app)?,
+        )
+        .separator()
+        .item(&MenuItemBuilder::with_id("playback.shuffle", "Toggle Shuffle").build(app)?)
+        .item(&MenuItemBuilder::with_id("playback.repeat", "Cycle Repeat").build(app)?)
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&MenuItemBuilder::with_id("view.home", "Home").build(app)?)
+        .item(&MenuItemBuilder::with_id("view.library", "Songs").build(app)?)
+        .item(&MenuItemBuilder::with_id("view.albums", "Albums").build(app)?)
+        .item(&MenuItemBuilder::with_id("view.artists", "Artists").build(app)?)
+        .item(&MenuItemBuilder::with_id("view.playlists", "Playlists").build(app)?)
+        .item(&MenuItemBuilder::with_id("view.queue", "Queue").build(app)?)
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("view.full-player", "Full Player")
+                .accelerator("Cmd+Shift+F")
+                .build(app)?,
+        )
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "Window")
@@ -39,15 +121,43 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         .close_window()
         .build()?;
 
+    let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&MenuItemBuilder::with_id("help.help", "Tarab Help").build(app)?)
+        .item(&MenuItemBuilder::with_id("help.diagnostics", "Diagnostics").build(app)?)
+        .build()?;
+
     let menu = MenuBuilder::new(app)
-        .items(&[&app_menu, &edit_menu, &window_menu])
+        .items(&[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &playback_menu,
+            &view_menu,
+            &window_menu,
+            &help_menu,
+        ])
         .build()?;
 
     app.set_menu(menu)?;
+    replace_menu_handles(app.handle(), play_pause, previous, next);
 
     app.on_menu_event(move |app, event| {
-        if event.id() == "quit" {
-            let _ = app.emit("menu-quit", ());
+        let id = event.id().as_ref();
+        let control = match id {
+            "quit" => Some(DesktopControlAction::Quit),
+            "playback.toggle" => Some(DesktopControlAction::TogglePlay),
+            "playback.previous" => Some(DesktopControlAction::Previous),
+            "playback.next" => Some(DesktopControlAction::Next),
+            "playback.seek-backward" => Some(DesktopControlAction::SeekBackward),
+            "playback.seek-forward" => Some(DesktopControlAction::SeekForward),
+            "playback.shuffle" => Some(DesktopControlAction::ToggleShuffle),
+            "playback.repeat" => Some(DesktopControlAction::CycleRepeat),
+            _ => None,
+        };
+        if let Some(action) = control {
+            request_desktop_control_action(app, action);
+        } else {
+            let _ = app.emit_to("main", "native-menu-action", id);
         }
     });
 

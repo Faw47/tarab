@@ -96,9 +96,12 @@ const buildGradient = (primaryHex: string, secondaryHex: string): ExtractedColor
  */
 export const useColorExtraction = (filePath: string | null | undefined): ExtractedColors => {
   const [colors, setColors] = useState<ExtractedColors>(DEFAULT_COLORS);
-  const abortRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
+    const isCurrentRequest = () => requestId === requestIdRef.current;
+
     if (!filePath) {
       setColors(DEFAULT_COLORS);
       return;
@@ -110,12 +113,10 @@ export const useColorExtraction = (filePath: string | null | undefined): Extract
       return;
     }
 
-    abortRef.current = false;
-
     // Use the Tauri backend for color extraction
     getCoverArtPalette(filePath)
       .then((palette) => {
-        if (abortRef.current) return;
+        if (!isCurrentRequest()) return;
 
         if (palette && palette.primary && palette.secondary) {
           const extracted = buildGradient(palette.primary, palette.secondary);
@@ -130,14 +131,13 @@ export const useColorExtraction = (filePath: string | null | undefined): Extract
         }
       })
       .catch((err) => {
+        if (!isCurrentRequest()) return;
         console.warn('Failed to get cover art palette:', err);
-        if (!abortRef.current) {
-          setColors(DEFAULT_COLORS);
-        }
+        setColors(DEFAULT_COLORS);
       });
 
     return () => {
-      abortRef.current = true;
+      if (requestIdRef.current === requestId) requestIdRef.current += 1;
     };
   }, [filePath]);
 

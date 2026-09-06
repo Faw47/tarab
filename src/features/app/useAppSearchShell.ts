@@ -6,9 +6,17 @@ interface AppSearchShellOptions {
   navigate: (view: NavView) => void;
   navMode: NavMode;
   searchQuery: string;
+  onSearchChange?: (query: string) => void;
+  onOpenGlobalSearch?: () => void;
 }
 
-export function useAppSearchShell({ navigate, navMode, searchQuery }: AppSearchShellOptions) {
+export function useAppSearchShell({
+  navigate,
+  navMode,
+  searchQuery,
+  onSearchChange,
+  onOpenGlobalSearch: prepareGlobalSearch,
+}: AppSearchShellOptions) {
   const [showSearchShell, setShowSearchShell] = useState(false);
   const [searchFocusNonce, setSearchFocusNonce] = useState(0);
   const [shellSearchFocused, setShellSearchFocused] = useState(false);
@@ -26,10 +34,16 @@ export function useAppSearchShell({ navigate, navMode, searchQuery }: AppSearchS
     setShowSearchShell(false);
   }, []);
 
+  const browseLibrary = useCallback(() => {
+    closeSearchShell();
+    onSearchChange?.('');
+  }, [closeSearchShell, onSearchChange]);
+
   const openGlobalSearch = useCallback(() => {
+    prepareGlobalSearch?.();
     navigate('library');
     openSearchShell();
-  }, [navigate, openSearchShell]);
+  }, [navigate, openSearchShell, prepareGlobalSearch]);
 
   const handleSearchFocusChange = useCallback(
     (focused: boolean) => {
@@ -53,6 +67,7 @@ export function useAppSearchShell({ navigate, navMode, searchQuery }: AppSearchS
     focusSearch,
     openSearchShell,
     closeSearchShell,
+    browseLibrary,
     openGlobalSearch,
     handleSearchFocusChange,
   };

@@ -7,6 +7,7 @@ export const SmartRuleKindSchema = z.enum([
   'TopRated',
   'ByArtist',
   'ByAlbum',
+  'ByGenre',
   'ByYear',
   'LongerThan',
   'ShorterThan',
@@ -46,6 +47,11 @@ export const PlaylistEditorFormSchema = z
         if (
           data.ruleKind === 'ByAlbum' &&
           (!data.ruleValues.album || data.ruleValues.album.trim() === '')
+        )
+          return false;
+        if (
+          data.ruleKind === 'ByGenre' &&
+          (!data.ruleValues.genre || data.ruleValues.genre.trim() === '')
         )
           return false;
       }

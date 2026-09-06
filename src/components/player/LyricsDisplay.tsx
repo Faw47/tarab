@@ -1,14 +1,15 @@
 import { clsx } from 'clsx';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useSmoothTime } from '../../hooks/useSmoothTime';
+import { useSmoothTimeSubscription, useSmoothTimeValue } from '../../contexts/smooth-time';
 import { getCurrentLineIndex, getDisplayLines } from '../../lib/lyrics-parser';
 import { useRenderLog } from '../../lib/performance';
-import { seekToPosition } from '../../lib/playback-actions';
+import { captureActivePlaybackSource, seekToPosition } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { getCoverArtPalette } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
+import type { ParsedLyrics } from '../../types';
 import { LyricsLine } from './LyricsLine';
 
 // Utility moved to top
@@ -21,6 +22,44 @@ const hexToRgba = (hex: string, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+const updateKaraokeWordProgress = (
+  container: HTMLDivElement | null,
+  lyrics: ParsedLyrics,
+  currentLineIndex: number,
+  timeMs: number,
+) => {
+  if (
+    !container ||
+    !lyrics.isEnhanced ||
+    currentLineIndex < 0 ||
+    currentLineIndex >= lyrics.lines.length
+  ) {
+    return;
+  }
+
+  const currentLine = lyrics.lines[currentLineIndex];
+  if (currentLine.words.length === 0) return;
+
+  const wordSpans = container.querySelectorAll<HTMLSpanElement>('[data-karaoke-word]');
+  wordSpans.forEach((span, wordIdx) => {
+    const word = currentLine.words[wordIdx];
+    if (!word) return;
+    const duration = Math.max(10, word.endTime - word.startTime);
+    const progress = Math.min(1, Math.max(0, (timeMs - word.startTime) / duration));
+
+    if (progress <= 0) {
+      span.style.backgroundSize = '0% 100%, 100% 100%';
+      span.style.textShadow = 'none';
+      span.style.filter = 'none';
+    } else if (progress >= 1) {
+      span.style.backgroundSize = '100% 100%, 100% 100%';
+      span.style.textShadow = 'none';
+      span.style.filter = 'none';
+    } else {
+      span.style.backgroundSize = `${progress * 100}% 100%, 100% 100%`;
+    }
+  });
+};
 const KARAOKE_DEBUG =
   __DEV__ &&
   typeof localStorage !== 'undefined' &&
@@ -34,102 +73,52 @@ interface LyricsDisplayProps {
 export const LyricsDisplay = memo(
   ({ lyricSize = 50, lyricAlignment = 'center' }: LyricsDisplayProps) => {
     useRenderLog('LyricsDisplay');
-    const { lyrics, currentTime, isPlaying, currentTrack } = usePlayerStore(
+    const { lyrics, isPlaying, currentTrack } = usePlayerStore(
       useShallow((s) => ({
         lyrics: s.lyrics,
-        currentTime: s.currentTime,
         isPlaying: s.isPlaying,
         currentTrack: s.currentTrack,
       })),
     );
     const lyricsEnabled = useSettingsStore((s) => s.lyricsEnabled);
 
-    const getTimeMs = useSmoothTime();
+    const smoothTime = useSmoothTimeValue();
 
-    // Local state only for line index - updates only when line changes
+    // Keep line selection in React state, while the hot playback clock remains
+    // imperative and shared with every other visible progress surface.
     const [currentLineIndex, setCurrentLineIndex] = useState(() => {
       if (!lyrics || lyrics.lines.length === 0) return -1;
-      return getCurrentLineIndex(lyrics, currentTime * 1000);
+      return getCurrentLineIndex(lyrics, smoothTime.timeSec * 1000);
     });
 
-    // Word progress ref for karaoke - updated via RAF, read by LyricsLine via ref
-    const wordProgressRef = useRef<Map<number, number>>(new Map());
-    const lastFrameRef = useRef<number>(0);
     const lyricsContainerRef = useRef<HTMLDivElement>(null);
+    const [glowColor, setGlowColor] = useState<string>('#fbbf24'); // Default gold
 
-    const [glowColor, setGlowColor] = useState<string>('#fbbf24'); // Default gold color
+    const updatePlaybackSurface = useCallback(
+      (timeSec: number) => {
+        if (!lyrics) return;
+        const timeMs = Math.max(0, timeSec) * 1000;
+        const nextLineIndex = getCurrentLineIndex(lyrics, timeMs);
+        setCurrentLineIndex((previous) => (previous === nextLineIndex ? previous : nextLineIndex));
+        if (isPlaying) {
+          updateKaraokeWordProgress(lyricsContainerRef.current, lyrics, nextLineIndex, timeMs);
+        }
+      },
+      [isPlaying, lyrics],
+    );
 
-    // Consolidated RAF loop: updates line index via state, word progress via direct DOM updates
+    useSmoothTimeSubscription(updatePlaybackSurface);
+
+    // Reconcile immediately when the lyric source or transport mode changes;
+    // a paused source may not produce another clock tick after this render.
     useEffect(() => {
-      if (!isPlaying || !lyrics) {
-        wordProgressRef.current = new Map();
+      if (!lyrics || lyrics.lines.length === 0) {
+        setCurrentLineIndex(-1);
         return;
       }
-
-      let rafId = 0;
-      const tick = () => {
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        // Throttle to ~30fps for line index updates
-        const shouldUpdateLineIndex = now - lastFrameRef.current >= 33;
-
-        const timeMs = getTimeMs();
-
-        if (shouldUpdateLineIndex) {
-          lastFrameRef.current = now;
-          const newIndex = getCurrentLineIndex(lyrics, timeMs);
-          setCurrentLineIndex((prev) => {
-            if (prev !== newIndex) return newIndex;
-            return prev;
-          });
-        }
-
-        // Update word progress directly on DOM (every frame for smooth karaoke)
-        const container = lyricsContainerRef.current;
-        if (container) {
-          const currentIdx = getCurrentLineIndex(lyrics, timeMs);
-          if (currentIdx >= 0 && currentIdx < lyrics.lines.length) {
-            const currentLine = lyrics.lines[currentIdx];
-            if (lyrics.isEnhanced && currentLine.words.length > 0) {
-              const wordSpans = container.querySelectorAll<HTMLSpanElement>('[data-karaoke-word]');
-              wordSpans.forEach((span, wordIdx) => {
-                const word = currentLine.words[wordIdx];
-                if (!word) return;
-                const start = word.startTime;
-                const end = word.endTime;
-                const duration = Math.max(10, end - start);
-                const progress = Math.min(1, Math.max(0, (timeMs - start) / duration));
-
-                // Update DOM directly without state
-                if (progress <= 0) {
-                  span.style.backgroundSize = '0% 100%, 100% 100%';
-                  span.style.textShadow = 'none';
-                  span.style.filter = 'none';
-                } else if (progress >= 1) {
-                  span.style.backgroundSize = '100% 100%, 100% 100%';
-                  span.style.textShadow = 'none';
-                  span.style.filter = 'none';
-                } else {
-                  const revealPct = progress * 100;
-                  span.style.backgroundSize = `${revealPct}% 100%, 100% 100%`;
-                }
-              });
-            }
-          }
-        }
-
-        rafId = requestAnimationFrame(tick);
-      };
-      rafId = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(rafId);
-    }, [isPlaying, lyrics, getTimeMs]);
-
-    // Sync index on seek/pause (when isPlaying might be false but time changed)
-    useEffect(() => {
-      if (!lyrics) return;
-      const idx = getCurrentLineIndex(lyrics, currentTime * 1000);
-      setCurrentLineIndex(idx);
-    }, [currentTime, lyrics]);
-
+      const idx = getCurrentLineIndex(lyrics, smoothTime.timeSec * 1000);
+      setCurrentLineIndex((previous) => (previous === idx ? previous : idx));
+    }, [isPlaying, lyrics, smoothTime]);
     // Optimize glow color variations with useMemo to avoid recalc per render
     const glowColors = useMemo(() => {
       // Lighten the glow color for the highlighted text
@@ -190,8 +179,10 @@ export const LyricsDisplay = memo(
     const handleLineClick = useCallback(async (startTimeMs: number) => {
       if (startTimeMs < 0) return;
       const positionSecs = startTimeMs / 1000;
+      const expectedSource = captureActivePlaybackSource();
+      if (!expectedSource) return;
       try {
-        await seekToPosition(positionSecs);
+        await seekToPosition(positionSecs, expectedSource);
       } catch (error) {
         reportError('Failed to seek', { source: 'lyrics-display', error });
       }
@@ -200,8 +191,10 @@ export const LyricsDisplay = memo(
     const handleWordClick = useCallback(async (startTimeMs: number, e: React.MouseEvent) => {
       e.stopPropagation();
       const positionSecs = startTimeMs / 1000;
+      const expectedSource = captureActivePlaybackSource();
+      if (!expectedSource) return;
       try {
-        await seekToPosition(positionSecs);
+        await seekToPosition(positionSecs, expectedSource);
       } catch (error) {
         reportError('Failed to seek', { source: 'lyrics-display', error });
       }

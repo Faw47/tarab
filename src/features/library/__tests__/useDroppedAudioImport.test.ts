@@ -1,18 +1,37 @@
+import { act, renderHook, waitFor } from '@testing-library/react';
+
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../lib/tauri-commands', () => ({
-  dbGetExistingPaths: vi.fn(),
-  dbGetTrackCount: vi.fn(),
-  dbUpsertTracks: vi.fn(),
-  generateCoverArtHashes: vi.fn(),
-  getBatchMetadata: vi.fn(),
-  scanLibrary: vi.fn(),
-  scanLibraryParallel: vi.fn(),
-  setLibraryRoots: vi.fn(),
-  syncLyricsIndex: vi.fn(),
-}));
+import { mergeDroppedLibraryFolders, useDroppedAudioImport } from '../useDroppedAudioImport';
 
-import { mergeDroppedLibraryFolders } from '../useDroppedAudioImport';
+const createDropEvent = (path: string): DragEvent => {
+  const file = new File(['audio'], 'track.mp3', { type: 'audio/mpeg' });
+  Object.defineProperty(file, 'path', { value: path });
+  const event = new Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { files: [file] } });
+  return event as DragEvent;
+};
+
+describe('useDroppedAudioImport', () => {
+  it('routes approved dropped audio through the shared scan queue', async () => {
+    const scanFolder = vi.fn(async () => undefined);
+
+    renderHook(() =>
+      useDroppedAudioImport({
+        libraryFolders: ['C:/Music'],
+        scanFolder,
+      }),
+    );
+
+    act(() => {
+      window.dispatchEvent(createDropEvent('C:\\Music\\Jazz\\track.mp3'));
+    });
+
+    await waitFor(() => {
+      expect(scanFolder).toHaveBeenCalledWith('C:/Music/Jazz', { silent: true });
+    });
+  });
+});
 
 describe('mergeDroppedLibraryFolders', () => {
   it('adds dropped folders that are not already watched', () => {
@@ -36,5 +55,9 @@ describe('mergeDroppedLibraryFolders', () => {
 
   it('normalizes separators and trailing slashes before adding folders', () => {
     expect(mergeDroppedLibraryFolders([], ['C:\\Music\\Jazz\\'])).toEqual(['C:/Music/Jazz']);
+  });
+  it('preserves filesystem roots while normalizing dropped folders', () => {
+    expect(mergeDroppedLibraryFolders([], ['C:/'])).toEqual(['C:/']);
+    expect(mergeDroppedLibraryFolders([], ['/'])).toEqual(['/']);
   });
 });

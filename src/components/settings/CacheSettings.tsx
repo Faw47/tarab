@@ -1,5 +1,5 @@
 import { HardDrive, Loader2, RefreshCw, Trash2 } from 'lucide-react';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { reportError } from '../../lib/report-error';
 import {
@@ -38,32 +38,45 @@ export const CacheSettings = memo(() => {
   const [confirmDialog, setConfirmDialog] = useState<Omit<ConfirmDialogProps, 'onCancel'> | null>(
     null,
   );
+  const mountedRef = useRef(true);
+  const statsRequestIdRef = useRef(0);
 
   const loadStats = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++statsRequestIdRef.current;
     setLoading(true);
     try {
       const data = await cacheGetStats();
+      if (requestId !== statsRequestIdRef.current || !mountedRef.current) return;
       setStats(data);
     } catch (e) {
-      reportError('Failed to load cache stats', { source: 'cache-settings', error: e });
+      if (requestId === statsRequestIdRef.current && mountedRef.current) {
+        reportError('Failed to load cache stats', { source: 'cache-settings', error: e });
+      }
     } finally {
-      setLoading(false);
+      if (requestId === statsRequestIdRef.current && mountedRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadStats();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [loadStats]);
 
   const executeClearCache = useCallback(async () => {
     setClearing(true);
     try {
       await cacheClear(0);
-      await loadStats();
+      if (mountedRef.current) await loadStats();
     } catch (e) {
-      reportError('Failed to clear cache', { source: 'cache-settings', error: e });
+      if (mountedRef.current) {
+        reportError('Failed to clear cache', { source: 'cache-settings', error: e });
+      }
     } finally {
-      setClearing(false);
+      if (mountedRef.current) setClearing(false);
     }
   }, [loadStats]);
 
@@ -82,11 +95,13 @@ export const CacheSettings = memo(() => {
     setLoading(true);
     try {
       await cacheEnforceLimit(cacheSizeLimitMb);
-      await loadStats();
+      if (mountedRef.current) await loadStats();
     } catch (e) {
-      reportError('Failed to enforce limit', { source: 'cache-settings', error: e });
+      if (mountedRef.current) {
+        reportError('Failed to enforce limit', { source: 'cache-settings', error: e });
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, [cacheSizeLimitMb, loadStats]);
 
@@ -101,7 +116,7 @@ export const CacheSettings = memo(() => {
             size="sm"
             tone="ghost"
             onClick={loadStats}
-            disabled={loading}
+            disabled={loading || clearing}
             title="Refresh stats"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} /> Refresh
@@ -140,7 +155,7 @@ export const CacheSettings = memo(() => {
               size="sm"
               tone="ghost"
               onClick={handleEnforceLimit}
-              disabled={loading}
+              disabled={loading || clearing}
             >
               Enforce Limit
             </SettingsActionButton>
@@ -159,7 +174,7 @@ export const CacheSettings = memo(() => {
             <SettingsActionButton
               tone="danger"
               onClick={handleClearCache}
-              disabled={clearing || !stats?.totalSizeBytes}
+              disabled={clearing || loading || !stats?.totalSizeBytes}
             >
               {clearing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               Clear Image Cache

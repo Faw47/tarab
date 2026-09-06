@@ -58,10 +58,11 @@ const ButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <Component
         {...props}
         ref={forwardedRef}
+        data-button-variant={variant ?? 'default'}
         type={asChild ? undefined : (type ?? 'button')}
         className={cn(
           buttonVariants({ variant, size }),
-          theme === 'neobrutalism' && 'border-2 border-black',
+          theme === 'neobrutalism' && 'neo-button',
           className,
         )}
         style={style}

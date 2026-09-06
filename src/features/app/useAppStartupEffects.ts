@@ -1,8 +1,6 @@
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useEffect, useRef } from 'react';
 import type { NavView } from '../../components/navigation';
 import { recordPerfBudget } from '../../lib/performance';
-import { reportError } from '../../lib/report-error';
 
 type PreloadCallback = () => void;
 
@@ -56,14 +54,4 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
       }
     }
   }, [currentView]);
-
-  useEffect(() => {
-    const showWindow = async () => {
-      await new Promise((res) => setTimeout(res, 100));
-      await getCurrentWindow().show();
-    };
-    void showWindow().catch((error) => {
-      reportError('Failed to show the main window', { source: 'app-startup', error });
-    });
-  }, []);
 }

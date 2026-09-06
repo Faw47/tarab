@@ -19,8 +19,6 @@ export function useTrackSelection({
   const [selectedTracks, setSelectedTracks] = useState<Track[]>([]);
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [contextMenuTrack, setContextMenuTrack] = useState<Track | null>(null);
-  const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
-  const [playlistPickerTrackIds, setPlaylistPickerTrackIds] = useState<string[]>([]);
 
   const closeContextMenu = useCallback(() => {
     setContextMenuPosition(null);
@@ -28,6 +26,9 @@ export function useTrackSelection({
   }, []);
 
   const handleTrackContextMenu = useCallback((track: Track, position: ContextMenuPosition) => {
+    setSelectedTracks((current) =>
+      current.some((selected) => selected.id === track.id) ? current : [track],
+    );
     setContextMenuTrack(track);
     setContextMenuPosition(position);
   }, []);
@@ -56,22 +57,6 @@ export function useTrackSelection({
     setSelectedTracks(tracks);
   }, []);
 
-  const openPlaylistPicker = useCallback(
-    (tracks: Track[]) => {
-      const trackIds = Array.from(new Set(tracks.map((track) => track.id))).filter(Boolean);
-      if (trackIds.length === 0) return;
-      setPlaylistPickerTrackIds(trackIds);
-      setShowPlaylistPicker(true);
-      closeContextMenu();
-    },
-    [closeContextMenu],
-  );
-
-  const closePlaylistPicker = useCallback(() => {
-    setShowPlaylistPicker(false);
-    setPlaylistPickerTrackIds([]);
-  }, []);
-
   const handleRevealInLibrary = useCallback(
     (tracks: Track[]) => {
       const first = tracks[0];
@@ -92,15 +77,11 @@ export function useTrackSelection({
     setContextMenuPosition,
     contextMenuTrack,
     setContextMenuTrack,
-    showPlaylistPicker,
-    playlistPickerTrackIds,
     handleTrackContextMenu,
     handleTrackSelect,
     handleSelectAllTracks,
     handleClearSelection,
     handleSelectionChange,
-    openPlaylistPicker,
-    closePlaylistPicker,
     closeContextMenu,
     handleRevealInLibrary,
   };

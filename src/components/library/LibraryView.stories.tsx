@@ -2,6 +2,7 @@ import type { Decorator, Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fn } from 'storybook/test';
 import { libraryKeys } from '../../features/library/queryKeys';
+import { getAlbumKey, getArtistKey } from '../../lib/album-key';
 import type { Track } from '../../types';
 import { LibraryView } from './LibraryView';
 
@@ -48,8 +49,8 @@ const withLibraryData = (tracks: Track[]): Decorator => {
   queryClient.setQueryData(libraryKeys.stats(), {
     trackCount: tracks.length,
     totalDuration: tracks.reduce((sum, track) => sum + track.duration, 0),
-    artistCount: new Set(tracks.map((track) => track.artist)).size,
-    albumCount: new Set(tracks.map((track) => `${track.albumArtist}::${track.album}`)).size,
+    artistCount: new Set(tracks.map((track) => getArtistKey(track.artist))).size,
+    albumCount: new Set(tracks.map((track) => getAlbumKey(track))).size,
     totalPlays: tracks.reduce((sum, track) => sum + (track.playCount ?? 0), 0),
   });
 
@@ -102,6 +103,13 @@ export const ErrorWithRetry: Story = {
 
 export const NeobrutalismPopulated: Story = {
   decorators: [withLibraryData(populatedTracks)],
+  globals: {
+    theme: 'neobrutalism',
+  },
+};
+
+export const NeobrutalismEmpty: Story = {
+  decorators: [withLibraryData([])],
   globals: {
     theme: 'neobrutalism',
   },

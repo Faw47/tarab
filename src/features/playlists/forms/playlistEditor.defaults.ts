@@ -44,6 +44,9 @@ export const parseRule = (
   if ('ByAlbum' in first) {
     return { kind: 'ByAlbum', values: { album: first.ByAlbum.album } };
   }
+  if ('ByGenre' in first) {
+    return { kind: 'ByGenre', values: { genre: first.ByGenre.genre } };
+  }
   if ('ByYear' in first) {
     return {
       kind: 'ByYear',
@@ -78,6 +81,8 @@ export const toBackendRule = (
       return [{ ByArtist: { artist: values.artist || '' } }];
     case 'ByAlbum':
       return [{ ByAlbum: { album: values.album || '' } }];
+    case 'ByGenre':
+      return [{ ByGenre: { genre: values.genre || '' } }];
     case 'ByYear':
       return [
         {

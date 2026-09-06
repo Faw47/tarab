@@ -73,18 +73,18 @@ export const WindowsWindowControls = memo(function WindowsWindowControls({
 
   const buttonClassName = useMemo(() => {
     if (variant === 'neo') {
-      return 'h-10 w-12 border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+      return 'h-10 w-12 border-2 border-[var(--neo-ink)] bg-[var(--neo-panel)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-sm)] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
     }
 
-    return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-100 hover:bg-white/10 hover:text-white';
+    return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-white/10 hover:text-white';
   }, [variant]);
 
   const closeButtonClassName = useMemo(() => {
     if (variant === 'neo') {
-      return 'h-10 w-12 border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[#ff5f56] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+      return 'h-10 w-12 border-2 border-[var(--neo-ink)] bg-[var(--neo-panel)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-sm)] transition-none hover:bg-[#ff5f56] hover:text-[var(--neo-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
     }
 
-    return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-100 hover:bg-[#e81123] hover:text-white';
+    return 'h-8 w-[46px] rounded-none bg-transparent text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-[#e81123] hover:text-white';
   }, [variant]);
 
   if (!isWindowsDesktop) return null;

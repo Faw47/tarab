@@ -178,6 +178,7 @@ This system uses a very small accent palette. Each color has exactly one job. Us
 - Lime green (`#7CC61F`): currently playing/active content state. Nowhere else.
 - Red (`#E53935`): destructive and danger states only. Nowhere else.
 - Black (`#000000`): universal ink - borders, shadows, primary text, section rules.
+- Shared Button and IconButton controls use universal black ink on purple and red fills; do not use white text on those fills unless the measured contrast meets WCAG AA.
 
 If a third accent color feels necessary, the solution is a layout revision, not a palette expansion.
 
@@ -284,7 +285,7 @@ Two accent colors. One destructive color. One ink. That is the entire system.
 
 The lime green appears exactly where it needs to: when a track is playing, the card turns green. When the seek bar fills, it fills green. When a volume segment is active, it fills green. That single color now means "this is the thing that is happening right now" across the entire app, with zero ambiguity.
 
-**Implementation tokens:** use `--signal-active` for yellow active/navigation states, `--signal-play` for lime playing/progress/volume states, and `--signal-danger` for destructive red. Components must consume these variables instead of embedding the corresponding hex values. Theme-specific hover shades may remain separate only when they represent a real interaction state rather than the base semantic color.
+**Implementation tokens:** use `--signal-active` for yellow active/navigation states, `--signal-play` for lime playing/progress/volume states, and `--signal-danger` for destructive red. Components must consume these variables instead of embedding the corresponding hex values. Theme-specific hover shades may remain separate only when they represent a real interaction state rather than the base semantic color. Shared polaroid surfaces additionally use `--neo-card-shadow`, `--neo-card-shadow-hover`, and `--neo-card-playing-shadow` for their repeated hard-shadow geometry.
 
 
 ### 3.5 Active State Logic
@@ -339,7 +340,7 @@ This construction appears in every section header across every view. It provides
 
 | Section | Header |
 |---|---|
-| Recently played | `■ 🕐 RECENTLY PLAYED` |
+| Recently added | `■ 🕐 RECENTLY ADDED` |
 | Albums | `■ 💿 ALBUMS` |
 | Artists | `■ 🎤 ARTISTS` |
 | Queue | `■ 📋 QUEUE` |
@@ -2269,6 +2270,11 @@ color:
   paper: "#FFFFFF"
   paper-warm: "#fafaf7"
   canvas: "#e9e9e9"
+  canvas-dot: "#b0b0b0"
+  placeholder: "#d1d1d1"
+  violet: "#9d80e3"
+  violet-hover: "#8a6fcc"
+  light-control: "#eaeaea"
   surface-muted: "#F5F5F0"
   gray-200: "#E5E5E5"
   gray-inactive: "#e0e0e0"
@@ -2302,6 +2308,8 @@ shadow:
   nested: "2px 2px 0px 0px #000000"
   polaroid: "3px 3px 0px 0px #1a1a1a"
   tape: "0 1px 2px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.4)"
+  xl: "8px 8px 0px 0px #000000"
+  2xl: "12px 12px 0px 0px #000000"
 
 radius:
   square: 0
@@ -2559,3 +2567,6 @@ Bordered, shadowed, red icon square, red Level 3 label, gray secondary text, dan
 ## 19. One-Sentence Design Direction
 
 > Build the interface like a bold printed-object system assembled on a dot-grid surface: 2px black structural outlines, hard-offset shadows with zero blur, mechanical press states that physically sink elements into the surface, translucent tape and warm-paper polaroids as literal physical metaphors, four distinct typographic levels with wide-tracked uppercase labels at the smallest scale, and a three-color semantic accent system where yellow means primary action, lime green means currently active, and red means danger, nothing else.
+## State and recovery surfaces
+
+State feedback keeps the mechanical visual language: 2px ink borders, zero blur, hard-offset shadow, and semantic paper/ink contrast. Shared state components may provide the content and recovery action, but the Neobrutalism token overrides control the surface, border, ink, and shadow values.

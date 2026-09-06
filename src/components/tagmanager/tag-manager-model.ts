@@ -1,3 +1,4 @@
+import { getArtistKey } from '../../lib/album-key';
 import { normalizePath } from '../../lib/path-utils';
 import type { Track } from '../../types';
 
@@ -79,7 +80,7 @@ export function filterAndSortTracks({
   if (fileFilter === 'missing-art') result = result.filter((track) => !track.hasCoverArt);
   if (fileFilter === 'untagged') {
     result = result.filter(
-      (track) => !track.artist || track.artist.toLowerCase() === 'unknown artist' || !track.title,
+      (track) => !track.artist || getArtistKey(track.artist) === 'unknown artist' || !track.title,
     );
   }
 

@@ -1,39 +1,35 @@
 import type { Track } from '../../types';
-import { fetchLibraryTracksPage } from './api';
+import { loadLibraryTrackSnapshot } from './cursorPagination';
 
 export const SHUFFLE_PAGE_SIZE = 1000;
 
 export async function loadTracksForShuffle({
   loadedTracks,
   totalTracks,
+  onProgress,
 }: {
   loadedTracks: Track[];
   totalTracks: number;
+  onProgress?: (progress: number) => void;
 }): Promise<Track[]> {
-  if (totalTracks <= loadedTracks.length) return loadedTracks;
+  if (totalTracks === 0 && loadedTracks.length === 0) return loadedTracks;
 
-  const tracksById = new Map<string, Track>();
-  let offset = 0;
-
-  while (offset < totalTracks) {
-    const page = await fetchLibraryTracksPage({
-      offset,
-      limit: SHUFFLE_PAGE_SIZE,
-      sortBy: 'dateAdded',
-      sortOrder: 'desc',
-    });
-
-    if (page.length === 0) break;
-
-    for (const track of page) {
-      if (!tracksById.has(track.id)) tracksById.set(track.id, track);
-    }
-
-    offset += page.length;
-    if (page.length < SHUFFLE_PAGE_SIZE) break;
-  }
-
-  return tracksById.size > 0 ? Array.from(tracksById.values()) : loadedTracks;
+  const snapshot = await loadLibraryTrackSnapshot({
+    limit: SHUFFLE_PAGE_SIZE,
+    sortBy: 'dateAdded',
+    sortOrder: 'desc',
+    onProgress: (tracks, restarted) => {
+      if (restarted) {
+        onProgress?.(0);
+        return;
+      }
+      const expectedCount = Math.max(totalTracks, tracks.length, 1);
+      onProgress?.(
+        tracks.length >= expectedCount ? 100 : Math.floor((tracks.length / expectedCount) * 100),
+      );
+    },
+  });
+  return snapshot.tracks;
 }
 
 export function shuffleTracks<T>(items: readonly T[]): T[] {

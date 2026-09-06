@@ -1,11 +1,12 @@
 import { clsx } from 'clsx';
 import { FolderSync, Music, Sparkles } from 'lucide-react';
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useId } from 'react';
 import { useForm } from 'react-hook-form';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '../../../components/ui/button';
+import { Input } from '../../../components/ui/Input';
 import { reportError } from '../../../lib/report-error';
-import { selectFolder } from '../../../lib/tauri-commands';
+import { selectLibraryFolder } from '../../../lib/tauri-commands';
 import { zodResolver } from '../../../lib/validation/resolver';
 import { useSettingsStore } from '../../../store/settings-store';
 import type { BackendSmartPlaylistRule, PlaylistType } from '../../../types';
@@ -30,7 +31,7 @@ interface PlaylistEditorFormProps {
     playlistType: PlaylistType;
     smartRules?: BackendSmartPlaylistRule[];
     folderPath?: string;
-  }) => Promise<void> | void;
+  }) => Promise<boolean | undefined> | boolean | undefined;
 }
 
 export const PlaylistEditorForm = memo(
@@ -49,19 +50,22 @@ export const PlaylistEditorForm = memo(
       defaultValues: getPlaylistEditorDefaults(initial),
       mode: 'onChange',
     });
+    const formId = useId();
+    const fieldId = (name: string) => `${formId}-${name}`;
+    const initialKey = JSON.stringify(initial ?? null);
 
     useEffect(() => {
       reset(getPlaylistEditorDefaults(initial));
-    }, [initial, reset]);
+    }, [initialKey, reset]);
 
     const playlistType = watch('playlistType');
     const ruleKind = watch('ruleKind');
 
     const handleBrowseFolder = async () => {
       try {
-        const selected = await selectFolder();
+        const selected = await selectLibraryFolder();
         if (selected) {
-          setValue('folderPath', selected, { shouldValidate: true, shouldDirty: true });
+          setValue('folderPath', selected.path, { shouldValidate: true, shouldDirty: true });
         }
       } catch (error) {
         reportError('Failed to select folder for playlist', {
@@ -84,6 +88,7 @@ export const PlaylistEditorForm = memo(
         });
       } catch (error) {
         reportError('Failed to save playlist', { source: 'playlist-editor-form', error });
+        return false;
       }
     };
 
@@ -91,6 +96,7 @@ export const PlaylistEditorForm = memo(
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
           <label
+            htmlFor={fieldId('name')}
             className={clsx(
               'block text-sm mb-1',
               isNeobrutalism ? 'font-black uppercase text-black' : 'text-text-secondary',
@@ -98,15 +104,12 @@ export const PlaylistEditorForm = memo(
           >
             Name
           </label>
-          <input
+          <Input
+            id={fieldId('name')}
             {...register('name')}
             type="text"
-            className={clsx(
-              'w-full px-3 py-2 outline-none transition-all duration-200',
-              isNeobrutalism
-                ? 'bg-white border-2 border-black rounded-none shadow-[3px_3px_0_0_#000] focus:shadow-[5px_5px_0_0_#000] focus:-translate-x-0.5 focus:-translate-y-0.5 text-black font-bold placeholder:text-black/40'
-                : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
-            )}
+            theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+            className="w-full px-3 py-2"
             placeholder="My playlist"
           />
           {errors.name && (
@@ -116,6 +119,7 @@ export const PlaylistEditorForm = memo(
 
         <div>
           <label
+            id={fieldId('type-label')}
             className={clsx(
               'block text-sm mb-2',
               isNeobrutalism ? 'font-black uppercase text-black' : 'text-text-secondary',
@@ -123,7 +127,11 @@ export const PlaylistEditorForm = memo(
           >
             Type
           </label>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Playlist type">
+          <div
+            className="grid grid-cols-3 gap-2"
+            role="radiogroup"
+            aria-labelledby={fieldId('type-label')}
+          >
             {[
               { type: 'Manual' as const, label: 'Manual', icon: Music },
               { type: 'Smart' as const, label: 'Smart', icon: Sparkles },
@@ -139,10 +147,10 @@ export const PlaylistEditorForm = memo(
                   setValue('playlistType', type, { shouldValidate: true, shouldDirty: true })
                 }
                 className={clsx(
-                  'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-all',
+                  'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
                   isNeobrutalism
                     ? [
-                        'rounded-none border-2 border-black font-black uppercase tracking-tight',
+                        'rounded-none border-2 border-black font-black uppercase tracking-normal',
                         playlistType === type
                           ? 'bg-[#ffdb70] shadow-[3px_3px_0_0_#000] -translate-x-0.5 -translate-y-0.5 text-black'
                           : 'bg-white text-black/60 hover:text-black hover:bg-[#fffef0]',
@@ -172,6 +180,7 @@ export const PlaylistEditorForm = memo(
             )}
           >
             <label
+              htmlFor={fieldId('rule-kind')}
               className={clsx(
                 'block text-sm',
                 isNeobrutalism ? 'font-black uppercase text-black' : 'text-text-secondary',
@@ -180,9 +189,10 @@ export const PlaylistEditorForm = memo(
               Smart rule
             </label>
             <select
+              id={fieldId('rule-kind')}
               {...register('ruleKind')}
               className={clsx(
-                'w-full px-3 py-2 outline-none transition-all duration-200',
+                'w-full px-3 py-2 outline-none transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 isNeobrutalism
                   ? 'bg-white border-2 border-black rounded-none text-black font-bold appearance-none cursor-pointer hover:bg-[#fffef0]'
                   : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
@@ -193,6 +203,7 @@ export const PlaylistEditorForm = memo(
               <option value="TopRated">Top Rated</option>
               <option value="ByArtist">By Artist</option>
               <option value="ByAlbum">By Album</option>
+              <option value="ByGenre">By Genre</option>
               <option value="ByYear">By Year</option>
               <option value="LongerThan">Longer Than</option>
               <option value="ShorterThan">Shorter Than</option>
@@ -201,6 +212,7 @@ export const PlaylistEditorForm = memo(
             {ruleKind === 'RecentlyAdded' && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-days')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -208,16 +220,13 @@ export const PlaylistEditorForm = memo(
                 >
                   Days
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-days')}
                   {...register('ruleValues.days')}
                   type="number"
                   min={1}
-                  className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                  )}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -225,6 +234,7 @@ export const PlaylistEditorForm = memo(
             {ruleKind === 'MostPlayed' && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-min-plays')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -232,16 +242,13 @@ export const PlaylistEditorForm = memo(
                 >
                   Min plays
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-min-plays')}
                   {...register('ruleValues.minPlays')}
                   type="number"
                   min={1}
-                  className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                  )}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -249,6 +256,7 @@ export const PlaylistEditorForm = memo(
             {ruleKind === 'TopRated' && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-min-rating')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -256,17 +264,14 @@ export const PlaylistEditorForm = memo(
                 >
                   Min rating (0-5)
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-min-rating')}
                   {...register('ruleValues.minRating')}
                   type="number"
                   min={0}
                   max={5}
-                  className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                  )}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -274,6 +279,7 @@ export const PlaylistEditorForm = memo(
             {ruleKind === 'ByArtist' && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-artist')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -281,14 +287,11 @@ export const PlaylistEditorForm = memo(
                 >
                   Artist contains
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-artist')}
                   {...register('ruleValues.artist')}
-                  className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                  )}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -296,6 +299,7 @@ export const PlaylistEditorForm = memo(
             {ruleKind === 'ByAlbum' && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-album')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -303,14 +307,31 @@ export const PlaylistEditorForm = memo(
                 >
                   Album contains
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-album')}
                   {...register('ruleValues.album')}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
+                />
+              </div>
+            )}
+
+            {ruleKind === 'ByGenre' && (
+              <div>
+                <label
+                  htmlFor={fieldId('rule-genre')}
                   className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
+                    'block text-xs mb-1',
+                    isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
                   )}
+                >
+                  Genre contains
+                </label>
+                <Input
+                  id={fieldId('rule-genre')}
+                  {...register('ruleValues.genre')}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -319,6 +340,7 @@ export const PlaylistEditorForm = memo(
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label
+                    htmlFor={fieldId('rule-start-year')}
                     className={clsx(
                       'block text-xs mb-1',
                       isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -326,19 +348,17 @@ export const PlaylistEditorForm = memo(
                   >
                     Start year
                   </label>
-                  <input
+                  <Input
+                    id={fieldId('rule-start-year')}
                     {...register('ruleValues.startYear')}
                     type="number"
-                    className={clsx(
-                      'w-full px-3 py-2',
-                      isNeobrutalism
-                        ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                        : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                    )}
+                    theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                    className="w-full px-3 py-2"
                   />
                 </div>
                 <div>
                   <label
+                    htmlFor={fieldId('rule-end-year')}
                     className={clsx(
                       'block text-xs mb-1',
                       isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -346,15 +366,12 @@ export const PlaylistEditorForm = memo(
                   >
                     End year
                   </label>
-                  <input
+                  <Input
+                    id={fieldId('rule-end-year')}
                     {...register('ruleValues.endYear')}
                     type="number"
-                    className={clsx(
-                      'w-full px-3 py-2',
-                      isNeobrutalism
-                        ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                        : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                    )}
+                    theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                    className="w-full px-3 py-2"
                   />
                 </div>
               </div>
@@ -363,6 +380,7 @@ export const PlaylistEditorForm = memo(
             {(ruleKind === 'LongerThan' || ruleKind === 'ShorterThan') && (
               <div>
                 <label
+                  htmlFor={fieldId('rule-seconds')}
                   className={clsx(
                     'block text-xs mb-1',
                     isNeobrutalism ? 'font-bold text-black' : 'text-text-muted',
@@ -370,16 +388,13 @@ export const PlaylistEditorForm = memo(
                 >
                   Seconds
                 </label>
-                <input
+                <Input
+                  id={fieldId('rule-seconds')}
                   {...register('ruleValues.seconds')}
                   type="number"
                   min={0}
-                  className={clsx(
-                    'w-full px-3 py-2',
-                    isNeobrutalism
-                      ? 'bg-white border-2 border-black rounded-none text-black font-bold'
-                      : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                  )}
+                  theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                  className="w-full px-3 py-2"
                 />
               </div>
             )}
@@ -401,6 +416,7 @@ export const PlaylistEditorForm = memo(
             )}
           >
             <label
+              htmlFor={fieldId('folder-path')}
               className={clsx(
                 'block text-sm',
                 isNeobrutalism ? 'font-black uppercase text-black' : 'text-text-secondary',
@@ -409,14 +425,11 @@ export const PlaylistEditorForm = memo(
               Folder path
             </label>
             <div className="flex gap-2">
-              <input
+              <Input
+                id={fieldId('folder-path')}
                 {...register('folderPath')}
-                className={clsx(
-                  'flex-1 px-3 py-2 outline-none transition-all duration-200',
-                  isNeobrutalism
-                    ? 'bg-white border-2 border-black rounded-none text-black font-bold placeholder:text-black/40'
-                    : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700',
-                )}
+                theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+                className="flex-1 px-3 py-2"
                 placeholder="/Music/Arabic"
               />
               <Button

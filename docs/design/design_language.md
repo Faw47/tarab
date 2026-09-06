@@ -35,6 +35,13 @@ View padding defaults:
 - Dense lists: row padding Y = 12px, X = 16px
 - Cards: 16px (compact), 24px (normal), 32px (hero)
 
+Library album composition:
+
+- The standard Library album grid starts with one featured album spanning two columns, followed by regular album cards in normal reading order.
+- Keep persistent album and artist labels beneath regular artwork; metadata must not depend on hover.
+- The featured card uses a split artwork/details composition and should remain optically aligned to the height of its neighboring cards.
+- Large collections may move albums after the initial showcase into a virtualized continuation, but the featured-first hierarchy must remain intact.
+
 ---
 
 ## 2) Radius system
@@ -65,6 +72,9 @@ Contrast/readability rules:
 
 - Section labels over glass should not drop below `text-white/40`.
 - Decorative metadata can be dimmer, but actionable text should remain clearly legible.
+- Small metadata that communicates a current count or table value must use `text-text-muted-strong` (or a measured equivalent) and meet WCAG AA contrast.
+- Supporting text must be at least 12 px. Dense interactive labels should use 13 to 14 px when
+  the available surface permits it.
 
 ---
 
@@ -95,6 +105,20 @@ All glass surfaces use:
 |    Subtle | rgba(255,255,255,0.06) | rgba(255,255,255,0.10) | 18px |
 |    Medium | rgba(255,255,255,0.08) | rgba(255,255,255,0.12) | 22px |
 |    Strong | rgba(255,255,255,0.10) | rgba(255,255,255,0.14) | 26px |
+Implementation token families:
+
+- Settings control fills and shadows use --settings-control-background and
+  --settings-control-shadow so the navigation pill and action buttons share one reviewed recipe.
+- Standard player controls use --player-control-surface, --player-control-surface-hover,
+  --player-control-border, --player-control-text, and --player-control-text-subtle.
+- Liquid button highlights, shadows, and ghost hover fills use
+  --button-liquid-light, --button-liquid-shadow, and --button-ghost-hover. Button
+  variants should consume signal and type tokens instead of embedding raw color
+  literals.
+- Library glass surfaces use the local --library-glass-* family for shared borders, fills,
+  highlights, hover states, and warm shadow depth. These remain scoped to the library so a library
+  archive surface can change without changing dialogs or player controls.
+- Do not promote one-off geometry or a genuinely different Neobrutalism treatment into these tokens.
 
 ---
 
@@ -184,10 +208,29 @@ Mini window:
 - Always-on-top compact surface
 - Controlled by main window state
 - Can request and receive playback snapshot immediately on open
+- Close/hide is idempotent: hide the reusable surface instead of minimizing, destroying, or toggling it
+- Seek intents carry the visible track and playback generation; stale intents refresh the snapshot instead
 
 Selection toolbar entrance:
 
-- Preferred motion: short vertical rise with fade (`~220ms`, springy easing)
+- Preferred motion: short vertical rise with fade using the 180 ms standard token.
+
+Motion tokens:
+
+- Fast feedback: 120 ms
+- Standard controls: 180 ms
+- Emphasized surface changes: 240 ms
+- Use `cubic-bezier(0.2, 0, 0, 1)` for standard UI transitions.
+- The operating-system Reduce Motion preference or Tarab Reduced Effects disables decorative motion.
+- Reduced Effects also suppresses the cover-art backdrop and app-shell WebGL ambience, leaving the solid shell and accessible controls.
+- The app provider exposes `data-reduced-effects="true"` on the document root while reduced effects are active, so legacy animations and transitions in portal surfaces also settle to a static state.
+- Do not stagger routine card entry. Animate only the surface or result state that changed.
+- Declare each transitioned property. Do not use `transition-all`.
+
+Supporting text:
+
+- Use 12 px as the minimum size.
+- Use 13–14 px for dense interactive labels.
 
 Back/Sticky choreography:
 
@@ -199,8 +242,24 @@ Back/Sticky choreography:
 
 - Hero art should scale responsively across phone/desktop.
 - If art URL is pending, render shimmer placeholder.
-- If art load fails, render explicit icon fallback.
-- Optional blur diffusion layer is disabled when reduced effects are enabled.
+- Use the shared cover-art resolver in every surface.
+- Show the icon fallback only after native resolution confirms that the track has no art.
+- Cache, permission, and protocol failures are repair states, not no-art states.
+- Artwork backdrop blur remains CSS-driven; the app-shell WebGL canvas does not run a full-window blur post-process.
+- Reduced Effects removes the artwork backdrop entirely; Background off also removes all ambient layers.
+
+Full-player seek:
+
+- Mount the shared seek bar on the top edge of the cover card.
+- Keep the visible rail at 2 px and the pointer target at least 20 px.
+- Reveal the rail, knob, and time tooltip on hover, focus, or drag.
+- Clamp the dot, knob, and tooltip within the card corners.
+
+Playback recovery:
+
+- Keep playback failures visible until the listener chooses a recovery action.
+- Offer Retry, Skip, Reveal in Finder, and Remove from Queue.
+- Do not present a decode failure as normal track completion.
 
 ---
 
@@ -224,3 +283,10 @@ Empty states:
 Before making UI/styling decisions in TARAB, follow this spec’s numeric scales and behavior rules.
 If existing UI conflicts with these standards, align visuals while preserving product behavior.
 ```
+
+## 13) Shared state feedback
+
+- Error, warning, success, informational, and loading surfaces use the shared `StatePanel` primitive where the workflow needs a visible state and recovery action.
+- State surfaces consume `--state-*` semantic tokens instead of hard-coded red, amber, or white values.
+- The Neobrutalism theme replaces those tokens with paper, ink, sage, mustard, and mechanical shadow values while preserving the same message hierarchy and actions.
+- Retry actions remain explicit and keyboard reachable; a failed request must not silently disable the surrounding workflow.

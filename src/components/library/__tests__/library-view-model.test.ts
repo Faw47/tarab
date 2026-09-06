@@ -6,6 +6,7 @@ import {
   buildFacetCounts,
   buildFacetPayload,
   formatLongDuration,
+  resolveTracksByIds,
 } from '../library-view-model';
 
 const mkTrack = (overrides: Partial<Track>): Track => ({
@@ -97,6 +98,39 @@ describe('library-view-model', () => {
     expect(albumScope.map((track) => track.id)).toEqual(['a', 'b']);
   });
 
+  it('matches album detail scopes without case-sensitive metadata splits', () => {
+    const tracks = [
+      mkTrack({ id: 'a', album: 'Shared Album', artist: 'Singer One', albumArtist: 'Various' }),
+      mkTrack({ id: 'b', album: 'shared album', artist: 'Singer Two', albumArtist: 'various' }),
+      mkTrack({ id: 'c', album: 'Other Album', artist: 'Singer Three', albumArtist: 'Various' }),
+    ];
+
+    const albumScope = buildDetailTracks(tracks, {
+      type: 'album',
+      album: 'SHARED ALBUM',
+      artist: 'VARIOUS',
+    });
+
+    expect(albumScope.map((track) => track.id)).toEqual(['a', 'b']);
+  });
+
+  it('normalizes case variants into one artist identity', () => {
+    const tracks = [
+      mkTrack({ id: 'first', artist: 'Artist' }),
+      mkTrack({ id: 'second', artist: 'artist' }),
+    ];
+
+    expect(buildFacetCounts(tracks).artists).toBe(1);
+
+    const artists = buildFacetPayload('artists', tracks, () => undefined) as Array<{
+      artist: string;
+      count: number;
+    }>;
+    expect(artists).toHaveLength(1);
+    expect(artists[0]).toMatchObject({ artist: 'Artist', count: 2 });
+    expect(buildDetailTracks(tracks, { type: 'artist', artist: 'ARTIST' })).toHaveLength(2);
+  });
+
   it('returns recent and artist payloads by facet', () => {
     const tracks = [
       mkTrack({ id: 'old', artist: 'A', dateAdded: 10, coverArtHash: 'x' }),
@@ -112,11 +146,36 @@ describe('library-view-model', () => {
     );
 
     expect(Array.isArray(artists)).toBe(true);
-    expect((artists as Array<{ artist: string }>).map((entry) => entry.artist)).toEqual(['A', 'B']);
+    expect(
+      (artists as Array<{ artist: string; count: number }>).map(({ artist, count }) => ({
+        artist,
+        count,
+      })),
+    ).toEqual([
+      { artist: 'A', count: 2 },
+      { artist: 'B', count: 1 },
+    ]);
   });
 
   it('formats duration in long form', () => {
     expect(formatLongDuration(3599)).toBe('59m');
     expect(formatLongDuration(7260)).toBe('2h 1m');
+  });
+
+  it('resolves selected ids from hydrated result sources with later sources winning', () => {
+    const paged = mkTrack({ id: 'shared', filePath: '/paged/shared.mp3' });
+    const hydratedSearch = mkTrack({
+      id: 'shared',
+      filePath: '/hydrated/shared.flac',
+      bitrate: 1411,
+    });
+    const hydratedDetail = mkTrack({ id: 'detail-only', filePath: '/hydrated/detail.flac' });
+
+    expect(
+      resolveTracksByIds(
+        ['shared', 'detail-only', 'missing'],
+        [[paged], [hydratedSearch], [hydratedDetail]],
+      ),
+    ).toEqual([hydratedSearch, hydratedDetail]);
   });
 });

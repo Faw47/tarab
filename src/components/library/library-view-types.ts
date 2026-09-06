@@ -44,6 +44,7 @@ export interface SelectionBarProps {
   selectedCount: number;
   onSelectAll?: () => void;
   onClearSelection?: () => void;
+  onEditSelected?: () => void;
   isNeo?: boolean;
 }
 
@@ -59,7 +60,7 @@ export interface ResultsOrchestratorProps {
   onPlayAlbum: (track: Track) => void;
   onTrackSelect?: (track: Track, isMulti: boolean) => void;
   onTrackContextMenu?: (track: Track, position: { x: number; y: number }) => void;
-  onShowFileInfo: (trackId: string) => void;
+  onShowFileInfo: (track: Track) => void;
   onAlbumOpen: (track: Track) => void;
   onArtistOpen: (artist: string) => void;
   onDragStart: (event: DragEvent, track: Track) => void;
@@ -67,7 +68,7 @@ export interface ResultsOrchestratorProps {
   onTrackGridRangeChange: (tracks: Track[], start: number, end: number) => void;
   onAlbumGridRangeChange: (albums: AlbumGroup[], start: number, end: number) => void;
   onArtistGridRangeChange: (artists: ArtistGroup[], start: number, end: number) => void;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
   hasMore: boolean;
   formatSize: (size?: number) => string;
   getFormatLabel: (track: Track) => string;

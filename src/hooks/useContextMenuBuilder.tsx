@@ -12,7 +12,7 @@ interface UseContextMenuBuilderProps {
   selectedTracks: Track[];
   contextMenuTrack: Track | null;
   addToQueue: (track: Track, position: 'next' | 'last') => void;
-  setTagEditorTracks: (tracks: Track[] | null) => void;
+  setTagEditorTracks: (tracks: Track[]) => void;
   handleRevealTracks: (tracks: Track[]) => void;
   handleRemoveTracks: (tracks: Track[]) => void;
   handleRevealInLibrary: (tracks: Track[]) => void;
@@ -33,8 +33,13 @@ export function useContextMenuBuilder({
   openPlaylistPicker,
   queryClient,
 }: UseContextMenuBuilderProps) {
-  const selectedOrContext = useMemo(
-    () => (selectedTracks.length > 0 ? selectedTracks : contextMenuTrack ? [contextMenuTrack] : []),
+  const contextTargets = useMemo(
+    () =>
+      contextMenuTrack
+        ? selectedTracks.some((track) => track.id === contextMenuTrack.id)
+          ? selectedTracks
+          : [contextMenuTrack]
+        : [],
     [selectedTracks, contextMenuTrack],
   );
 
@@ -48,7 +53,7 @@ export function useContextMenuBuilder({
               label: 'Play',
               icon: <Play className="w-4 h-4" />,
               onClick: async () => {
-                const tracksToPlay = selectedOrContext;
+                const tracksToPlay = contextTargets;
                 if (tracksToPlay.length === 0) return;
                 const [first] = tracksToPlay;
                 try {
@@ -66,7 +71,7 @@ export function useContextMenuBuilder({
               label: 'Play Next',
               icon: <ListMusic className="w-4 h-4" />,
               onClick: () => {
-                const tracksToAdd = selectedOrContext;
+                const tracksToAdd = contextTargets;
                 if (tracksToAdd.length === 0) return;
                 tracksToAdd
                   .slice()
@@ -79,7 +84,7 @@ export function useContextMenuBuilder({
               label: 'Add to Queue',
               icon: <ListMusic className="w-4 h-4" />,
               onClick: () => {
-                const tracksToAdd = selectedOrContext;
+                const tracksToAdd = contextTargets;
                 tracksToAdd.forEach((track) => addToQueue(track, 'last'));
               },
             },
@@ -88,22 +93,18 @@ export function useContextMenuBuilder({
               label: 'Add to Playlist',
               icon: <ListPlus className="w-4 h-4" />,
               onClick: () => {
-                openPlaylistPicker(selectedOrContext);
+                openPlaylistPicker(contextTargets);
               },
             },
             // Edit actions
             {
               id: 'edit',
               label:
-                selectedTracks.length > 1 ? `Edit ${selectedTracks.length} Tracks` : 'Edit Info',
+                contextTargets.length > 1 ? `Edit ${contextTargets.length} Tracks` : 'Edit Info',
               icon: <Edit2 className="w-4 h-4" />,
               divider: true,
               onClick: () => {
-                if (selectedTracks.length > 1) {
-                  setTagEditorTracks(selectedTracks);
-                } else if (contextMenuTrack) {
-                  setTagEditorTracks([contextMenuTrack]);
-                }
+                if (contextTargets.length > 0) setTagEditorTracks(contextTargets);
               },
             },
             // Rating actions
@@ -113,7 +114,7 @@ export function useContextMenuBuilder({
               icon: <Star className="w-4 h-4" />,
               divider: i === 0,
               onClick: async () => {
-                const targetIds = selectedOrContext.map((track) => track.id);
+                const targetIds = contextTargets.map((track) => track.id);
                 try {
                   await Promise.all(targetIds.map((trackId) => dbSetTrackRating(trackId, stars)));
                   applyTrackRatings(targetIds, stars);
@@ -128,7 +129,7 @@ export function useContextMenuBuilder({
               label: 'Clear Rating',
               icon: <Star className="w-4 h-4" />,
               onClick: async () => {
-                const targetIds = selectedOrContext.map((track) => track.id);
+                const targetIds = contextTargets.map((track) => track.id);
                 try {
                   await Promise.all(targetIds.map((trackId) => dbSetTrackRating(trackId, null)));
                   applyTrackRatings(targetIds, null);
@@ -145,7 +146,7 @@ export function useContextMenuBuilder({
               icon: <FolderOpen className="w-4 h-4" />,
               divider: true,
               onClick: () => {
-                handleRevealTracks(selectedOrContext);
+                handleRevealTracks(contextTargets);
               },
             },
             {
@@ -153,29 +154,28 @@ export function useContextMenuBuilder({
               label: 'Reveal in Library',
               icon: <Library className="w-4 h-4" />,
               onClick: () => {
-                handleRevealInLibrary(selectedOrContext);
+                handleRevealInLibrary(contextTargets);
               },
             },
             // Danger actions
             {
               id: 'remove',
               label:
-                selectedOrContext.length > 1
-                  ? `Remove ${selectedOrContext.length} from Library`
+                contextTargets.length > 1
+                  ? `Remove ${contextTargets.length} from Library`
                   : 'Remove from Library',
               icon: <Trash2 className="w-4 h-4" />,
               divider: true,
               danger: true,
               onClick: () => {
-                handleRemoveTracks(selectedOrContext);
+                handleRemoveTracks(contextTargets);
               },
             },
           ]
         : [],
     [
       contextMenuTrack,
-      selectedOrContext,
-      selectedTracks.length,
+      contextTargets,
       addToQueue,
       setTagEditorTracks,
       handleRevealTracks,
@@ -183,6 +183,7 @@ export function useContextMenuBuilder({
       handleRevealInLibrary,
       applyTrackRatings,
       openPlaylistPicker,
+      queryClient,
     ],
   );
 

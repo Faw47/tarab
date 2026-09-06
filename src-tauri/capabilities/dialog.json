@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "dialog",
-  "description": "Native open-dialog permissions for main-window folder, audio, and image selection.",
+  "description": "Native open-dialog permissions for main-window folder and audio selection.",
   "windows": ["main"],
   "permissions": ["dialog:allow-open"]
 }

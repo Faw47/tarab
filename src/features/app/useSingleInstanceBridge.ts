@@ -8,13 +8,15 @@ const DOMAIN = 'SingleInstanceBridge';
  * Hook to handle second instance launches.
  * This should be used at the root of the application.
  */
-export function useSingleInstanceBridge(onSecondInstance?: (argv: string[], cwd: string) => void) {
+export function useSingleInstanceBridge(onSecondInstance?: () => void) {
   useAsyncCleanup(
     () =>
       setupSingleInstanceListener((payload) => {
-        logger.info(DOMAIN, 'Handling second instance launch', { argv: payload.argv });
+        logger.info(DOMAIN, 'Handling second instance launch', {
+          argumentCount: payload.argumentCount,
+        });
         if (onSecondInstance) {
-          onSecondInstance(payload.argv, payload.cwd);
+          onSecondInstance();
         }
       }),
     [onSecondInstance],

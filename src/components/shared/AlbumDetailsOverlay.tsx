@@ -25,16 +25,18 @@ import {
   useState,
 } from 'react';
 import { useColorExtraction } from '../../hooks/use-color-extraction';
-import { getCoverArtBlobFallback, useCoverArt } from '../../hooks/useCoverArt';
+
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { formatTime } from '../../lib/format-time';
-import { reportError } from '../../lib/report-error';
-import { useSettingsStore } from '../../store/settings-store';
+
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { Button } from '../ui/button';
 import { QueueIcon as ListMusic, TrackIcon } from '../ui/Icons';
 import { cn, GlassCard } from '../ui/liquid-glass';
+import { useAlbumOverviewModel } from './useAlbumOverviewModel';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
+import { useResolvedCoverArt } from './useResolvedCoverArt';
 
 // ============================================================================
 // CONSTANTS & ANIMATIONS
@@ -129,21 +131,23 @@ function getRelativeLuminance(color: string): number {
   return L;
 }
 
-function useLongPress(callback: () => void, delay = 500) {
+export function useLongPress(callback: () => void, delay = 500) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onStart = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      callback();
       timerRef.current = null;
+      callback();
     }, delay);
   };
   const onEnd = () => {
-    if (timerRef.current) {
+    if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
   };
+
+  useEffect(() => onEnd, []);
   return {
     onMouseDown: onStart,
     onMouseUp: onEnd,
@@ -188,41 +192,6 @@ export interface AlbumDetailsOverlayProps {
 // SUBCOMPONENTS
 // ============================================================================
 
-const useResolvedCoverArt = (src: string | undefined, track: Track | null) => {
-  const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(src);
-  const [error, setError] = useState(false);
-
-  const resolvedSrcRef = useRef(resolvedSrc);
-  useEffect(() => {
-    resolvedSrcRef.current = resolvedSrc;
-  }, [resolvedSrc]);
-
-  useEffect(() => {
-    setResolvedSrc(src);
-    setError(false);
-  }, [src]);
-
-  const handleError = useCallback(async () => {
-    if (resolvedSrcRef.current?.startsWith('cover-art://') && track?.coverArtHash) {
-      try {
-        const blobUrl = await getCoverArtBlobFallback(track.coverArtHash, 'large');
-        if (blobUrl) {
-          setResolvedSrc(blobUrl);
-          return;
-        }
-      } catch (err) {
-        reportError('Failed to load thumbnail via IPC', {
-          source: 'album-details-overlay',
-          error: err,
-        });
-      }
-    }
-    setError(true);
-  }, [track]);
-
-  return { resolvedSrc, error, handleError };
-};
-
 const WAVE_BARS = [
   { h: 7, dur: '0.72s', delay: '0ms' },
   { h: 13, dur: '0.96s', delay: '110ms' },
@@ -264,7 +233,7 @@ const MetadataPill = memo(function MetadataPill({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-white/85"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium text-white/85"
       style={{
         backgroundColor: 'rgba(0,0,0,0.35)',
         border: '1px solid rgba(255,255,255,0.14)',
@@ -312,7 +281,7 @@ const MenuButton = ({
     <Icon className="w-4 h-4 shrink-0" />
     <span className="flex-1 leading-none">{label}</span>
     {badge && (
-      <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/40">
+      <span className="text-[12px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/40">
         {badge}
       </span>
     )}
@@ -343,7 +312,7 @@ const ToolbarButton = ({
       'min-w-[64px] sm:min-w-[70px] rounded-[1.25rem] px-2 sm:px-3 py-2.5 sm:py-2',
       disabled && 'opacity-55',
     )}
-    contentClassName="flex flex-col items-center gap-1 text-[10px] font-semibold tracking-[0.12em] uppercase"
+    contentClassName="flex flex-col items-center gap-1 text-[12px] font-semibold tracking-[0.12em] uppercase"
     aria-label={label}
     title={label}
   >
@@ -489,7 +458,7 @@ const TrackRow = memo(
         className={cn(
           trackGridClass,
           'px-4 sm:px-6 py-3 group relative cursor-pointer',
-          'transition-all duration-300 ease-out',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] ease-out',
           !reducedEffects && 'adl-track-row',
           isSelected ? 'bg-[var(--adl-ink)]/[0.2]' : '',
           isCurrentTrack
@@ -540,7 +509,7 @@ const TrackRow = memo(
             <>
               <span
                 className={cn(
-                  'font-mono tabular-nums transition-opacity duration-150',
+                  'font-mono tabular-nums transition-opacity duration-[var(--motion-fast)]',
                   isCurrentTrack ? 'opacity-0' : 'group-hover:opacity-0',
                 )}
                 style={{ color: isCurrentTrack ? inkTextColor : undefined }}
@@ -550,7 +519,7 @@ const TrackRow = memo(
               </span>
               <div
                 className={cn(
-                  'absolute inset-0 flex items-center justify-center transition-opacity duration-150',
+                  'absolute inset-0 flex items-center justify-center transition-opacity duration-[var(--motion-fast)]',
                   isCurrentTrack ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 )}
               >
@@ -561,7 +530,7 @@ const TrackRow = memo(
                     onPlayTrack?.(track);
                   }}
                   aria-label={`Play ${track.title}`}
-                  className="flex h-7 w-7 items-center justify-center rounded-full shadow-md transition-[transform,box-shadow] duration-150 hover:scale-110 active:scale-90"
+                  className="flex h-7 w-7 items-center justify-center rounded-full shadow-md transition-[transform,box-shadow] duration-[var(--motion-fast)] hover:scale-110 active:scale-90"
                   style={
                     isCurrentTrack
                       ? {
@@ -586,7 +555,7 @@ const TrackRow = memo(
         <div role="cell" className="flex flex-col min-w-0 pr-4">
           <span
             className={cn(
-              'text-[0.9375rem] font-bold truncate tracking-tight mb-0.5',
+              'text-[0.9375rem] font-bold truncate tracking-normal mb-0.5',
               isCurrentTrack ? 'text-white' : 'text-text-primary',
             )}
           >
@@ -606,7 +575,7 @@ const TrackRow = memo(
               e.stopPropagation();
               onTrackContextMenu?.(e, track);
             }}
-            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-white/10 rounded-lg transition-all"
+            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 hover:bg-white/10 rounded-lg transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]"
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
@@ -646,23 +615,12 @@ export const AlbumDetailsOverlay = memo(
     isPlaying: isCurrentlyPlaying,
     onScrollChange,
   }: AlbumDetailsOverlayProps) => {
-    const totalDuration = useMemo(
-      () => tracks.reduce((acc, t) => acc + (t.duration || 0), 0),
-      [tracks],
-    );
-
-    const coverTrack = useMemo(() => tracks[0] ?? null, [tracks]);
-    const releaseYear = useMemo(() => tracks.find((t) => t.year)?.year ?? null, [tracks]);
-
-    const hookResolvedCoverArt = useCoverArt(
-      coverTrack?.filePath ?? '',
-      coverTrack?.hasCoverArt ?? false,
-      true,
-      'large',
-      coverTrack?.coverArtHash ?? undefined,
-    );
-
-    const initialCover = coverArt ?? hookResolvedCoverArt ?? undefined;
+    const {
+      firstTrack: coverTrack,
+      resolvedCoverArt: initialCover,
+      totalDuration,
+      releaseYear,
+    } = useAlbumOverviewModel(tracks, coverArt);
     const {
       resolvedSrc: heroArt,
       error: heroArtError,
@@ -671,7 +629,7 @@ export const AlbumDetailsOverlay = memo(
     const hasHeroArt = Boolean(heroArt && !heroArtError);
 
     const colors = useColorExtraction(coverTrack?.filePath ?? null);
-    const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+    const reducedEffects = useEffectiveReducedEffects();
 
     const albumInk = colors.primary || 'rgba(255,255,255,0.88)';
     const albumBg = colors.background || '#0c0c0c';
@@ -788,7 +746,7 @@ export const AlbumDetailsOverlay = memo(
     useEffect(() => {
       return () => {
         isMountedRef.current = false;
-        if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+        if (flashTimeoutRef.current !== null) clearTimeout(flashTimeoutRef.current);
       };
     }, []);
 
@@ -796,7 +754,7 @@ export const AlbumDetailsOverlay = memo(
 
     const flashAction = useCallback((action: string) => {
       setFlashedAction(action);
-      if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+      if (flashTimeoutRef.current !== null) clearTimeout(flashTimeoutRef.current);
       flashTimeoutRef.current = setTimeout(() => {
         if (isMountedRef.current) setFlashedAction(null);
       }, 600);
@@ -927,7 +885,7 @@ export const AlbumDetailsOverlay = memo(
 
         <div
           ref={stickyHeaderRef}
-          className="absolute top-0 left-0 right-0 z-30 border-b border-transparent h-16 md:h-20 transition-all duration-200 opacity-0 pointer-events-none"
+          className="absolute top-0 left-0 right-0 z-30 border-b border-transparent h-16 md:h-20 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] opacity-0 pointer-events-none"
         >
           <div className="flex items-center justify-between px-6 h-full">
             <div className="flex items-center gap-4 pointer-events-auto w-full">
@@ -939,7 +897,7 @@ export const AlbumDetailsOverlay = memo(
               )}
               <div
                 ref={stickyHeaderInnerRef}
-                className="transition-all duration-300 opacity-0 translate-y-2 flex items-center justify-between flex-1 gap-4"
+                className="transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] opacity-0 translate-y-2 flex items-center justify-between flex-1 gap-4"
               >
                 <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-lg leading-tight truncate max-w-sm">{album}</h3>
@@ -988,7 +946,7 @@ export const AlbumDetailsOverlay = memo(
                   radius={24}
                   className="w-48 h-48 sm:w-56 sm:h-56 md:w-60 md:h-60 lg:w-72 lg:h-72 shadow-2xl relative z-10"
                 >
-                  {heroArt ? (
+                  {heroArt && !heroArtError ? (
                     <img
                       src={heroArt}
                       alt={album}
@@ -1133,14 +1091,14 @@ export const AlbumDetailsOverlay = memo(
                 style={{ backdropFilter: reducedEffects ? 'blur(4px)' : 'blur(12px)' }}
               />
               <div className="flex items-center justify-between px-4 sm:px-6 pt-4 pb-2">
-                <span className="text-[10px] font-bold tracking-[0.22em] uppercase text-white/80">
+                <span className="text-[12px] font-bold tracking-[0.22em] uppercase text-white/80">
                   Tracklist
                 </span>
                 {selectionActive && (
                   <button
                     type="button"
                     onClick={clearSelection}
-                    className="text-[11px] font-semibold px-3 py-1 rounded-full"
+                    className="text-[12px] font-semibold px-3 py-1 rounded-full"
                     style={{ color: inkTextColor, backgroundColor: withAlpha(albumInk, '18') }}
                   >
                     {someSelected ? 'Clear' : 'Done'}

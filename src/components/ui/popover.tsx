@@ -33,7 +33,7 @@ function PopoverContent({
         {...props}
       >
         <div className="absolute inset-0 z-[-1] mix-blend-screen opacity-90">
-          <LiquidGlassSurface interactive={false} />
+          <LiquidGlassSurface />
         </div>
         {props.children}
       </PopoverPrimitive.Content>

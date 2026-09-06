@@ -1,9 +1,13 @@
 #![allow(dead_code)]
 use tauri::{Runtime, WebviewWindow};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use window_vibrancy::*;
 
 pub fn apply_platform_vibrancy<R: Runtime>(window: &WebviewWindow<R>) {
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = window;
+
     #[cfg(target_os = "windows")]
     {
         // Detect Windows version at runtime via the registry

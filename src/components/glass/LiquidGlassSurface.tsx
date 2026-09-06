@@ -2,8 +2,6 @@ import type React from 'react';
 import { useGlassSystem } from '../ui/liquid-glass';
 
 export interface LiquidGlassSurfaceProps {
-  /** Turn on fluid mouse interaction (ignored in CSS fallback) */
-  interactive?: boolean;
   /** Optional background image/texture url to render behind the glass */
   bgTextureUrl?: string;
   /** CSS class to apply to the container wrapper */
@@ -36,7 +34,8 @@ export const LiquidGlassSurface: React.FC<LiquidGlassSurfaceProps> = ({
     backgroundImage: bgTextureUrl ? `url(${bgTextureUrl})` : undefined,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
-    transition: 'backdrop-filter 0.3s ease, background-color 0.3s ease',
+    transition:
+      'backdrop-filter var(--motion-emphasis) var(--motion-ease-standard), background-color var(--motion-emphasis) var(--motion-ease-standard)',
     pointerEvents: 'none',
     zIndex: 0,
   };

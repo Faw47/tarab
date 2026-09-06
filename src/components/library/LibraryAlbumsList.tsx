@@ -1,6 +1,7 @@
 import { Info, Play } from 'lucide-react';
 import { memo } from 'react';
 import { cn } from '@/lib/utils';
+import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedList } from '../shared/VirtualizedList';
@@ -34,13 +35,14 @@ const AlbumRow = memo(function AlbumRow({
     ? 'rounded-none bg-[var(--neo-utility-hover)] px-0.5 text-black'
     : 'rounded-[3px] bg-primary/35 px-0.5 text-inherit';
 
+  const albumArtist = getAlbumArtist(album.track);
   return (
     <div className={cn(isNeo ? 'px-0 py-0' : 'px-2 py-0.5 border-b border-transparent')}>
       <div
         className={cn(
           isNeo
-            ? 'group -mt-[2px] grid cursor-pointer grid-cols-[58px_2.4fr_1.7fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none focus-visible:border-l-black'
-            : 'library-list-row group grid grid-cols-[58px_2.4fr_1.7fr_1fr_132px] cursor-pointer',
+            ? 'library-list-row--albums group -mt-[2px] grid cursor-pointer grid-cols-[58px_2.4fr_1.7fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none focus-visible:border-l-black'
+            : 'library-list-row library-list-row--albums group grid grid-cols-[58px_2.4fr_1.7fr_1fr_132px] cursor-pointer',
           isNeo &&
             isPlayingAlbum &&
             'relative z-10 border-l-4 border-l-black bg-[var(--signal-play)]',
@@ -48,9 +50,17 @@ const AlbumRow = memo(function AlbumRow({
             !isPlayingAlbum &&
             'border-l-4 border-l-transparent bg-white hover:z-10 hover:bg-[var(--neo-panel)]',
         )}
-        role="button"
+        role="group"
         tabIndex={0}
+        data-virtual-list-focus-target
         onClick={() => onOpen(album.track)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpen(album.track);
+          }
+        }}
         onDoubleClick={() => onPlay(album.track)}
       >
         <div className="flex items-center justify-center">
@@ -92,12 +102,20 @@ const AlbumRow = memo(function AlbumRow({
               className={cn(
                 'truncate mt-0.5',
                 isNeo
-                  ? 'text-[10px] font-bold uppercase tracking-[0.1em] text-black/60'
+                  ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60'
                   : 'text-xs text-text-muted',
               )}
             >
-              {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
+              {renderHighlightedText(albumArtist, searchQuery, highlightClass)}
             </div>
+            <span
+              className={cn(
+                'library-list-mobile-meta',
+                isNeo ? 'font-bold uppercase tracking-[0.08em] text-black/60' : 'text-text-muted',
+              )}
+            >
+              {album.count} {album.count === 1 ? 'track' : 'tracks'}
+            </span>
           </div>
         </div>
 
@@ -106,21 +124,21 @@ const AlbumRow = memo(function AlbumRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[11px] font-black uppercase tracking-[0.05em] text-black'
+                ? 'text-[12px] font-black uppercase tracking-[0.05em] text-black'
                 : 'text-sm text-text-secondary',
             )}
           >
-            {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
+            {renderHighlightedText(albumArtist, searchQuery, highlightClass)}
           </div>
         </div>
 
         <div className="min-w-0 py-2 flex flex-col justify-center">
           <div
             className={cn(
-              'uppercase tracking-tight inline-flex self-start',
+              'uppercase tracking-normal inline-flex self-start',
               isNeo
-                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                ? 'border-2 border-[var(--neo-ink)] bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[var(--neo-shadow-md)]'
+                : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
             )}
           >
             {album.count} {album.count === 1 ? 'Track' : 'Tracks'}
@@ -169,7 +187,7 @@ export interface LibraryAlbumsListProps {
   searchQuery: string;
   onOpen: (track: Track) => void;
   onPlay: (track: Track) => void;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
   isNeo?: boolean;
   currentTrack?: Track | null;
   isPlaying?: boolean;
@@ -189,9 +207,9 @@ export const LibraryAlbumsList = memo(function LibraryAlbumsList({
     <div className={cn(!isNeo && 'library-list-shell', isNeo && 'h-full flex flex-col')}>
       <div
         className={cn(
-          'library-list-head grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
+          'library-list-head library-list-head--albums grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-[var(--neo-ink)] bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-[var(--neo-ink)] shadow-none',
         )}
       >
         <span className="text-center">#</span>
@@ -206,11 +224,16 @@ export const LibraryAlbumsList = memo(function LibraryAlbumsList({
         itemHeight={ALBUM_ROW_HEIGHT}
         overscan={8}
         className="relative h-full overflow-y-auto overflow-x-hidden custom-scrollbar pt-2"
-        getItemKey={(album) => `${album.track.album}-${album.track.artist}`}
+        containerProps={{
+          role: 'list',
+          'aria-label': 'Library albums',
+        }}
+        keyboardNavigation
+        getItemKey={(album) => getAlbumKey(album.track)}
         onScrollNearEnd={onLoadMore}
         renderItem={(album, idx) => (
           <AlbumRow
-            key={`${album.track.album}-${album.track.artist}`}
+            key={getAlbumKey(album.track)}
             album={album}
             idx={idx}
             searchQuery={searchQuery}
@@ -218,10 +241,7 @@ export const LibraryAlbumsList = memo(function LibraryAlbumsList({
             onPlay={onPlay}
             isNeo={isNeo}
             isPlayingAlbum={Boolean(
-              isPlaying &&
-                currentTrack &&
-                currentTrack.album === album.track.album &&
-                currentTrack.artist === album.track.artist,
+              isPlaying && currentTrack && getAlbumKey(currentTrack) === getAlbumKey(album.track),
             )}
           />
         )}

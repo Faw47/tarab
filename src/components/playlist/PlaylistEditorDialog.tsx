@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { PlaylistEditorForm } from '../../features/playlists/components/PlaylistEditorForm';
 import { useSettingsStore } from '../../store/settings-store';
 import type { BackendSmartPlaylistRule, PlaylistType } from '../../types';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
 
 interface PlaylistEditorDialogProps {
@@ -24,7 +24,7 @@ interface PlaylistEditorDialogProps {
     playlistType: PlaylistType;
     smartRules?: BackendSmartPlaylistRule[];
     folderPath?: string;
-  }) => Promise<void> | void;
+  }) => Promise<boolean | undefined> | boolean | undefined;
 }
 
 export const PlaylistEditorDialog = memo(
@@ -40,7 +40,7 @@ export const PlaylistEditorDialog = memo(
           className={clsx(
             'w-full max-w-xl p-6',
             isNeobrutalism
-              ? 'bg-white border-3 border-black shadow-[12px_12px_0_0_#000] radius-r3'
+              ? 'bg-white border-3 border-black shadow-[var(--neo-shadow-2xl)] radius-r3'
               : 'rounded-2xl border border-zinc-800 bg-surface shadow-2xl',
           )}
         >
@@ -49,12 +49,17 @@ export const PlaylistEditorDialog = memo(
               className={clsx(
                 'text-lg',
                 isNeobrutalism
-                  ? 'font-black uppercase tracking-tight text-black'
+                  ? 'font-black uppercase tracking-normal text-black'
                   : 'font-semibold text-text-primary',
               )}
             >
               {title}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              {mode === 'create'
+                ? 'Create a playlist and choose how its tracks are managed.'
+                : 'Update this playlist and how its tracks are managed.'}
+            </DialogDescription>
             <IconButton
               size="sm"
               variant={isNeobrutalism ? 'default' : 'ghost'}
@@ -71,8 +76,9 @@ export const PlaylistEditorDialog = memo(
             initial={initial}
             onCancel={onClose}
             onSave={async (payload) => {
-              await onSave(payload);
-              onClose();
+              const result = await onSave(payload);
+              if (result !== false) onClose();
+              return result;
             }}
           />
         </DialogContent>

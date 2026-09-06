@@ -49,7 +49,7 @@ export interface GlassSystemContextValue {
    * null  = no GlassSystemProvider present; each component falls back to its
    * own usePrefersReducedMotion check.
    * true  = force all glass effects off (app-level override).
-   * false = explicitly allow effects regardless of system preference.
+   * false = app effects are allowed, subject to the system preference.
    */
   reducedEffects: boolean | null;
   theme: string;
@@ -75,6 +75,17 @@ export const GlassSystemProvider = memo(function GlassSystemProvider({
     () => ({ reducedEffects: reducedEffects ?? null, theme }),
     [reducedEffects, theme],
   );
+
+  useEffect(() => {
+    if (reducedEffects !== true || typeof document === 'undefined') return;
+    const root = document.documentElement;
+    root.dataset.reducedEffects = 'true';
+    return () => {
+      if (root.dataset.reducedEffects === 'true') {
+        delete root.dataset.reducedEffects;
+      }
+    };
+  }, [reducedEffects]);
 
   return <GlassSystemContext.Provider value={value}>{children}</GlassSystemContext.Provider>;
 });
@@ -448,7 +459,8 @@ const GlassCardBase = forwardRef<HTMLDivElement, GlassCardProps>(
     const prefersReducedMotion = usePrefersReducedMotion();
     const { reducedEffects: contextReducedEffects } = useGlassSystem();
 
-    const finalReducedEffects = reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
+    const finalReducedEffects =
+      Boolean(reducedEffects) || Boolean(contextReducedEffects) || prefersReducedMotion;
     const finalInteractive = interactive && !finalReducedEffects;
     const [sheenVisible, setSheenVisible] = useState(false);
 
@@ -546,7 +558,7 @@ const GlassCardBase = forwardRef<HTMLDivElement, GlassCardProps>(
 
         {finalInteractive && (
           <div
-            className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] transition-opacity duration-300 ease-out"
+            className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] transition-opacity duration-[var(--motion-emphasis)] ease-out"
             style={{
               opacity: sheenVisible ? 1 : 0,
               background: `radial-gradient(ellipse calc(var(--glass-light-size, 480px) * (1 + var(--adl-liquid-stretch-x, 0))) calc(var(--glass-light-size, 480px) * (1 + var(--adl-liquid-stretch-y, 0))) at var(--glass-light-x, 50%) var(--glass-light-y, 50%), var(--glass-sheen-color, rgba(255,255,255,0.08)), transparent 42%)`,
@@ -593,7 +605,8 @@ export const LiquidBg = memo(function LiquidBg({
 }: LiquidBgProps) {
   const prefersReducedMotion = usePrefersReducedMotion();
   const { reducedEffects: contextReducedEffects } = useGlassSystem();
-  const finalReducedEffects = reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
+  const finalReducedEffects =
+    Boolean(reducedEffects) || Boolean(contextReducedEffects) || prefersReducedMotion;
   const documentHidden = useDocumentHidden();
 
   const mergedColors = useMemo(

@@ -1,15 +1,16 @@
 import type { Track } from '../../types';
 
+export interface HomeAlbumDetails {
+  album: string;
+  artist: string;
+  coverArt?: string;
+  tracks: Track[];
+}
+
 export interface HomeViewProps {
   onNavigateToLibrary: () => void;
   onNavigateToFolders: () => void;
-  onNavigateToQueue?: () => void;
-  onOpenAlbumDetails?: (payload: {
-    album: string;
-    artist: string;
-    coverArt?: string;
-    tracks: Track[];
-  }) => void;
+  onOpenAlbumDetails?: (payload: HomeAlbumDetails) => void;
   onOpenFullPlayer?: () => void;
   isLibraryLoading?: boolean;
   libraryError?: string | null;

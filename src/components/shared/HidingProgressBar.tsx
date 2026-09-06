@@ -1,8 +1,15 @@
 import { clsx } from 'clsx';
 import { memo, useCallback, useRef, useState } from 'react';
-import { seekToPosition } from '../../lib/playback-actions';
+import { useSmoothTimeState } from '../../contexts/smooth-time';
+import {
+  captureActivePlaybackSource,
+  type PlaybackSourceSnapshot,
+  seekToPosition,
+} from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';
+import { useSettingsStore } from '../../store/settings-store';
+import { usePrefersReducedMotion } from '../ui/liquid-glass';
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
@@ -27,15 +34,21 @@ interface HidingProgressBarProps {
 export const HidingProgressBar = memo(
   ({ accentColor = 'var(--hero-accent)', className }: HidingProgressBarProps) => {
     const duration = usePlayerStore((s) => s.duration);
-    const currentTime = usePlayerStore((s) => s.currentTime);
+    const currentTime = useSmoothTimeState(50);
+    const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const reduceMotion = reducedEffects || prefersReducedMotion;
     const [isDragging, setIsDragging] = useState(false);
     const [isHovering, setIsHovering] = useState(false);
     const [dragVal, setDragVal] = useState(0);
     const barRef = useRef<HTMLDivElement>(null);
     const activePid = useRef<number | null>(null);
+    const dragSourceRef = useRef<PlaybackSourceSnapshot | null>(null);
 
     const display = isDragging ? dragVal : currentTime;
     const pct = duration > 0 ? clamp01(display / duration) * 100 : 0;
+    const edgeSafePct = Math.max(0.75, Math.min(99.25, pct));
+    const tooltipPct = Math.max(6, Math.min(94, pct));
     const showTooltip = isDragging || isHovering;
 
     const timeAt = (clientX: number): number => {
@@ -45,9 +58,10 @@ export const HidingProgressBar = memo(
     };
 
     const seek = useCallback(
-      async (t: number) => {
+      async (t: number, expectedSource: PlaybackSourceSnapshot | null) => {
+        if (!expectedSource) return;
         try {
-          await seekToPosition(Math.max(0, Math.min(duration || 0, t)));
+          await seekToPosition(Math.max(0, Math.min(duration || 0, t)), expectedSource);
         } catch (e) {
           reportError('seek failed', { source: 'hiding-progress-bar', error: e });
         }
@@ -59,6 +73,7 @@ export const HidingProgressBar = memo(
       if (!barRef.current || duration <= 0) return;
       e.preventDefault();
       activePid.current = e.pointerId;
+      dragSourceRef.current = captureActivePlaybackSource();
       barRef.current.setPointerCapture(e.pointerId);
       setDragVal(timeAt(e.clientX));
       setIsDragging(true);
@@ -76,8 +91,10 @@ export const HidingProgressBar = memo(
       setDragVal(t);
       if (barRef.current?.hasPointerCapture(e.pointerId))
         barRef.current.releasePointerCapture(e.pointerId);
+      const expectedSource = dragSourceRef.current;
+      dragSourceRef.current = null;
       try {
-        await seek(t);
+        await seek(t, expectedSource);
       } finally {
         setIsDragging(false);
       }
@@ -87,6 +104,7 @@ export const HidingProgressBar = memo(
       if (barRef.current?.hasPointerCapture(e.pointerId))
         barRef.current.releasePointerCapture(e.pointerId);
       activePid.current = null;
+      dragSourceRef.current = null;
       setIsDragging(false);
     };
 
@@ -122,19 +140,23 @@ export const HidingProgressBar = memo(
       }
       if (!hit) return;
       e.preventDefault();
-      void seek(next);
+      void seek(next, captureActivePlaybackSource());
     };
 
     return (
       <div className={clsx('absolute inset-x-0 top-0 z-50 h-6', className)}>
         {/* Persistent accent dot - always visible, fades when seek bar shows */}
         <div
-          className="absolute top-0 z-20 pointer-events-none transition-opacity duration-200"
-          style={{ left: `${Math.max(pct, 0.3)}%` }}
+          className={clsx(
+            'absolute top-0 z-20 pointer-events-none',
+            !reduceMotion && 'transition-opacity duration-[var(--motion-standard)]',
+          )}
+          style={{ left: `${edgeSafePct}%` }}
         >
           <div
             className={clsx(
-              'w-[6px] h-[6px] rounded-full -translate-x-1/2 -translate-y-[1px] transition-opacity duration-200',
+              'w-[6px] h-[6px] rounded-full -translate-x-1/2 -translate-y-[1px]',
+              !reduceMotion && 'transition-opacity duration-[var(--motion-standard)]',
               isDragging ? 'opacity-0' : 'opacity-55 group-hover:opacity-0',
             )}
             style={{ background: accentColor, boxShadow: `0 0 7px ${accentColor}cc` }}
@@ -145,7 +167,8 @@ export const HidingProgressBar = memo(
         <div
           ref={barRef}
           className={clsx(
-            'absolute inset-x-0 top-0 z-30 h-full select-none touch-none transition-opacity duration-150 cursor-pointer',
+            'absolute inset-x-0 top-0 z-30 h-full min-h-5 select-none touch-none cursor-pointer',
+            !reduceMotion && 'transition-opacity duration-[var(--motion-fast)]',
             isDragging
               ? 'opacity-100 pointer-events-auto'
               : 'opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 group-hover:pointer-events-auto group-focus-within:pointer-events-auto',
@@ -169,7 +192,10 @@ export const HidingProgressBar = memo(
           <div className="absolute inset-x-0 top-0 h-[2px] bg-white/[0.09]" />
           {/* Fill */}
           <div
-            className="absolute left-0 top-0 h-[2px] transition-[width] duration-75 ease-out"
+            className={clsx(
+              'absolute left-0 top-0 h-[2px]',
+              !reduceMotion && 'transition-[width] duration-[var(--motion-fast)] ease-out',
+            )}
             style={{
               width: `${pct}%`,
               backgroundColor: accentColor,
@@ -181,23 +207,24 @@ export const HidingProgressBar = memo(
             className={clsx(
               'absolute top-0 w-3.5 h-3.5 rounded-full shadow-md',
               '-translate-y-[calc(50%-1px)] -translate-x-1/2',
-              'transition-transform duration-200',
+              !reduceMotion && 'transition-transform duration-[var(--motion-standard)]',
               isDragging
                 ? 'scale-100'
                 : 'scale-0 group-hover:scale-100 group-focus-within:scale-100',
             )}
-            style={{ left: `${pct}%`, background: accentColor }}
+            style={{ left: `${edgeSafePct}%`, background: accentColor }}
           />
           {/* Floating time tooltip */}
           <div
             className={clsx(
               'absolute z-40 top-4 -translate-x-1/2 px-2 py-0.5 rounded-md',
-              'text-[10px] font-mono tabular-nums text-white/90',
+              'text-[12px] font-mono tabular-nums text-white/90',
               'bg-black/80 backdrop-blur-md shadow-lg',
-              'pointer-events-none transition-opacity duration-150',
+              'pointer-events-none',
+              !reduceMotion && 'transition-opacity duration-[var(--motion-fast)]',
               showTooltip ? 'opacity-100' : 'opacity-0',
             )}
-            style={{ left: `${pct}%` }}
+            style={{ left: `${tooltipPct}%` }}
           >
             {formatTime(display)}
           </div>

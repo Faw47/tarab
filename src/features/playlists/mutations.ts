@@ -4,6 +4,7 @@ import {
   addTracksToPlaylist,
   createPlaylist,
   deletePlaylist,
+  relinkPlaylistTrack,
   removeMissingFromPlaylist,
   removeTracksFromPlaylist,
   reorderPlaylistTracks,
@@ -76,8 +77,10 @@ export function useAddTracksMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
-      addTracksToPlaylist(playlistId, trackIds),
+    mutationFn: (variables: { playlistId: string; trackIds: string[]; mutationId?: string }) => {
+      variables.mutationId ??= crypto.randomUUID();
+      return addTracksToPlaylist(variables.playlistId, variables.trackIds, variables.mutationId);
+    },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
       queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
@@ -98,12 +101,34 @@ export function useRemoveTracksMutation() {
   });
 }
 
+export function useRelinkPlaylistTrackMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      playlistId,
+      oldTrackId,
+      newTrackId,
+    }: {
+      playlistId: string;
+      oldTrackId: string;
+      newTrackId: string;
+    }) => relinkPlaylistTrack(playlistId, oldTrackId, newTrackId),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
+      queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
+    },
+  });
+}
+
 export function useReorderPlaylistTracksMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
-      reorderPlaylistTracks(playlistId, trackIds),
+    mutationFn: (variables: { playlistId: string; trackIds: string[]; mutationId?: string }) => {
+      variables.mutationId ??= crypto.randomUUID();
+      return reorderPlaylistTracks(variables.playlistId, variables.trackIds, variables.mutationId);
+    },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
       queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);

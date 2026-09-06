@@ -85,9 +85,7 @@ export const SleepTimerButton = memo(
           >
             <Timer className="w-4 h-4 shrink-0" />
             {isActive && remaining && (
-              <span className="text-[10px] font-medium tabular-nums min-w-[2.5ch]">
-                {remaining}
-              </span>
+              <span className="text-xs font-medium tabular-nums min-w-[2.5ch]">{remaining}</span>
             )}
           </Button>
         </PopoverTrigger>

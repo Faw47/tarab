@@ -6,8 +6,7 @@ import { usePlaylistRepair } from '../usePlaylistRepair';
 
 const eventListeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>());
 const listenMock = vi.hoisted(() => vi.fn());
-const revealItemInDirMock = vi.hoisted(() => vi.fn(async () => undefined));
-const getPlaylistsDataPathMock = vi.hoisted(() => vi.fn(async () => '/data/playlists.json'));
+const revealPlaylistsDataFolderMock = vi.hoisted(() => vi.fn(async () => undefined));
 const resetPlaylistsDataMock = vi.hoisted(() => vi.fn(async () => undefined));
 const reportErrorMock = vi.hoisted(() => vi.fn());
 
@@ -15,12 +14,8 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: listenMock,
 }));
 
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  revealItemInDir: revealItemInDirMock,
-}));
-
 vi.mock('../../../lib/tauri-commands', () => ({
-  getPlaylistsDataPath: getPlaylistsDataPathMock,
+  revealPlaylistsDataFolder: revealPlaylistsDataFolderMock,
   resetPlaylistsData: resetPlaylistsDataMock,
 }));
 
@@ -138,7 +133,6 @@ describe('usePlaylistRepair', () => {
       await result.current.handleOpenPlaylistsDataFolder();
     });
 
-    expect(getPlaylistsDataPathMock).toHaveBeenCalled();
-    expect(revealItemInDirMock).toHaveBeenCalledWith('/data/playlists.json');
+    expect(revealPlaylistsDataFolderMock).toHaveBeenCalledWith();
   });
 });

@@ -1,13 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "core-mini",
-  "description": "Mini-player core permissions are limited to snapshot/control events plus its own drag and minimize controls.",
+  "description": "Mini-player core permissions are limited to snapshot listening and its own drag surface.",
   "windows": ["mini-player"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "core:event:allow-emit-to",
-    "core:window:allow-start-dragging",
-    "core:window:allow-minimize"
+    "core:window:allow-start-dragging"
   ]
 }

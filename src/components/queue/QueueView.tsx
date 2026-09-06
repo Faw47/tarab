@@ -40,6 +40,7 @@ import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedList } from '../shared/VirtualizedList';
 import { Button } from '../ui/button';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
+import { StatePanel } from '../ui/StatePanel';
 
 interface QueueViewProps {
   isLibraryLoading?: boolean;
@@ -180,7 +181,11 @@ export const QueueView = memo(
           className="custom-scrollbar h-full overflow-y-auto pb-36"
           onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
         >
-          <div className="mx-auto w-full max-w-5xl space-y-4 px-6 py-6 sm:px-8 lg:py-8">
+          <div
+            className="mx-auto w-full max-w-5xl space-y-4 px-6 py-6 sm:px-8 lg:py-8"
+            role="status"
+            aria-label="Loading queue"
+          >
             <div className="skeleton-shimmer h-7 w-40 rounded-xl" />
             <div className="skeleton-shimmer h-32 rounded-[22px]" />
             <div className="skeleton-shimmer h-[60vh] rounded-[22px]" />
@@ -196,17 +201,13 @@ export const QueueView = memo(
           onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
         >
           <div className="mx-auto w-full max-w-3xl px-6 py-16 sm:px-8">
-            <section className="glass-panel-strong rounded-[22px] p-7 text-center">
-              <p className="text-lg font-semibold text-text-primary">Could not load queue</p>
-              <p className="mx-auto mt-2 max-w-[48ch] text-sm text-text-secondary">
-                {libraryError}
-              </p>
-              {onRetryLoad && (
-                <Button className="mt-5" onClick={onRetryLoad}>
-                  Retry
-                </Button>
-              )}
-            </section>
+            <StatePanel
+              tone="error"
+              title="Could not load queue"
+              description={libraryError}
+              action={onRetryLoad ? { label: 'Retry', onClick: onRetryLoad } : undefined}
+              className="flex-col items-center p-7 text-center"
+            />
           </div>
         </div>
       );
@@ -219,7 +220,7 @@ export const QueueView = memo(
           onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 8)}
         >
           <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-6 sm:px-8 lg:py-8">
-            <header className="border-2 border-black bg-white p-4 shadow-[4px_4px_0_0_#000] sm:p-5">
+            <header className="border-2 border-black bg-white p-4 shadow-[var(--neo-shadow-md)] sm:p-5">
               <div className="flex items-start justify-between">
                 <div>
                   <NeoSectionHeader emoji="📋" label="QUEUE" />
@@ -231,7 +232,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={clearQueue}
-                    className="inline-flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="inline-flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.08em] shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={2.5} />
                     Clear queue
@@ -251,7 +252,7 @@ export const QueueView = memo(
               <div className="mt-5 h-4 border-2 border-black bg-white p-[2px]">
                 {/* Brutalist striped progress bar */}
                 <div
-                  className="h-full bg-[var(--signal-play)] transition-[width] duration-500 ease-out"
+                  className="h-full bg-[var(--signal-play)] transition-[width] duration-[var(--motion-standard)] ease-out"
                   style={{
                     width: `${playedRatio * 100}%`,
                     backgroundImage:
@@ -263,10 +264,10 @@ export const QueueView = memo(
 
             {queue.length === 0 && (
               <section
-                className="border-2 border-black bg-[var(--signal-active)] p-8 text-center shadow-[4px_4px_0_0_#000]"
+                className="border-2 border-black bg-[var(--signal-active)] p-8 text-center shadow-[var(--neo-shadow-md)]"
                 role="status"
               >
-                <p className="font-mono text-lg font-black uppercase tracking-tight text-black">
+                <p className="font-mono text-lg font-black uppercase tracking-normal text-black">
                   NOTHING QUEUED
                 </p>
                 <p className="mt-2 text-sm font-bold uppercase tracking-widest text-black/70">
@@ -276,21 +277,21 @@ export const QueueView = memo(
             )}
 
             {nowPlayingTrack && (
-              <section className="relative border-2 border-black bg-white p-4 shadow-[6px_6px_0_0_#000] sm:p-5">
+              <section className="relative border-2 border-black bg-white p-4 shadow-[var(--neo-shadow-lg)] sm:p-5">
                 <div className="flex items-center gap-4">
                   <CoverArtImage
                     track={nowPlayingTrack}
                     variant="album"
-                    className="h-20 w-20 shrink-0 border-2 border-black shadow-[2px_2px_0_0_#000]"
+                    className="h-20 w-20 shrink-0 border-2 border-black shadow-[var(--neo-shadow-xs)]"
                     imgClassName="h-full w-full object-cover"
                     iconClassName="h-8 w-8"
                     alt={nowPlayingTrack.album}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
+                    <p className="text-[12px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
                       Now playing
                     </p>
-                    <p className="mt-1 truncate text-lg font-black uppercase tracking-tight text-black">
+                    <p className="mt-1 truncate text-lg font-black uppercase tracking-normal text-black">
                       {nowPlayingTrack.title}
                     </p>
                     <p className="truncate text-xs font-bold uppercase tracking-[0.08em] text-black/60">
@@ -300,7 +301,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={handleToggleCurrent}
-                    className="flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black bg-[var(--signal-active)] text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-black hover:text-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="flex h-14 w-14 shrink-0 items-center justify-center border-2 border-black bg-[var(--signal-active)] text-black shadow-[var(--neo-shadow-md)] transition-none hover:bg-black hover:text-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                     aria-label={isPlaying ? 'Pause current track' : 'Play current track'}
                   >
                     {isPlaying ? (
@@ -314,8 +315,8 @@ export const QueueView = memo(
             )}
 
             {upcomingTracks.length > 0 && (
-              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
-                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[var(--neo-panel)]/90">
+              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[var(--neo-shadow-md)] sm:p-4">
+                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 bg-[var(--neo-panel)]/90">
                   <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">
                     Up next
                   </h2>
@@ -378,15 +379,15 @@ export const QueueView = memo(
             )}
 
             {playedTracks.length > 0 && (
-              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[4px_4px_0_0_#000] sm:p-4">
-                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 backdrop-blur-md bg-[var(--neo-panel)]/90">
+              <section className="border-2 border-black bg-[var(--neo-panel)] p-3 shadow-[var(--neo-shadow-md)] sm:p-4">
+                <div className="sticky top-0 z-10 mb-3 flex items-center justify-between border-b-2 border-black pb-2 px-1 bg-[var(--neo-panel)]/90">
                   <h2 className="text-sm font-black uppercase tracking-[0.1em] text-black">
                     Played
                   </h2>
                   <button
                     type="button"
                     onClick={() => setShowFullHistory((prev) => !prev)}
-                    className="border-2 border-black bg-white px-2 py-1 text-xs font-black uppercase shadow-[4px_4px_0_0_#000] transition-none hover:bg-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                    className="border-2 border-black bg-white px-2 py-1 text-xs font-black uppercase shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--signal-active)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   >
                     {showFullHistory ? 'Less' : 'All'}
                   </button>
@@ -424,7 +425,7 @@ export const QueueView = memo(
           <header className="rounded-[22px] border border-white/[0.08] bg-white/[0.02] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_18px_34px_-28px_rgba(8,6,4,0.78)] backdrop-blur-[24px]">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="min-w-0">
-                <h1 className="text-3xl font-extrabold tracking-tight text-white">Queue</h1>
+                <h1 className="text-3xl font-extrabold tracking-normal text-white">Queue</h1>
                 <p className="mt-1.5 text-sm font-medium text-white/60">
                   {queue.length} tracks • {formatTime(totalDuration)} total
                 </p>
@@ -435,7 +436,7 @@ export const QueueView = memo(
                   variant="ghost"
                   size="sm"
                   onClick={clearQueue}
-                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-all hover:bg-red-500/20 hover:text-red-200"
+                  className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-red-500/20 hover:text-red-200"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Clear queue
@@ -451,7 +452,7 @@ export const QueueView = memo(
 
             <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-white/[0.08] shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]">
               <div
-                className="h-full rounded-full transition-all duration-500 ease-out"
+                className="h-full rounded-full transition-[width,background-color] duration-[var(--motion-standard)] ease-out"
                 style={{
                   width: `${Math.max(2, playedRatio * 100)}%`,
                   background:
@@ -500,7 +501,7 @@ export const QueueView = memo(
 
                   <div className="relative z-10 min-w-0 flex-1">
                     <div className="mb-2 flex items-center gap-2.5">
-                      <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.15em] text-white/90 shadow-[0_0_10px_var(--hero-glow)] backdrop-blur-md">
+                      <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.15em] text-white/90 shadow-[0_0_10px_var(--hero-glow)] backdrop-blur-md">
                         <span className="h-1.5 w-1.5 rounded-full bg-[var(--hero-accent)] animate-pulse shadow-[0_0_8px_var(--hero-accent)]" />
                         Now playing
                       </span>
@@ -510,7 +511,7 @@ export const QueueView = memo(
                           : `${queue.length} tracks`}
                       </span>
                     </div>
-                    <p className="truncate text-lg font-bold text-white tracking-tight">
+                    <p className="truncate text-lg font-bold text-white tracking-normal">
                       {nowPlayingTrack.title}
                     </p>
                     <p className="truncate text-sm font-medium text-white/60 mt-0.5">
@@ -521,7 +522,7 @@ export const QueueView = memo(
                   <button
                     type="button"
                     onClick={handleToggleCurrent}
-                    className="relative z-10 flex h-14 w-14 items-center justify-center shrink-0 rounded-full bg-white text-black shadow-[0_0_20px_var(--hero-glow)] transition-all hover:scale-[1.05] active:scale-[0.95]"
+                    className="relative z-10 flex h-14 w-14 items-center justify-center shrink-0 rounded-full bg-white text-black shadow-[0_0_20px_var(--hero-glow)] transition-transform duration-[var(--motion-fast)] hover:scale-[1.05] active:scale-[0.95]"
                     aria-label={isPlaying ? 'Pause current track' : 'Play current track'}
                   >
                     {isPlaying ? (
@@ -663,15 +664,15 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
       'bg-gradient-to-b from-white/[0.08] to-white/[0.03]',
       'hover:from-white/[0.12] hover:to-white/[0.05]',
-      'transition-all duration-300',
+      'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
     )}
   >
     <div
-      className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-500"
+      className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-[var(--motion-emphasis)]"
       style={{ background: 'var(--hero-accent)' }}
     />
     <div
-      className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.07]"
+      className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.07]"
       style={{
         background: `linear-gradient(180deg, color-mix(in oklch, var(--hero-accent) 40%, rgba(255,255,255,0.15)) 0%, color-mix(in oklch, var(--hero-accent) 20%, rgba(255,255,255,0.05)) 100%)`,
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.2)`,
@@ -680,7 +681,7 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       <Icon className="w-5 h-5 shrink-0 text-white drop-shadow-md" />
     </div>
     <div className="min-w-0">
-      <p className="font-display font-extrabold text-white tabular-nums leading-none tracking-tight text-xl">
+      <p className="font-display font-extrabold text-white tabular-nums leading-none tracking-normal text-xl">
         {value}
       </p>
       <p className="text-[9.5px] font-bold uppercase tracking-[0.24em] text-white/50 mt-[5px]">
@@ -688,7 +689,7 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       </p>
     </div>
     <div
-      className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+      className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--motion-emphasis)]"
       style={{ background: `linear-gradient(90deg, transparent, var(--hero-accent), transparent)` }}
     />
   </div>
@@ -702,8 +703,8 @@ interface NeoSummaryBoxProps {
 }
 
 const NeoSummaryBox = memo(({ label, value, icon: Icon }: NeoSummaryBoxProps) => (
-  <div className="border-2 border-black bg-white px-3 py-2.5 shadow-[4px_4px_0_0_#000]">
-    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.08em] text-black/60">
+  <div className="border-2 border-black bg-white px-3 py-2.5 shadow-[var(--neo-shadow-md)]">
+    <div className="flex items-center gap-1.5 text-[12px] font-black uppercase tracking-[0.08em] text-black/60">
       <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
       <span>{label}</span>
     </div>
@@ -734,13 +735,13 @@ const QueueRowBase = memo(
   }: QueueRowBaseProps) => (
     <article
       className={clsx(
-        'group relative flex h-[72px] items-center gap-4 px-4 transition-all duration-200',
+        'group relative flex h-[72px] items-center gap-4 px-4 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
         isNeobrutalism
           ? [
               'border-2 border-black bg-white',
               isDragging
-                ? 'shadow-[8px_8px_0_0_#000] z-10'
-                : 'shadow-[4px_4px_0_0_#000] hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[6px_6px_0_0_#000] hover:bg-[var(--neo-panel)]',
+                ? 'shadow-[var(--neo-shadow-xl)] z-10'
+                : 'shadow-[var(--neo-shadow-md)] hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[var(--neo-shadow-lg)] hover:bg-[var(--neo-panel)]',
             ]
           : [
               'rounded-[16px] border border-transparent bg-transparent',
@@ -755,10 +756,11 @@ const QueueRowBase = memo(
         className={clsx(
           'flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing',
           isNeobrutalism
-            ? 'border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000]'
+            ? 'border-2 border-black bg-[var(--neo-panel)] text-black shadow-[var(--neo-shadow-xs)]'
             : 'rounded-full text-white/40 transition-colors hover:bg-white/[0.12] group-hover:text-white/80 focus-visible:text-white/80',
         )}
-        aria-label={`Drag track ${position}`}
+        aria-label={`Drag track ${position}. Press Space to lift, Arrow keys to move, and Space to drop.`}
+        aria-roledescription="sortable"
         {...dragHandle}
       >
         <GripVertical className="h-4 w-4" strokeWidth={isNeobrutalism ? 2.5 : 2} />
@@ -787,7 +789,7 @@ const QueueRowBase = memo(
         />
         <span
           className={clsx(
-            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-200 group-hover:opacity-100',
+            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] group-hover:opacity-100',
             isNeobrutalism ? 'bg-black/40' : 'rounded-[10px] bg-black/40 backdrop-blur-[2px]',
           )}
         >
@@ -800,7 +802,7 @@ const QueueRowBase = memo(
           className={clsx(
             'truncate text-[15px]',
             isNeobrutalism
-              ? 'font-black uppercase tracking-tight text-black'
+              ? 'font-black uppercase tracking-normal text-black'
               : 'font-semibold text-white/90',
           )}
         >
@@ -834,16 +836,16 @@ const QueueRowBase = memo(
           'flex items-center gap-2',
           isNeobrutalism
             ? 'opacity-100'
-            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+            : 'opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
           type="button"
           onClick={onRemove}
           className={clsx(
-            'flex h-9 w-9 items-center justify-center transition-all',
+            'flex h-9 w-9 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
-              ? 'border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-white text-black shadow-[var(--neo-shadow-xs)] hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] hover:bg-red-500/30 hover:text-red-200 text-white/60',
           )}
           aria-label="Remove from queue"
@@ -904,9 +906,9 @@ const HistoryRow = memo(
   ({ track, onReplay, onRemove, isNeobrutalism = false }: HistoryRowProps) => (
     <article
       className={clsx(
-        'group flex h-[64px] items-center gap-4 px-4 transition-all duration-200',
+        'group flex h-[64px] items-center gap-4 px-4 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
         isNeobrutalism
-          ? 'border-2 border-black bg-[#EAEAEA] shadow-[2px_2px_0_0_#000] hover:bg-white hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[4px_4px_0_0_#000]'
+          ? 'border-2 border-black bg-[var(--neo-light-control)] shadow-[var(--neo-shadow-xs)] hover:bg-white hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-[var(--neo-shadow-md)]'
           : 'rounded-[16px] border border-transparent bg-transparent hover:border-white/[0.06] hover:bg-white/[0.02]',
       )}
     >
@@ -920,7 +922,8 @@ const HistoryRow = memo(
           )}
           imgClassName={clsx(
             'h-full w-full object-cover transition-transform group-hover:scale-105',
-            isNeobrutalism && 'grayscale group-hover:grayscale-0 transition-all',
+            isNeobrutalism &&
+              'grayscale group-hover:grayscale-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
           )}
           roundedClassName={isNeobrutalism ? '' : 'rounded-[10px]'}
           iconClassName="h-4 w-4"
@@ -928,7 +931,7 @@ const HistoryRow = memo(
         />
         <span
           className={clsx(
-            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-200 group-hover:opacity-100',
+            'pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] group-hover:opacity-100',
             isNeobrutalism ? 'bg-black/40' : 'rounded-[10px] bg-black/40 backdrop-blur-[2px]',
           )}
         >
@@ -946,7 +949,7 @@ const HistoryRow = memo(
           className={clsx(
             'truncate text-[14px]',
             isNeobrutalism
-              ? 'font-black uppercase tracking-tight text-black/80 group-hover:text-black'
+              ? 'font-black uppercase tracking-normal text-black/80 group-hover:text-black'
               : 'font-semibold text-white/90',
           )}
         >
@@ -980,16 +983,16 @@ const HistoryRow = memo(
           'flex items-center gap-2',
           isNeobrutalism
             ? 'opacity-100'
-            : 'opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100',
+            : 'opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-within:opacity-100',
         )}
       >
         <button
           type="button"
           onClick={onReplay}
           className={clsx(
-            'flex h-8 w-8 items-center justify-center transition-all',
+            'flex h-8 w-8 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
-              ? 'border-2 border-black bg-[var(--signal-active)] shadow-[2px_2px_0_0_#000] hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-[var(--signal-active)] shadow-[var(--neo-shadow-xs)] hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-white/[0.15] hover:text-white',
           )}
           aria-label="Replay track"
@@ -1000,9 +1003,9 @@ const HistoryRow = memo(
           type="button"
           onClick={onRemove}
           className={clsx(
-            'flex h-8 w-8 items-center justify-center transition-all',
+            'flex h-8 w-8 items-center justify-center transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
             isNeobrutalism
-              ? 'border-2 border-black bg-white shadow-[2px_2px_0_0_#000] hover:bg-[var(--signal-danger)] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+              ? 'border-2 border-black bg-white shadow-[var(--neo-shadow-xs)] hover:bg-[var(--signal-danger)] hover:text-white hover:-translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
               : 'rounded-full bg-white/[0.06] text-white/70 hover:bg-red-500/30 hover:text-red-200',
           )}
           aria-label="Remove from queue history"

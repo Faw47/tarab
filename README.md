@@ -1,203 +1,624 @@
-# Tarab
+<p align="center">
+  <img src="src-tauri/icons/app-icon-source.png" width="128" height="128" alt="Tarab app icon">
+</p>
 
-**Tarab** is a local-first desktop music player built with **Tauri 2**, **React 19**, **TypeScript**, and **Rust**. It combines a high-performance native backend with a polished, modern React frontend to deliver fast library browsing, seamless playback control, rich lyrics support, and deep desktop-native integration.
+<h1 align="center">Tarab</h1>
 
-## Key Features
+<p align="center">
+  A modern local music player built around timed lyrics, library management, and interface design.
+</p>
 
-### Playback & Audio
-- **Gapless playback** with configurable crossfade
-- **Seamless next-track preloading** via Rust `rodio` backend
-- **Multiple audio output device** support with hot-switching
-- **Media session sync** with OS (now-playing metadata, playback controls)
-- **Global media key handling** (play/pause/next/prev) on macOS and Windows
+Tarab is a desktop music player for people who want the control of a serious local library without an interface that feels decades old.
 
-### Desktop Integration
-- **Native status icon** (tray on Windows, menu bar on macOS) with playback controls and quick access
-- **Always-on-top mini player** window (320×92, transparent, undecorated)
-- **App menu integration** with keyboard accelerators for key actions
-- **Graceful degradation**: all desktop features are optional and best-effort; app remains fully functional if any integration fails
+It combines a polished album-first library with deeply integrated timed lyrics, a built-in LRC editor, metadata editing, smart playlists, native desktop controls, and two complete visual systems.
 
-### Library & Playback
-- **Fast tag-based library browsing** with albums, artists, playlists, and custom tags
-- **Full-screen lyrics** with time-synced line highlighting
-- **Queue management** and playback history
-- **Shuffle and repeat modes**
-- **Auto-watching file changes** for live library updates
+Tarab runs on macOS, Windows, and Linux.
 
-### Persistence & State
-- **Local-first design**: all data lives in user-controlled files
-- **Player state persistence** via Tauri store (`tarab-player.dat`)
-- **Settings storage** for audio device, UI theme, and feature toggles
-- **Legacy session migration** from older formats
+> **Project status:** Tarab is under active development. No official binary release is currently available. Developers and testers can run or build it from source.
 
-### UI & Theming
-- **Multiple theme modes**: standard themes + strict Neobrutalism variant
-- **WebGL-enhanced glass effect** in liquid layout (aurora header strip, metaball background, scan particles)
-- **Reduced-motion and reduced-effects awareness** for accessibility
-- **Dynamic accent foreground color** with luminance-based readability guards
+![Tarab Home view in the Liquid Glass theme](docs/screenshots/tarab-home-liquid-glass.jpg)
 
-## Project Structure
+## What makes Tarab different
 
-```
-tarab/
-├── src/                              # React + TypeScript frontend
-│   ├── main.tsx                      # Main window entry
-│   ├── mini-player.tsx               # Mini player window entry
-│   ├── components/                   # UI components (TopBar, Player, Library, etc.)
-│   ├── features/                     # Feature modules (playback, library, settings)
-│   ├── store/                        # Zustand stores (player state, settings, library)
-│   ├── styles/                       # App theme stylesheets
-│   └── graphics/                     # WebGL shader assets
-│
-├── src-tauri/                        # Rust backend & Tauri shell
-│   ├── src/
-│   │   ├── main.rs                   # Native app entry
-│   │   ├── lib.rs                    # Tauri app setup & IPC command exports
-│   │   ├── audio.rs                  # Audio playback engine (rodio-based)
-│   │   ├── library.rs                # File scanning, tag reading, DB
-│   │   ├── desktop_integration.rs    # Tray, menu, media keys, media session
-│   │   ├── lyrics.rs                 # Lyrics parsing & time-sync
-│   │   └── taskbar.rs                # Windows taskbar integration
-│   │
-│   ├── vendor/tauri-plugin-media/    # Vendored + patched media plugin
-│   ├── Cargo.toml
-│   └── tauri.conf.json               # Window declarations (main, mini), features, icons
-│
-├── docs/                             # Design language, QA checklists, architecture notes
-└── package.json, pnpm-lock.yaml      # Node dependencies & pnpm lockfile
-```
+Many local music players are powerful, but their interfaces remain dense, dated, or dependent on plugins.
 
-## Architecture Overview
+Tarab treats interface design, lyrics, playback, and library management as parts of the same product.
 
-### Main Window as Source of Truth
-The main window (`index.html` → `src/main.tsx`) holds all playback, queue, library, and settings state. Desktop surfaces (tray, mini window) are **controlled, read-only snapshots** that send intent back to the main window via typed IPC.
+Its main focus is not simply playing local files. It is making a large music library feel polished, visual, and pleasant to use.
 
-### Rust Backend (`src-tauri/src/`)
-- **Playback**: `rodio::Sink`-based streaming with gapless support, device switching, and duration tracking
-- **Library**: Fast tag-based scanning and metadata extraction (ID3, Vorbis, etc.)
-- **Audio devices**: Enumeration and hot-switching via native OS APIs
-- **Desktop shell**: Tray, app menu, global media key registration, media session metadata updates
-- **Lyrics**: LRC/inline parsing and time-synced line caching
-- **IPC**: Strongly typed command exports to React frontend
+### Lyrics are part of the entire application
 
-### React Frontend (`src/`)
-- **Playback UI**: Now playing view with album art, time scrubber, playback controls
-- **Library UI**: Grid/list views for albums, artists, playlists, tracks, tags
-- **Search & filtering**: Case-insensitive search with scope filters
-- **Mini player**: Compact floating window with transport controls
-- **Settings**: Theme selection, feature toggles (status icon, media keys, mini window), audio device picker
-- **State management**: Zustand for player state, library metadata, settings, UI routing
+Timed lyrics are not limited to a small panel beside the player.
 
-### WebGL Enhancements (Optional)
-The **liquid-glass** layout mounts a single `Canvas` in the app shell with Three.js (R3F) to render:
-- Full-window metaball background
-- Aurora light strip in the header
-- Scan-line particles
-- Respects `reducedEffects`, `prefersReducedMotion`, and tab visibility
+Tarab integrates lyrics into playback, search, editing, and the full-screen listening experience.
 
-## Development
+It includes:
 
-### Prerequisites
-- **Node.js 22.18.0** (use `nvm use` with the repo `.nvmrc`)
-- **pnpm** (see `packageManager` in `package.json`)
-- **Rust toolchain** (latest stable)
-- **Tauri CLI** (`cargo install tauri-cli`)
-- **Platform SDKs**: Xcode (macOS), Visual Studio or MinGW (Windows)
+* full-screen timed lyrics
+* synchronized line highlighting
+* embedded lyric support
+* local sidecar lyric support
+* automatic LRCLIB lookup
+* lyric-text search
+* adjustable lyric size and alignment
+* artwork-driven lyric backgrounds
+* background blur and motion controls
+* a built-in LRC editor
 
-### Setup
+Lyrics remain connected to the track, library, search, and playback experience instead of behaving like a separate add-on.
+
+### Edit timed lyrics without leaving the player
+
+Tarab includes a built-in LRC editor for creating, correcting, and synchronizing timed lyrics.
+
+You can:
+
+* add lyrics to a track
+* edit lyric text
+* create timed lyrics
+* adjust existing timestamps
+* synchronize lines with playback
+* correct downloaded lyrics
+* fix individual mistimed lines
+
+You do not need a separate LRC application just to repair or create lyrics for one track.
+
+### Fix metadata inside your library
+
+Tarab also includes a built-in tag editor.
+
+You can correct track information without leaving the player or opening another application.
+
+Tag changes feed directly back into Tarab’s:
+
+* album views
+* artist views
+* search
+* sorting
+* filters
+* playlists
+* library organization
+
+Track number, disc number, format, bitrate, sample rate, and file size persist in the library
+database. A rescan updates media metadata without resetting ratings, play history, or playlist
+membership.
+Scan paths cross the desktop boundary in bounded 500-path chunks. Rust applies the final folder
+reconciliation in one database transaction.
+
+File removal uses Tarab Trash by default. Tarab stores a bounded recovery record and returns one
+undo token per successful file. Permanent deletion is a separate action with a second
+confirmation. Cross-volume moves are staged without replacing an existing destination, and an
+interrupted restore resumes from its persistent recovery marker.
+
+### A modern interface for a serious library
+
+Tarab is designed as a complete desktop application rather than a utility wrapped around a track list.
+
+The interface includes:
+
+* album-first browsing
+* artwork-focused layouts
+* fast search and filtering
+* a persistent player bar
+* a full-screen player
+* a compact always-on-top mini player
+* native menus and shortcuts
+* hardware media-key support
+* operating-system playback controls
+* motion and visual effects that respect reduced-motion settings
+
+## Two complete visual systems
+
+Tarab includes two full interface systems.
+
+These are not simple color themes. They change the appearance and behavior of navigation, cards, dialogs, settings, editors, playlists, controls, and playback surfaces.
+
+### Liquid Glass
+
+Liquid Glass uses:
+
+* album-art colors
+* soft depth
+* layered glass surfaces
+* restrained WebGL motion
+* blurred backgrounds
+* smooth transitions
+* artwork-driven presentation
+
+![Tarab album library in the Liquid Glass theme](docs/screenshots/tarab-library-liquid-glass.jpg)
+
+### Neobrutalism
+
+Neobrutalism rebuilds the interface with:
+
+* hard borders
+* mechanical controls
+* bold state indicators
+* high contrast
+* paper-like textures
+* rigid layouts
+* direct visual feedback
+
+![Tarab Home view in the Neobrutalism theme](docs/screenshots/tarab-home-neobrutalism.jpg)
+
+Both systems preserve the same library, playback, lyric, and editing features.
+
+Tarab also respects the operating system’s reduced-motion preference and includes a Reduced Effects setting.
+The system preference always wins. The Background setting stops animated and cover-driven background layers
+instead of only hiding their controls. Reduced Effects also suppresses cover-art and WebGL ambience, then
+makes the application’s remaining CSS transitions and animations settle immediately, including controls
+rendered through dialogs and other portal surfaces.
+
+## Your library has structure
+
+Tarab turns selected music folders into a structured album and artist library.
+
+You can:
+
+* browse albums, artists, tracks, playlists, and tags
+* search metadata with track-, album-, and artist-focused ranking
+* search lyric text
+* edit track metadata
+* rate tracks
+* inspect play counts
+* identify missing files
+* keep missing files visible until you resolve them
+* watch approved folders for changes
+
+Tarab supports three playlist types.
+Open **Playlists** from the primary navigation to create a collection, inspect its tracks, see
+unavailable entries, or refresh a folder-synced source.
+
+### Manual playlists
+
+Choose tracks directly and control their order. Rename a playlist inline from its detail header, then use the same detail list for keyboard focus, range selection, Enter-to-play, and Delete removal.
+
+Add and reorder requests carry an idempotency key. A repeated request returns the first completed
+playlist result instead of applying the mutation twice.
+
+### Smart playlists
+
+Build collections from rules based on your library metadata. Available filters include recently added,
+most played, rating, artist, album, genre, year range, and duration.
+
+### Folder Sync playlists
+
+Keep a playlist synchronized with the contents of a selected folder.
+Tarab creates a native library grant when you choose the folder. Manual sync validates that grant,
+uses all indexed tracks below the folder, preserves missing-track snapshots, and reports files that
+still need a library scan. Smart and folder-synced detail resolution reads the catalog in bounded cursor pages
+and restarts safely if the library changes during the read, so large libraries do not require one full
+in-memory track snapshot.
+
+When an approved music folder changes, Tarab can refresh the library automatically.
+
+## Playback
+
+Tarab uses a Rust audio engine and supports:
+
+* gapless playback
+* next-track preloading
+* crossfade
+* playback speed control
+* volume control
+* volume boost
+* audio output selection
+* queue management
+
+The in-app playback surface is the **Now Playing bar**. The separate always-on-top window is the
+**Floating mini window**. The full player uses the same edge-mounted seek control as the Home hero.
+It resolves packaged cover art from Tarab’s validated app-owned cache and repairs missing cached
+thumbnails from an authorized source file when possible.
+
+Playback continuity also includes:
+
+* smart shuffle
+* shuffle history
+* repeat modes
+
+You can control Tarab through:
+
+* hardware media keys
+* custom global shortcuts
+* the application menu
+* the system status icon
+* operating-system media controls
+* the always-on-top mini player
+
+On Linux, the application menu owns the default `Ctrl+Alt+Right` and `Ctrl+Alt+Left` Next and
+Previous accelerators. The global-shortcut manager reserves those two chords to prevent duplicate
+dispatch while continuing to register user-custom alternatives system-wide.
+
+Audio file associations and `tarab://` links can send tracks or library searches into the application.
+Open-at-login launches start hidden, while ordinary launches continue to show the main window.
+
+## Feature reference
+
+### Lyrics
+
+* embedded lyrics
+* local sidecar lyrics
+* timed LRC lyrics
+* synchronized line highlighting
+* full-screen lyric view
+* built-in LRC editor
+* timestamp editing
+* lyric synchronization
+* lyric-text search
+* optional LRCLIB lookup
+* adjustable text size
+* adjustable alignment
+* background blur controls
+* background motion controls
+
+### Library and playlists
+
+* album view
+* artist view
+* track view
+* playlist view
+* tag view
+* metadata search
+* lyric search
+* retryable search failures with explicit partial-result status
+* manual playlists
+* smart playlists
+* folder-sync playlists
+* tag editing
+* ratings
+* play counts
+* missing-file handling
+* native folder grants
+* file watching
+* migration from older Tarab storage
+
+### Playback
+
+* gapless playback
+* next-track preloading
+* crossfade from 0 to 12 seconds
+* queue management
+* smart shuffle
+* shuffle history
+* repeat modes
+* playback speed control
+* volume control
+* volume boost
+* audio output selection
+
+### Desktop integration
+
+* hardware media keys
+* operating-system playback actions
+* custom global shortcuts
+* application menu commands
+* system status icon
+* hide-on-close support
+* always-on-top 320 × 92 mini player
+* open at login
+* audio file associations
+* `tarab://` deep links
+
+### Appearance and accessibility
+
+* Liquid Glass interface
+* Neobrutalism interface
+* artwork-driven colors
+* WebGL visual effects
+* Reduced Effects setting
+* operating-system reduced-motion support
+* luminance-aware foreground colors
+* high-contrast interaction states
+
+## Where Tarab fits
+
+| Player                                               | Main focus                                                                           | Choose Tarab for                                                                                                                                              |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tarab**                                            | A designed local library with deep timed-lyrics integration.                         | Modern interface design, a built-in LRC editor, a built-in tag editor, full-screen timed lyrics, and the same product model across macOS, Windows, and Linux. |
+| [MusicBee](https://getmusicbee.com/)                 | Windows library maintenance, auto-tagging, CD tools, DSP, and audio-driver support.  | A cross-platform interface, deeper first-party lyric integration, and built-in lyric editing.                                                                 |
+| [foobar2000](https://www.foobar2000.org/)            | Codec depth, conversion, DSP, ReplayGain, and a component ecosystem.                 | A complete visual experience that does not require assembling plugins for lyrics, playlists, desktop controls, and interface design.                          |
+| [Strawberry](https://www.strawberrymusicplayer.org/) | Collection management, tag sources, radio, server integrations, and device transfer. | A stronger focus on timed lyrics, editing, artwork, and full-screen playback presentation.                                                                    |
+
+MusicBee offers more Windows-specific library and audio tools.
+
+foobar2000 offers deeper codec, DSP, conversion, and extension support.
+
+Strawberry offers more external music sources and server integrations.
+
+Tarab focuses on combining the library tools most listeners need with a modern interface and a complete timed-lyrics workflow.
+
+## Local data and network behavior
+
+Tarab stores its library information locally.
+
+Local data includes:
+
+* the library database
+* playlists
+* settings
+* player session
+* artwork cache
+* application logs
+
+Offline playback and library management make no network requests.
+
+Optional LRCLIB lookup sends track metadata to LRCLIB only after you enable that feature.
+
+The native Rust backend controls access to music folders. Renderer code cannot grant itself access to arbitrary paths.
+
+File-association requests use bounded choices:
+
+* **Play once**
+* **Import folder**
+* **Cancel**
+
+Play once uses an opaque, file-identity-bound capability for one metadata read and one playback
+attempt. The capability is consumed before decoding and cannot authorize a replacement file at the
+same path.
+
+Tarab does not require an account and includes no analytics or crash-reporting client.
+
+## Supported audio files
+
+Tarab scans the following formats:
+
+`MP3` · `FLAC` · `WAV` · `OGG` · `M4A` · `AAC` · `AIFF` · `ALAC`
+
+Actual decoding and metadata support depend on Tarab’s Rust audio and metadata libraries.
+
+## Project status
+
+Tarab is under active development.
+
+There is currently no official downloadable binary release.
+
+The application can be run or built from source for development and testing. Local builds may be unsigned and can trigger operating-system security warnings.
+
+Current target platforms:
+
+* macOS 12 or newer
+* Windows 10 22H2 or newer
+* Ubuntu 22.04
+* Debian 12
+* compatible newer Linux distributions
+
+Platform support is still being tested. A successful local build does not guarantee that every platform-specific feature works correctly.
+
+## Build from source
+
+### Requirements
+
+Install the following before building Tarab:
+
+* Node.js 22.18.0 from `.nvmrc`
+* pnpm 9.15.2
+* Rust 1.92.0 from `rust-toolchain.toml`
+* Git
+* the Tauri system dependencies for your operating system
+
+### Clone the repository
+
 ```bash
-# Use repo-pinned Node version
+git clone https://github.com/Faw47/tarab.git
+cd tarab
+```
+
+### Install dependencies
+
+```bash
 nvm use
-
-# Install JS dependencies
-pnpm install
-
-# Check Rust toolchain
-cargo --version
+pnpm install --frozen-lockfile
 ```
 
-### Running
+### Run the desktop application
 
-**Desktop app (dev mode with hot reload):**
 ```bash
-pnpm tauri dev
+pnpm dev:app
 ```
 
-**Web UI only (for isolated component development):**
+### Run the frontend only
+
+This mode is useful for isolated interface development. Native playback and desktop features may not work.
+
 ```bash
 pnpm dev
 ```
 
-### Building
+### Run Storybook
+
 ```bash
-# Build Rust backend and bundle UI
+pnpm storybook
+```
+
+### Build a local application bundle
+
+```bash
 pnpm build:app
-
-# Or separately:
-# pnpm build         # Build UI only
-# cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
-### Scripts
+Generated bundles are placed under the Tauri target directories inside `src-tauri/target/`.
 
-- `pnpm test` — Run tests in watch mode
+Local bundles are intended for development and testing. They may not be signed, notarized, or suitable for public distribution.
 
-- `pnpm test:run` — Run tests once
+## Development checks
 
-- `pnpm tsc --noEmit` — Type-check TypeScript
-
-- `pnpm check:ci` — Run Biome without writing changes
-
-- `pnpm verify` — Run TypeScript, Biome, Vitest, and the production UI build
-
-- `pnpm verify:release` — Run the full release gate: verify, Storybook build, Knip, Rust tests, and Rust check
-
-- `cargo check --manifest-path src-tauri/Cargo.toml` — Type-check Rust
-
-- `pnpm clean` — Remove build/cache artifacts
-
-- `pnpm clean:deep` — Full clean including Cargo target
-
-## Validation Checklist
-
-Before handing off changes:
+Run the standard code gate:
 
 ```bash
-# Standard code gate
 pnpm verify
-
-# Full release-oriented gate
-pnpm verify:release
-
-# Manual startup check when desktop shell, capability, or window behavior changed
-cargo run --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-**Expected behavior:**
-- App launches without panic
-- If media keys unavailable, a warning is logged but app continues
-- Liquid WebGL canvas renders (when reduced-effects is off)
-- Status icon, mini window, and menu integrations work as configured
+The frontend gate checks:
 
-## Design & Theming
+* TypeScript
+* Biome
+* Vitest
+* the typed IPC contract
+* the production web build
+* the initial bundle limit
 
-- **Standard themes**: Follow `docs/design/design_language.md` for spacing, motion, contrast, glass behavior
-- **Neobrutalism theme**: Follow `docs/design/neobrutalism_design.md` for strict high-contrast mechanical style
-- **Accent colors**: Use luminance logic to guard readability of dynamic foreground colors
-- **WebGL shaders**: Pause animation when tab is hidden; respect reduced-effects and prefersReducedMotion
+Run the complete release-quality gate:
 
-See `docs/` for detailed design system documentation.
+```bash
+pnpm verify:release
+```
 
-## Known Runtime Notes
+The release gate checks:
 
-- **Vendored media plugin**: `src-tauri/vendor/tauri-plugin-media/` contains local safety patches; do not update without testing
-- **Media key best-effort**: On some macOS hosts, global shortcut watcher registration may fail gracefully (warning logged)
-- **Audio device switching**: Stops current stream; UI reflects available devices from backend enumeration
-- **Startup stability**: All desktop integrations are optional; setup failures do not crash the app
+* TypeScript
+* Biome
+* Vitest
+* the IPC contract
+* the production web build
+* the initial bundle limit
+* Storybook
+* unused code and dependencies
+* release configuration
+* Rust formatting
+* Rust tests
+* Clippy with warnings denied
 
+Run dependency audits:
 
-## QA & Documentation
+```bash
+pnpm audit:dependencies
+```
 
-- **Playlist QA checklist**: `docs/playlist-v2-manual-qa.md`
-- **Agent guidance**: `AGENTS.md` (for contributors and coding agents)
-- **Design language**: `docs/design/design_language.md` and `docs/design/neobrutalism_design.md`
+## Architecture
+
+Tarab uses:
+
+* Tauri 2
+* React 19
+* TypeScript
+* Rust
+* SQLite
+* Zustand
+* TanStack Query
+* Vitest
+* Storybook
+* Three.js
+
+```text
+src/
+  components/        shared interface and player surfaces
+  features/          playback, library, playlists, lyrics, and settings
+  store/             interface, settings, and player state
+  graphics/          Liquid Glass WebGL effects
+  test/              frontend test helpers and mocks
+
+src-tauri/src/
+  audio.rs                playback engine
+  database.rs             SQLite library database
+  desktop_integration.rs  status icon, menus, shortcuts, and controls
+  file_ops.rs             validated file operations
+  image_cache.rs          artwork and image cache
+  launch_intents.rs       deep links and file associations
+  library.rs              folder scanning
+  library_watcher.rs      approved-folder watching
+  lyrics.rs               local and LRCLIB lyrics
+  metadata.rs             music metadata extraction
+  playlist.rs             playlist storage and rules
+  session.rs              playback session migration
+  tageditor.rs            metadata editing
+  waveform.rs             waveform generation
+```
+
+### Main window authority
+
+The main window owns:
+
+* playback state
+* queue state
+* library state
+* playlist state
+* settings state
+
+The mini player receives typed snapshots from the main window and sends typed control requests back to it.
+
+The mini player does not own persistent library or playback state.
+
+Closing the mini player hides its pre-created window instead of destroying or minimizing it. Main-window
+close and native Quit requests from the tray, Linux application menu, and operating-system media session
+are coordinated through the main renderer so pending session, player-state, and settings writes can flush;
+native code retains startup quit requests and applies a bounded fallback if the renderer cannot acknowledge them.
+
+Discrete tray, application-menu, hardware-media-key, operating-system media, and custom global-shortcut
+actions all enter the same serialized `desktop-control-action` path. Value-bearing OS timeline and volume
+intents use typed events handled by that same main-window coordinator. Source-changing playback commands,
+including Stop, advance the native playback generation so stale position and seek events cannot affect a
+replaced source.
+Windows uses SMTC for its media session; macOS remote commands and Linux MPRIS use the vendored plugin's
+single Souvlaki adapter. Native timeline seeks are validated against the main window's active source.
+Media-session artwork is byte-bounded, format-sniffed, and fully decoded as JPEG, PNG, or WebP before
+it reaches the operating-system plugin.
+
+### Native command boundary
+
+Custom Rust commands are restricted to the main window at the invoke-handler boundary except the exact
+mini-player control, seek, and snapshot-request bridge. Those three commands are mini-window-only and
+also require the enabled native mini setting; disabled state permits only idempotent hide cleanup.
+
+Renderer code cannot grant itself arbitrary filesystem access.
+
+Library paths must be approved through the native folder-selection flow.
+
+### Optional network access
+
+Tarab is designed to work without a network connection.
+
+Optional LRCLIB lookup is the primary normal network feature. It remains disabled until the user enables it.
+
+## Documentation
+
+More implementation details are available in:
+
+* [Frontend architecture](docs/frontend-architecture.md)
+* [Security review](docs/security-review.md)
+* [Release hardening](docs/release-hardening.md)
+* [Release evidence](docs/release-evidence-1.0.0.md)
+* [Playlist manual QA](docs/playlist-v2-manual-qa.md)
+* [Design language](docs/design/design_language.md)
+* [Neobrutalism design language](docs/design/neobrutalism_design.md)
+* [Agent and contributor guidance](AGENTS.md)
+
+## Contributing
+
+Tarab is still early in development.
+
+Bug reports, compatibility reports, design feedback, and focused pull requests are welcome.
+
+Before opening a pull request:
+
+1. Read `AGENTS.md`.
+2. Preserve the native filesystem and IPC boundaries.
+3. Follow the relevant design-language documentation.
+4. Add or update tests when behavior changes.
+5. Run the relevant validation commands.
+6. Explain any platform-specific behavior or limitations.
+
+Discuss large architectural changes in an issue before implementation.
+
+## Security
+
+Do not publish suspected security vulnerabilities in a public issue.
+
+Security-sensitive areas include:
+
+* filesystem path validation
+* music metadata parsing
+* file associations
+* deep links
+* Tauri capabilities
+* custom Rust commands
+* renderer-to-native IPC
+* library grants
+* playlist and database mutation
+* vendored native plugins
+
+Until a dedicated security-reporting process is published, contact the maintainer privately through the GitHub profile associated with this repository.
+
+## License
+
+Tarab is licensed under the [MIT License](LICENSE).

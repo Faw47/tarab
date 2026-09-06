@@ -1,10 +1,8 @@
 use crate::models::*;
 use std::error::Error as StdError;
 
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "macos")]
-mod macos;
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+mod souvlaki;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -14,10 +12,12 @@ pub trait MediaController {
         app_id: String,
         app_name: String,
     ) -> Result<(), Box<dyn StdError>>;
+    fn disable_session(&mut self) -> Result<(), Box<dyn StdError>>;
     fn set_metadata(&mut self, metadata: MediaMetadata) -> Result<(), Box<dyn StdError>>;
     fn set_playback_info(&mut self, info: PlaybackInfo) -> Result<(), Box<dyn StdError>>;
     fn set_playback_status(&mut self, status: PlaybackStatus) -> Result<(), Box<dyn StdError>>;
     fn set_position(&mut self, position: f64) -> Result<(), Box<dyn StdError>>;
+    fn set_volume(&mut self, volume: f64) -> Result<(), Box<dyn StdError>>;
     fn clear_metadata(&mut self) -> Result<(), Box<dyn StdError>>;
     fn set_event_handler(&mut self, handler: Box<dyn Fn(MediaControlEvent) + Send>);
 
@@ -36,10 +36,10 @@ pub fn create_media_controller() -> Box<dyn MediaController + Send> {
     }
     #[cfg(target_os = "macos")]
     {
-        Box::new(macos::MacOSMediaController::new())
+        Box::new(souvlaki::SouvlakiMediaController::new())
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(linux::LinuxMediaController::new())
+        Box::new(souvlaki::SouvlakiMediaController::new())
     }
 }

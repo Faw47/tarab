@@ -14,6 +14,12 @@ describe('toBackendRule', () => {
     ]);
   });
 
+  it('serializes the genre smart rule', () => {
+    expect(toBackendRule('ByGenre', { genre: 'Classical' })).toEqual([
+      { ByGenre: { genre: 'Classical' } },
+    ]);
+  });
+
   it('clamps numeric smart rule values to backend-safe ranges', () => {
     expect(toBackendRule('RecentlyAdded', { days: '-5' })).toEqual([
       { RecentlyAdded: { days: 1 } },

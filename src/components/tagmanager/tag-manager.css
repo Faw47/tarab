@@ -1,0 +1,207 @@
+.tag-manager-view {
+  --tag-surface: var(--surface-raised);
+  --tag-surface-muted: var(--surface-overlay);
+  --tag-surface-strong: var(--surface-shell);
+  --tag-border: var(--glass-border);
+  --tag-ink: var(--type-primary);
+  --tag-muted-ink: var(--type-secondary);
+  --tag-hover: var(--glass-medium);
+  --tag-danger-surface: var(--state-error-surface);
+  --tag-shadow: 0 18px 36px -28px var(--glass-shadow);
+  color: var(--tag-ink);
+}
+
+.tag-manager-toolbar,
+.tag-manager-editor-header,
+.tag-manager-footer {
+  border-color: var(--tag-border);
+  background: var(--tag-surface);
+  color: var(--tag-ink);
+}
+
+.tag-manager-toolbar {
+  box-shadow: var(--tag-shadow);
+}
+
+.tag-manager-toolbar-divider {
+  border-color: var(--tag-border);
+}
+
+.tag-manager-control,
+.tag-manager-input {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-muted) !important;
+  color: var(--tag-ink) !important;
+}
+
+.tag-manager-control:hover,
+.tag-manager-input:focus {
+  background: var(--tag-hover) !important;
+}
+
+.tag-manager-menu {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-strong) !important;
+  color: var(--tag-ink);
+}
+
+.tag-manager-menu-item {
+  color: var(--tag-muted-ink);
+}
+
+.tag-manager-menu-item:hover,
+.tag-manager-menu-item[aria-checked="true"] {
+  background: var(--tag-hover);
+  color: var(--tag-ink);
+}
+
+.tag-manager-menu-separator {
+  background: var(--tag-border);
+}
+
+.tag-manager-filter-group {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-muted) !important;
+}
+
+.tag-manager-filter-option {
+  color: var(--tag-muted-ink);
+}
+
+.tag-manager-filter-option:hover {
+  background: var(--tag-hover);
+  color: var(--tag-ink);
+}
+
+.tag-manager-filter-option--active {
+  background: var(--signal-play) !important;
+  color: var(--signal-play-ink) !important;
+}
+
+.tag-manager-icon-button,
+.tag-manager-file-action {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-muted) !important;
+  color: var(--tag-muted-ink) !important;
+}
+
+.tag-manager-icon-button:hover,
+.tag-manager-file-action:hover {
+  background: var(--tag-hover) !important;
+  color: var(--tag-ink) !important;
+}
+
+.tag-manager-hydration,
+.tag-manager-table-header {
+  border-color: var(--tag-border);
+  background: var(--tag-surface-muted);
+  color: var(--tag-muted-ink);
+}
+
+.tag-manager-progress-track {
+  background: var(--tag-hover) !important;
+}
+
+.tag-manager-progress-fill {
+  background: var(--signal-play) !important;
+}
+
+.tag-manager-content,
+.tag-manager-editor {
+  background: var(--tag-surface);
+}
+
+.tag-manager-empty {
+  color: var(--tag-muted-ink);
+}
+
+.tag-manager-editor input,
+.tag-manager-editor textarea {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-muted) !important;
+  color: var(--tag-ink) !important;
+}
+
+.tag-manager-editor input:focus,
+.tag-manager-editor textarea:focus {
+  background: var(--tag-hover) !important;
+}
+
+.tag-manager-save {
+  background: var(--signal-play) !important;
+  color: var(--signal-play-ink) !important;
+}
+
+.tag-manager-undo-surface {
+  border-color: var(--tag-border) !important;
+  background: var(--tag-surface-strong) !important;
+  color: var(--tag-ink);
+}
+
+[data-theme="neobrutalism"] .tag-manager-view {
+  --tag-surface: var(--neo-paper);
+  --tag-surface-muted: var(--neo-panel);
+  --tag-surface-strong: var(--neo-muted);
+  --tag-border: var(--neo-ink);
+  --tag-ink: var(--neo-ink);
+  --tag-muted-ink: var(--neo-card-ink);
+  --tag-hover: var(--neo-utility-hover);
+  --tag-danger-surface: var(--state-error-surface);
+  --tag-shadow: var(--neo-shadow-md);
+  background: var(--neo-canvas);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+[data-theme="neobrutalism"] .tag-manager-toolbar,
+[data-theme="neobrutalism"] .tag-manager-editor-header,
+[data-theme="neobrutalism"] .tag-manager-footer {
+  border-width: 2px;
+  border-color: var(--neo-ink) !important;
+  background: var(--neo-panel);
+  box-shadow: var(--neo-shadow-md);
+  backdrop-filter: none;
+}
+
+[data-theme="neobrutalism"] .tag-manager-control,
+[data-theme="neobrutalism"] .tag-manager-input,
+[data-theme="neobrutalism"] .tag-manager-menu,
+[data-theme="neobrutalism"] .tag-manager-filter-group,
+[data-theme="neobrutalism"] .tag-manager-icon-button,
+[data-theme="neobrutalism"] .tag-manager-file-action {
+  border-width: 2px !important;
+  border-radius: 0 !important;
+  box-shadow: var(--neo-shadow-xs);
+}
+
+[data-theme="neobrutalism"] .tag-manager-filter-option--active,
+[data-theme="neobrutalism"] .tag-manager-save {
+  background: var(--signal-active) !important;
+  color: var(--signal-active-ink) !important;
+  box-shadow: var(--neo-shadow-xs);
+}
+
+[data-theme="neobrutalism"] .tag-manager-table-header,
+[data-theme="neobrutalism"] .tag-manager-hydration {
+  border-bottom-width: 2px;
+  background: var(--neo-muted);
+  color: var(--neo-ink);
+}
+
+[data-theme="neobrutalism"] .tag-manager-editor input,
+[data-theme="neobrutalism"] .tag-manager-editor textarea {
+  border-width: 2px !important;
+  border-radius: 0 !important;
+  box-shadow: none;
+}
+
+[data-theme="neobrutalism"] .tag-manager-undo-surface {
+  border-width: 2px !important;
+  border-radius: 0 !important;
+  box-shadow: var(--neo-shadow-md);
+}
+
+@media (max-width: 1023px) {
+  .tag-manager-editor {
+    border-left: 0;
+  }
+}

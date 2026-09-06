@@ -16,10 +16,11 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { reportError } from '../../lib/report-error';
 import type { AppTheme } from '../../store/settings-store';
-import type { NavView } from './FloatingDock';
+import type { NavView } from './navigation-model';
 
 interface GlobalCommandPaletteProps {
   currentView: NavView;
@@ -42,7 +43,9 @@ interface PaletteCommand {
   description: string;
   group: 'Navigation' | 'Playback' | 'Library';
   icon: LucideIcon;
+  shortcut?: string;
   disabled?: boolean;
+  disabledReason?: string;
   onSelect: () => void | Promise<void>;
 }
 
@@ -83,18 +86,17 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
       if (isModK) {
         event.preventDefault();
         setOpen((prev) => !prev);
-        return;
-      }
-
-      if (event.key === 'Escape' && open) {
-        event.preventDefault();
-        setOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open]);
+    const handleNativeOpen = () => setOpen(true);
+    window.addEventListener('tarab:open-command-palette', handleNativeOpen);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('tarab:open-command-palette', handleNativeOpen);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -111,6 +113,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Navigation',
         icon: Home,
         disabled: currentView === 'home',
+        disabledReason: 'Home is already open.',
         onSelect: () => onNavigate('home'),
       },
       {
@@ -120,6 +123,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Navigation',
         icon: Library,
         disabled: currentView === 'library',
+        disabledReason: 'Library is already open.',
         onSelect: () => onNavigate('library'),
       },
       {
@@ -129,7 +133,18 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Navigation',
         icon: ListMusic,
         disabled: currentView === 'queue',
+        disabledReason: 'Queue is already open.',
         onSelect: () => onNavigate('queue'),
+      },
+      {
+        id: 'nav-playlists',
+        label: 'Go to Playlists',
+        description: 'Open manual, smart, and synced playlists',
+        group: 'Navigation',
+        icon: ListMusic,
+        disabled: currentView === 'playlists',
+        disabledReason: 'Playlists is already open.',
+        onSelect: () => onNavigate('playlists'),
       },
       {
         id: 'nav-tags',
@@ -138,6 +153,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Navigation',
         icon: Tag,
         disabled: currentView === 'tags',
+        disabledReason: 'Tags is already open.',
         onSelect: () => onNavigate('tags'),
       },
       {
@@ -147,6 +163,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Navigation',
         icon: Settings,
         disabled: currentView === 'settings',
+        disabledReason: 'Settings is already open.',
         onSelect: () => onNavigate('settings'),
       },
       {
@@ -155,7 +172,9 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Toggle current playback state',
         group: 'Playback',
         icon: isPlaying ? Pause : Play,
+        shortcut: 'Space',
         disabled: !hasCurrentTrack,
+        disabledReason: 'Select a track before you use playback controls.',
         onSelect: onTogglePlayback,
       },
       {
@@ -164,7 +183,9 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Skip forward in the queue',
         group: 'Playback',
         icon: SkipForward,
+        shortcut: '⌘→',
         disabled: !hasCurrentTrack,
+        disabledReason: 'Select a track before you skip.',
         onSelect: onNextTrack,
       },
       {
@@ -173,7 +194,9 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Go to previous track or restart current',
         group: 'Playback',
         icon: SkipBack,
+        shortcut: '⌘←',
         disabled: !hasCurrentTrack,
+        disabledReason: 'Select a track before you go back.',
         onSelect: onPreviousTrack,
       },
       {
@@ -182,7 +205,9 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Expand to full player view',
         group: 'Playback',
         icon: Maximize2,
+        shortcut: 'F',
         disabled: !hasCurrentTrack,
+        disabledReason: 'Select a track before you open the full player.',
         onSelect: onOpenFullPlayer,
       },
       {
@@ -200,6 +225,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         group: 'Library',
         icon: RefreshCw,
         disabled: isScanning,
+        disabledReason: 'A library scan is already running.',
         onSelect: onRescanLibrary,
       },
     ],
@@ -230,22 +256,20 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
   if (!open) return null;
 
   return (
-    <div
-      className={cn(
-        'fixed inset-0 z-[160] flex items-start justify-center px-4 pt-[10vh]',
-        isNeo ? 'bg-black/45' : 'bg-black/55 backdrop-blur-sm',
-      )}
-      onMouseDown={() => setOpen(false)}
-    >
-      <div
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent
+        showCloseButton={false}
         className={cn(
-          'w-full max-w-2xl',
+          'top-[10vh] max-h-[80vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 gap-0 overflow-hidden p-0',
           isNeo
-            ? 'border-3 border-black bg-white shadow-[12px_12px_0_0_#000]'
+            ? 'border-3 border-black bg-white shadow-[var(--neo-shadow-2xl)]'
             : 'rounded-2xl border border-white/10 bg-[#0f1118]/95 shadow-2xl',
         )}
-        onMouseDown={(event) => event.stopPropagation()}
       >
+        <DialogTitle className="sr-only">Global commands</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search navigation, playback, and library commands.
+        </DialogDescription>
         <Command label="Global commands" loop className="w-full">
           <div
             className={cn(
@@ -270,7 +294,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
             />
             <kbd
               className={cn(
-                'shrink-0 text-[10px] font-semibold',
+                'shrink-0 text-xs font-semibold',
                 isNeo
                   ? 'border-2 border-black bg-[var(--neo-panel)] px-2 py-1 text-black'
                   : 'rounded border border-white/15 bg-white/5 px-2 py-1 text-white/70',
@@ -303,7 +327,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                         'group flex cursor-pointer items-center gap-3 px-3 py-2.5 outline-none',
                         'data-[selected=true]:translate-x-[1px] data-[selected=true]:translate-y-[1px]',
                         isNeo
-                          ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[var(--neo-utility-hover)] data-[selected=true]:shadow-[2px_2px_0_0_#000] data-[disabled=true]:opacity-40'
+                          ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[var(--neo-utility-hover)] data-[selected=true]:shadow-[var(--neo-shadow-xs)] data-[disabled=true]:opacity-40'
                           : 'rounded-xl text-white/90 data-[selected=true]:bg-white/14 data-[selected=true]:text-white data-[disabled=true]:opacity-40',
                       )}
                     >
@@ -332,9 +356,23 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                             isNeo ? 'font-bold text-black/70' : 'text-white/60',
                           )}
                         >
-                          {command.description}
+                          {command.disabled && command.disabledReason
+                            ? command.disabledReason
+                            : command.description}
                         </span>
                       </span>
+                      {command.shortcut && (
+                        <kbd
+                          className={cn(
+                            'ml-auto shrink-0 text-[11px] font-semibold',
+                            isNeo
+                              ? 'border-2 border-black bg-[var(--neo-panel)] px-1.5 py-0.5 font-bold'
+                              : 'rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/50',
+                          )}
+                        >
+                          {command.shortcut}
+                        </kbd>
+                      )}
                     </Command.Item>
                   );
                 })}
@@ -342,7 +380,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
             ))}
           </Command.List>
         </Command>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 });

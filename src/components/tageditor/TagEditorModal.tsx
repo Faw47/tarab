@@ -1,25 +1,24 @@
 import { clsx } from 'clsx';
+import { Clipboard, ClipboardCheck, Loader2, Save, Wand2, X } from 'lucide-react';
 import {
-  Clipboard,
-  ClipboardCheck,
-  Image,
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-  Wand2,
-  X,
-} from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { reportError } from '../../lib/report-error';
 import {
+  type ArtworkMime,
   getCoverArtData,
   getLyricsForTrack,
+  pickCoverArt,
   readFullTags,
-  readImageAsBase64,
   removeCoverArt,
-  selectImageFile,
   writeLyricsForTrack,
   writeTags,
   writeTagsBatch,
@@ -29,9 +28,14 @@ import { clipboard } from '../../platform/clipboard';
 import { useMetadataClipboardStore } from '../../store/metadata-clipboard-store';
 import type { TagClearField, TagInfo, TagUpdate, Track } from '../../types';
 import { MetadataClipboard } from '../metadata/MetadataClipboard';
+import { buildExtraTagUpdates } from '../tagmanager/tag-manager-mutations';
 import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
-import { LyricsEditor } from './LyricsEditor';
+import { getLyricsUtf8ByteLength, LyricsEditor, MAX_LYRICS_SIDECAR_BYTES } from './LyricsEditor';
+import { TagEditorArtworkPanel } from './TagEditorArtworkPanel';
+import { TagEditorFileInfo } from './TagEditorFileInfo';
+import { TagEditorMetadataForm } from './TagEditorMetadataForm';
 
 const deriveTagsFromPath = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, '/');
@@ -53,14 +57,57 @@ const deriveTagsFromPath = (filePath: string) => {
   };
 };
 
-const base64ToBlobUrl = (base64: string, mime: string): string => {
+const MAX_ARTWORK_BYTES = 25 * 1024 * 1024;
+const MAX_ARTWORK_BASE64_LENGTH = Math.ceil(MAX_ARTWORK_BYTES / 3) * 4;
+
+const sniffArtworkMime = (bytes: Uint8Array): ArtworkMime | null => {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return null;
+};
+
+const base64ToArtwork = (base64: string): { mime: ArtworkMime; url: string } => {
+  if (base64.length > MAX_ARTWORK_BASE64_LENGTH) {
+    throw new Error('Artwork exceeds the encoded byte limit.');
+  }
   const byteString = atob(base64);
+  if (byteString.length === 0 || byteString.length > MAX_ARTWORK_BYTES) {
+    throw new Error('Artwork exceeds the encoded byte limit.');
+  }
   const bytes = new Uint8Array(byteString.length);
   for (let i = 0; i < byteString.length; i++) {
     bytes[i] = byteString.charCodeAt(i);
   }
-  const blob = new Blob([bytes], { type: mime || 'image/jpeg' });
-  return URL.createObjectURL(blob);
+  const mime = sniffArtworkMime(bytes);
+  if (!mime) throw new Error('Artwork must be JPEG, PNG, or WebP.');
+  return { mime, url: URL.createObjectURL(new Blob([bytes], { type: mime })) };
 };
 
 interface TagEditorModalProps {
@@ -132,11 +179,19 @@ export const TagEditorModal = memo(
       };
     }, [newCoverArt]);
 
+    const hasTracks = tracks.length > 0;
     const isBatchEdit = tracks.length > 1;
 
     useEffect(() => {
+      let cancelled = false;
       const loadTags = async () => {
-        if (tracks.length === 0) return;
+        if (!hasTracks) {
+          setTagInfo(null);
+          setExtendedFields([]);
+          setError('No tracks selected.');
+          setIsLoading(false);
+          return;
+        }
 
         try {
           setIsLoading(true);
@@ -144,11 +199,13 @@ export const TagEditorModal = memo(
 
           if (isBatchEdit) {
             // For batch edit, just show empty fields
+            if (cancelled) return;
             setIsLoading(false);
             setExtendedFields([]);
           } else {
             // Single track - load full info
             const info = await readFullTags(tracks[0].filePath);
+            if (cancelled) return;
             setTagInfo(info);
 
             setTitle(info.title || '');
@@ -172,21 +229,27 @@ export const TagEditorModal = memo(
             setIsLoading(false);
           }
         } catch (err) {
+          if (cancelled) return;
           setError(err instanceof Error ? err.message : 'Failed to load tags');
           setIsLoading(false);
         }
       };
 
-      loadTags();
-    }, [tracks, isBatchEdit]);
+      void loadTags();
+      return () => {
+        cancelled = true;
+      };
+    }, [hasTracks, tracks, isBatchEdit]);
 
     useEffect(() => {
+      let cancelled = false;
       const loadLyrics = async () => {
         if (isBatchEdit || !trackPath) {
           setLyricsContent('');
           setLyricsError(null);
           return;
         }
+        setLyricsContent('');
         try {
           setLyricsError(null);
           const single = tracks.length === 1 ? tracks[0] : null;
@@ -198,6 +261,7 @@ export const TagEditorModal = memo(
             single?.album ?? '',
             single?.duration ?? 0,
           );
+          if (cancelled) return;
           if (content) {
             setLyricsContent(content);
           } else {
@@ -205,12 +269,16 @@ export const TagEditorModal = memo(
             setLyricsError('No .lrc found yet. Saving will create one next to the track.');
           }
         } catch (err) {
+          if (cancelled) return;
           setLyricsContent('');
           setLyricsError('No .lrc found yet. Saving will create one next to the track.');
         }
       };
 
-      loadLyrics();
+      void loadLyrics();
+      return () => {
+        cancelled = true;
+      };
     }, [isBatchEdit, trackPath, tracks]);
 
     useEffect(() => {
@@ -221,27 +289,81 @@ export const TagEditorModal = memo(
 
     const handleSelectCover = useCallback(async () => {
       try {
-        const filePath = await selectImageFile();
-        if (filePath) {
-          const [base64, mime] = await readImageAsBase64(filePath);
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
+        const selected = await pickCoverArt();
+        if (selected) {
+          const preview = base64ToArtwork(selected.base64);
+          if (preview.mime !== selected.mime) {
+            URL.revokeObjectURL(preview.url);
+            throw new Error('Selected artwork MIME did not match its contents.');
           }
-          const blob = new Blob([bytes], { type: mime });
-          const url = URL.createObjectURL(blob);
-          // Revoke previous preview URL
           setNewCoverArt((prev) => {
             if (prev?.url) URL.revokeObjectURL(prev.url);
-            return { base64, mime, url };
+            return { base64: selected.base64, mime: preview.mime, url: preview.url };
           });
           setRemoveCover(false);
+          setError(null);
         }
       } catch (err) {
         reportError('Failed to select cover', { source: 'tag-editor-modal', error: err });
       }
     }, []);
+
+    const applyCoverFile = useCallback(async (file: File) => {
+      if (file.size === 0 || file.size > MAX_ARTWORK_BYTES) {
+        setError('Artwork must be 25 MB or smaller.');
+        return;
+      }
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(reader.error ?? new Error('Could not read artwork'));
+          reader.onload = () => resolve(String(reader.result ?? ''));
+          reader.readAsDataURL(file);
+        });
+        const separator = dataUrl.indexOf(',');
+        if (separator < 0) throw new Error('Tarab could not read the artwork.');
+        const base64 = dataUrl.slice(separator + 1);
+        const preview = base64ToArtwork(base64);
+        setNewCoverArt((previous) => {
+          if (previous?.url) URL.revokeObjectURL(previous.url);
+          return { base64, mime: preview.mime, url: preview.url };
+        });
+        setRemoveCover(false);
+        setError(null);
+      } catch {
+        setError('Choose a valid JPEG, PNG, or WebP image.');
+      }
+    }, []);
+
+    const handleCoverDrop = useCallback(
+      (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files[0];
+        if (file) void applyCoverFile(file);
+      },
+      [applyCoverFile],
+    );
+
+    const handleCoverPaste = useCallback(
+      (event: ClipboardEvent<HTMLDivElement>) => {
+        const file = Array.from(event.clipboardData.files).find((item) =>
+          item.type.startsWith('image/'),
+        );
+        if (!file) return;
+        event.preventDefault();
+        void applyCoverFile(file);
+      },
+      [applyCoverFile],
+    );
+
+    const handleCoverKeyDown = useCallback(
+      (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        void handleSelectCover();
+      },
+      [handleSelectCover],
+    );
 
     const handleRemoveCover = useCallback(() => {
       if (newCoverArt?.url) {
@@ -251,18 +373,25 @@ export const TagEditorModal = memo(
       setRemoveCover(true);
     }, []);
 
-    const handleSaveLyrics = useCallback(async () => {
-      if (!trackPath) return;
-      try {
-        setIsLyricsSaving(true);
-        setLyricsError(null);
-        await writeLyricsForTrack(trackPath, lyricsContent ?? '');
-      } catch (err) {
-        setLyricsError(err instanceof Error ? err.message : 'Failed to save lyrics');
-      } finally {
-        setIsLyricsSaving(false);
-      }
-    }, [trackPath, lyricsContent]);
+    const handleSaveLyrics = useCallback(
+      async (content: string) => {
+        if (!trackPath) return;
+        if (getLyricsUtf8ByteLength(content) > MAX_LYRICS_SIDECAR_BYTES) {
+          setLyricsError('Lyrics must be 1 MiB (1,048,576 UTF-8 bytes) or smaller.');
+          return;
+        }
+        try {
+          setIsLyricsSaving(true);
+          setLyricsError(null);
+          await writeLyricsForTrack(trackPath, content);
+        } catch (err) {
+          setLyricsError(err instanceof Error ? err.message : 'Failed to save lyrics');
+        } finally {
+          setIsLyricsSaving(false);
+        }
+      },
+      [trackPath],
+    );
 
     const handleAddExtendedField = useCallback(() => {
       setExtendedFields((prev) => [...prev, { key: '', value: '' }]);
@@ -294,6 +423,11 @@ export const TagEditorModal = memo(
     }, [trackPath, tracks]);
 
     const handleSave = useCallback(async () => {
+      if (!hasTracks) {
+        setError('No tracks selected.');
+        return;
+      }
+
       try {
         setIsSaving(true);
         setError(null);
@@ -341,39 +475,40 @@ export const TagEditorModal = memo(
           updates.coverArtBase64 = newCoverArt.base64;
           updates.coverArtMime = newCoverArt.mime;
         }
-        if (extendedFields.length > 0) {
-          const extras = extendedFields
-            .filter((f) => f.key.trim())
-            .reduce<Record<string, string>>((acc, field) => {
-              acc[field.key.trim()] = field.value;
-              return acc;
-            }, {});
-          if (Object.keys(extras).length > 0) {
-            updates.extraTags = extras;
-          }
-        }
+        const extraTagUpdates = buildExtraTagUpdates(tagInfo?.extraTags, extendedFields);
+        if (extraTagUpdates) updates.extraTags = extraTagUpdates;
 
         if (isBatchEdit) {
           const filePaths = tracks.map((t) => t.filePath);
-          const errors = await writeTagsBatch(filePaths, updates);
+          const results = await writeTagsBatch(filePaths, updates);
+          const tagErrors = results.filter((result) => result.status === 'failed');
+          const successfulPaths = results
+            .filter((result) => result.status === 'success')
+            .map((result) => result.path);
 
-          if (errors.length > 0) {
-            setError(`Failed to update ${errors.length} file(s)`);
-          }
-
-          // Handle cover removal separately for batch
+          const coverErrors: string[] = [];
           if (removeCover) {
-            for (const path of filePaths) {
+            for (const path of successfulPaths) {
               try {
                 await removeCoverArt(path);
               } catch (e) {
+                coverErrors.push(path);
                 reportError('Failed to remove cover', { source: 'tag-editor-modal', error: e });
               }
             }
           }
-          await refreshTracksByFilePaths(filePaths);
+          await refreshTracksByFilePaths(successfulPaths);
+          const failureCount = tagErrors.length + coverErrors.length;
+          if (failureCount > 0) {
+            setError(`Failed to fully update ${failureCount} file(s)`);
+            setIsSaving(false);
+            return;
+          }
         } else {
-          await writeTags(tracks[0].filePath, updates);
+          const result = await writeTags(tracks[0].filePath, updates);
+          if (result.status !== 'success') {
+            throw new Error(result.errorMessage ?? 'Tarab could not write the track tags.');
+          }
 
           if (removeCover) {
             await removeCoverArt(tracks[0].filePath);
@@ -390,6 +525,7 @@ export const TagEditorModal = memo(
       }
     }, [
       tracks,
+      hasTracks,
       isBatchEdit,
       title,
       artist,
@@ -481,14 +617,14 @@ export const TagEditorModal = memo(
 
       if (clipboardArt) {
         try {
-          const url = base64ToBlobUrl(clipboardArt.base64, clipboardArt.mime);
+          const preview = base64ToArtwork(clipboardArt.base64);
           if (newCoverArt?.url) {
             URL.revokeObjectURL(newCoverArt.url);
           }
           setNewCoverArt({
             base64: clipboardArt.base64,
-            mime: clipboardArt.mime,
-            url,
+            mime: preview.mime,
+            url: preview.url,
           });
           setRemoveCover(false);
         } catch (err) {
@@ -503,468 +639,242 @@ export const TagEditorModal = memo(
     }, [clipboardData, clipboardArt, newCoverArt, setClipboardMessage]);
 
     return (
-      <div className="fixed inset-0 z-50 bg-background text-text-primary">
-        <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-background-elevated/50 backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <IconButton
-                onClick={onClose}
-                className="p-2 text-text-secondary hover:text-white rounded-full transition-colors"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </IconButton>
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-text-muted">
-                  Metadata Editor
-                </p>
-                <p className="text-sm font-semibold text-text-primary">
-                  {isBatchEdit
-                    ? `Editing ${tracks.length} tracks`
-                    : tagInfo?.filePath
-                      ? 'Edit Track Info'
-                      : 'Edit Track Info'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                onClick={handleCopyMetadata}
-                disabled={isSaving || isLoading || !trackPath}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <Clipboard className="w-4 h-4" />
-                Copy
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handlePasteMetadata}
-                disabled={!canPaste() || isSaving}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <ClipboardCheck className="w-4 h-4" />
-                Paste
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={handleAutoTag}
-                disabled={isSaving || isLoading || isBatchEdit}
-                title={isBatchEdit ? 'Auto-Tag is available for single-track edits' : undefined}
-                className="rounded-xl flex items-center gap-2"
-              >
-                <Wand2 className="w-4 h-4" />
-                Auto-Tag
-              </Button>
-              <Button variant="ghost" onClick={onClose} disabled={isSaving} className="rounded-xl">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={isLoading || isSaving}
-                className="rounded-xl bg-white text-black hover:bg-white/90"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-          {clipboardMessage && (
-            <div className="px-6 pb-2 text-xs text-text-secondary">{clipboardMessage}</div>
-          )}
-
-          <div className="flex-1 flex overflow-hidden">
-            {/* Left rail */}
-            <aside className="hidden lg:flex w-80 flex-col gap-6 p-6 border-r border-white/5 bg-background-elevated/60">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                  Album Artwork
-                </p>
-                <div
-                  className={clsx(
-                    'aspect-square w-full rounded-2xl border border-dashed border-white/15',
-                    'flex items-center justify-center overflow-hidden',
-                    'bg-white/5 cursor-pointer hover:border-primary/60 transition-colors',
-                  )}
-                  onClick={handleSelectCover}
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent
+          showCloseButton={false}
+          className="inset-0 top-0 left-0 block h-screen max-h-none w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 bg-background p-0 text-text-primary shadow-none"
+        >
+          <DialogTitle className="sr-only">Metadata editor</DialogTitle>
+          <DialogDescription className="sr-only">
+            Edit metadata, artwork, and lyrics for the selected tracks.
+          </DialogDescription>
+          <div className="h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-background-elevated/50 backdrop-blur-xl">
+              <div className="flex items-center gap-3">
+                <IconButton
+                  onClick={onClose}
+                  className="p-2 text-text-secondary hover:text-white rounded-full transition-colors"
+                  aria-label="Close"
                 >
-                  {coverPreviewUrl ? (
-                    <img src={coverPreviewUrl} alt="Cover" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="text-center text-text-muted">
-                      <Image className="w-8 h-8 mx-auto mb-2" />
-                      <span className="text-xs">Drop or click to add</span>
-                    </div>
-                  )}
-                </div>
-                {coverPreviewUrl && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleRemoveCover}
-                    className="mt-3 w-full text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 flex items-center justify-center gap-1 rounded-full h-8"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Remove artwork
-                  </Button>
-                )}
-              </div>
-
-              {!isBatchEdit && tagInfo && (
+                  <X className="w-5 h-5" />
+                </IconButton>
                 <div>
-                  <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                    File Info
+                  <p className="text-xs uppercase tracking-[0.3em] text-text-muted">
+                    Metadata Editor
                   </p>
-                  <div className="panel rounded-2xl p-4 space-y-2 text-xs text-text-muted text-mono">
-                    <div className="flex justify-between">
-                      <span>Format</span>
-                      <span className="text-text-primary">{tagInfo.fileFormat}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Duration</span>
-                      <span className="text-text-primary">
-                        {Math.floor(tagInfo.durationSecs / 60)}:
-                        {Math.floor(tagInfo.durationSecs % 60)
-                          .toString()
-                          .padStart(2, '0')}
-                      </span>
-                    </div>
-                    {tagInfo.bitrate && (
-                      <div className="flex justify-between">
-                        <span>Bitrate</span>
-                        <span className="text-text-primary">{tagInfo.bitrate} kbps</span>
-                      </div>
-                    )}
-                    {tagInfo.sampleRate && (
-                      <div className="flex justify-between">
-                        <span>Sample Rate</span>
-                        <span className="text-text-primary">{tagInfo.sampleRate} Hz</span>
-                      </div>
-                    )}
-                    {tagInfo.channels && (
-                      <div className="flex justify-between">
-                        <span>Channels</span>
-                        <span className="text-text-primary">{tagInfo.channels}</span>
-                      </div>
-                    )}
-                  </div>
+                  <p className="text-sm font-semibold text-text-primary">
+                    {isBatchEdit
+                      ? `Editing ${tracks.length} tracks`
+                      : tagInfo?.filePath
+                        ? 'Edit Track Info'
+                        : 'Edit Track Info'}
+                  </p>
                 </div>
-              )}
-            </aside>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              ) : (
-                <div className="space-y-6 max-w-3xl">
-                  <div className="lg:hidden">
-                    <p className="text-xs uppercase tracking-widest text-text-subtle mb-3">
-                      Album Artwork
-                    </p>
-                    <div
-                      className={clsx(
-                        'aspect-square w-full rounded-2xl border border-dashed border-white/15',
-                        'flex items-center justify-center overflow-hidden',
-                        'bg-white/5 cursor-pointer hover:border-primary/60 transition-colors',
-                      )}
-                      onClick={handleSelectCover}
-                    >
-                      {coverPreviewUrl ? (
-                        <img
-                          src={coverPreviewUrl}
-                          alt="Cover"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="text-center text-text-muted">
-                          <Image className="w-8 h-8 mx-auto mb-2" />
-                          <span className="text-xs">Drop or click to add</span>
-                        </div>
-                      )}
-                    </div>
-                    {coverPreviewUrl && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRemoveCover}
-                        className="mt-3 w-full text-xs text-red-400 hover:text-red-300 hover:bg-red-950/20 flex items-center justify-center gap-1 rounded-full h-8"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Remove artwork
-                      </Button>
-                    )}
-                  </div>
-
-                  {error && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                      {error}
-                    </div>
-                  )}
-
-                  <MetadataClipboard onPaste={handlePasteMetadata} />
-
-                  {isBatchEdit && (
-                    <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg text-primary text-sm">
-                      Only filled fields will be applied to all selected tracks.
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    {(['standard', 'extended', 'lyrics'] as const).map((tab) => {
-                      const disabled = tab === 'lyrics' && isBatchEdit;
-                      return (
-                        <Button
-                          key={tab}
-                          variant={activeTab === tab ? 'secondary' : 'ghost'}
-                          size="sm"
-                          onClick={() => !disabled && setActiveTab(tab)}
-                          disabled={disabled}
-                          className={clsx(
-                            'rounded-full text-sm font-medium transition px-4 py-2 h-auto',
-                            activeTab === tab
-                              ? 'bg-white text-black hover:bg-white/90'
-                              : 'text-text-primary hover:text-white hover:bg-white/10',
-                            disabled && 'opacity-50 cursor-not-allowed',
-                          )}
-                        >
-                          {tab === 'standard'
-                            ? 'Standard Tags'
-                            : tab === 'extended'
-                              ? 'Extended Tags'
-                              : 'Lyrics'}
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  {activeTab === 'standard' && (
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={handleCopyMetadata}
+                  disabled={isSaving || isLoading || !trackPath}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <Clipboard className="w-4 h-4" />
+                  Copy
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handlePasteMetadata}
+                  disabled={!hasTracks || !canPaste() || isSaving}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <ClipboardCheck className="w-4 h-4" />
+                  Paste
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleAutoTag}
+                  disabled={!hasTracks || isSaving || isLoading || isBatchEdit}
+                  title={isBatchEdit ? 'Auto-Tag is available for single-track edits' : undefined}
+                  className="rounded-xl flex items-center gap-2"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  Auto-Tag
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={onClose}
+                  disabled={isSaving}
+                  className="rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={!hasTracks || isLoading || isSaving}
+                  className="rounded-xl bg-white text-black hover:bg-white/90"
+                >
+                  {isSaving ? (
                     <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm text-text-secondary mb-1">Title</label>
-                          <input
-                            type="text"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Track title'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Artist</label>
-                          <input
-                            type="text"
-                            value={artist}
-                            onChange={(e) => setArtist(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Artist name'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">
-                            Album Artist
-                          </label>
-                          <input
-                            type="text"
-                            value={albumArtist}
-                            onChange={(e) => setAlbumArtist(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className="block text-sm text-text-secondary mb-1">Album</label>
-                          <input
-                            type="text"
-                            value={album}
-                            onChange={(e) => setAlbum(e.target.value)}
-                            placeholder={
-                              isBatchEdit ? 'Leave empty to keep original' : 'Album name'
-                            }
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Genre</label>
-                          <input
-                            type="text"
-                            value={genre}
-                            onChange={(e) => setGenre(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Year</label>
-                          <input
-                            type="number"
-                            value={year}
-                            onChange={(e) => setYear(e.target.value)}
-                            placeholder="YYYY"
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Track #</label>
-                          <input
-                            type="number"
-                            value={trackNumber}
-                            onChange={(e) => setTrackNumber(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Disc #</label>
-                          <input
-                            type="number"
-                            value={discNumber}
-                            onChange={(e) => setDiscNumber(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-text-secondary mb-1">Composer</label>
-                          <input
-                            type="text"
-                            value={composer}
-                            onChange={(e) => setComposer(e.target.value)}
-                            className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm text-text-secondary mb-1">Comment</label>
-                        <textarea
-                          value={comment}
-                          onChange={(e) => setComment(e.target.value)}
-                          rows={3}
-                          className="w-full panel rounded-xl px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
-                        />
-                      </div>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 mr-2" />
+                      Save Changes
                     </>
                   )}
+                </Button>
+              </div>
+            </div>
+            {clipboardMessage && (
+              <div className="px-6 pb-2 text-xs text-text-secondary">{clipboardMessage}</div>
+            )}
 
-                  {activeTab === 'extended' && (
-                    <div className="panel rounded-2xl p-4 border border-white/10 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-text-primary">Extended tags</p>
-                          <p className="text-xs text-text-muted">Vorbis / ID3v2 custom fields</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleAddExtendedField}
-                          className="flex items-center gap-2 rounded-full text-text-primary hover:text-white text-sm h-8 px-3 hover:bg-white/10"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Add field
-                        </Button>
-                      </div>
-                      <div className="border border-white/10 rounded-xl overflow-hidden">
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-white/5 text-text-subtle text-xs font-bold uppercase">
-                            <tr>
-                              <th className="p-3 w-1/3">Field</th>
-                              <th className="p-3">Value</th>
-                              <th className="p-3 w-10" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-white/5">
-                            {extendedFields.length === 0 ? (
-                              <tr>
-                                <td colSpan={3} className="p-6 text-center text-text-muted text-sm">
-                                  No extended tags found.
-                                </td>
-                              </tr>
-                            ) : (
-                              extendedFields.map((tag, i) => (
-                                <tr key={`${tag.key}-${i}`} className="group hover:bg-white/5">
-                                  <td className="p-3">
-                                    <input
-                                      value={tag.key}
-                                      onChange={(e) =>
-                                        handleUpdateExtendedField(i, 'key', e.target.value)
-                                      }
-                                      placeholder="FIELD NAME"
-                                      className="w-full bg-transparent border border-white/10 rounded-lg px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                    />
-                                  </td>
-                                  <td className="p-3">
-                                    <input
-                                      value={tag.value}
-                                      onChange={(e) =>
-                                        handleUpdateExtendedField(i, 'value', e.target.value)
-                                      }
-                                      placeholder="Value"
-                                      className="w-full bg-transparent border border-white/10 rounded-lg px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                    />
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <IconButton
-                                      className="p-1 text-text-muted hover:text-red-400 hover:bg-red-950/20 rounded-full"
-                                      onClick={() => handleRemoveExtendedField(i)}
-                                      aria-label="Remove field"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </IconButton>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p className="text-[11px] text-text-muted">
-                        These fields save alongside standard tags. Leave blank to keep current
-                        values.
-                      </p>
-                    </div>
-                  )}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left rail */}
+              <aside className="hidden lg:flex w-80 flex-col gap-6 p-6 border-r border-white/5 bg-background-elevated/60">
+                {hasTracks && (
+                  <TagEditorArtworkPanel
+                    previewUrl={coverPreviewUrl}
+                    onSelect={handleSelectCover}
+                    onKeyDown={handleCoverKeyDown}
+                    onDrop={handleCoverDrop}
+                    onPaste={handleCoverPaste}
+                    onRemove={handleRemoveCover}
+                  />
+                )}
 
-                  {activeTab === 'lyrics' && !isBatchEdit && (
-                    <div className="panel rounded-2xl p-4 border border-white/10">
-                      <LyricsEditor
-                        trackPath={trackPath}
-                        lyricsContent={lyricsContent}
-                        onChange={setLyricsContent}
-                        onSave={handleSaveLyrics}
-                        isSaving={isLyricsSaving}
+                {hasTracks && !isBatchEdit && tagInfo && <TagEditorFileInfo tagInfo={tagInfo} />}
+              </aside>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                {isLoading ? (
+                  <div
+                    className="flex items-center justify-center py-12"
+                    role="status"
+                    aria-label="Loading tags"
+                  >
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : !hasTracks ? (
+                  <div
+                    className="mx-auto max-w-lg rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"
+                    role="status"
+                  >
+                    No tracks selected. Close this editor and choose at least one track.
+                  </div>
+                ) : (
+                  <div className="space-y-6 max-w-3xl">
+                    <div className="lg:hidden">
+                      <TagEditorArtworkPanel
+                        previewUrl={coverPreviewUrl}
+                        onSelect={handleSelectCover}
+                        onKeyDown={handleCoverKeyDown}
+                        onDrop={handleCoverDrop}
+                        onPaste={handleCoverPaste}
+                        onRemove={handleRemoveCover}
                       />
-                      {lyricsError && <p className="text-xs text-red-400 mt-2">{lyricsError}</p>}
                     </div>
-                  )}
 
-                  {activeTab === 'lyrics' && isBatchEdit && (
-                    <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-text-muted text-sm">
-                      Lyrics editing is available when a single track is selected.
+                    {error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                        {error}
+                      </div>
+                    )}
+
+                    <MetadataClipboard onPaste={handlePasteMetadata} />
+
+                    {isBatchEdit && (
+                      <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg text-primary text-sm">
+                        Only filled fields will be applied to all selected tracks.
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      {(['standard', 'extended', 'lyrics'] as const).map((tab) => {
+                        const disabled = !hasTracks || (tab === 'lyrics' && isBatchEdit);
+                        return (
+                          <Button
+                            key={tab}
+                            variant={activeTab === tab ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => !disabled && setActiveTab(tab)}
+                            disabled={disabled}
+                            className={clsx(
+                              'rounded-full text-sm font-medium transition px-4 py-2 h-auto',
+                              activeTab === tab
+                                ? 'bg-white text-black hover:bg-white/90'
+                                : 'text-text-primary hover:text-white hover:bg-white/10',
+                              disabled && 'opacity-50 cursor-not-allowed',
+                            )}
+                          >
+                            {tab === 'standard'
+                              ? 'Standard Tags'
+                              : tab === 'extended'
+                                ? 'Extended Tags'
+                                : 'Lyrics'}
+                          </Button>
+                        );
+                      })}
                     </div>
-                  )}
-                </div>
-              )}
+
+                    <TagEditorMetadataForm
+                      activeTab={activeTab}
+                      isBatchEdit={isBatchEdit}
+                      title={title}
+                      setTitle={setTitle}
+                      artist={artist}
+                      setArtist={setArtist}
+                      album={album}
+                      setAlbum={setAlbum}
+                      albumArtist={albumArtist}
+                      setAlbumArtist={setAlbumArtist}
+                      year={year}
+                      setYear={setYear}
+                      trackNumber={trackNumber}
+                      setTrackNumber={setTrackNumber}
+                      discNumber={discNumber}
+                      setDiscNumber={setDiscNumber}
+                      genre={genre}
+                      setGenre={setGenre}
+                      composer={composer}
+                      setComposer={setComposer}
+                      comment={comment}
+                      setComment={setComment}
+                      extendedFields={extendedFields}
+                      onAddExtendedField={handleAddExtendedField}
+                      onUpdateExtendedField={handleUpdateExtendedField}
+                      onRemoveExtendedField={handleRemoveExtendedField}
+                    />
+
+                    {activeTab === 'lyrics' && tracks.length === 1 && (
+                      <div className="panel rounded-2xl p-4 border border-white/10">
+                        <LyricsEditor
+                          track={tracks[0]}
+                          lyricsContent={lyricsContent}
+                          onChange={setLyricsContent}
+                          onSave={handleSaveLyrics}
+                          isSaving={isLyricsSaving}
+                        />
+                        {lyricsError && <p className="text-xs text-red-400 mt-2">{lyricsError}</p>}
+                      </div>
+                    )}
+
+                    {activeTab === 'lyrics' && hasTracks && isBatchEdit && (
+                      <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-text-muted text-sm">
+                        Lyrics editing is available when a single track is selected.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     );
   },
 );

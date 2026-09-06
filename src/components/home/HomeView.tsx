@@ -32,7 +32,6 @@ import { clsx } from 'clsx';
 import {
   ArrowRight,
   Clock,
-  Disc3,
   Headphones,
   Maximize2,
   Music2,
@@ -42,20 +41,18 @@ import {
   SkipForward,
   Users,
 } from 'lucide-react';
-import { memo, useCallback, useMemo } from 'react';
-import { useShallow } from 'zustand/react/shallow';
+import { memo, type UIEvent, useCallback, useMemo } from 'react';
 
-import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumKey } from '../../lib/album-key';
 import { useRenderLog } from '../../lib/performance';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
 
-import { usePlayerStore } from '../../store/player-store';
-import { useSettingsStore } from '../../store/settings-store';
+import { CoverArtImage } from '../shared/CoverArtImage';
+
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { Button } from '../ui/button';
 import { AlbumIcon, TrackIcon } from '../ui/Icons';
+import { StatePanel } from '../ui/StatePanel';
 import {
   AlbumSpotlightCard,
   CardLyricsDisplay,
@@ -66,7 +63,8 @@ import {
 } from './HomeView.parts';
 import { useAnimatedCounter, useCoverTilt, useFinePointer } from './home-hooks';
 import type { HomeViewProps } from './homeTypes';
-import { useHomeLibraryModel } from './useHomeLibraryModel';
+import { useHomeAlbumDetailsLoader } from './useHomeAlbumDetails';
+import { useHomeViewModel } from './useHomeViewModel';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -85,30 +83,39 @@ export const HomeView = memo(
     isLibraryLoading = false,
     libraryError = null,
     onRetryLoad,
+    onScrollChange,
   }: HomeViewProps) => {
     useRenderLog('HomeView');
 
-    const { currentTrack, isPlaying } = usePlayerStore(
-      useShallow((s) => ({ currentTrack: s.currentTrack, isPlaying: s.isPlaying })),
-    );
-
-    const currentCoverArt = useCoverArt(
-      currentTrack?.filePath,
-      currentTrack?.hasCoverArt,
-      true,
-      'large',
-      currentTrack?.coverArtHash,
-    );
-    const currentCoverUrl = currentCoverArt ?? null;
+    const {
+      currentTrack,
+      isPlaying,
+      currentCoverUrl,
+      tracks,
+      libraryStats,
+      librarySecondaryError,
+      isLibrarySecondaryLoading,
+      retryLibrarySecondaryData,
+      albumTracksByKey,
+      albums,
+      playAlbum,
+      handleTogglePlay,
+      handlePrevious,
+      handleNext,
+    } = useHomeViewModel('home-view');
 
     const heroAccent = 'var(--hero-accent)';
     const heroGlow = 'var(--hero-glow)';
 
-    const { tracks, libraryStats, albumTracksByKey, albums, playAlbum } = useHomeLibraryModel();
-    const reducedEffects = useSettingsStore((s) => s.reducedEffects);
+    const reducedEffects = useEffectiveReducedEffects();
+    const handleScroll = useCallback(
+      (event: UIEvent<HTMLDivElement>) => onScrollChange?.(event.currentTarget.scrollTop > 8),
+      [onScrollChange],
+    );
     const hasFinePointer = useFinePointer();
     const interactiveOn = !reducedEffects && hasFinePointer;
     const coverTilt = useCoverTilt(interactiveOn);
+    const handleOpenAlbumDetails = useHomeAlbumDetailsLoader(onOpenAlbumDetails, 'home-view');
 
     const stats = useMemo(() => {
       if (libraryStats)
@@ -131,38 +138,13 @@ export const HomeView = memo(
     const animArtists = useAnimatedCounter(stats.uniqueArtists, 1500, reducedEffects);
     const animAlbums = useAnimatedCounter(stats.albumCount, 1500, reducedEffects);
 
-    const handleTogglePlay = useCallback(async () => {
-      if (!currentTrack) return;
-      try {
-        await toggleCurrentPlayback();
-      } catch (e) {
-        reportError('toggle failed', { source: 'home-view', error: e });
-      }
-    }, [currentTrack]);
-
-    const handlePrevious = useCallback(async () => {
-      try {
-        await playAdjacentTrack('previous');
-      } catch (e) {
-        reportError('previous failed', { source: 'home-view', error: e });
-      }
-    }, []);
-
-    const handleNext = useCallback(async () => {
-      try {
-        await playAdjacentTrack('next');
-      } catch (e) {
-        reportError('next failed', { source: 'home-view', error: e });
-      }
-    }, []);
-
     // -------------------------------------------------------------------------
     // Loading skeleton
     // -------------------------------------------------------------------------
 
     if (isLibraryLoading) {
       return (
-        <div className="h-full overflow-y-auto pb-32 custom-scrollbar">
+        <div className="h-full overflow-y-auto pb-32 custom-scrollbar" onScroll={handleScroll}>
           <div
             className="max-w-7xl mx-auto px-6 py-8 space-y-6 animate-pulse"
             role="status"
@@ -199,8 +181,8 @@ export const HomeView = memo(
 
     if (libraryError) {
       return (
-        <div className="h-full overflow-y-auto pb-32 custom-scrollbar">
-          <div className="max-w-2xl mx-auto px-6 py-20 text-center">
+        <div className="h-full overflow-y-auto pb-32 custom-scrollbar" onScroll={handleScroll}>
+          <div className="max-w-2xl mx-auto px-6 py-20 text-center" role="alert">
             <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-5 shadow-[0_0_24px_-8px_rgba(239,68,68,0.35)]">
               <Music2 className="w-7 h-7 text-red-400/70" />
             </div>
@@ -209,7 +191,7 @@ export const HomeView = memo(
             {onRetryLoad && (
               <Button
                 onClick={onRetryLoad}
-                className="rounded-full bg-gradient-to-b from-white/14 to-white/8 text-white hover:from-white/18 hover:to-white/10 active:scale-[0.97] h-10 px-5 font-medium transition-all duration-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                className="rounded-full bg-gradient-to-b from-white/14 to-white/8 text-white hover:from-white/18 hover:to-white/10 active:scale-[0.97] h-10 px-5 font-medium transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
               >
                 Retry
               </Button>
@@ -224,10 +206,28 @@ export const HomeView = memo(
     // -------------------------------------------------------------------------
 
     return (
-      <div className="h-full overflow-y-auto pb-32 custom-scrollbar relative">
+      <div
+        className="h-full overflow-y-auto pb-32 custom-scrollbar relative"
+        onScroll={handleScroll}
+      >
         {/* Full-viewport ambient: `LiquidHomeAmbientBackdrop` in App (under TopBar). */}
 
         <div className="max-w-7xl mx-auto px-6 py-8 relative z-10">
+          {librarySecondaryError && (
+            <StatePanel
+              tone="warning"
+              role="alert"
+              title="Some library data is unavailable."
+              description={librarySecondaryError}
+              action={{
+                label: isLibrarySecondaryLoading ? 'Retrying...' : 'Retry library data',
+                onClick: retryLibrarySecondaryData,
+                disabled: isLibrarySecondaryLoading,
+              }}
+              className="mb-6 rounded-xl p-3"
+            />
+          )}
+
           {/* ===============================================================
             HERO PLAYER CARD
             Layout: cover art | track info + transport
@@ -303,7 +303,7 @@ export const HomeView = memo(
                     {onOpenFullPlayer && (
                       <Button
                         onClick={onOpenFullPlayer}
-                        className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-all duration-200"
+                        className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                         aria-label="Fullscreen player"
                         title="Fullscreen"
                         accentColor={heroAccent}
@@ -317,9 +317,9 @@ export const HomeView = memo(
                   <HeroStatusBar />
 
                   {/* Main layout */}
-                  <div className="relative z-10 flex items-start gap-6 p-6 sm:gap-7 sm:p-7 lg:gap-8 lg:p-8">
+                  <div className="relative z-10 flex flex-col items-stretch gap-5 p-5 sm:flex-row sm:items-start sm:gap-7 sm:p-7 lg:gap-8 lg:p-8">
                     {/* Cover art with 3D tilt and ambient bloom */}
-                    <div className="relative shrink-0 isolate">
+                    <div className="relative mx-auto shrink-0 isolate sm:mx-0">
                       {/* Ambient bloom behind the cover */}
                       <div
                         className="pointer-events-none absolute left-1/2 top-1/2 h-[130%] w-[130%] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[8px] -z-10 transition-[background,opacity] duration-700"
@@ -350,34 +350,30 @@ export const HomeView = memo(
                           0 0 0 0 rgba(255,255,255,0.08)`,
                         }}
                       >
-                        {currentCoverUrl ? (
-                          <>
-                            <img
-                              src={currentCoverUrl}
-                              alt={currentTrack.album}
-                              className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
-                              draggable={false}
-                            />
-                            <span
-                              aria-hidden
-                              className="pointer-events-none absolute inset-x-2 top-0 z-[1] h-px rounded-full opacity-70"
-                              style={{
-                                background:
-                                  'linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent)',
-                              }}
-                            />
-                          </>
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-white/[0.04] text-white/20">
-                            <Disc3 className="h-12 w-12" />
-                          </div>
-                        )}
+                        <CoverArtImage
+                          track={currentTrack}
+                          className="h-full w-full"
+                          imgClassName="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+                          roundedClassName="rounded-[20px]"
+                          iconClassName="h-12 w-12"
+                          alt={currentTrack.album}
+                          lazy={false}
+                          size="large"
+                        />
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-x-2 top-0 z-[20] h-px rounded-full opacity-70"
+                          style={{
+                            background:
+                              'linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent)',
+                          }}
+                        />
                       </div>
                     </div>
 
                     {/* Track info + transport */}
                     <div
-                      className="flex flex-col min-w-0 flex-1 py-0.5"
+                      className="flex w-full min-w-0 flex-1 flex-col py-0.5"
                       style={{ minHeight: 'clamp(174px, 19.5vw, 256px)' }}
                     >
                       {/* NOW PLAYING label with equalizer bars */}
@@ -396,26 +392,19 @@ export const HomeView = memo(
 
                       {/* Title */}
                       <h1
-                        className="font-display font-extrabold uppercase text-white line-clamp-2 leading-[0.88] tracking-[-0.015em]"
-                        style={{ fontSize: 'clamp(1.85rem, 4.1vw, 3.75rem)' }}
+                        className="font-display font-extrabold uppercase text-white line-clamp-2 leading-[0.88] tracking-normal text-[1.85rem] md:text-[3rem] lg:text-[3.75rem]"
                         title={currentTrack.title}
                       >
                         {currentTrack.title}
                       </h1>
 
                       {/* Artist */}
-                      <p
-                        className="mt-2 font-display font-semibold text-white/90 truncate"
-                        style={{ fontSize: 'clamp(1.05rem, 1.75vw, 1.42rem)' }}
-                      >
+                      <p className="mt-2 font-display font-semibold text-white/90 truncate text-[1.05rem] md:text-[1.25rem] lg:text-[1.42rem]">
                         {currentTrack.artist}
                       </p>
 
                       {/* Album */}
-                      <p
-                        className="mt-0.5 font-medium text-white/34 truncate"
-                        style={{ fontSize: 'clamp(0.82rem, 1.05vw, 0.97rem)' }}
-                      >
+                      <p className="mt-0.5 font-medium text-white/34 truncate text-[0.82rem] md:text-[0.9rem] lg:text-[0.97rem]">
                         {currentTrack.album}
                       </p>
 
@@ -429,7 +418,7 @@ export const HomeView = memo(
                         {/* Previous */}
                         <Button
                           onClick={handlePrevious}
-                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-all duration-200"
+                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                           aria-label="Previous track"
                           accentColor={heroAccent}
                         >
@@ -439,7 +428,7 @@ export const HomeView = memo(
                         {/* Play / Pause */}
                         <Button
                           onClick={handleTogglePlay}
-                          className="h-[60px] w-[60px] rounded-full inline-flex items-center justify-center shrink-0 bg-white text-black transition-all duration-300"
+                          className="h-[60px] w-[60px] rounded-full inline-flex items-center justify-center shrink-0 bg-white text-black transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]"
                           style={{
                             boxShadow: `
                             0 12px 40px -10px color-mix(in oklch, var(--hero-accent) 40%, transparent),
@@ -461,7 +450,7 @@ export const HomeView = memo(
                         {/* Next */}
                         <Button
                           onClick={handleNext}
-                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-all duration-200"
+                          className="h-11 w-11 rounded-full inline-flex items-center justify-center shrink-0 bg-black/38 text-white/65 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                           aria-label="Next track"
                           accentColor={heroAccent}
                         >
@@ -499,15 +488,13 @@ export const HomeView = memo(
                       style={{ background: heroAccent, opacity: 0.8 }}
                     />
                   </span>
-                  <h2 className="text-[17px] font-semibold text-white tracking-[-0.01em]">
-                    Albums
-                  </h2>
+                  <h2 className="text-[17px] font-semibold text-white tracking-normal">Albums</h2>
                 </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={onNavigateToLibrary}
-                  className="flex items-center gap-1.5 text-sm text-white/35 hover:text-white/72 active:scale-[0.97] transition-all duration-200"
+                  className="flex items-center gap-1.5 text-sm text-white/35 hover:text-white/72 active:scale-[0.97] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
                 >
                   View all <ArrowRight className="w-3.5 h-3.5" />
                 </Button>
@@ -531,7 +518,7 @@ export const HomeView = memo(
                       interactiveSpotlight={interactiveOn}
                       staggerIndex={0}
                       reducedEffects={reducedEffects}
-                      onOpenAlbumDetails={onOpenAlbumDetails}
+                      onOpenAlbumDetails={handleOpenAlbumDetails}
                       onPlayAlbum={playAlbum}
                     />
                   </div>
@@ -549,7 +536,7 @@ export const HomeView = memo(
                         interactiveSpotlight={interactiveOn}
                         staggerIndex={idx + 1}
                         reducedEffects={reducedEffects}
-                        onOpenAlbumDetails={onOpenAlbumDetails}
+                        onOpenAlbumDetails={handleOpenAlbumDetails}
                         onPlayAlbum={playAlbum}
                       />
                     ))}
@@ -569,7 +556,7 @@ export const HomeView = memo(
                     interactiveSpotlight={interactiveOn}
                     staggerIndex={idx}
                     reducedEffects={reducedEffects}
-                    onOpenAlbumDetails={onOpenAlbumDetails}
+                    onOpenAlbumDetails={handleOpenAlbumDetails}
                     onPlayAlbum={playAlbum}
                   />
                 ))}
@@ -639,7 +626,7 @@ export const HomeView = memo(
               </p>
               <Button
                 onClick={onNavigateToFolders}
-                className="rounded-full bg-white text-black hover:bg-white/90 active:scale-[0.97] font-semibold h-12 px-6 inline-flex items-center gap-2 transition-all duration-200"
+                className="rounded-full bg-white text-black hover:bg-white/90 active:scale-[0.97] font-semibold h-12 px-6 inline-flex items-center gap-2 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
               >
                 Add Folders <ArrowRight className="w-4 h-4" />
               </Button>

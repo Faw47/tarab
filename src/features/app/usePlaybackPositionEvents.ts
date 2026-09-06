@@ -1,6 +1,13 @@
 import { type MutableRefObject, useRef } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
+import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';
+import { isCurrentPlaybackGeneration } from './playback-generation';
+
+interface PlaybackPositionEventPayload {
+  generation: number;
+  position: number;
+}
 
 export function usePlaybackPositionEvents({
   scheduleSessionSave,
@@ -13,10 +20,12 @@ export function usePlaybackPositionEvents({
 }) {
   const lastUiPositionRef = useRef<{ time: number; pos: number }>({ time: 0, pos: 0 });
 
-  useTauriEvent<number>(
+  useTauriEvent<PlaybackPositionEventPayload>(
     'playback-position',
     (event) => {
-      const pos = event.payload;
+      if (!isCurrentPlaybackGeneration(event.payload)) return;
+      const pos = event.payload.position;
+      if (!Number.isFinite(pos)) return;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const last = lastUiPositionRef.current;
       const { setCurrentTime } = usePlayerStore.getState();
@@ -33,19 +42,29 @@ export function usePlaybackPositionEvents({
       }
     },
     [scheduleSessionSave],
-    (error) => console.error('Failed to setup playback position listener:', error),
+    (error) =>
+      reportError('Failed to setup playback position listener', {
+        source: 'playback-position-events',
+        error,
+      }),
   );
 
-  useTauriEvent<number>(
+  useTauriEvent<PlaybackPositionEventPayload>(
     'playback-seeked',
     (event) => {
-      const pos = Math.max(0, event.payload);
+      if (!isCurrentPlaybackGeneration(event.payload)) return;
+      const pos = Math.max(0, event.payload.position);
+      if (!Number.isFinite(pos)) return;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       usePlayerStore.getState().setCurrentTime(pos);
       lastUiPositionRef.current = { time: now, pos };
       scheduleSessionSave(true);
     },
     [scheduleSessionSave],
-    (error) => console.error('Failed to setup playback seek listener:', error),
+    (error) =>
+      reportError('Failed to setup playback seek listener', {
+        source: 'playback-position-events',
+        error,
+      }),
   );
 }

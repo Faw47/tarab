@@ -27,11 +27,13 @@ use windows::{
     Storage::Streams::RandomAccessStreamReference,
 };
 
+type EventHandler = Arc<Mutex<Box<dyn Fn(MediaControlEvent) + Send>>>;
+
 pub struct WindowsMediaController {
     #[cfg(target_os = "windows")]
     media_player: Option<MediaPlayer>,
     controls: Option<SystemMediaTransportControls>,
-    event_handler: Option<Arc<Mutex<Box<dyn Fn(MediaControlEvent) + Send>>>>,
+    event_handler: Option<EventHandler>,
     metadata: Option<MediaMetadata>,
     playback_info: Option<PlaybackInfo>,
 }
@@ -176,6 +178,21 @@ impl super::MediaController for WindowsMediaController {
 
             self.setup_button_handlers()?;
         }
+        Ok(())
+    }
+
+    fn disable_session(&mut self) -> Result<(), Box<dyn StdError>> {
+        #[cfg(target_os = "windows")]
+        if let Some(controls) = &self.controls {
+            controls.SetIsEnabled(false)?;
+        }
+        self.controls = None;
+        #[cfg(target_os = "windows")]
+        {
+            self.media_player = None;
+        }
+        self.metadata = None;
+        self.playback_info = None;
         Ok(())
     }
 
@@ -342,6 +359,10 @@ impl super::MediaController for WindowsMediaController {
         Ok(())
     }
 
+    fn set_volume(&mut self, _volume: f64) -> Result<(), Box<dyn StdError>> {
+        Ok(())
+    }
+
     fn clear_metadata(&mut self) -> Result<(), Box<dyn StdError>> {
         #[cfg(target_os = "windows")]
         {
@@ -360,10 +381,6 @@ impl super::MediaController for WindowsMediaController {
 
     fn set_event_handler(&mut self, handler: Box<dyn Fn(MediaControlEvent) + Send>) {
         self.event_handler = Some(Arc::new(Mutex::new(handler)));
-        #[cfg(target_os = "windows")]
-        {
-            let _ = self.setup_button_handlers();
-        }
     }
 
     fn get_metadata(&self) -> Result<Option<MediaMetadata>, Box<dyn StdError>> {
@@ -461,7 +478,7 @@ impl super::MediaController for WindowsMediaController {
                     return Ok(Some(PlaybackInfo {
                         status,
                         shuffle: is_shuffle,
-                        repeat_mode: repeat_mode,
+                        repeat_mode,
                         playback_rate,
                         position: 0.0, // Will be set by get_position
                     }));

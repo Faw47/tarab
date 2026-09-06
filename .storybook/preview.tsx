@@ -1,11 +1,13 @@
 import type { Decorator, Preview } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { GlassSystemProvider } from '../src/components/ui/liquid-glass';
 import '../src/index.css';
 import { type AppTheme, useSettingsStore } from '../src/store/settings-store';
 
 const withTheme: Decorator = (Story, context) => {
   const theme = (context.globals.theme ?? 'liquid-glass') as AppTheme;
+  const isFullscreen = context.parameters.layout === 'fullscreen';
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -20,11 +22,19 @@ const withTheme: Decorator = (Story, context) => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-[var(--background)] p-6 text-[var(--foreground)]">
-        <div className="mx-auto max-w-5xl">
-          <Story />
+      <GlassSystemProvider theme={theme} reducedEffects={false}>
+        <div
+          className={
+            isFullscreen
+              ? 'min-h-screen bg-[var(--background)] text-[var(--foreground)]'
+              : 'min-h-screen bg-[var(--background)] p-6 text-[var(--foreground)]'
+          }
+        >
+          <div className={isFullscreen ? undefined : 'mx-auto max-w-5xl'}>
+            <Story />
+          </div>
         </div>
-      </div>
+      </GlassSystemProvider>
     </QueryClientProvider>
   );
 };

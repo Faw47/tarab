@@ -1,10 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useCallback, useState } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { reportError } from '../../lib/report-error';
-import { getPlaylistsDataPath, resetPlaylistsData } from '../../lib/tauri-commands';
+import { resetPlaylistsData, revealPlaylistsDataFolder } from '../../lib/tauri-commands';
 import { playlistKeys } from '../playlists/queryKeys';
 import type { PlaylistRepairState } from './app-state-types';
 
@@ -83,8 +82,7 @@ export function usePlaylistRepair({ queryClient, setConfirmDialog }: UsePlaylist
 
   const handleOpenPlaylistsDataFolder = useCallback(async () => {
     try {
-      const dataPath = await getPlaylistsDataPath();
-      await revealItemInDir(dataPath);
+      await revealPlaylistsDataFolder();
     } catch (error) {
       reportError('Failed to open playlists data folder', { source: 'app', error });
     }

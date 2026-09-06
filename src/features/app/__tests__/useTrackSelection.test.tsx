@@ -63,22 +63,17 @@ describe('useTrackSelection', () => {
     expect(result.current.selectedTracks).toEqual([albumTrack]);
   });
 
-  it('opens playlist picker with unique track ids and closes context menu', () => {
+  it('keeps a right-clicked multi-selection and replaces an unrelated selection', () => {
     const { result } = renderSelection();
+    const outsideSelection = makeTrack('outside');
 
+    act(() => result.current.handleSelectionChange(libraryTracks));
     act(() => result.current.handleTrackContextMenu(libraryTracks[0], { x: 10, y: 20 }));
-    act(() =>
-      result.current.openPlaylistPicker([libraryTracks[0], libraryTracks[0], libraryTracks[1]]),
-    );
+    expect(result.current.selectedTracks).toEqual(libraryTracks);
 
-    expect(result.current.showPlaylistPicker).toBe(true);
-    expect(result.current.playlistPickerTrackIds).toEqual(['one', 'two']);
-    expect(result.current.contextMenuPosition).toBeNull();
-    expect(result.current.contextMenuTrack).toBeNull();
-
-    act(() => result.current.closePlaylistPicker());
-    expect(result.current.showPlaylistPicker).toBe(false);
-    expect(result.current.playlistPickerTrackIds).toEqual([]);
+    act(() => result.current.handleTrackContextMenu(outsideSelection, { x: 30, y: 40 }));
+    expect(result.current.selectedTracks).toEqual([outsideSelection]);
+    expect(result.current.contextMenuTrack).toEqual(outsideSelection);
   });
 
   it('reveals selected tracks in the library search', () => {

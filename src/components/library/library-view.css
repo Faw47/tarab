@@ -1,6 +1,14 @@
 /* ─── Base layout ─────────────────────────────────────────────────────────── */
 
 .library-v2-root {
+  --library-glass-border: rgba(255, 255, 255, 0.08);
+  --library-glass-border-faint: rgba(255, 255, 255, 0.04);
+  --library-glass-surface: rgba(255, 255, 255, 0.03);
+  --library-glass-surface-faint: rgba(255, 255, 255, 0.012);
+  --library-glass-surface-raised: rgba(255, 255, 255, 0.045);
+  --library-glass-highlight: rgba(255, 255, 255, 0.1);
+  --library-glass-hover: rgba(255, 255, 255, 0.08);
+  --library-glass-shadow: rgba(8, 6, 4, 0.78);
   position: relative;
   height: 100%;
   overflow-y: auto;
@@ -8,6 +16,10 @@
   isolation: isolate;
   display: flex;
   flex-direction: column;
+}
+
+.library-list-mobile-meta {
+  display: none;
 }
 
 /* Liquid + icon rail: tuck content slightly; keep left edges visually continuous with the rail (no accent border). */
@@ -18,9 +30,9 @@
 .library-v2-root.library-neo-shell {
   padding: 0;
   overflow: hidden;
-  /* Match root neo dot matrix (neobrutalism.css): 18px, #e9e9e9 / #b0b0b0 */
-  background-color: #e9e9e9;
-  background-image: radial-gradient(#b0b0b0 1.2px, transparent 1.2px);
+  /* Match the tokenized root Neo dot matrix: 18px, --neo-canvas / --neo-canvas-dot */
+  background-color: var(--neo-canvas);
+  background-image: radial-gradient(var(--neo-canvas-dot) 1.2px, transparent 1.2px);
   background-size: 18px 18px;
 }
 
@@ -132,11 +144,11 @@
 .library-v2-error-shell,
 .library-v2-empty-wrap {
   border-radius: 1.15rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--library-glass-border);
+  background: var(--library-glass-surface);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 18px 34px -28px rgba(8, 6, 4, 0.78);
+    inset 0 1px 0 var(--library-glass-highlight),
+    0 18px 34px -28px var(--library-glass-shadow);
   backdrop-filter: blur(15px) saturate(1.3);
   -webkit-backdrop-filter: blur(15px) saturate(1.3);
 }
@@ -290,8 +302,8 @@
   font-weight: 540;
   cursor: pointer;
   transition:
-    color 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    background-color 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    color var(--motion-standard) var(--motion-ease-standard),
+    background-color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab:hover {
@@ -333,7 +345,7 @@
 
 .library-v2-tab-icon {
   color: currentColor;
-  transition: color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab.is-active .library-v2-tab-icon {
@@ -353,7 +365,7 @@
  * At 0.62rem on 1x DPI screens these were sub-9px — below comfortable legibility.
  */
 .library-v2-tab-count {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 0.1rem 0.45rem;
@@ -362,15 +374,80 @@
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.65);
   transition:
-    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    background-color var(--motion-standard) var(--motion-ease-standard),
+    color var(--motion-standard) var(--motion-ease-standard),
+    border-color var(--motion-standard) var(--motion-ease-standard);
 }
 
 .library-v2-tab.is-active .library-v2-tab-count {
   background: rgba(255, 255, 255, 0.18);
   color: rgba(255, 255, 255, 0.95);
   border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Neo Tab Overrides */
+.library-neo-shell .library-v2-tablist {
+  background: var(--neo-paper);
+  border: 2px solid var(--neo-ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 0 var(--neo-ink);
+  padding: 0;
+  gap: 0;
+}
+
+.library-neo-shell .library-v2-tabs-pill {
+  background: var(--neo-utility-hover);
+  border: 2px solid var(--neo-ink);
+  border-radius: 0;
+  box-shadow: none;
+  top: -2px;
+  bottom: -2px;
+  z-index: 0;
+}
+
+.library-neo-shell .library-v2-tabs-pill::before {
+  display: none;
+}
+
+.library-neo-shell .library-v2-tab {
+  color: var(--neo-ink);
+  font-weight: 900;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  text-transform: uppercase;
+  border-radius: 0;
+  border-right: 2px solid var(--neo-ink);
+  padding: 0.5rem 1rem;
+}
+
+.library-neo-shell .library-v2-tab:last-child {
+  border-right: none;
+}
+
+.library-neo-shell .library-v2-tab:hover {
+  background: transparent;
+  color: var(--neo-ink);
+}
+
+.library-neo-shell .library-v2-tab.is-active {
+  color: var(--neo-ink);
+}
+
+.library-neo-shell .library-v2-tab.is-active::before {
+  display: none;
+}
+
+.library-neo-shell .library-v2-tab.is-active .library-v2-tab-icon {
+  color: var(--neo-ink);
+}
+
+.library-neo-shell .library-v2-tab-count {
+  background: var(--neo-paper);
+  border: 1px solid var(--neo-ink);
+  color: var(--neo-ink);
+  padding: 0 0.25rem;
+  border-radius: 4px;
 }
 
 .library-view-mode-selector {
@@ -514,11 +591,23 @@
 }
 
 .library-v2-detail-title {
-  font-size: clamp(1.2rem, 2.2vw, 1.82rem);
-  letter-spacing: -0.02em;
+  font-size: 1.2rem;
+  letter-spacing: 0;
   line-height: 1.08;
   font-weight: 740;
   color: var(--type-primary);
+}
+
+@media (min-width: 768px) {
+  .library-v2-detail-title {
+    font-size: 1.5rem;
+  }
+}
+
+@media (min-width: 1200px) {
+  .library-v2-detail-title {
+    font-size: 1.82rem;
+  }
 }
 
 .library-v2-detail-subtitle {
@@ -567,10 +656,10 @@
   gap: 0.82rem;
   border-radius: 1.4rem;
   padding: 0.6rem;
-  background: rgba(255, 255, 255, 0.012);
+  background: var(--library-glass-surface-faint);
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--library-glass-border-faint);
 }
 
 .library-v2-root.library-v2-root--icon-rail:not(.library-neo-shell) .library-v2-results-pane {
@@ -694,6 +783,84 @@
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
 }
 
+/* Albums begin with the same featured-first composition used by Home. The
+ * initial nine stay in normal document flow so the lead card can span two
+ * columns; larger collections continue in the virtualized archive below. */
+.library-v2-albums-layout {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.8rem;
+  padding-bottom: 1.4rem;
+}
+
+.library-v2-albums-showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.library-v2-albums-showcase > .library-v2-album-featured-span {
+  grid-column: span 2;
+  min-height: 100%;
+}
+
+.library-v2-albums-archive {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.library-v2-albums-archive-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-inline: 0.35rem;
+}
+
+.library-v2-albums-archive-heading h3 {
+  color: var(--type-primary);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.library-v2-albums-archive-heading span {
+  color: color-mix(in oklch, var(--type-secondary) 56%, transparent);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-v2-albums-archive-grid {
+  min-height: min(46rem, 62vh);
+}
+
+.library-v2-albums-load-more {
+  align-self: center;
+  min-height: 2.35rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--library-glass-border);
+  border-radius: 9999px;
+  background: var(--library-glass-surface-raised);
+  color: color-mix(in oklch, var(--type-secondary) 82%, white);
+  font-size: 0.74rem;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 120ms ease;
+}
+
+.library-v2-albums-load-more:hover {
+  background: var(--library-glass-hover);
+  color: var(--type-primary);
+}
+
+.library-v2-albums-load-more:active {
+  transform: scale(0.97);
+}
+
 .library-v2-album-featured-layout {
   display: flex;
   min-height: 160px;
@@ -702,6 +869,15 @@
 .library-v2-album-featured-media {
   flex: 0 0 160px;
   width: 160px;
+}
+
+.library-v2-albums-showcase .library-v2-album-featured-layout {
+  min-height: 100%;
+}
+
+.library-v2-albums-showcase .library-v2-album-featured-media {
+  flex-basis: 50%;
+  width: 50%;
 }
 
 /* ─── Track & album tiles ─────────────────────────────────────────────────
@@ -1104,7 +1280,84 @@
   min-width: 6.4rem;
 }
 
+/* Neo loading and error states keep their mechanical contrast outside LibraryShell. */
+.library-neo-state-wrap {
+  min-height: 100%;
+  background-color: var(--neo-muted);
+  background-image: radial-gradient(var(--neo-canvas-dot) 1.2px, transparent 1.2px);
+  background-size: 18px 18px;
+  color: var(--neo-ink);
+}
+
+.library-neo-loading-shell,
+.library-neo-error-shell {
+  border: 2px solid var(--neo-ink);
+  border-radius: 0;
+  background: var(--neo-paper);
+  box-shadow: var(--neo-shadow-md);
+  color: var(--neo-ink);
+}
+
+.library-neo-loading-shell {
+  gap: 0.75rem;
+}
+
+.library-neo-loading-line {
+  border: 2px solid var(--neo-ink);
+  border-radius: 0;
+  background: var(--neo-panel);
+  animation: library-v2-pulse 1.4s ease-in-out infinite;
+}
+
+.library-neo-error-shell h2 {
+  color: var(--neo-ink);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.library-neo-error-shell p {
+  color: var(--neo-ink);
+}
+
+.library-neo-error-shell button {
+  border: 2px solid var(--neo-ink);
+  border-radius: 0;
+  background: var(--neo-sage);
+  box-shadow: var(--neo-shadow-sm);
+  color: var(--neo-ink);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.library-neo-error-shell button:hover {
+  background: var(--neo-utility-hover);
+}
+
+.library-neo-error-shell button:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
 /* ─── Focus rings ────────────────────────────────────────────────────────── */
+.library-v2-card-keyboard-action {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.library-v2-card-keyboard-action:focus-visible {
+  opacity: 1;
+  outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+  outline-offset: -2px;
+}
 
 .library-v2-sort:focus-within,
 .library-v2-utility:focus-visible,
@@ -1146,6 +1399,10 @@
     grid-template-columns: repeat(auto-fill, minmax(9.7rem, 1fr));
   }
 
+  .library-v2-albums-showcase {
+    grid-template-columns: repeat(auto-fill, minmax(9.7rem, 1fr));
+  }
+
   .library-v2-detail-header {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.62rem;
@@ -1163,6 +1420,19 @@
 }
 
 @media (max-width: 640px) {
+  .library-v2-albums-showcase > .library-v2-album-featured-span {
+    grid-column: 1 / -1;
+  }
+
+  .library-v2-albums-showcase .library-v2-album-featured-layout {
+    flex-direction: column;
+  }
+
+  .library-v2-albums-showcase .library-v2-album-featured-media {
+    width: 100%;
+    flex-basis: auto;
+  }
+
   .library-v2-toolbar {
     width: 100%;
   }
@@ -1179,6 +1449,77 @@
 
   .library-v2-view-mode {
     margin-left: auto;
+  }
+
+  .library-v2-root .library-list-head--albums,
+  .library-v2-root .library-list-head--artists,
+  .library-v2-root .library-list-head--tracks {
+    display: none;
+  }
+
+  .library-list-row--albums,
+  .library-list-row--artists {
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+    min-width: 0;
+  }
+
+  .library-list-row--tracks {
+    grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+    min-width: 0;
+  }
+
+  .library-v2-root .library-list-mobile-meta {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.68rem;
+    line-height: 1.15;
+  }
+
+  .library-list-row--albums > :nth-child(3),
+  .library-list-row--albums > :nth-child(4),
+  .library-list-row--artists > :nth-child(3),
+  .library-list-row--tracks > :nth-child(3),
+  .library-list-row--tracks > :nth-child(4) {
+    display: none;
+  }
+
+  .library-list-row--albums > :nth-child(2),
+  .library-list-row--artists > :nth-child(2),
+  .library-list-row--tracks > :nth-child(2) {
+    min-width: 0;
+  }
+
+  .library-list-row--albums > :nth-child(5),
+  .library-list-row--artists > :nth-child(4),
+  .library-list-row--tracks > :nth-child(5) {
+    min-width: 0;
+    padding-right: 0.25rem;
+  }
+
+  .library-list-row--tracks > :nth-child(5) {
+    gap: 0.35rem;
+  }
+
+  .library-list-row--tracks > :nth-child(5) > span:first-child {
+    display: none;
+  }
+
+  .library-list-row--tracks > :nth-child(2) .library-track-cover-play {
+    opacity: 1;
+  }
+
+  .library-list-row--tracks > :nth-child(5) > .library-track-actions-play {
+    display: none;
+  }
+
+  .library-list-row--albums > :nth-child(5) button,
+  .library-list-row--artists > :nth-child(4) button,
+  .library-list-row--tracks > :nth-child(5) button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 }
 
@@ -1252,6 +1593,16 @@
   transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+.library-v2-root .library-list-row--neo .library-track-cover-play {
+  background: var(--signal-play);
+}
+
+.library-card-overlay:focus-visible {
+  opacity: 1;
+  outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+  outline-offset: -2px;
+}
+
 .library-card-overlay.is-visible {
   opacity: 1;
 }
@@ -1288,4 +1639,35 @@
 .library-icon-action:hover {
   transform: scale(1.03);
   color: var(--type-primary);
+}
+
+.app-shell[data-compact="true"] .library-v2-page {
+  gap: 0.7rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-grid,
+.app-shell[data-compact="true"] .library-v2-albums-showcase {
+  gap: 0.75rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-grid {
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+
+.app-shell[data-compact="true"] .library-v2-albums-layout {
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-toolbar {
+  gap: 0.3rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-tile {
+  border-radius: 0.85rem;
+}
+
+.app-shell[data-compact="true"] .library-v2-track-meta {
+  gap: 0.1rem;
+  padding: 0.55rem 0.65rem 0.65rem;
 }

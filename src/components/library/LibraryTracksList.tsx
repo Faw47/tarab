@@ -21,14 +21,14 @@ export interface LibraryTracksListProps {
   onPlayTrack: (track: Track) => void;
   onRowClick: (track: Track, e: React.MouseEvent) => void;
   onContextMenu?: (track: Track, position: ContextMenuPosition) => void;
-  onShowFileInfo: (trackId: string) => void;
+  onShowFileInfo: (track: Track) => void;
   onDragStart: (e: React.DragEvent, track: Track) => void;
   formatSize: (size?: number) => string;
   getFormatLabel: (track: Track) => string;
   isLyricsMatch: ((id: string) => boolean) | boolean;
   getLyricsMatchLine: ((id: string) => string | null) | string | null;
   onRangeChange: (tracks: Track[], start: number, end: number) => void;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
   isNeo?: boolean;
 }
 
@@ -58,7 +58,7 @@ const TrackRow = memo(function TrackRow({
   onPlayTrack: (track: Track) => void;
   onContextMenu?: (track: Track, position: ContextMenuPosition) => void;
   onDragStart: (e: React.DragEvent, track: Track) => void;
-  onShowFileInfo: (trackId: string) => void;
+  onShowFileInfo: (track: Track) => void;
   getFormatLabel: (track: Track) => string;
   isLyricsMatch: ((id: string) => boolean) | boolean;
   getLyricsMatchLine: ((id: string) => string | null) | string | null;
@@ -94,8 +94,9 @@ const TrackRow = memo(function TrackRow({
       <div
         className={cn(
           isNeo
-            ? 'group -mt-[2px] grid cursor-pointer grid-cols-[58px_2.4fr_1.7fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none'
-            : 'library-list-row group grid grid-cols-[58px_2.4fr_1.7fr_1fr_132px] cursor-pointer',
+            ? 'library-list-row--tracks group -mt-[2px] grid cursor-pointer grid-cols-[58px_2.4fr_1.7fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none'
+            : 'library-list-row library-list-row--tracks group grid grid-cols-[58px_2.4fr_1.7fr_1fr_132px] cursor-pointer',
+          isNeo && 'library-list-row--neo',
           !isNeo && isActive && 'is-active',
           !isNeo && isSelected && 'is-selected',
           isNeo && isActive && 'border-l-4 border-l-black bg-[var(--signal-play)] z-10 relative',
@@ -108,9 +109,10 @@ const TrackRow = memo(function TrackRow({
             !isSelected &&
             'border-l-4 border-l-transparent bg-white hover:z-10 hover:bg-[var(--neo-panel)] z-0',
         )}
-        role="button"
+        role="option"
         tabIndex={0}
         aria-selected={isSelected}
+        data-virtual-list-focus-target
         aria-label={`${track.title} by ${track.artist}`}
         onClick={(e) => onRowClick(track, e)}
         onDoubleClick={() => onPlayTrack(track)}
@@ -144,9 +146,9 @@ const TrackRow = memo(function TrackRow({
         <div className="flex items-center justify-center">
           {isActive ? (
             isNeo ? (
-              <div className="flex items-center gap-1.5 border-2 border-black bg-black p-1 px-2 text-[var(--signal-play)] shadow-[4px_4px_0_0_#000]">
+              <div className="flex items-center gap-1.5 border-2 border-black bg-black p-1 px-2 text-[var(--signal-play)] shadow-[var(--neo-shadow-md)]">
                 <div className="w-1.5 h-1.5 rounded-full bg-[var(--signal-play)] animate-pulse shrink-0" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-white leading-none">
+                <span className="text-[12px] font-black uppercase tracking-widest text-white leading-none">
                   NOW
                 </span>
               </div>
@@ -182,21 +184,22 @@ const TrackRow = memo(function TrackRow({
               alt={track.album}
               viewTransitionName={`cover-${track.id}`}
             />
-            {!isNeo && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPlayTrack(track);
-                }}
-                className={cn(
-                  'absolute inset-0 flex items-center justify-center rounded-lg transition-opacity library-card-overlay',
-                  isSelected || isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                )}
-                aria-label={`Play ${track.title}`}
-              >
-                <Play className="w-4 h-4" fill="currentColor" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPlayTrack(track);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                'library-track-cover-play absolute inset-0 flex items-center justify-center transition-opacity library-card-overlay',
+                isNeo ? 'border-2 border-black text-black' : 'rounded-lg',
+                isSelected || isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+              )}
+              aria-label={`Play ${track.title}`}
+            >
+              <Play className="w-4 h-4" fill="currentColor" />
+            </button>
           </div>
 
           <div className="min-w-0 pr-2">
@@ -216,7 +219,7 @@ const TrackRow = memo(function TrackRow({
                 <span
                   className={cn(
                     isNeo
-                      ? 'border-2 border-black bg-[var(--signal-play)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
+                      ? 'border-2 border-black bg-[var(--signal-play)] px-1.5 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[var(--neo-shadow-md)]'
                       : 'library-lyrics-chip shrink-0',
                   )}
                 >
@@ -229,7 +232,7 @@ const TrackRow = memo(function TrackRow({
               className={cn(
                 'truncate mt-0.5',
                 isNeo
-                  ? 'text-[10px] font-bold uppercase tracking-[0.1em] text-black/60'
+                  ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60'
                   : 'text-xs text-text-muted',
               )}
             >
@@ -241,6 +244,14 @@ const TrackRow = memo(function TrackRow({
                 renderHighlightedText(track.artist, searchQuery, highlightClass)
               )}
             </div>
+            <span
+              className={cn(
+                'library-list-mobile-meta',
+                isNeo ? 'font-bold uppercase tracking-[0.08em] text-black/60' : 'text-text-muted',
+              )}
+            >
+              {renderHighlightedText(track.album, searchQuery, highlightClass)}
+            </span>
           </div>
         </div>
 
@@ -249,7 +260,7 @@ const TrackRow = memo(function TrackRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[11px] font-black uppercase tracking-[0.05em] text-black'
+                ? 'text-[12px] font-black uppercase tracking-[0.05em] text-black'
                 : 'text-sm text-text-secondary',
             )}
           >
@@ -259,8 +270,8 @@ const TrackRow = memo(function TrackRow({
             className={cn(
               'truncate',
               isNeo
-                ? 'text-[9px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5'
-                : 'text-[11px] text-text-muted',
+                ? 'text-[12px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5'
+                : 'text-[12px] text-text-muted',
             )}
           >
             {renderHighlightedText(track.artist, searchQuery, highlightClass)}
@@ -271,25 +282,25 @@ const TrackRow = memo(function TrackRow({
           <div className="truncate">
             <span
               className={cn(
-                'uppercase tracking-tight inline-flex',
+                'uppercase tracking-normal inline-flex',
                 isNeo
-                  ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                  : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                  ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[var(--neo-shadow-md)]'
+                  : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
               )}
             >
               {safeGetFormatLabel}
             </span>
           </div>
           {isNeo ? (
-            <div className="text-[9px] font-mono font-black tracking-widest text-[#555] mt-1.5 truncate uppercase">
+            <div className="text-[12px] font-mono font-black tracking-widest text-[var(--neo-micro-ink)] mt-1.5 truncate uppercase">
               {safeFormatSize} • {track.bitrate} KBPS
             </div>
           ) : (
             <>
-              <div className="text-[11px] text-text-muted mt-1 truncate">
+              <div className="text-[12px] text-text-muted mt-1 truncate">
                 {track.bitrate ? `${track.bitrate} kbps` : 'Unknown bitrate'}
               </div>
-              <div className="text-[10px] text-text-muted font-mono truncate">{safeFormatSize}</div>
+              <div className="text-[12px] text-text-muted font-mono truncate">{safeFormatSize}</div>
             </>
           )}
         </div>
@@ -309,11 +320,12 @@ const TrackRow = memo(function TrackRow({
               e.stopPropagation();
               onPlayTrack(track);
             }}
-            className={
+            className={cn(
               isNeo
                 ? NEO_PLAY_ICON_BUTTON_CLASS
-                : 'library-icon-action flex items-center justify-center p-2'
-            }
+                : 'library-icon-action flex items-center justify-center p-2',
+              'library-track-actions-play',
+            )}
             aria-label={`Play ${track.title}`}
           >
             <Play size={14} fill="currentColor" strokeWidth={isNeo ? 3 : 2} />
@@ -322,7 +334,7 @@ const TrackRow = memo(function TrackRow({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onShowFileInfo(track.id);
+              onShowFileInfo(track);
             }}
             className={
               isNeo
@@ -389,9 +401,9 @@ export const LibraryTracksList = memo(function LibraryTracksList({
     <div className={cn(!isNeo && 'library-list-shell', isNeo && 'h-full flex flex-col')}>
       <div
         className={cn(
-          'library-list-head grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
+          'library-list-head library-list-head--tracks grid-cols-[58px_2.4fr_1.7fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-black shadow-none',
         )}
       >
         <span className="text-center">#</span>
@@ -406,6 +418,12 @@ export const LibraryTracksList = memo(function LibraryTracksList({
         itemHeight={isNeo ? 72 : LIST_ROW_HEIGHT}
         overscan={8}
         className="relative h-full overflow-y-auto overflow-x-hidden custom-scrollbar pt-2"
+        containerProps={{
+          role: 'listbox',
+          'aria-label': 'Library tracks',
+          'aria-multiselectable': true,
+        }}
+        keyboardNavigation
         getItemKey={(track) => track.id}
         onRangeChange={handleRangeChange}
         onScrollNearEnd={onLoadMore}

@@ -1,16 +1,28 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useRef } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSmoothTime } from '../hooks/useSmoothTime';
+import { usePlayerStore } from '../store/player-store';
 
 type SmoothTimeContextValue = {
   getTimeSec: () => number;
   subscribe: (callback: (timeSec: number) => void) => () => void;
 };
 
-const SmoothTimeContext = createContext<SmoothTimeContextValue>({
-  getTimeSec: () => 0,
-  subscribe: () => () => {},
-});
+const defaultSmoothTimeContext: SmoothTimeContextValue = {
+  // Components rendered outside the application provider (for example, isolated
+  // Storybook stories) still receive coarse playback updates.
+  getTimeSec: () => usePlayerStore.getState().currentTime,
+  subscribe: (callback) => {
+    let previous = usePlayerStore.getState().currentTime;
+    return usePlayerStore.subscribe((state) => {
+      if (state.currentTime === previous) return;
+      previous = state.currentTime;
+      callback(state.currentTime);
+    });
+  },
+};
+
+const SmoothTimeContext = createContext<SmoothTimeContextValue>(defaultSmoothTimeContext);
 
 export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
   const getTimeMs = useSmoothTime();
@@ -65,13 +77,46 @@ export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
 // Hook to get current time imperatively (doesn't cause re-renders)
 export const useSmoothTimeValue = () => {
   const ctx = useContext(SmoothTimeContext);
-  // Return object with timeSec getter for backwards compatibility
-  // This is a stable reference that reads the current time on access
-  return {
-    get timeSec() {
-      return ctx.getTimeSec();
-    },
-  };
+  // Keep the object stable while reading the latest clock value through its getter.
+  return useMemo(
+    () => ({
+      get timeSec() {
+        return ctx.getTimeSec();
+      },
+    }),
+    [ctx],
+  );
+};
+
+const DEFAULT_TIME_STATE_THROTTLE_MS = 80;
+
+// React state is appropriate for small text/progress surfaces, but the hot
+// playback clock itself stays imperative so currentTime updates do not fan out
+// through the entire component tree.
+export const useSmoothTimeState = (throttleMs = DEFAULT_TIME_STATE_THROTTLE_MS): number => {
+  const ctx = useContext(SmoothTimeContext);
+  const [timeSec, setTimeSec] = useState(() => ctx.getTimeSec());
+  const lastUpdateRef = useRef({ timeSec, at: Number.NEGATIVE_INFINITY });
+
+  useEffect(() => {
+    const minimumInterval = Math.max(0, throttleMs);
+    const initialTime = ctx.getTimeSec();
+    lastUpdateRef.current = { timeSec: initialTime, at: Number.NEGATIVE_INFINITY };
+    setTimeSec(initialTime);
+
+    const unsubscribe = ctx.subscribe((nextTimeSec) => {
+      const at = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const previous = lastUpdateRef.current;
+      const jumped = Math.abs(nextTimeSec - previous.timeSec) > 0.25;
+      if (!jumped && at - previous.at < minimumInterval) return;
+      lastUpdateRef.current = { timeSec: nextTimeSec, at };
+      setTimeSec(nextTimeSec);
+    });
+
+    return unsubscribe;
+  }, [ctx, throttleMs]);
+
+  return timeSec;
 };
 
 // Hook to subscribe to time updates (for components that need to animate)

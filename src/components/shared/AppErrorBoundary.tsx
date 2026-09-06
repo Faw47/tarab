@@ -70,7 +70,7 @@ export class AppErrorBoundary extends React.Component<
             {this.state.error.message}
           </p>
           {this.state.stack && (
-            <p className="mt-2 text-[11px] text-red-200/70 font-mono whitespace-pre-wrap max-h-28 overflow-auto custom-scrollbar">
+            <p className="mt-2 text-[12px] text-red-200/70 font-mono whitespace-pre-wrap max-h-28 overflow-auto custom-scrollbar">
               {this.state.stack}
             </p>
           )}

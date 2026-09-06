@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pauseCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
-import { pausePlayback } from '../../lib/tauri-commands';
 
 interface UseSleepTimerOptions {
   setIsPlaying: (isPlaying: boolean) => void;
@@ -11,7 +11,7 @@ export function useSleepTimer({ setIsPlaying }: UseSleepTimerOptions) {
   const [sleepDeadline, setSleepDeadline] = useState<number | null>(null);
 
   const cancelSleepTimer = useCallback(() => {
-    if (sleepTimeoutRef.current) {
+    if (sleepTimeoutRef.current !== null) {
       clearTimeout(sleepTimeoutRef.current);
       sleepTimeoutRef.current = null;
     }
@@ -26,7 +26,7 @@ export function useSleepTimer({ setIsPlaying }: UseSleepTimerOptions) {
       setSleepDeadline(deadline);
       sleepTimeoutRef.current = setTimeout(async () => {
         try {
-          await pausePlayback();
+          await pauseCurrentPlayback();
         } catch (err) {
           reportError('Failed to pause for sleep timer', { source: 'app', error: err });
         } finally {
@@ -41,7 +41,7 @@ export function useSleepTimer({ setIsPlaying }: UseSleepTimerOptions) {
 
   useEffect(() => {
     return () => {
-      if (sleepTimeoutRef.current) {
+      if (sleepTimeoutRef.current !== null) {
         clearTimeout(sleepTimeoutRef.current);
       }
     };

@@ -1,8 +1,9 @@
+import { invalidateLibraryForMutation } from '../features/library/mutations';
 import { getLibraryQueryClient } from '../features/library/queryClientBridge';
 import { libraryKeys } from '../features/library/queryKeys';
 import { invalidateCoverArtCache } from '../hooks/useCoverArt';
 import { usePlayerStore } from '../store/player-store';
-import { useSettingsStore } from '../store/settings-store';
+
 import type { Track } from '../types';
 import { getPathBaseName } from './path-utils';
 import { reportError } from './report-error';
@@ -29,17 +30,14 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
   if (metadata.length === 0) return;
 
   let coverArtHashMap = new Map<string, string | null>();
-  const downloadArtwork = useSettingsStore.getState().downloadArtwork;
-  const artTargets = downloadArtwork
-    ? metadata.filter((m) => m.has_cover_art).map((m) => m.file_path)
-    : [];
-  if (downloadArtwork && artTargets.length > 0) {
-    try {
-      const hashed = await generateCoverArtHashes(artTargets);
-      coverArtHashMap = new Map(hashed);
-    } catch (err) {
-      reportError('Failed to refresh cover art hashes', { source: 'track-refresh', error: err });
-    }
+  try {
+    const hashed = await generateCoverArtHashes(
+      metadata.map((item) => item.file_path),
+      true,
+    );
+    coverArtHashMap = new Map(hashed);
+  } catch (err) {
+    reportError('Failed to refresh cover art hashes', { source: 'track-refresh', error: err });
   }
 
   const queryClient = getLibraryQueryClient();
@@ -64,7 +62,10 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
       artist: meta.artist || existing?.artist || 'Unknown Artist',
       albumArtist: meta.album_artist ?? existing?.albumArtist ?? null,
       album: meta.album || existing?.album || 'Unknown Album',
+      genre: meta.genre ?? null,
       year: meta.year,
+      trackNumber: meta.track_number,
+      discNumber: meta.disc_number,
       duration: meta.duration_secs,
       filePath: meta.file_path,
       hasCoverArt: !!meta.has_cover_art,
@@ -85,18 +86,22 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
     queryClient?.setQueryData(libraryKeys.tracks(), updatedTracks);
   }
 
-  if (playerState.queue.length > 0) {
-    const updatedQueue = playerState.queue.map(
-      (track) => updatedByPath.get(track.filePath) ?? track,
-    );
-    usePlayerStore.setState({ queue: updatedQueue });
-  }
-
-  if (playerState.currentTrack) {
-    const updated = updatedByPath.get(playerState.currentTrack.filePath);
-    if (updated) {
-      usePlayerStore.setState({ currentTrack: updated, duration: updated.duration });
-    }
+  if (playerState.queue.length > 0 || playerState.currentTrack) {
+    usePlayerStore.setState((state) => {
+      const refreshTrack = (track: Track): Track => {
+        const refreshed = updatedByPath.get(track.filePath);
+        return refreshed ? { ...track, ...refreshed, _queueId: track._queueId } : track;
+      };
+      const queue = state.queue.map(refreshTrack);
+      let currentTrack = state.currentTrack ? refreshTrack(state.currentTrack) : null;
+      if (currentTrack?._queueId) {
+        currentTrack =
+          queue.find((track) => track._queueId === currentTrack?._queueId) ?? currentTrack;
+      }
+      return currentTrack
+        ? { queue, currentTrack, duration: currentTrack.duration }
+        : { queue, currentTrack };
+    });
   }
 
   try {
@@ -114,7 +119,10 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
         artist: meta.artist || dbTrack?.artist || 'Unknown Artist',
         albumArtist: meta.album_artist ?? dbTrack?.albumArtist ?? null,
         album: meta.album || dbTrack?.album || 'Unknown Album',
+        genre: meta.genre ?? null,
         year: meta.year,
+        trackNumber: meta.track_number,
+        discNumber: meta.disc_number,
         duration: meta.duration_secs,
         filePath: meta.file_path,
         hasCoverArt: !!meta.has_cover_art,
@@ -124,10 +132,16 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
         lastPlayed: dbTrack?.lastPlayed ?? null,
         rating: dbTrack?.rating ?? null,
         blurhash: meta.blurhash || dbTrack?.blurhash || null,
+        fileFormat: meta.file_format,
+        bitrate: meta.bitrate,
+        sampleRate: meta.sample_rate,
+        fileSize: meta.file_size,
       };
     });
     await dbUpsertTracks(updates);
-    await queryClient?.invalidateQueries({ queryKey: libraryKeys.searchRoot() });
+    if (queryClient) {
+      await invalidateLibraryForMutation(queryClient, 'upsert');
+    }
   } catch (err) {
     reportError('Failed to persist refreshed metadata', { source: 'track-refresh', error: err });
   }

@@ -1,3 +1,4 @@
+import { Edit2 } from 'lucide-react';
 import { memo } from 'react';
 import { cn } from '@/lib/utils';
 import type { SelectionBarProps } from './library-view-types';
@@ -6,6 +7,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
   selectedCount,
   onSelectAll,
   onClearSelection,
+  onEditSelected,
   isNeo = false,
 }: SelectionBarProps) {
   if (selectedCount <= 0) {
@@ -16,7 +18,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
     <div
       className={cn(
         isNeo
-          ? 'flex flex-wrap items-center justify-between gap-3 px-3 md:px-5 py-3 border-[3px] border-black bg-[#A855F7] shadow-[4px_4px_0_0_#000] shrink-0'
+          ? 'flex flex-wrap items-center justify-between gap-3 px-3 md:px-5 py-3 border-[3px] border-[var(--neo-ink)] bg-[var(--signal-secondary)] shadow-[var(--neo-shadow-md)] shrink-0'
           : 'library-v2-selection',
       )}
     >
@@ -24,7 +26,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
         <span
           className={cn(
             isNeo
-              ? 'px-2 py-0.5 border-[2px] border-black bg-[var(--neo-panel)] text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[2px_2px_0_0_#000]'
+              ? 'px-2 py-0.5 border-[2px] border-[var(--neo-ink)] bg-[var(--neo-panel)] text-[12px] font-black uppercase tracking-[0.12em] text-[var(--neo-ink)] shadow-[var(--neo-shadow-xs)]'
               : '',
           )}
         >
@@ -40,13 +42,25 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
       <div
         className={cn(isNeo ? 'flex flex-wrap items-center gap-2' : 'library-v2-selection-actions')}
       >
+        {isNeo && onEditSelected && (
+          <button
+            type="button"
+            onClick={onEditSelected}
+            title={`Edit ${selectedCount} selected`}
+            aria-label={`Edit ${selectedCount} selected`}
+            className="inline-flex h-9 items-center justify-center gap-2 border-[2px] border-[var(--neo-ink)] bg-[var(--neo-panel)] px-3 text-[12px] font-black uppercase tracking-[0.08em] text-[var(--neo-ink)] shadow-[var(--neo-shadow-xs)] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer"
+          >
+            <Edit2 className="h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
+            <span>EDIT TAGS</span>
+          </button>
+        )}
         {onSelectAll && (
           <button
             type="button"
             onClick={onSelectAll}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-[var(--neo-panel)] px-3 text-[11px] font-black uppercase tracking-[0.08em] text-black shadow-[2px_2px_0_0_#000] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-[var(--neo-ink)] bg-[var(--neo-panel)] px-3 text-[12px] font-black uppercase tracking-[0.08em] text-[var(--neo-ink)] shadow-[var(--neo-shadow-xs)] transition-none hover:bg-[var(--neo-utility-hover)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >
@@ -59,7 +73,7 @@ export const LibrarySelectionBar = memo(function LibrarySelectionBar({
             onClick={onClearSelection}
             className={cn(
               isNeo
-                ? 'inline-flex h-9 items-center justify-center border-[2px] border-black bg-black px-3 text-[11px] font-black uppercase tracking-[0.08em] text-[#A855F7] shadow-[2px_2px_0_0_#FFF] shadow-black/80 transition-none hover:bg-[var(--signal-danger)] hover:text-black active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
+                ? 'inline-flex h-9 items-center justify-center border-[2px] border-[var(--neo-ink)] bg-[var(--neo-ink)] px-3 text-[12px] font-black uppercase tracking-[0.08em] text-[var(--signal-secondary)] shadow-[var(--neo-shadow-xs-paper)] transition-none hover:bg-[var(--signal-danger)] hover:text-[var(--neo-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer'
                 : '',
             )}
           >

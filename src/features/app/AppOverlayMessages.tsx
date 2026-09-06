@@ -36,11 +36,12 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
     <div className="absolute left-8 right-8 top-4 z-40 flex flex-col gap-3">
       {appError ? (
         <div
+          role="alert"
           className={cn(
             'flex items-start justify-between gap-4 p-4 text-sm',
             isNeo
-              ? 'rounded-none border-[3px] border-black bg-[#D88274] shadow-[6px_6px_0_0_#000]'
-              : 'rounded-2xl border border-red-400/40 bg-red-950/55 backdrop-blur-sm',
+              ? 'rounded-none border-[3px] border-black bg-[var(--state-error-surface)] shadow-[var(--neo-shadow-lg)]'
+              : 'rounded-2xl border border-[var(--state-error-border)] bg-[var(--state-error-surface)] text-[var(--state-error-ink)] backdrop-blur-sm',
           )}
         >
           <div>
@@ -48,13 +49,18 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
               className={cn(
                 isNeo
                   ? 'font-black uppercase tracking-[0.08em] text-black'
-                  : 'font-semibold text-red-100',
+                  : 'font-semibold text-[var(--state-error-ink)]',
               )}
             >
               {appError.message}
             </p>
             {appError.detail ? (
-              <p className={cn('mt-1', isNeo ? 'font-bold text-black' : 'text-red-200/85')}>
+              <p
+                className={cn(
+                  'mt-1',
+                  isNeo ? 'font-bold text-black' : 'text-[var(--state-error-ink)]',
+                )}
+              >
                 {appError.detail}
               </p>
             ) : null}
@@ -65,14 +71,14 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
             className={cn(
               'shrink-0',
               isNeo
-                ? 'rounded-none border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[var(--neo-muted)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
-                : 'text-red-100 hover:text-white',
+                ? 'rounded-none border-2 border-black bg-white text-black shadow-[var(--neo-shadow-xs)] hover:bg-[var(--neo-muted)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
+                : 'text-[var(--state-error-ink)] hover:text-[var(--type-primary)]',
             )}
             onClick={onDismissError}
             aria-label="Dismiss error"
           >
             <X
-              className={cn('h-4 w-4', isNeo ? 'text-black' : 'text-red-100')}
+              className={cn('h-4 w-4', isNeo ? 'text-black' : 'text-[var(--state-error-ink)]')}
               strokeWidth={isNeo ? 3 : undefined}
             />
           </IconButton>
@@ -81,11 +87,12 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
 
       {playlistRepair ? (
         <div
+          role="alert"
           className={cn(
             'flex flex-col gap-3 p-4 text-sm lg:flex-row lg:items-center lg:justify-between',
             isNeo
-              ? 'rounded-none border-[3px] border-black bg-[#DAB852] shadow-[6px_6px_0_0_#000]'
-              : 'rounded-2xl border border-amber-300/35 bg-amber-950/45 backdrop-blur-sm',
+              ? 'rounded-none border-[3px] border-black bg-[var(--state-warning-surface)] shadow-[var(--neo-shadow-lg)]'
+              : 'rounded-2xl border border-[var(--state-warning-border)] bg-[var(--state-warning-surface)] text-[var(--state-warning-ink)] backdrop-blur-sm',
           )}
         >
           <div>
@@ -93,15 +100,25 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
               className={cn(
                 isNeo
                   ? 'font-black uppercase tracking-[0.08em] text-black'
-                  : 'font-semibold text-amber-100',
+                  : 'font-semibold text-[var(--state-warning-ink)]',
               )}
             >
               {playlistWasRecovered ? 'Playlist data recovered' : 'Playlist data needs repair'}
             </p>
-            <p className={cn('mt-1', isNeo ? 'font-bold text-black' : 'text-amber-200/85')}>
+            <p
+              className={cn(
+                'mt-1',
+                isNeo ? 'font-bold text-black' : 'text-[var(--state-warning-ink)]',
+              )}
+            >
               {playlistRepair.reason}
             </p>
-            <p className={cn('mt-1 text-xs', isNeo ? 'font-bold text-black' : 'text-amber-200/70')}>
+            <p
+              className={cn(
+                'mt-1 text-xs',
+                isNeo ? 'font-bold text-black' : 'text-[var(--state-warning-ink)]',
+              )}
+            >
               {playlistRepair.attemptedRecovery
                 ? playlistRepair.recoveredFrom
                   ? `Recovered from ${playlistRepair.recoveredFrom}.`
@@ -109,11 +126,11 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
                 : 'Automatic recovery has not run yet.'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               className={cn(
                 isNeo
-                  ? 'rounded-none border-2 border-black bg-[#A091D0] font-black uppercase text-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-lavender)] font-black uppercase text-black shadow-[var(--neo-shadow-md)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
                   : 'rounded-xl',
               )}
               onClick={onRetryPlaylistLoad}
@@ -124,7 +141,7 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
               variant="secondary"
               className={cn(
                 isNeo
-                  ? 'rounded-none border-2 border-black bg-white font-black uppercase text-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
+                  ? 'rounded-none border-2 border-black bg-white font-black uppercase text-black shadow-[var(--neo-shadow-md)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
                   : 'rounded-xl',
               )}
               onClick={onResetPlaylistData}
@@ -135,7 +152,7 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
               variant="secondary"
               className={cn(
                 isNeo
-                  ? 'rounded-none border-2 border-black bg-[#A4B680] font-black uppercase text-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-sage)] font-black uppercase text-black shadow-[var(--neo-shadow-md)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
                   : 'rounded-xl',
               )}
               onClick={onOpenPlaylistsDataFolder}

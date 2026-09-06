@@ -5,10 +5,15 @@ import { useHomeLibraryModel } from './useHomeLibraryModel';
 
 const startPlayback = vi.fn();
 const reportError = vi.fn();
+const fetchAlbumTracksMock = vi.hoisted(() => vi.fn());
 let tracks: Track[] = [];
+let albumAggregates: Array<{ count: number; track: Track }> = [];
 
 vi.mock('../../features/library/useLibraryData', () => ({
-  useLibraryData: () => ({ tracks, libraryStats: null }),
+  useLibraryData: () => ({ tracks, libraryStats: null, albumAggregates }),
+}));
+vi.mock('../../features/library/api', () => ({
+  fetchAlbumTracks: fetchAlbumTracksMock,
 }));
 
 vi.mock('../../lib/playback-actions', () => ({
@@ -36,8 +41,10 @@ const makeTrack = (id: string, overrides: Partial<Track> = {}): Track => ({
 describe('useHomeLibraryModel', () => {
   beforeEach(() => {
     tracks = [];
+    albumAggregates = [];
     vi.clearAllMocks();
     startPlayback.mockResolvedValue(undefined);
+    fetchAlbumTracksMock.mockImplementation(async () => tracks);
   });
 
   it('groups tracks with the canonical album artist and preserves each album track list', () => {
@@ -60,6 +67,31 @@ describe('useHomeLibraryModel', () => {
     ]);
   });
 
+  it('uses full database album aggregates for Home counts and representatives', () => {
+    const representative = makeTrack('representative', {
+      album: 'Older album',
+      albumArtist: 'Album artist',
+    });
+    tracks = [
+      makeTrack('loaded', {
+        album: 'Older album',
+        albumArtist: 'Album artist',
+      }),
+    ];
+    albumAggregates = [{ count: 12, track: representative }];
+
+    const { result } = renderHook(() => useHomeLibraryModel());
+
+    expect(result.current.albums).toEqual([
+      {
+        key: result.current.albums[0]?.key,
+        track: representative,
+        count: 12,
+        tracks,
+      },
+    ]);
+  });
+
   it('sorts album tracks before playback and reports playback failures', async () => {
     const second = makeTrack('second', { trackNumber: 2 });
     const first = makeTrack('first', { trackNumber: 1 });
@@ -73,6 +105,7 @@ describe('useHomeLibraryModel', () => {
       await result.current.playAlbum(second, tracks);
     });
 
+    expect(fetchAlbumTracksMock).toHaveBeenCalledWith('Album', 'Album artist');
     expect(startPlayback).toHaveBeenCalledWith(first, {
       queue: [first, second],
       queueIndex: 0,

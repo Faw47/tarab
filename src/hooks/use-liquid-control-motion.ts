@@ -70,8 +70,16 @@ export function useLiquidControlMotionHorizontal(options: HorizontalMotionOpts):
 
     useLiquidControlGlassStore.getState().setTabStripActive(true);
 
-    let raf = 0;
-    const tick = (now: number) => {
+    let raf: number | null = null;
+    let disposed = false;
+    const schedule = () => {
+      if (disposed || raf !== null) return;
+      raf = requestAnimationFrame(tick);
+    };
+
+    function tick(now: number) {
+      raf = null;
+      if (disposed) return;
       const root = rootRef.current;
       const canvas = document.querySelector(
         '[data-liquid-shell-canvas]',
@@ -81,10 +89,7 @@ export function useLiquidControlMotionHorizontal(options: HorizontalMotionOpts):
 
       setDebug(readLiquidGlassDebugExaggerated());
 
-      if (!root || !canvas) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
+      if (!root || !canvas) return;
 
       const debug = readLiquidGlassDebugExaggerated();
       const dbg = debug ? 2.4 : 1;
@@ -99,7 +104,7 @@ export function useLiquidControlMotionHorizontal(options: HorizontalMotionOpts):
       const visible = pillStyle.opacity > 0.01 || pillLayoutFromDom;
       if (!visible || targetWidth <= 0.5) {
         setPill({ visible: false });
-        raf = requestAnimationFrame(tick);
+        schedule();
         return;
       }
 
@@ -172,12 +177,26 @@ export function useLiquidControlMotionHorizontal(options: HorizontalMotionOpts):
         velocityPx: [velEmaRef.current, 0],
       });
 
-      raf = requestAnimationFrame(tick);
-    };
+      schedule();
+    }
 
-    raf = requestAnimationFrame(tick);
+    const observer =
+      typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver(() => {
+            if (document.querySelector('[data-liquid-shell-canvas]')) schedule();
+          });
+    observer?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-liquid-shell-canvas'],
+      childList: true,
+      subtree: true,
+    });
+    if (document.querySelector('[data-liquid-shell-canvas]')) schedule();
     return () => {
-      cancelAnimationFrame(raf);
+      disposed = true;
+      if (raf !== null) cancelAnimationFrame(raf);
+      observer?.disconnect();
       useLiquidControlGlassStore.getState().setTabStripActive(false);
       useLiquidControlGlassStore.getState().resetPill();
     };

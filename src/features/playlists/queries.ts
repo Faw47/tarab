@@ -2,10 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchPlaylistDetail, fetchPlaylists } from './api';
 import { playlistKeys } from './queryKeys';
 
-export function usePlaylistsQuery() {
+export function usePlaylistsQuery(enabled = true) {
   return useQuery({
     queryKey: playlistKeys.lists(),
     queryFn: fetchPlaylists,
+    enabled,
   });
 }
 

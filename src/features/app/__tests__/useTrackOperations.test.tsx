@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import type { SetStateAction } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { moveFile, renameFile, restoreTrashedFiles, trashFiles } from '../../../lib/tauri-commands';
 import { usePlayerStore } from '../../../store/player-store';
 import type { ContextMenuPosition, Track } from '../../../types';
 import { libraryKeys } from '../../library/queryKeys';
@@ -17,7 +18,9 @@ vi.mock('../../../lib/tauri-commands', () => ({
   pausePlayback: vi.fn(async () => undefined),
   readFullTags: vi.fn(async () => ({})),
   renameFile: vi.fn(async () => ''),
-  stopPlayback: vi.fn(async () => undefined),
+  restoreTrashedFiles: vi.fn(async () => []),
+  stopPlayback: vi.fn(async () => 1),
+  trashFiles: vi.fn(async () => []),
   writeTagsBatch: vi.fn(async () => undefined),
 }));
 
@@ -193,5 +196,175 @@ describe('useTrackOperations', () => {
     expect(state.currentTrack?.id).toBe(tracks[2].id);
     expect(state.queueIndex).toBe(1);
     expect(state.queue[state.queueIndex]?.id).toBe(tracks[2].id);
+  });
+
+  it('prunes from the current library cache instead of a stale render snapshot', async () => {
+    const queryClient = new QueryClient();
+    const staleTrack = makeTrack('/music/stale.mp3');
+    const importedTrack = makeTrack('/music/imported.mp3');
+    queryClient.setQueryData(libraryKeys.tracks(), [staleTrack, importedTrack]);
+
+    const setTracks = vi.fn((nextTracks: Track[]) => {
+      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
+    });
+
+    const { result } = renderHook(() =>
+      useTrackOperations({
+        queryClient,
+        libraryTracks: [staleTrack],
+        albumDetails: null,
+        setAlbumDetails: vi.fn(),
+        setTracks,
+        setTrackCount: vi.fn(),
+        setSelectedTracks: vi.fn(),
+        setTagEditorTracks: vi.fn(),
+        setContextMenuTrack: vi.fn(),
+        setContextMenuPosition: vi.fn(),
+        setConfirmDialog: vi.fn(),
+        handleClearSelection: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.pruneTracks([staleTrack]);
+    });
+
+    expect(queryClient.getQueryData<Track[]>(libraryKeys.tracks())).toEqual([importedTrack]);
+  });
+
+  it('preserves active playback state when the current source is renamed and moved', async () => {
+    const queryClient = new QueryClient();
+    const original = makeTrack('/music/album/one.mp3', { title: 'One' });
+    queryClient.setQueryData(libraryKeys.tracks(), [original]);
+    const setTracks = vi.fn((nextTracks: Track[]) => {
+      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
+    });
+    usePlayerStore.setState({
+      currentTrack: original,
+      queue: [original],
+      queueIndex: 0,
+      currentTime: 47,
+      duration: 180,
+      isPlaying: false,
+      hasActivePlayback: true,
+    });
+
+    const { result } = renderHook(() =>
+      useTrackOperations({
+        queryClient,
+        libraryTracks: [original],
+        albumDetails: null,
+        setAlbumDetails: vi.fn(),
+        setTracks,
+        setTrackCount: vi.fn(),
+        setSelectedTracks: vi.fn(),
+        setTagEditorTracks: vi.fn(),
+        setContextMenuTrack: vi.fn(),
+        setContextMenuPosition: vi.fn(),
+        setConfirmDialog: vi.fn(),
+        handleClearSelection: vi.fn(),
+      }),
+    );
+
+    vi.mocked(renameFile).mockResolvedValueOnce('/music/album/renamed.mp3');
+    await act(async () => {
+      await result.current.handleRenameTrack(original, 'renamed');
+    });
+
+    let state = usePlayerStore.getState();
+    expect(state.currentTrack?.filePath).toBe('/music/album/renamed.mp3');
+    expect(state.currentTime).toBe(47);
+    expect(state.isPlaying).toBe(false);
+    expect(state.hasActivePlayback).toBe(true);
+
+    vi.mocked(moveFile).mockResolvedValueOnce('/music/archive/renamed.mp3');
+    await act(async () => {
+      await result.current.handleMoveTracks([state.currentTrack as Track], '/music/archive');
+    });
+
+    state = usePlayerStore.getState();
+    expect(state.currentTrack?.filePath).toBe('/music/archive/renamed.mp3');
+    expect(state.queueIndex).toBe(0);
+    expect(state.currentTime).toBe(47);
+    expect(state.isPlaying).toBe(false);
+    expect(state.hasActivePlayback).toBe(true);
+  });
+
+  it('keeps recoverable Trash tokens available after a restore failure', async () => {
+    const queryClient = new QueryClient();
+    const track = makeTrack('/music/album/one.mp3', { title: 'One' });
+    queryClient.setQueryData(libraryKeys.tracks(), [track]);
+    const setConfirmDialog = vi.fn();
+
+    vi.mocked(trashFiles).mockResolvedValueOnce([
+      {
+        path: track.filePath,
+        status: 'success',
+        operation: 'trash',
+        errorCode: null,
+        recoverable: true,
+        errorMessage: null,
+        undoToken: '0123456789abcdef0123456789abcdef',
+      },
+    ]);
+    vi.mocked(restoreTrashedFiles).mockResolvedValueOnce([
+      {
+        path: track.filePath,
+        status: 'failed',
+        operation: 'restore',
+        errorCode: 'fileRestoreFailed',
+        recoverable: true,
+        errorMessage: 'The destination is temporarily unavailable',
+        undoToken: '0123456789abcdef0123456789abcdef',
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useTrackOperations({
+        queryClient,
+        libraryTracks: [track],
+        albumDetails: null,
+        setAlbumDetails: vi.fn(),
+        setTracks: vi.fn(),
+        setTrackCount: vi.fn(),
+        setSelectedTracks: vi.fn(),
+        setTagEditorTracks: vi.fn(),
+        setContextMenuTrack: vi.fn(),
+        setContextMenuPosition: vi.fn(),
+        setConfirmDialog,
+        handleClearSelection: vi.fn(),
+      }),
+    );
+
+    act(() => result.current.handleDeleteFiles([track]));
+    const trashDialog = setConfirmDialog.mock.calls.at(-1)?.[0];
+    await act(async () => {
+      await trashDialog.onConfirm();
+      await Promise.resolve();
+    });
+
+    const undoDialog = setConfirmDialog.mock.calls.at(-1)?.[0];
+    expect(undoDialog.title).toBe('Files moved to Trash');
+    expect(undoDialog.message).toContain('Settings > Storage');
+    expect(undoDialog.detail).toContain('stores recovery entries on disk');
+    await act(async () => {
+      await undoDialog.onConfirm();
+      await Promise.resolve();
+    });
+
+    const retryDialog = setConfirmDialog.mock.calls.at(-1)?.[0];
+    expect(retryDialog.title).toBe('Files still in Trash');
+    expect(retryDialog.confirmLabel).toBe('Retry restore');
+
+    const restoreError = new Error('restore IPC unavailable');
+    vi.mocked(restoreTrashedFiles).mockRejectedValueOnce(restoreError);
+    await act(async () => {
+      await retryDialog.onConfirm();
+      await Promise.resolve();
+    });
+
+    const rejectedRetryDialog = setConfirmDialog.mock.calls.at(-1)?.[0];
+    expect(rejectedRetryDialog.title).toBe('Files still in Trash');
+    expect(rejectedRetryDialog.confirmLabel).toBe('Retry restore');
   });
 });

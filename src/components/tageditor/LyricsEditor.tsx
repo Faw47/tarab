@@ -15,10 +15,18 @@ import {
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useSmoothTimeState } from '../../contexts/smooth-time';
 import { formatTime } from '../../lib/format-time';
+import {
+  captureActivePlaybackSource,
+  pauseCurrentPlayback,
+  resumeCurrentPlayback,
+  seekToPosition,
+  startEditorPreview,
+} from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
-import { pausePlayback, playTrack, resumePlayback, seekPlayback } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
+import type { Track } from '../../types';
 
 interface LyricLine {
   id: string;
@@ -27,12 +35,23 @@ interface LyricLine {
 }
 
 interface LyricsEditorProps {
-  trackPath: string;
+  track: Track;
   lyricsContent: string;
   onChange: (content: string) => void;
-  onSave: () => void;
+  onSave: (content: string) => void | Promise<void>;
   isSaving: boolean;
 }
+
+export const MAX_LYRICS_SIDECAR_BYTES = 1024 * 1024;
+
+export const getLyricsUtf8ByteLength = (content: string): number =>
+  new TextEncoder().encode(content).byteLength;
+
+const formatLyricsByteCount = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+};
 
 // ── History reducer ────────────────────────────────────────────────────────
 // Replaces the two separate useState<LyricLine[][]>/useState<number> pair
@@ -49,7 +68,11 @@ interface HistoryState {
   index: number;
 }
 
-type HistoryAction = { type: 'push'; lines: LyricLine[] } | { type: 'undo' } | { type: 'redo' };
+type HistoryAction =
+  | { type: 'push'; lines: LyricLine[] }
+  | { type: 'reset'; lines: LyricLine[] }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
@@ -58,6 +81,8 @@ function historyReducer(state: HistoryState, action: HistoryAction): HistoryStat
       const trimmed = state.snapshots.slice(0, state.index + 1);
       return { snapshots: [...trimmed, action.lines], index: state.index + 1 };
     }
+    case 'reset':
+      return { snapshots: [action.lines], index: 0 };
     case 'undo':
       return state.index > 0 ? { ...state, index: state.index - 1 } : state;
     case 'redo':
@@ -134,28 +159,18 @@ const linesToLRC = (lines: LyricLine[]): string =>
 const REPEAT_DURATION = 5; // seconds
 
 export const LyricsEditor = memo(
-  ({ trackPath, lyricsContent, onChange, onSave, isSaving }: LyricsEditorProps) => {
-    const {
-      currentTrack,
-      isPlaying,
-      currentTime,
-      duration,
-      setIsPlaying,
-      setCurrentTime,
-      hasActivePlayback,
-      setHasActivePlayback,
-    } = usePlayerStore(
+  ({ track, lyricsContent, onChange, onSave, isSaving }: LyricsEditorProps) => {
+    const trackPath = track.filePath;
+    const { currentTrack, isPlaying, duration, setCurrentTime, hasActivePlayback } = usePlayerStore(
       useShallow((s) => ({
         currentTrack: s.currentTrack,
         isPlaying: s.isPlaying,
-        currentTime: s.currentTime,
         duration: s.duration,
-        setIsPlaying: s.setIsPlaying,
         setCurrentTime: s.setCurrentTime,
         hasActivePlayback: s.hasActivePlayback,
-        setHasActivePlayback: s.setHasActivePlayback,
       })),
     );
+    const currentTime = useSmoothTimeState(80);
 
     const [view, setView] = useState<'sync' | 'text'>('sync');
 
@@ -188,6 +203,23 @@ export const LyricsEditor = memo(
     const [editingText, setEditingText] = useState('');
     const [userScrolled, setUserScrolled] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const lastExternalLyricsRef = useRef(lyricsContent);
+    const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const serializedLines = useMemo(() => linesToLRC(lines), [lines]);
+    const saveContent = view === 'text' ? textContent : serializedLines;
+    const lyricsByteLength = useMemo(() => getLyricsUtf8ByteLength(saveContent), [saveContent]);
+    const isOverSizeLimit = lyricsByteLength > MAX_LYRICS_SIDECAR_BYTES;
+
+    useEffect(() => {
+      if (lastExternalLyricsRef.current === lyricsContent) return;
+      lastExternalLyricsRef.current = lyricsContent;
+      const parsed = parseLRC(lyricsContent);
+      dispatch({ type: 'reset', lines: parsed });
+      setTextContent(lyricsContent);
+      setSelectedLineId(null);
+      setEditingId(null);
+      setEditingText('');
+    }, [lyricsContent, trackPath]);
 
     const listRef = useRef<HTMLDivElement>(null);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -220,19 +252,34 @@ export const LyricsEditor = memo(
     }, [lines, currentTime, isCurrentTrack]);
 
     const showError = useCallback((message: string) => {
+      if (errorTimeoutRef.current !== null) clearTimeout(errorTimeoutRef.current);
       setErrorMessage(message);
-      setTimeout(() => setErrorMessage(''), 3000);
+      errorTimeoutRef.current = setTimeout(() => {
+        errorTimeoutRef.current = null;
+        setErrorMessage('');
+      }, 3000);
     }, []);
+
+    const handleSave = useCallback(() => {
+      if (isSaving) return;
+      if (isOverSizeLimit) {
+        showError('Lyrics must be 1 MiB (1,048,576 UTF-8 bytes) or smaller');
+        return;
+      }
+      if (saveContent !== lyricsContent) onChange(saveContent);
+      void onSave(saveContent);
+    }, [isOverSizeLimit, isSaving, lyricsContent, onChange, onSave, saveContent, showError]);
 
     // Repeat mode — seek guard uses a boolean ref instead of a timestamp check
     useEffect(() => {
       if (!isRepeating || !repeatRange || !isCurrentTrack || !isPlaying) return;
       if (currentTime < repeatRange.end) return;
       if (isSeekingRef.current) return;
+      const expectedSource = captureActivePlaybackSource();
+      if (!expectedSource) return;
 
       isSeekingRef.current = true;
-      seekPlayback(repeatRange.start)
-        .then(() => setCurrentTime(repeatRange.start))
+      seekToPosition(repeatRange.start, expectedSource)
         .catch((e) => {
           console.error('Repeat seek failed:', e);
           showError('Failed to repeat');
@@ -253,9 +300,8 @@ export const LyricsEditor = memo(
     // Sync lines → parent only from sync view to avoid circular updates
     useEffect(() => {
       if (view !== 'sync') return;
-      const newContent = linesToLRC(lines);
-      if (newContent !== lyricsContent) onChange(newContent);
-    }, [lines, view, lyricsContent, onChange]);
+      if (serializedLines !== lyricsContent) onChange(serializedLines);
+    }, [serializedLines, view, lyricsContent, onChange]);
 
     // Auto-scroll: use lineRefsMap instead of children[index] indexing
     useEffect(() => {
@@ -269,17 +315,18 @@ export const LyricsEditor = memo(
     // Reset user-scrolled flag after idle period
     useEffect(() => {
       if (!userScrolled) return;
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      if (scrollTimeoutRef.current !== null) clearTimeout(scrollTimeoutRef.current);
       scrollTimeoutRef.current = setTimeout(() => setUserScrolled(false), 3000);
       return () => {
-        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+        if (scrollTimeoutRef.current !== null) clearTimeout(scrollTimeoutRef.current);
       };
     }, [userScrolled]);
 
     // Cleanup debounce timer on unmount
     useEffect(
       () => () => {
-        if (parseDebounceRef.current) clearTimeout(parseDebounceRef.current);
+        if (parseDebounceRef.current !== null) clearTimeout(parseDebounceRef.current);
+        if (errorTimeoutRef.current !== null) clearTimeout(errorTimeoutRef.current);
       },
       [],
     );
@@ -289,34 +336,21 @@ export const LyricsEditor = memo(
     const handleTogglePlay = useCallback(async () => {
       try {
         if (!isCurrentTrack) {
-          await playTrack(trackPath);
-          setHasActivePlayback(true);
-          setIsPlaying(true);
+          await startEditorPreview(track);
         } else if (isPlaying) {
-          await pausePlayback();
-          setIsPlaying(false);
+          await pauseCurrentPlayback();
         } else {
           if (!hasActivePlayback) {
-            await playTrack(trackPath);
-            setHasActivePlayback(true);
+            await startEditorPreview(track);
           } else {
-            await resumePlayback();
+            await resumeCurrentPlayback();
           }
-          setIsPlaying(true);
         }
       } catch (e) {
         console.error('Failed to toggle playback:', e);
         showError('Failed to control playback');
       }
-    }, [
-      trackPath,
-      isCurrentTrack,
-      isPlaying,
-      hasActivePlayback,
-      setIsPlaying,
-      setHasActivePlayback,
-      showError,
-    ]);
+    }, [track, trackPath, isCurrentTrack, isPlaying, hasActivePlayback, showError]);
 
     // Keep ref current so the keyboard handler always calls the latest version
     useEffect(() => {
@@ -326,14 +360,16 @@ export const LyricsEditor = memo(
     // Keyboard shortcuts — space uses ref to avoid stale closure on handleTogglePlay
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          handleSave();
+          return;
+        }
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
         if (e.key === ' ' && !e.repeat) {
           e.preventDefault();
           void togglePlayRef.current?.();
-        } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-          e.preventDefault();
-          onSave();
         } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
           e.preventDefault();
           handleUndo();
@@ -345,7 +381,7 @@ export const LyricsEditor = memo(
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [onSave, handleUndo, handleRedo]);
+    }, [handleSave, handleUndo, handleRedo]);
 
     const handleSeek = useCallback(
       async (time: number) => {
@@ -353,15 +389,19 @@ export const LyricsEditor = memo(
           showError('Load this track first');
           return;
         }
+        const expectedSource = captureActivePlaybackSource();
+        if (!expectedSource) {
+          showError('Start playback before seeking');
+          return;
+        }
         try {
-          await seekPlayback(time);
-          setCurrentTime(time);
+          await seekToPosition(time, expectedSource);
         } catch (e) {
           console.error('Failed to seek:', e);
           showError('Failed to seek');
         }
       },
-      [isCurrentTrack, setCurrentTime, showError],
+      [isCurrentTrack, showError],
     );
 
     const handleLineClick = useCallback(
@@ -454,7 +494,7 @@ export const LyricsEditor = memo(
     const handleTextChange = useCallback(
       (value: string) => {
         setTextContent(value);
-        if (parseDebounceRef.current) clearTimeout(parseDebounceRef.current);
+        if (parseDebounceRef.current !== null) clearTimeout(parseDebounceRef.current);
         parseDebounceRef.current = setTimeout(() => {
           parseDebounceRef.current = null;
           try {
@@ -507,7 +547,10 @@ export const LyricsEditor = memo(
       <div className="space-y-4">
         {/* Error message */}
         {errorMessage && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-sm">
+          <div
+            role="alert"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-sm"
+          >
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
           </div>
@@ -636,9 +679,11 @@ export const LyricsEditor = memo(
               </>
             )}
             <button
-              onClick={onSave}
-              disabled={isSaving}
+              onClick={handleSave}
+              disabled={isSaving || isOverSizeLimit}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-black text-xs font-semibold hover:bg-white/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              title={isOverSizeLimit ? 'Lyrics exceed the 1 MiB UTF-8 limit' : undefined}
+              aria-describedby="lyrics-sidecar-size"
             >
               {isSaving ? (
                 <>
@@ -653,6 +698,19 @@ export const LyricsEditor = memo(
               )}
             </button>
           </div>
+        </div>
+
+        <div
+          id="lyrics-sidecar-size"
+          aria-live="polite"
+          className={clsx(
+            'flex justify-end text-xs font-mono tabular-nums',
+            isOverSizeLimit ? 'text-red-400' : 'text-text-muted',
+          )}
+        >
+          {isOverSizeLimit
+            ? `${formatLyricsByteCount(lyricsByteLength)} exceeds the 1 MiB UTF-8 limit`
+            : `${formatLyricsByteCount(lyricsByteLength)} / 1 MiB UTF-8 limit`}
         </div>
 
         {/* Sync editor */}
@@ -704,7 +762,7 @@ export const LyricsEditor = memo(
                         }}
                         disabled={!isCurrentTrack}
                         className={clsx(
-                          'shrink-0 px-2 py-1 rounded bg-white/10 text-[11px] font-mono transition',
+                          'shrink-0 px-2 py-1 rounded bg-white/10 text-xs font-mono transition',
                           isCurrentTrack
                             ? 'text-text-muted hover:bg-white/20 hover:text-primary cursor-pointer'
                             : 'text-text-muted/50 cursor-not-allowed',
@@ -768,7 +826,7 @@ export const LyricsEditor = memo(
                             {line.text}
                           </span>
 
-                          <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                          <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -811,7 +869,7 @@ export const LyricsEditor = memo(
               )}
             </div>
 
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Space: Play/Pause · Click timestamp: Set time · Click line: Jump to time · Edit: Edit
               text · Repeat: Loop line · Ctrl+Z: Undo
             </p>
@@ -827,8 +885,10 @@ export const LyricsEditor = memo(
               placeholder={`[00:12.00] Start typing synced lyrics here\n[00:15.50] Each line begins with a timestamp\n[00:19.00] Format: [MM:SS.CS] text`}
               className="w-full panel rounded-xl px-4 py-3 text-text-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[400px]"
               aria-label="LRC lyric content"
+              aria-describedby="lyrics-sidecar-size"
+              aria-invalid={isOverSizeLimit}
             />
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               LRC format: [MM:SS.CS] text — CS = centiseconds (00–99), MS = milliseconds (000–999)
               also accepted. Changes auto-apply after 0.5s. Fix any errors before switching to Sync
               view.

@@ -37,23 +37,29 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
     () => items.flatMap((item, index) => (item.disabled ? [] : [index])),
     [items],
   );
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const enabledIndexesRef = useRef(enabledIndexes);
+  enabledIndexesRef.current = enabledIndexes;
+  const menuOpen = position !== null;
 
   const focusItem = useCallback((index: number) => {
     itemRefs.current[index]?.focus();
   }, []);
 
   useEffect(() => {
-    if (!position) return;
+    if (!menuOpen) return;
 
     previousFocusRef.current = document.activeElement as FocusableElement | null;
-    const firstEnabled = enabledIndexes[0];
     const focusTimer = window.setTimeout(() => {
+      const firstEnabled = enabledIndexesRef.current[0];
       if (firstEnabled !== undefined) focusItem(firstEnabled);
+      else menuRef.current?.focus();
     }, 0);
 
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -71,12 +77,14 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
         previousFocus.focus();
       }
     };
-  }, [enabledIndexes, focusItem, onClose, position]);
+  }, [focusItem, menuOpen]);
 
   const handleItemClick = useCallback(
     (item: ContextMenuItem) => {
-      if (!item.disabled) {
+      if (item.disabled) return;
+      try {
         item.onClick();
+      } finally {
         onClose();
       }
     },
@@ -161,6 +169,7 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
       Math.min(position.x, window.innerWidth - MENU_MIN_WIDTH - MENU_MARGIN),
     ),
     top: Math.max(MENU_MARGIN, Math.min(position.y, window.innerHeight - menuHeight - MENU_MARGIN)),
+    transformOrigin: `${position.x < window.innerWidth / 2 ? 'left' : 'right'} ${position.y < window.innerHeight / 2 ? 'top' : 'bottom'}`,
   };
 
   return (
@@ -168,6 +177,7 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
       ref={menuRef}
       role="menu"
       tabIndex={-1}
+      aria-label="Track actions"
       className="glass-overlay-menu fixed z-50 min-w-[200px] max-w-[280px] py-1.5"
       style={adjustedStyle}
       onKeyDown={handleMenuKeyDown}
@@ -188,7 +198,7 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
             aria-label={item.label}
             className={clsx(
               'w-full px-3 py-1.5 text-left text-[13px] flex items-center gap-2.5 outline-none',
-              'transition-colors duration-100 focus-visible:bg-white/10 focus-visible:text-white',
+              'transition-colors duration-[var(--motion-fast)] focus-visible:bg-white/10 focus-visible:text-white',
               item.disabled
                 ? 'text-text-muted/50 cursor-not-allowed'
                 : item.danger
@@ -196,7 +206,11 @@ export const ContextMenu = memo(({ position, items, onClose }: ContextMenuProps)
                   : 'text-text-secondary hover:bg-white/5 hover:text-white',
             )}
           >
-            {item.icon && <span className="w-4 h-4 opacity-60">{item.icon}</span>}
+            {item.icon && (
+              <span className="w-4 h-4 opacity-60" aria-hidden="true">
+                {item.icon}
+              </span>
+            )}
             <span className="truncate">{item.label}</span>
           </button>
         </div>

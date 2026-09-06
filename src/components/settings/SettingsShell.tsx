@@ -103,7 +103,7 @@ export const SettingsShell = memo(function SettingsShell({
           className={cn(
             'space-y-2 p-4',
             isNeobrutalism
-              ? 'relative border-2 border-black bg-white shadow-[4px_4px_0_0_#000]'
+              ? 'relative border-2 border-[var(--neo-ink)] bg-[var(--neo-paper)] shadow-[var(--neo-shadow-md)]'
               : 'rounded-2xl border border-white/[0.06] bg-black/20 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.1)]',
           )}
         >
@@ -112,7 +112,7 @@ export const SettingsShell = memo(function SettingsShell({
             className={cn(
               'mb-1 text-text-primary',
               isNeobrutalism
-                ? 'border-b-2 border-black pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-black md:text-[2rem]'
+                ? 'border-b-2 border-[var(--neo-ink)] pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-[var(--neo-ink)] md:text-[2rem]'
                 : 'text-2xl font-bold',
             )}
           >
@@ -130,7 +130,7 @@ export const SettingsShell = memo(function SettingsShell({
           </p>
           <p
             className={cn(
-              'text-[11px]',
+              'text-xs',
               isNeobrutalism
                 ? 'font-bold uppercase tracking-[0.1em] text-black/55'
                 : 'text-white/40',
@@ -159,25 +159,14 @@ export const SettingsShell = memo(function SettingsShell({
                   'absolute left-0 right-0 rounded-xl pointer-events-none motion-reduce:transition-none',
                   isDragging || pillLayoutFromDom
                     ? 'transition-none'
-                    : 'transition-[top,height,opacity] duration-200 ease-out',
+                    : 'transition-[top,height,opacity] duration-[var(--motion-standard)] ease-out',
                 )}
                 style={{
                   ...(pillLayoutFromDom
                     ? {}
                     : { top: pillStyle.top, height: pillStyle.height, opacity: pillStyle.opacity }),
-                  background: [
-                    'linear-gradient(180deg,',
-                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 60%, rgba(255,255,255,0.13)) 0%,`,
-                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 30%, rgba(255,255,255,0.06)) 50%,`,
-                    `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 10%, rgba(255,255,255,0.04)) 100%`,
-                    ')',
-                  ].join(''),
-                  boxShadow: [
-                    'inset 0 1px 0 rgba(255,255,255,0.18)',
-                    'inset 0 -1px 0 rgba(0,0,0,0.08)',
-                    `0 0 14px -6px rgb(var(--hero-accent-rgb, 255 255 255) / 0.40)`,
-                    '0 2px 8px -4px rgba(0,0,0,0.25)',
-                  ].join(', '),
+                  background: 'var(--settings-control-background)',
+                  boxShadow: 'var(--settings-control-shadow)',
                 }}
               >
                 <span

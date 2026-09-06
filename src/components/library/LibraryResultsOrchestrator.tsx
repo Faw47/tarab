@@ -2,10 +2,16 @@ import { Check, Play } from 'lucide-react';
 import type { CSSProperties, DragEvent } from 'react';
 import { memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { getAlbumArtist, getAlbumKey, getArtistKey } from '../../lib/album-key';
 import { getContextMenuPosition } from '../../lib/context-menu-position';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
+import {
+  NEO_POLAROID_CARD_CLASS,
+  NEO_POLAROID_PLAYING_CLASS,
+  NEO_POLAROID_SELECTED_CLASS,
+} from '../shared/neo-surface-classes';
 import { VirtualizedGrid } from '../shared/VirtualizedGrid';
 import { Button } from '../ui/button';
 import { ArtistIcon } from '../ui/Icons';
@@ -26,24 +32,18 @@ const ALBUM_ROTATIONS = [
   'rotate-[0.8deg]',
 ];
 const ALBUM_TAPE_ROTATIONS = ['rotate-[-4deg]', 'rotate-[3deg]', 'rotate-[-3deg]', 'rotate-[4deg]'];
-
-const NEO_CARD_BASE =
-  'group relative border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none cursor-pointer select-none';
-const NEO_CARD_SELECTED =
-  'bg-[var(--signal-active)] shadow-none translate-x-[1px] translate-y-[1px] border-[1.5px] border-[#1a1a1a]';
-const NEO_CARD_PLAYING =
-  'border-[var(--signal-play)] bg-[var(--signal-play)] shadow-[3px_3px_0_0_var(--signal-play)]';
+const ALBUM_SHOWCASE_LIMIT = 9;
 
 const NEO_TAPE_STYLE =
   'absolute -top-[9px] left-1/2 -translate-x-1/2 w-12 h-[18px] z-20 pointer-events-none opacity-90';
 const TAPE_INNER_STYLE: CSSProperties = {
-  background: 'rgba(230, 200, 120, 0.28)',
-  border: '1px solid rgba(180, 155, 80, 0.35)',
-  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
+  background: 'var(--neo-tape-bg)',
+  border: '1px solid var(--neo-tape-border)',
+  boxShadow: 'var(--neo-tape-shadow)',
 };
 
 const NEO_TILE_PLAY_BTN =
-  'absolute flex items-center justify-center border-2 border-black bg-[var(--signal-active)] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#FFE234] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none z-20';
+  'absolute flex items-center justify-center border-2 border-[var(--neo-ink)] bg-[var(--signal-active)] shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--neo-active-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none z-20';
 
 function getAlbumRotationClass(i: number): string {
   return ALBUM_ROTATIONS[i % ALBUM_ROTATIONS.length];
@@ -51,11 +51,6 @@ function getAlbumRotationClass(i: number): string {
 
 function getAlbumTapeRotationClass(i: number): string {
   return ALBUM_TAPE_ROTATIONS[i % ALBUM_TAPE_ROTATIONS.length];
-}
-
-function getEntranceClass(index: number): string {
-  if (index >= 12) return '';
-  return `animate-fade-in-up stagger-${(index % 6) + 1}`;
 }
 
 interface TrackTileProps {
@@ -91,17 +86,14 @@ const TrackTile = memo(function TrackTile({
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         draggable
-        aria-selected={isSelected}
         aria-label={`${track.title} by ${track.artist}`}
         className={cn(
-          NEO_CARD_BASE,
+          NEO_POLAROID_CARD_CLASS,
           'aspect-[4/5] flex flex-col',
           getAlbumRotationClass(index),
-          isPlaying && NEO_CARD_PLAYING,
-          isSelected && !isPlaying && NEO_CARD_SELECTED,
+          isPlaying && NEO_POLAROID_PLAYING_CLASS,
+          isSelected && !isPlaying && NEO_POLAROID_SELECTED_CLASS,
         )}
         onClick={(event) => {
           const multi = event.metaKey || event.ctrlKey || event.shiftKey;
@@ -117,6 +109,7 @@ const TrackTile = memo(function TrackTile({
         }}
         onDragStart={(event) => onDragStart(event, track)}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             const multi = event.metaKey || event.ctrlKey || event.shiftKey;
@@ -128,6 +121,20 @@ const TrackTile = memo(function TrackTile({
           }
         }}
       >
+        <button
+          type="button"
+          className="ghost library-v2-card-keyboard-action"
+          aria-pressed={isSelected}
+          aria-label={`${isSelected ? 'Deselect' : 'Select'} ${track.title} by ${track.artist}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            const multi = event.metaKey || event.ctrlKey || event.shiftKey;
+            if (onTrackSelect) onTrackSelect(track, multi);
+            else onPlayTrack(track);
+          }}
+        >
+          {isSelected ? 'Deselect' : 'Select'} track
+        </button>
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -157,20 +164,20 @@ const TrackTile = memo(function TrackTile({
             <Play className="h-3 w-3" fill="currentColor" strokeWidth={3} />
           </button>
         </div>
-        <div className="text-[11px] font-black uppercase tracking-tight truncate leading-tight">
+        <div className="text-[12px] font-black uppercase tracking-normal truncate leading-tight">
           {renderHighlightedText(track.title, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[9px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
           {matchedLyricLine
             ? `“${matchedLyricLine}”`
             : renderHighlightedText(track.artist, searchQuery, highlightClass)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1">
-          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest">
+          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest">
             {renderHighlightedText(track.album, searchQuery, highlightClass)}
           </span>
           {isLyricsMatch && (
-            <span className="border border-black/20 bg-[var(--signal-play)] px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#000]">
+            <span className="border border-black/20 bg-[var(--signal-play)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest text-[var(--neo-ink)]">
               LYR
             </span>
           )}
@@ -181,12 +188,9 @@ const TrackTile = memo(function TrackTile({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
       draggable
-      aria-selected={isSelected}
       aria-label={`${track.title} by ${track.artist}`}
-      className={cn('library-v2-track-tile', isSelected && 'is-selected', getEntranceClass(index))}
+      className={cn('library-v2-track-tile', isSelected && 'is-selected')}
       onClick={(event) => {
         const multi = event.metaKey || event.ctrlKey || event.shiftKey;
         onTrackSelect?.(track, multi);
@@ -201,12 +205,27 @@ const TrackTile = memo(function TrackTile({
       }}
       onDragStart={(event) => onDragStart(event, track)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onPlayTrack(track);
         }
       }}
     >
+      <button
+        type="button"
+        className="ghost library-v2-card-keyboard-action"
+        aria-pressed={isSelected}
+        aria-label={`${isSelected ? 'Deselect' : 'Select'} ${track.title} by ${track.artist}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          const multi = event.metaKey || event.ctrlKey || event.shiftKey;
+          if (onTrackSelect) onTrackSelect(track, multi);
+          else onPlayTrack(track);
+        }}
+      >
+        {isSelected ? 'Deselect' : 'Select'} track
+      </button>
       <div className="library-v2-track-media">
         <CoverArtImage
           track={track}
@@ -288,26 +307,37 @@ const AlbumTile = memo(function AlbumTile({
   isPlayingAlbum = false,
 }: AlbumTileProps) {
   const highlightClass = isNeo ? NEO_HIGHLIGHT_CLASS : DEFAULT_HIGHLIGHT_CLASS;
+  const albumArtist = getAlbumArtist(album.track);
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
-          NEO_CARD_BASE,
+          NEO_POLAROID_CARD_CLASS,
           'aspect-[4/5] flex flex-col',
           getAlbumRotationClass(index),
-          isPlayingAlbum && NEO_CARD_PLAYING,
+          isPlayingAlbum && NEO_POLAROID_PLAYING_CLASS,
         )}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(album.track);
           }
         }}
-        aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
+        aria-label={`Open album ${album.track.album} by ${albumArtist}`}
       >
+        <button
+          type="button"
+          className="ghost library-v2-card-keyboard-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(album.track);
+          }}
+          aria-label={`Open album ${album.track.album} by ${albumArtist}`}
+        >
+          Open album
+        </button>
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -336,19 +366,19 @@ const AlbumTile = memo(function AlbumTile({
           >
             <Play className="h-4 w-4" fill="currentColor" strokeWidth={3} />
           </button>
-          <div className="absolute left-2 top-2 z-20 border border-white bg-black px-1 py-0.5 text-[8px] font-black leading-none tracking-widest text-white shadow-[2px_2px_0_0_#000]">
+          <div className="absolute left-2 top-2 z-20 border border-white bg-black px-1 py-0.5 text-[12px] font-black leading-none tracking-widest text-white shadow-[var(--neo-shadow-xs)]">
             {album.count} {album.count === 1 ? 'FILE' : 'FILES'}
           </div>
         </div>
-        <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
+        <div className="truncate text-[12px] font-black uppercase tracking-normal leading-tight">
           {renderHighlightedText(album.track.album, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wide opacity-60 leading-tight">
-          {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+          {renderHighlightedText(albumArtist, searchQuery, highlightClass)}
         </div>
         {album.track.year && (
           <div className="mt-auto flex flex-wrap gap-1.5 pt-2">
-            <span className="border border-black bg-[var(--neo-muted)] px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.05em] text-black/70">
+            <span className="border border-black bg-[var(--neo-muted)] px-1.5 py-0.5 text-[12px] font-black uppercase tracking-[0.05em] text-black/70">
               {String(album.track.year)}
             </span>
           </div>
@@ -360,31 +390,39 @@ const AlbumTile = memo(function AlbumTile({
   if (isFeatured) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
           'library-v2-album-tile group relative overflow-hidden rounded-[22px] border border-white/10 bg-black/25',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
           'library-v2-album-featured-span',
-          getEntranceClass(index),
         )}
-        style={{ gridColumn: 'span 2' }}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(album.track);
           }
         }}
-        aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
+        aria-label={`Open album ${album.track.album} by ${albumArtist}`}
       >
+        <button
+          type="button"
+          className="ghost library-v2-card-keyboard-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(album.track);
+          }}
+          aria-label={`Open album ${album.track.album} by ${albumArtist}`}
+        >
+          Open album
+        </button>
         <div className="library-v2-album-featured-layout h-full min-h-[160px]">
           <div className="library-v2-album-featured-media relative overflow-hidden aspect-square">
             <CoverArtImage
               track={album.track}
               size="large"
               className="w-full h-full"
-              imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+              imgClassName="w-full h-full object-cover transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.05]"
               roundedClassName=""
               iconClassName="w-8 h-8"
               alt={album.track.album}
@@ -398,27 +436,25 @@ const AlbumTile = memo(function AlbumTile({
             />
             <button
               type="button"
-              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-visible:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 onPlay(album.track);
               }}
               aria-label={`Play ${album.track.album}`}
             >
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-11 h-11 rounded-full bg-white text-black shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-all duration-250 hover:scale-[1.12] active:scale-[0.92] pointer-events-none"
-                tabIndex={-1}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-black shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]"
               >
                 <Play className="w-4 h-4 ml-0.5" fill="currentColor" />
-              </Button>
+              </span>
             </button>
           </div>
 
           <div className="flex-1 min-w-0 p-4 flex flex-col justify-between bg-black/25">
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70">
                 Featured album
               </p>
               <p className="font-bold text-white leading-tight truncate text-[1.05rem] mt-1">
@@ -430,7 +466,7 @@ const AlbumTile = memo(function AlbumTile({
               </p>
               <p className="text-white/48 truncate mt-1 text-[0.75rem]">
                 {renderHighlightedText(
-                  album.track.artist,
+                  albumArtist,
                   searchQuery,
                   'rounded-[3px] bg-white/65 px-0.5 text-black',
                 )}
@@ -447,43 +483,52 @@ const AlbumTile = memo(function AlbumTile({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
       className={cn(
         'library-v2-album-tile group relative overflow-hidden rounded-[18px]',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
-        getEntranceClass(index),
       )}
       onClick={() => onOpen(album.track)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen(album.track);
         }
       }}
-      aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
+      aria-label={`Open album ${album.track.album} by ${albumArtist}`}
     >
+      <button
+        type="button"
+        className="ghost library-v2-card-keyboard-action"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen(album.track);
+        }}
+        aria-label={`Open album ${album.track.album} by ${albumArtist}`}
+      >
+        Open album
+      </button>
       <div className="library-v2-album-media relative w-full aspect-square">
         <CoverArtImage
           track={album.track}
           size="large"
           className="w-full h-full"
-          imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+          imgClassName="w-full h-full object-cover transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.05]"
           roundedClassName=""
           iconClassName="w-8 h-8"
           alt={album.track.album}
         />
         <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-250 group-hover:opacity-100"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-hover:opacity-100"
           style={{
             background:
               'linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.18) 52%, rgba(0,0,0,0.90) 100%)',
           }}
         />
-        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-200 group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-[var(--motion-standard)] group-hover:opacity-100 group-hover:translate-y-0">
           {album.count} {album.count === 1 ? 'track' : 'tracks'}
         </div>
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-all duration-250 group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] group-hover:opacity-100 group-hover:translate-y-0">
           <Button
             variant="ghost"
             size="icon"
@@ -491,7 +536,7 @@ const AlbumTile = memo(function AlbumTile({
               event.stopPropagation();
               onPlay(album.track);
             }}
-            className="pointer-events-auto shrink-0 rounded-full bg-white text-black inline-flex items-center justify-center shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-all duration-250 hover:scale-[1.12] active:scale-[0.92] w-9 h-9"
+            className="pointer-events-auto shrink-0 rounded-full bg-white text-black inline-flex items-center justify-center shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] hover:scale-[1.12] active:scale-[0.92] w-9 h-9"
             aria-label={`Play ${album.track.album}`}
           >
             <Play className="w-3.5 h-3.5 ml-0.5" fill="currentColor" />
@@ -504,7 +549,7 @@ const AlbumTile = memo(function AlbumTile({
           {renderHighlightedText(album.track.album, searchQuery, highlightClass)}
         </div>
         <div className="library-v2-track-subtitle truncate">
-          {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
+          {renderHighlightedText(albumArtist, searchQuery, highlightClass)}
         </div>
       </div>
     </article>
@@ -536,16 +581,15 @@ const ArtistTile = memo(function ArtistTile({
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
-          NEO_CARD_BASE,
+          NEO_POLAROID_CARD_CLASS,
           'aspect-[4/5] flex flex-col pt-4 pb-7',
           getAlbumRotationClass(index),
-          isPlayingArtist && NEO_CARD_PLAYING,
+          isPlayingArtist && NEO_POLAROID_PLAYING_CLASS,
         )}
         onClick={() => onOpen(artist.artist)}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(artist.artist);
@@ -553,6 +597,17 @@ const ArtistTile = memo(function ArtistTile({
         }}
         aria-label={`Open artist ${artist.artist}`}
       >
+        <button
+          type="button"
+          className="ghost library-v2-card-keyboard-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(artist.artist);
+          }}
+          aria-label={`Open artist ${artist.artist}`}
+        >
+          Open artist
+        </button>
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -570,7 +625,7 @@ const ArtistTile = memo(function ArtistTile({
               alt={artist.artist}
             />
           ) : artist.coverArt ? (
-            <div className="neo-artist-avatar relative h-full w-full overflow-hidden bg-[#D1D1D1]">
+            <div className="neo-artist-avatar relative h-full w-full overflow-hidden bg-[var(--neo-placeholder)]">
               <img
                 src={artist.coverArt}
                 alt={artist.artist}
@@ -581,7 +636,7 @@ const ArtistTile = memo(function ArtistTile({
               />
             </div>
           ) : (
-            <div className="neo-artist-avatar flex h-full w-full items-center justify-center bg-[#D1D1D1] text-black">
+            <div className="neo-artist-avatar flex h-full w-full items-center justify-center bg-[var(--neo-placeholder)] text-black">
               <ArtistIcon className="h-8 w-8" />
             </div>
           )}
@@ -599,11 +654,11 @@ const ArtistTile = memo(function ArtistTile({
             </button>
           )}
         </div>
-        <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
+        <div className="truncate text-[12px] font-black uppercase tracking-normal leading-tight">
           {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wide opacity-60 leading-tight">
-          {artist.tracks.length} {artist.tracks.length === 1 ? 'FILE' : 'FILES'}
+        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+          {artist.count} {artist.count === 1 ? 'FILE' : 'FILES'}
         </div>
       </article>
     );
@@ -611,11 +666,10 @@ const ArtistTile = memo(function ArtistTile({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
-      className={cn('library-v2-track-tile', getEntranceClass(index))}
+      className="library-v2-track-tile"
       onClick={() => onOpen(artist.artist)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen(artist.artist);
@@ -623,6 +677,17 @@ const ArtistTile = memo(function ArtistTile({
       }}
       aria-label={`Open artist ${artist.artist}`}
     >
+      <button
+        type="button"
+        className="ghost library-v2-card-keyboard-action"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen(artist.artist);
+        }}
+        aria-label={`Open artist ${artist.artist}`}
+      >
+        Open artist
+      </button>
       <div className="library-v2-track-media">
         {artist.coverArt ? (
           <img
@@ -659,7 +724,7 @@ const ArtistTile = memo(function ArtistTile({
           {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
         </p>
         <p className="library-v2-track-subtitle truncate">
-          {artist.tracks.length} {artist.tracks.length === 1 ? 'track' : 'tracks'}
+          {artist.count} {artist.count === 1 ? 'track' : 'tracks'}
         </p>
       </div>
     </article>
@@ -774,31 +839,76 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
       );
     }
 
+    const renderAlbumTile = (album: AlbumGroup, index: number, isFeatured = false) => (
+      <AlbumTile
+        key={getAlbumKey(album.track)}
+        album={album}
+        index={index}
+        searchQuery={searchQuery}
+        onOpen={onAlbumOpen}
+        onPlay={onPlayAlbum}
+        isFeatured={isFeatured}
+        isNeo={isNeo}
+        isPlayingAlbum={Boolean(
+          isPlaying && currentTrack && getAlbumKey(currentTrack) === getAlbumKey(album.track),
+        )}
+      />
+    );
+
+    if (!isNeo) {
+      const showcaseAlbums = albums.slice(0, ALBUM_SHOWCASE_LIMIT);
+      const archiveAlbums = albums.slice(ALBUM_SHOWCASE_LIMIT);
+
+      return (
+        <div className="library-v2-albums-layout">
+          <div className="library-v2-albums-showcase" role="group" aria-label="Featured albums">
+            {showcaseAlbums.map((album, index) => renderAlbumTile(album, index, index === 0))}
+          </div>
+
+          {archiveAlbums.length > 0 && (
+            <section className="library-v2-albums-archive" aria-labelledby="library-all-albums">
+              <div className="library-v2-albums-archive-heading">
+                <h3 id="library-all-albums">All albums</h3>
+                <span>{albums.length}</span>
+              </div>
+              <VirtualizedGrid
+                items={archiveAlbums}
+                minColumnWidth={180}
+                rowHeight={245}
+                className="library-v2-albums-archive-grid"
+                getItemKey={(album) => getAlbumKey(album.track)}
+                onRangeChange={(start, end) =>
+                  onAlbumGridRangeChange(
+                    albums,
+                    start + ALBUM_SHOWCASE_LIMIT,
+                    end + ALBUM_SHOWCASE_LIMIT,
+                  )
+                }
+                onScrollNearEnd={hasMore ? onLoadMore : undefined}
+                renderItem={(album, index) => renderAlbumTile(album, index + ALBUM_SHOWCASE_LIMIT)}
+              />
+            </section>
+          )}
+
+          {archiveAlbums.length === 0 && hasMore && onLoadMore && (
+            <button type="button" className="library-v2-albums-load-more" onClick={onLoadMore}>
+              Load more albums
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <VirtualizedGrid
         items={albums}
-        minColumnWidth={isNeo ? 165 : 155}
-        rowHeight={isNeo ? 270 : 245}
-        className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
-        getItemKey={(album) => `${album.track.album}-${album.track.artist}`}
+        minColumnWidth={165}
+        rowHeight={270}
+        className="px-1 pt-6 pb-12"
+        getItemKey={(album) => getAlbumKey(album.track)}
         onRangeChange={(start, end) => onAlbumGridRangeChange(albums, start, end)}
         onScrollNearEnd={hasMore ? onLoadMore : undefined}
-        renderItem={(album, index) => (
-          <AlbumTile
-            album={album}
-            index={index}
-            searchQuery={searchQuery}
-            onOpen={onAlbumOpen}
-            onPlay={onPlayAlbum}
-            isNeo={isNeo}
-            isPlayingAlbum={Boolean(
-              isPlaying &&
-                currentTrack &&
-                currentTrack.album === album.track.album &&
-                currentTrack.artist === album.track.artist,
-            )}
-          />
-        )}
+        renderItem={(album, index) => renderAlbumTile(album, index)}
       />
     );
   }
@@ -827,7 +937,7 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
         minColumnWidth={isNeo ? 165 : 155}
         rowHeight={isNeo ? 270 : 245}
         className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
-        getItemKey={(artist) => artist.artist}
+        getItemKey={(artist) => getArtistKey(artist.artist)}
         onRangeChange={(start, end) => onArtistGridRangeChange(artists, start, end)}
         onScrollNearEnd={hasMore ? onLoadMore : undefined}
         renderItem={(artist, index) => (
@@ -839,7 +949,9 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
             onPlay={onPlayTrack}
             isNeo={isNeo}
             isPlayingArtist={Boolean(
-              isPlaying && currentTrack && currentTrack.artist === artist.artist,
+              isPlaying &&
+                currentTrack &&
+                getArtistKey(currentTrack.artist) === getArtistKey(artist.artist),
             )}
           />
         )}

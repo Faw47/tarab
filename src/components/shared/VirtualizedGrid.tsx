@@ -1,5 +1,14 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 interface VirtualizedGridProps<T> {
   items: T[];
@@ -12,7 +21,7 @@ interface VirtualizedGridProps<T> {
   renderItem: (item: T, index: number) => React.ReactNode;
   onRangeChange?: (start: number, end: number) => void;
   /** Called when scroll position passes 90% of content (for load more). */
-  onScrollNearEnd?: () => void;
+  onScrollNearEnd?: () => void | Promise<void>;
 }
 
 const CELL_GUTTER = 6;
@@ -23,17 +32,29 @@ const FOCUSABLE_SELECTOR =
 function VirtualizedGridCell<T>({
   item,
   index,
+  columns,
+  gridId,
+  isActive,
+  onFocus,
   renderItem,
 }: {
   item: T;
   index: number;
+  columns: number;
+  gridId: string;
+  isActive: boolean;
+  onFocus: () => void;
   renderItem: (item: T, index: number) => React.ReactNode;
 }) {
   return (
     <div
+      id={`${gridId}-cell-${index}`}
       data-virtual-grid-index={index}
+      data-virtual-grid-active={isActive ? 'true' : undefined}
       role="gridcell"
+      aria-colindex={(index % columns) + 1}
       tabIndex={-1}
+      onFocus={onFocus}
       style={{ boxSizing: 'border-box', padding: CELL_GUTTER, height: '100%' }}
     >
       <div className="h-full w-full">{renderItem(item, index)}</div>
@@ -57,7 +78,10 @@ export function VirtualizedGrid<T>({
 }: VirtualizedGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nearEndInFlightRef = useRef(false);
+  const gridId = useId().replace(/:/g, '');
   const [containerWidth, setContainerWidth] = useState(0);
+  const [activeIndex, setActiveIndex] = useState<number | null>(items.length > 0 ? 0 : null);
   const [pendingFocusIndex, setPendingFocusIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -77,6 +101,13 @@ export function VirtualizedGrid<T>({
   }, [containerWidth, minColumnWidth]);
 
   const rowCount = Math.ceil(items.length / columns);
+
+  useEffect(() => {
+    setActiveIndex((previous) => {
+      if (items.length === 0) return null;
+      return previous === null ? 0 : Math.min(previous, items.length - 1);
+    });
+  }, [items.length]);
 
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
@@ -104,9 +135,22 @@ export function VirtualizedGrid<T>({
       `[data-virtual-grid-index="${pendingFocusIndex}"]`,
     );
     if (!cell) return;
+    setActiveIndex(pendingFocusIndex);
     (cell.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? cell).focus();
     setPendingFocusIndex(null);
   }, [pendingFocusIndex, virtualRows]);
+
+  useEffect(() => {
+    if (pendingFocusIndex !== null || activeIndex === null || virtualRows.length === 0) return;
+    const activeRowIndex = Math.floor(activeIndex / columns);
+    if (virtualRows.some((row) => row.index === activeRowIndex)) return;
+
+    setActiveIndex(Math.min(virtualRows[0].index * columns, items.length - 1));
+  }, [activeIndex, columns, items.length, pendingFocusIndex, virtualRows]);
+
+  const handleCellFocus = useCallback((index: number) => {
+    setActiveIndex(index);
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -115,7 +159,7 @@ export function VirtualizedGrid<T>({
       if (target.matches('input, textarea, select, [contenteditable="true"]')) return;
 
       const cell = target.closest<HTMLElement>('[data-virtual-grid-index]');
-      const currentIndex = Number(cell?.dataset.virtualGridIndex ?? -1);
+      const currentIndex = cell ? Number(cell.dataset.virtualGridIndex) : (activeIndex ?? 0);
       let nextIndex: number;
 
       switch (event.key) {
@@ -146,8 +190,14 @@ export function VirtualizedGrid<T>({
       rowVirtualizer.scrollToIndex(Math.floor(nextIndex / columns), { align: 'auto' });
       setPendingFocusIndex(nextIndex);
     },
-    [columns, items.length, rowVirtualizer],
+    [activeIndex, columns, items.length, rowVirtualizer],
   );
+
+  const activeRowIndex = activeIndex === null ? null : Math.floor(activeIndex / columns);
+  const activeCellIsMounted =
+    activeRowIndex !== null && virtualRows.some((row) => row.index === activeRowIndex);
+  const activeCellId =
+    activeIndex !== null && activeCellIsMounted ? gridId + '-cell-' + activeIndex : undefined;
 
   useEffect(() => {
     if (!onScrollNearEnd || items.length === 0) return;
@@ -158,8 +208,22 @@ export function VirtualizedGrid<T>({
       const { scrollTop, clientHeight, scrollHeight } = node;
       if (scrollHeight <= 0) return;
       if (scrollTop + clientHeight >= 0.9 * scrollHeight) {
-        if (throttleRef.current) return;
-        onScrollNearEnd();
+        if (throttleRef.current !== null || nearEndInFlightRef.current) return;
+        nearEndInFlightRef.current = true;
+        const release = () => {
+          nearEndInFlightRef.current = false;
+        };
+        try {
+          const result = onScrollNearEnd();
+          if (result && result instanceof Promise) {
+            void result.then(release, release);
+          } else {
+            release();
+          }
+        } catch (error) {
+          release();
+          throw error;
+        }
         throttleRef.current = setTimeout(() => {
           throttleRef.current = null;
         }, 400);
@@ -170,7 +234,10 @@ export function VirtualizedGrid<T>({
     node.addEventListener('scroll', check, { passive: true });
     return () => {
       node.removeEventListener('scroll', check);
-      if (throttleRef.current) clearTimeout(throttleRef.current);
+      if (throttleRef.current !== null) {
+        clearTimeout(throttleRef.current);
+        throttleRef.current = null;
+      }
     };
   }, [onScrollNearEnd, items.length]);
 
@@ -181,6 +248,7 @@ export function VirtualizedGrid<T>({
       aria-label="Library items"
       aria-colcount={columns}
       aria-rowcount={rowCount}
+      aria-activedescendant={activeCellId}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       className={className}
@@ -230,6 +298,10 @@ export function VirtualizedGrid<T>({
                   key={getItemKey ? getItemKey(item, index) : index}
                   item={item}
                   index={index}
+                  columns={columns}
+                  gridId={gridId}
+                  isActive={activeIndex === index}
+                  onFocus={() => handleCellFocus(index)}
                   renderItem={renderItem}
                 />
               ))}

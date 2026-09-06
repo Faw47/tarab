@@ -16,6 +16,24 @@ describe('useAppSearchShell', () => {
     expect(result.current.searchFocusNonce).toBe(1);
   });
 
+  it('cleans up the current browsing state before opening global search', () => {
+    const navigate = vi.fn();
+    const prepareGlobalSearch = vi.fn();
+    const { result } = renderHook(() =>
+      useAppSearchShell({
+        navigate,
+        navMode: 'iconRail',
+        searchQuery: '',
+        onOpenGlobalSearch: prepareGlobalSearch,
+      }),
+    );
+
+    act(() => result.current.openGlobalSearch());
+
+    expect(prepareGlobalSearch).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith('library');
+  });
+
   it('dismisses an empty icon-rail search after focus leaves the top bar', async () => {
     const { result } = renderHook(() =>
       useAppSearchShell({ navigate: vi.fn(), navMode: 'iconRail', searchQuery: '' }),
@@ -28,6 +46,23 @@ describe('useAppSearchShell', () => {
     });
 
     expect(result.current.shellSearchFocused).toBe(false);
+    expect(result.current.showSearchShell).toBe(false);
+  });
+
+  it('clears the active query when returning to library browse mode', () => {
+    const onSearchChange = vi.fn();
+    const { result } = renderHook(() =>
+      useAppSearchShell({
+        navigate: vi.fn(),
+        navMode: 'iconRail',
+        searchQuery: 'oud',
+        onSearchChange,
+      }),
+    );
+
+    act(() => result.current.browseLibrary());
+
+    expect(onSearchChange).toHaveBeenCalledWith('');
     expect(result.current.showSearchShell).toBe(false);
   });
 

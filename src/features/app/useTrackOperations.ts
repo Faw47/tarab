@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { type Dispatch, type SetStateAction, useCallback } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
+import { pauseCurrentPlayback, stopCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import {
   dbDeleteTracks,
@@ -8,10 +9,10 @@ import {
   deleteFiles,
   getCoverArtData,
   moveFile,
-  pausePlayback,
   readFullTags,
   renameFile,
-  stopPlayback,
+  restoreTrashedFiles,
+  trashFiles,
   writeTagsBatch,
 } from '../../lib/tauri-commands';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
@@ -88,8 +89,17 @@ export function useTrackOperations({
           payload.coverArtMime = metadataClipboard.coverArt.mime;
         }
         const filePaths = targets.map((t) => t.filePath);
-        await writeTagsBatch(filePaths, payload);
-        await refreshTracksByFilePaths(filePaths);
+        const results = await writeTagsBatch(filePaths, payload);
+        const successfulPaths = results
+          .filter((result) => result.status === 'success')
+          .map((result) => result.path);
+        if (successfulPaths.length > 0) {
+          await refreshTracksByFilePaths(successfulPaths);
+        }
+        const failedCount = results.length - successfulPaths.length;
+        if (failedCount > 0) {
+          throw new Error(`Failed to paste metadata to ${failedCount} file(s).`);
+        }
       } catch (err) {
         reportError('Failed to paste metadata', { source: 'app', error: err });
       }
@@ -175,7 +185,9 @@ export function useTrackOperations({
     async (tracksToRemove: Track[]) => {
       if (!tracksToRemove || tracksToRemove.length === 0) return;
       const ids = new Set(tracksToRemove.map((track) => track.id));
-      setTracks(libraryTracks.filter((track) => !ids.has(track.id)));
+      const currentTracks =
+        queryClient.getQueryData<Track[]>(libraryKeys.tracks()) ?? libraryTracks;
+      setTracks(currentTracks.filter((track) => !ids.has(track.id)));
 
       const player = usePlayerStore.getState();
       const filteredQueue = player.queue.filter((track) => !ids.has(track.id));
@@ -190,8 +202,8 @@ export function useTrackOperations({
 
       if (currentTrackRemoved) {
         try {
-          await pausePlayback();
-          await stopPlayback();
+          await pauseCurrentPlayback();
+          await stopCurrentPlayback();
         } catch (err) {
           reportError('Failed to stop playback before removal', { source: 'app', error: err });
         }
@@ -212,6 +224,7 @@ export function useTrackOperations({
       setContextMenuPosition,
       setContextMenuTrack,
       setSelectedTracks,
+      queryClient,
       setTracks,
     ],
   );
@@ -275,26 +288,167 @@ export function useTrackOperations({
       const first = tracksToDelete[0];
       const message =
         tracksToDelete.length === 1
-          ? `Delete "${first.title}" from disk? This cannot be undone.`
-          : `Delete ${tracksToDelete.length} files from disk? This cannot be undone.`;
+          ? `Move "${first.title}" to Tarab Trash? You can undo this action.`
+          : `Move ${tracksToDelete.length} files to Tarab Trash? You can undo this action.`;
       const detail = tracksToDelete.length === 1 ? first.filePath : undefined;
 
+      const runPermanentDelete = async () => {
+        const filePaths = tracksToDelete.map((track) => track.filePath);
+        try {
+          const results = await deleteFiles(filePaths);
+          const succeededPaths = new Set(
+            results.filter((result) => result.status === 'success').map((result) => result.path),
+          );
+          const succeededTracks = tracksToDelete.filter((track) =>
+            succeededPaths.has(track.filePath),
+          );
+          if (succeededTracks.length > 0) await pruneTracks(succeededTracks);
+          setTrackCount(await dbGetTrackCount());
+          await invalidateLibraryForMutation(queryClient, 'delete');
+          const failed = results.filter((result) => result.status !== 'success');
+          if (failed.length > 0) {
+            reportError(
+              `${succeededTracks.length} file(s) deleted; ${failed.length} file(s) failed`,
+              {
+                source: 'app',
+                error: failed
+                  .map((result) => result.errorMessage)
+                  .filter(Boolean)
+                  .join('; '),
+              },
+            );
+          }
+        } catch (err) {
+          reportError('Failed to delete files permanently', { source: 'app', error: err });
+        }
+      };
+
+      const requestPermanentDelete = () => {
+        queueMicrotask(() => {
+          setConfirmDialog({
+            title: 'Delete files permanently',
+            message:
+              tracksToDelete.length === 1
+                ? `Permanently delete "${first.title}"? This action cannot be undone.`
+                : `Permanently delete ${tracksToDelete.length} files? This action cannot be undone.`,
+            detail,
+            variant: 'danger',
+            confirmLabel: 'Delete permanently',
+            onConfirm: runPermanentDelete,
+          });
+        });
+      };
+
+      const offerRestore = (undoTokens: string[], retry = false) => {
+        queueMicrotask(() => {
+          setConfirmDialog({
+            title: retry ? 'Files still in Trash' : 'Files moved to Trash',
+            message: retry
+              ? `${undoTokens.length} file${undoTokens.length === 1 ? '' : 's'} could not be fully restored. You can retry without losing the recovery token.`
+              : `${undoTokens.length} file${undoTokens.length === 1 ? '' : 's'} can be restored now or later from Settings > Storage.`,
+            detail: 'Tarab stores recovery entries on disk until you restore or purge them.',
+            confirmLabel: retry ? 'Retry restore' : 'Undo',
+            cancelLabel: 'Done',
+            onConfirm: async () => {
+              let restoreResults: Awaited<ReturnType<typeof restoreTrashedFiles>>;
+              try {
+                restoreResults = await restoreTrashedFiles(undoTokens);
+              } catch (error) {
+                reportError('Failed to restore files from Trash', { source: 'app', error });
+                offerRestore(undoTokens, true);
+                return;
+              }
+
+              const restoreFailures = restoreResults.filter(
+                (result) => result.status !== 'success',
+              );
+              try {
+                setTrackCount(await dbGetTrackCount());
+                await invalidateLibraryForMutation(queryClient, 'upsert');
+              } catch (error) {
+                reportError('Failed to refresh the library after restoring files', {
+                  source: 'app',
+                  error,
+                });
+                return;
+              }
+              if (restoreFailures.length > 0) {
+                reportError(
+                  `${restoreResults.length - restoreFailures.length} file(s) restored; ${restoreFailures.length} file(s) failed`,
+                  {
+                    source: 'app',
+                    error: restoreFailures
+                      .map((result) => result.errorMessage)
+                      .filter(Boolean)
+                      .join('; '),
+                  },
+                );
+              }
+              const retryTokens = Array.from(
+                new Set(
+                  restoreFailures
+                    .filter(
+                      (result): result is typeof result & { undoToken: string } =>
+                        result.recoverable && Boolean(result.undoToken),
+                    )
+                    .map((result) => result.undoToken),
+                ),
+              );
+              if (retryTokens.length > 0) offerRestore(retryTokens, true);
+            },
+          });
+        });
+      };
+
       setConfirmDialog({
-        title: 'Delete files',
+        title: 'Move files to Trash',
         message,
         detail,
-        variant: 'danger',
-        confirmLabel: 'Delete',
+        confirmLabel: 'Move to Trash',
+        secondaryLabel: 'Delete permanently…',
+        onSecondary: requestPermanentDelete,
         onConfirm: async () => {
           const filePaths = tracksToDelete.map((track) => track.filePath);
           try {
-            await deleteFiles(filePaths);
-            await pruneTracks(tracksToDelete);
+            const results = await trashFiles(filePaths);
+            const succeededPaths = new Set(
+              results.filter((result) => result.status === 'success').map((result) => result.path),
+            );
+            const succeededTracks = tracksToDelete.filter((track) =>
+              succeededPaths.has(track.filePath),
+            );
+            if (succeededTracks.length > 0) {
+              await pruneTracks(succeededTracks);
+            }
             const total = await dbGetTrackCount();
             setTrackCount(total);
             await invalidateLibraryForMutation(queryClient, 'delete');
+            const failed = results.filter((result) => result.status !== 'success');
+            if (failed.length > 0) {
+              reportError(
+                `${succeededTracks.length} file(s) moved to Trash; ${failed.length} file(s) failed`,
+                {
+                  source: 'app',
+                  error: failed
+                    .map((result) => result.errorMessage)
+                    .filter(Boolean)
+                    .join('; '),
+                },
+              );
+            }
+            const undoTokens = Array.from(
+              new Set(
+                results
+                  .filter(
+                    (result): result is typeof result & { undoToken: string } =>
+                      result.recoverable && Boolean(result.undoToken),
+                  )
+                  .map((result) => result.undoToken),
+              ),
+            );
+            if (undoTokens.length > 0) offerRestore(undoTokens);
           } catch (err) {
-            reportError('Failed to delete files', { source: 'app', error: err });
+            reportError('Failed to move files to Trash', { source: 'app', error: err });
           }
         },
       });

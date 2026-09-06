@@ -1,7 +1,6 @@
 import '@fontsource/geist-mono/400.css';
 import '@fontsource/geist-mono/500.css';
 import '@fontsource/geist-mono/600.css';
-import * as Sentry from '@sentry/react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
@@ -26,31 +25,9 @@ const markPaintMetrics = () => {
   }
 };
 
-const initSentryDeferred = () => {
-  if (!import.meta.env.VITE_SENTRY_DSN) return;
-
-  const run = () => {
-    Sentry.init({
-      dsn: import.meta.env.VITE_SENTRY_DSN,
-      integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
-      tracesSampleRate: 1.0,
-      replaysSessionSampleRate: 0.1,
-      replaysOnErrorSampleRate: 1.0,
-    });
-  };
-
-  const requestIdle = (globalThis as Window & typeof globalThis).requestIdleCallback;
-  if (typeof requestIdle === 'function') {
-    requestIdle(run, { timeout: 1500 });
-    return;
-  }
-  setTimeout(run, 500);
-};
-
 // Initialize platform logging
 initLogger().catch(console.error);
 markPaintMetrics();
-initSentryDeferred();
 
 const rootElement = document.getElementById('root');
 

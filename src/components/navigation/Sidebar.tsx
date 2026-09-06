@@ -1,4 +1,4 @@
-import { Home, type LucideIcon, Search, Settings, Tag } from 'lucide-react';
+import { Home, ListMusic, type LucideIcon, Search, Settings, Tag } from 'lucide-react';
 import {
   type CSSProperties,
   memo,
@@ -14,7 +14,7 @@ import {
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
 import { LibraryIcon, QueueIcon } from '../ui/Icons';
-import type { NavView } from './FloatingDock';
+import { getNavigationLabel, type NavView, normalizeDockActiveView } from './navigation-model';
 
 type NavMode = 'iconRail' | 'topNav';
 
@@ -53,17 +53,31 @@ interface SidebarNavButtonProps {
   theme?: string;
 }
 
+const getNavigationLabelOrFallback = (view: NavView): string => getNavigationLabel(view) ?? view;
+
 const PRIMARY_NAV_ITEMS: SidebarNavItem[] = [
-  { view: 'home', label: 'Home', icon: Home },
+  { view: 'home', label: getNavigationLabelOrFallback('home'), icon: Home },
   { view: 'library', label: 'Search', icon: Search, segment: 'search' },
-  { view: 'library', label: 'Library', icon: LibraryIcon as LucideIcon, segment: 'libraryBrowse' },
-  { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
+  {
+    view: 'library',
+    label: getNavigationLabelOrFallback('library'),
+    icon: LibraryIcon as LucideIcon,
+    segment: 'libraryBrowse',
+  },
+  { view: 'queue', label: getNavigationLabelOrFallback('queue'), icon: QueueIcon as LucideIcon },
+  {
+    view: 'playlists',
+    label: getNavigationLabelOrFallback('playlists'),
+    icon: ListMusic,
+  },
 ];
 
-const UTILITY_NAV_ITEMS: SidebarNavItem[] = [{ view: 'tags', label: 'Tags', icon: Tag }];
+const UTILITY_NAV_ITEMS: SidebarNavItem[] = [
+  { view: 'tags', label: getNavigationLabelOrFallback('tags'), icon: Tag },
+];
 
 const FOOTER_NAV_ITEMS: SidebarNavItem[] = [
-  { view: 'settings', label: 'Settings', icon: Settings },
+  { view: 'settings', label: getNavigationLabelOrFallback('settings'), icon: Settings },
 ];
 
 const getIconNavButtonVars = (active: boolean): CSSProperties =>
@@ -103,13 +117,14 @@ const SidebarNavButton = memo(function SidebarNavButton({
   suppressNextTabClickRef,
   theme,
 }: SidebarNavButtonProps) {
-  const onLibrarySurface = currentView === 'library' || currentView === 'search';
+  const normalizedView = normalizeDockActiveView(currentView);
+  const onLibrarySurface = normalizedView === 'library';
   const active = useMemo(() => {
     if (previewActive) return true;
     if (segment === 'search') return onLibrarySurface && searchUiOpen;
     if (segment === 'libraryBrowse') return onLibrarySurface && !searchUiOpen;
-    return currentView === view;
-  }, [previewActive, segment, onLibrarySurface, searchUiOpen, currentView, view]);
+    return normalizedView === view;
+  }, [normalizedView, previewActive, segment, onLibrarySurface, searchUiOpen, view]);
   const handleClick = useCallback(() => {
     if (suppressNextTabClickRef?.current) {
       suppressNextTabClickRef.current = false;
@@ -128,10 +143,10 @@ const SidebarNavButton = memo(function SidebarNavButton({
         aria-label={label}
         aria-pressed={active}
         className={cn(
-          'group flex items-center justify-center border-2 border-black transition-none focus-visible:outline-none rounded-none text-black hover-neo-wiggle',
+          'group flex items-center justify-center border-2 border-[var(--neo-ink)] transition-none focus-visible:outline-none rounded-none text-[var(--neo-ink)]',
           active
             ? 'bg-[var(--signal-active)] p-[6px] shadow-none'
-            : 'h-11 w-11 bg-white shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-panel)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none',
+            : 'h-11 w-11 bg-[var(--neo-paper)] shadow-[var(--neo-shadow-md)] hover:bg-[var(--neo-panel)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none',
         )}
       >
         <Icon className="h-5 w-5" strokeWidth={2.5} />
@@ -149,7 +164,7 @@ const SidebarNavButton = memo(function SidebarNavButton({
       aria-pressed={active}
       className={cn(
         'group relative z-10 flex h-11 w-11 items-center justify-center',
-        'rounded-full transition-all duration-300',
+        'rounded-full transition-[color,background-color,transform] duration-[var(--motion-standard)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-inset',
         active ? 'text-white' : 'text-white/50 hover:text-white/90',
       )}
@@ -160,7 +175,7 @@ const SidebarNavButton = memo(function SidebarNavButton({
     >
       <span
         className={cn(
-          'transition-all duration-300',
+          'transition-[transform,filter] duration-[var(--motion-standard)]',
           active
             ? 'scale-110 drop-shadow-[0_0_12px_rgba(255,255,255,0.2)]'
             : 'group-hover:scale-110 group-active:scale-95',
@@ -194,11 +209,12 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
   const isNeobrutalism = theme === 'neobrutalism';
 
   const activeIndex = useMemo(() => {
+    const normalizedView = normalizeDockActiveView(currentView);
     const idx = items.findIndex((t) => {
-      const onLib = currentView === 'library' || currentView === 'search';
+      const onLib = normalizedView === 'library';
       if (t.segment === 'search') return onLib && searchUiOpen;
       if (t.segment === 'libraryBrowse') return onLib && !searchUiOpen;
-      return currentView === t.view;
+      return normalizedView === t.view;
     });
     return idx >= 0 ? idx : 0;
   }, [items, currentView, searchUiOpen]);
@@ -256,7 +272,7 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
             'absolute left-1/2 -translate-x-1/2 w-11 h-11 rounded-full pointer-events-none motion-reduce:transition-none',
             isDragging || pillLayoutFromDom
               ? 'transition-none'
-              : 'transition-[top,height,opacity] duration-200 ease-out',
+              : 'transition-[top,height,opacity] duration-[var(--motion-standard)] ease-out',
           )}
           style={{
             ...(pillLayoutFromDom

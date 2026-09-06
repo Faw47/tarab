@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { shuffleTracks } from '../features/library/loadTracksForShuffle';
 import { startPlayback } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
 import { sortAlbumTracks } from '../lib/track-order';
@@ -65,7 +66,7 @@ export const useAlbumActions = ({
 
   const handleShuffleAlbum = useCallback(async () => {
     if (!albumDetails || albumDetails.tracks.length === 0) return;
-    const shuffled = [...albumDetails.tracks].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleTracks(albumDetails.tracks);
     const first = shuffled[0];
     try {
       await startPlayback(first, {

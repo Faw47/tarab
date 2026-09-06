@@ -55,6 +55,21 @@ export const useKeyboardShortcuts = ({
 }: UseKeyboardShortcutsParams) => {
   const preMuteVolumeRef = useRef<number>(0.8);
 
+  // Keep volatile values in refs so the effect doesn't re-register
+  // the keydown listener on every state change.
+  const showFullPlayerRef = useRef(showFullPlayer);
+  showFullPlayerRef.current = showFullPlayer;
+  const contextMenuRef = useRef(contextMenuPosition);
+  contextMenuRef.current = contextMenuPosition;
+  const tagEditorRef = useRef(tagEditorTracks);
+  tagEditorRef.current = tagEditorTracks;
+  const selectedRef = useRef(selectedTracks);
+  selectedRef.current = selectedTracks;
+  const canGoBackRef = useRef(canGoBack);
+  canGoBackRef.current = canGoBack;
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.defaultPrevented || isInteractiveTarget(e.target)) {
@@ -163,22 +178,22 @@ export const useKeyboardShortcuts = ({
           e.preventDefault();
           const state = usePlayerStore.getState();
           if (state.currentTrack) {
-            setShowFullPlayer(!showFullPlayer);
+            setShowFullPlayer(!showFullPlayerRef.current);
           }
           break;
         }
 
         case 'Escape':
-          if (contextMenuPosition) {
+          if (contextMenuRef.current) {
             setContextMenuPosition(null);
-          } else if (tagEditorTracks) {
+          } else if (tagEditorRef.current) {
             setTagEditorTracks(null);
-          } else if (showFullPlayer) {
+          } else if (showFullPlayerRef.current) {
             setShowFullPlayer(false);
-          } else if (selectedTracks.length > 0) {
+          } else if (selectedRef.current.length > 0) {
             setSelectedTracks([]);
-          } else if (canGoBack) {
-            onBack?.();
+          } else if (canGoBackRef.current) {
+            onBackRef.current?.();
           }
           break;
       }
@@ -186,16 +201,5 @@ export const useKeyboardShortcuts = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    setContextMenuPosition,
-    setTagEditorTracks,
-    setShowFullPlayer,
-    setSelectedTracks,
-    contextMenuPosition,
-    tagEditorTracks,
-    showFullPlayer,
-    selectedTracks,
-    canGoBack,
-    onBack,
-  ]);
+  }, [setContextMenuPosition, setTagEditorTracks, setShowFullPlayer, setSelectedTracks]);
 };

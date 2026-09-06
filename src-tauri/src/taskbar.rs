@@ -1,5 +1,3 @@
-#![cfg(target_os = "windows")]
-
 use tauri::{Runtime, Window};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{

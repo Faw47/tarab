@@ -11,8 +11,8 @@ export function useCurrentTrackLyrics(autoLyrics: boolean) {
   useEffect(() => {
     let cancelled = false;
     const loadLyrics = async () => {
+      setLyrics(null);
       if (!currentTrack) {
-        setLyrics(null);
         return;
       }
 

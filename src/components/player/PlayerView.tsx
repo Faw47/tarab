@@ -2,7 +2,6 @@ import { memo } from 'react';
 import { useRenderLog } from '../../lib/performance';
 import { usePlayerStore } from '../../store/player-store';
 import { PlayerContent } from './PlayerContent';
-import { ParallaxProvider } from './PlayerParallax';
 
 interface PlayerViewProps {
   onClose: () => void;
@@ -16,11 +15,7 @@ export const PlayerView = memo(({ onClose }: PlayerViewProps) => {
 
   if (!currentTrack) return null;
 
-  return (
-    <ParallaxProvider>
-      <PlayerContent onClose={onClose} />
-    </ParallaxProvider>
-  );
+  return <PlayerContent onClose={onClose} />;
 });
 
 PlayerView.displayName = 'PlayerView';

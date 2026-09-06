@@ -14,10 +14,11 @@ import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
+import { useEffectiveReducedEffects } from '@/hooks/useEffectiveReducedEffects';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/store/settings-store';
 
-import type { NavView } from './FloatingDock';
+import type { NavView } from './navigation-model';
 
 export interface SlidingTabGroupProps {
   tabs: Array<{ view: NavView; label: string; icon: LucideIcon }>;
@@ -35,7 +36,10 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
   const hoveringRef = useRef(false);
   const pressingRef = useRef(false);
 
-  const useGpuLiquidPill = useSettingsStore((s) => s.theme === 'liquid-glass' && !s.reducedEffects);
+  const reducedEffects = useEffectiveReducedEffects();
+  const useGpuLiquidPill = useSettingsStore(
+    (s) => s.theme === 'liquid-glass' && s.backgroundEnabled,
+  );
 
   const activeIndex = useMemo(
     () =>
@@ -95,7 +99,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
   );
 
   useLiquidControlMotionHorizontal({
-    enabled: useGpuLiquidPill,
+    enabled: useGpuLiquidPill && !reducedEffects,
     rootRef: navRef,
     pillStyle,
     pillLayoutFromDom,
@@ -159,7 +163,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
           'pointer-events-none absolute bottom-1 top-1 rounded-full motion-reduce:transition-none',
           isDragging || pillLayoutFromDom
             ? 'transition-none'
-            : 'transition-[left,width,opacity] duration-200 ease-out',
+            : 'transition-[left,width,opacity] duration-[var(--motion-standard)] ease-out',
         )}
         style={domPillStyle}
       >
@@ -193,7 +197,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             }}
             className={cn(
               'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5',
-              'text-[13px] font-medium transition-colors duration-300 motion-reduce:transition-none',
+              'text-[13px] font-medium transition-colors duration-[var(--motion-emphasis)] motion-reduce:transition-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
               isActive ? 'text-white' : 'text-white/50 hover:bg-white/[0.04] hover:text-white/90',
             )}

@@ -1,11 +1,11 @@
 import { clsx } from 'clsx';
+import { AnimatePresence, motion } from 'framer-motion';
 import { type CSSProperties, lazy, type ReactNode, type RefObject, Suspense } from 'react';
 import { type NavView, Sidebar } from '../../components/navigation';
 import { type ProcessingTask, TopBar } from '../../components/navigation/TopBar';
 import { TopBarNeo } from '../../components/navigation/TopBarNeo';
 import { MiniPlayer } from '../../components/player/MiniPlayer';
 import { PillMiniPlayer } from '../../components/player/PillMiniPlayer';
-import { LiquidHomeAmbientBackdrop } from '../../components/shell/LiquidHomeAmbientBackdrop';
 import type { ReactivePalette } from '../../hooks/useReactivePalette';
 import { cn } from '../../lib/utils';
 import type { AppTheme, NavMode } from '../../store/settings-store';
@@ -17,6 +17,12 @@ const AppShellLiquidWebGL = lazy(() =>
   })),
 );
 
+const LiquidHomeAmbientBackdrop = lazy(() =>
+  import('../../components/shell/LiquidHomeAmbientBackdrop').then((module) => ({
+    default: module.LiquidHomeAmbientBackdrop,
+  })),
+);
+
 export interface AppLayoutsProps {
   theme: AppTheme;
   navMode: NavMode;
@@ -25,6 +31,7 @@ export interface AppLayoutsProps {
   overlayMessages: ReactNode;
   compactMode: boolean;
   reducedEffects: boolean;
+  backgroundEnabled: boolean;
   shellVars: CSSProperties;
   palette: ReactivePalette;
   isScrolled: boolean;
@@ -69,6 +76,7 @@ export function AppLayouts({
   overlayMessages,
   compactMode,
   reducedEffects,
+  backgroundEnabled,
   shellVars,
   palette,
   isScrolled,
@@ -107,13 +115,14 @@ export function AppLayouts({
   if (theme === 'neobrutalism') {
     return (
       <div
+        data-compact={compactMode || undefined}
         className={clsx(
           'app-shell min-h-[100dvh] w-full text-black overflow-hidden flex bg-transparent',
           compactMode && 'text-[15px]',
         )}
       >
         {navMode === 'iconRail' && (
-          <aside className="w-20 border-r-3 border-black flex flex-col overflow-hidden shrink-0">
+          <aside className="hidden w-20 border-r-3 border-black flex-col overflow-hidden shrink-0 lg:flex">
             <Sidebar
               navMode={navMode}
               currentView={currentView}
@@ -151,22 +160,52 @@ export function AppLayouts({
               onScroll={(event) => onScrollChange(event.currentTarget.scrollTop > 8)}
             >
               {overlayMessages}
-              <div key={currentView} className="main-content-view">
+              <ViewTransition currentView={currentView} reducedEffects={reducedEffects} isNeo>
                 {currentViewContent}
-              </div>
+              </ViewTransition>
             </div>
           </main>
 
-          {currentTrack && !showFullPlayer && (
-            <div className="h-24 border-t-2 border-black shrink-0 overflow-visible">
-              <MiniPlayer
-                onExpand={onOpenFullPlayer}
-                scheduleSleepTimer={scheduleSleepTimer}
-                cancelSleepTimer={cancelSleepTimer}
-                sleepDeadline={sleepDeadline}
-              />
-            </div>
-          )}
+          <AnimatePresence mode="popLayout">
+            {currentTrack && !showFullPlayer && !miniPlayerCollapsed && (
+              <motion.div
+                key="neo-mini-player"
+                initial={reducedEffects ? false : { height: 0, opacity: 0 }}
+                animate={{ height: '6rem', opacity: 1 }} // h-24 = 6rem
+                exit={reducedEffects ? undefined : { height: 0, opacity: 0 }}
+                transition={
+                  reducedEffects ? { duration: 0 } : { duration: 0.25, ease: [0.32, 0.72, 0, 1] }
+                }
+                className="border-t-2 border-black shrink-0 overflow-visible"
+              >
+                <MiniPlayer
+                  onExpand={onOpenFullPlayer}
+                  scheduleSleepTimer={scheduleSleepTimer}
+                  cancelSleepTimer={cancelSleepTimer}
+                  sleepDeadline={sleepDeadline}
+                />
+              </motion.div>
+            )}
+
+            {currentTrack && !showFullPlayer && miniPlayerCollapsed && (
+              <motion.div
+                key="neo-pill-player"
+                initial={reducedEffects ? false : { y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={
+                  reducedEffects ? undefined : { y: 20, opacity: 0, transition: { duration: 0.15 } }
+                }
+                transition={
+                  reducedEffects
+                    ? { duration: 0 }
+                    : { duration: 0.25, ease: [0.32, 0.72, 0, 1], delay: 0.1 }
+                }
+                className="absolute bottom-24 left-1/2 z-50 -translate-x-1/2 pointer-events-auto lg:bottom-6"
+              >
+                <PillMiniPlayer className="relative" onExpand={onExpandCollapsedPlayer} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     );
@@ -176,6 +215,7 @@ export function AppLayouts({
 
   return (
     <div
+      data-compact={compactMode || undefined}
       className={clsx(
         'app-shell h-screen flex flex-col w-full bg-transparent text-text-primary overflow-hidden relative',
         !reducedEffects && 'app-shell-grain',
@@ -183,10 +223,14 @@ export function AppLayouts({
       )}
       style={shellVars}
     >
-      {reducedEffects ? (
-        <div className="fixed inset-0 z-0 bg-[#07070f] pointer-events-none" />
+      {reducedEffects || !backgroundEnabled ? (
+        <div className="fixed inset-0 z-0 bg-[var(--surface-shell)] pointer-events-none" />
       ) : (
-        <Suspense fallback={<div className="fixed inset-0 z-0 bg-[#07070f] pointer-events-none" />}>
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-0 bg-[var(--surface-shell)] pointer-events-none" />
+          }
+        >
           <AppShellLiquidWebGL
             heroAccent={palette.heroAccent}
             isScrolled={isScrolled}
@@ -198,7 +242,11 @@ export function AppLayouts({
         </Suspense>
       )}
 
-      <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} />
+      {backgroundEnabled && !reducedEffects ? (
+        <Suspense fallback={null}>
+          <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} />
+        </Suspense>
+      ) : null}
 
       <div className="flex h-full w-full overflow-hidden relative z-10">
         <Sidebar
@@ -246,29 +294,91 @@ export function AppLayouts({
           >
             {overlayMessages}
             <main className="h-full min-w-0 flex-1">
-              <div
-                key={currentView}
-                className={clsx('h-full', !reducedEffects && 'animate-fade-in')}
-              >
+              <ViewTransition currentView={currentView} reducedEffects={reducedEffects}>
                 {currentViewContent}
-              </div>
+              </ViewTransition>
             </main>
           </div>
         </div>
       </div>
 
-      {currentView !== 'home' && currentTrack && !showFullPlayer && !miniPlayerCollapsed && (
-        <MiniPlayer
-          onExpand={onOpenFullPlayer}
-          scheduleSleepTimer={scheduleSleepTimer}
-          cancelSleepTimer={cancelSleepTimer}
-          sleepDeadline={sleepDeadline}
-        />
-      )}
+      <AnimatePresence mode="popLayout">
+        {currentView !== 'home' && currentTrack && !showFullPlayer && !miniPlayerCollapsed && (
+          <motion.div
+            key="mini-player"
+            initial={reducedEffects ? false : { height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={reducedEffects ? undefined : { height: 0, opacity: 0 }}
+            transition={
+              reducedEffects ? { duration: 0 } : { duration: 0.25, ease: [0.32, 0.72, 0, 1] }
+            }
+            className="shrink-0 overflow-hidden"
+          >
+            <MiniPlayer
+              onExpand={onOpenFullPlayer}
+              scheduleSleepTimer={scheduleSleepTimer}
+              cancelSleepTimer={cancelSleepTimer}
+              sleepDeadline={sleepDeadline}
+            />
+          </motion.div>
+        )}
 
-      {currentView !== 'home' && currentTrack && !showFullPlayer && miniPlayerCollapsed && (
-        <PillMiniPlayer onExpand={onExpandCollapsedPlayer} />
-      )}
+        {currentView !== 'home' && currentTrack && !showFullPlayer && miniPlayerCollapsed && (
+          <motion.div
+            key="pill-player"
+            initial={reducedEffects ? false : { y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={
+              reducedEffects ? undefined : { y: 20, opacity: 0, transition: { duration: 0.15 } }
+            }
+            transition={
+              reducedEffects
+                ? { duration: 0 }
+                : { duration: 0.25, ease: [0.32, 0.72, 0, 1], delay: 0.1 }
+            }
+            className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 pointer-events-auto lg:bottom-6"
+          >
+            <PillMiniPlayer className="relative" onExpand={onExpandCollapsedPlayer} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+interface ViewTransitionProps {
+  currentView: NavView;
+  reducedEffects: boolean;
+  isNeo?: boolean;
+  children: ReactNode;
+}
+
+function ViewTransition({
+  currentView,
+  reducedEffects,
+  isNeo = false,
+  children,
+}: ViewTransitionProps) {
+  if (reducedEffects) {
+    return (
+      <div key={currentView} className="h-full w-full">
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <AnimatePresence initial={false} mode="wait">
+      <motion.div
+        key={currentView}
+        className="h-full w-full"
+        initial={{ opacity: 0, y: isNeo ? 4 : 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: isNeo ? -2 : -4 }}
+        transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
   );
 }

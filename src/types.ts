@@ -6,6 +6,7 @@ export interface Track {
   artist: string;
   albumArtist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
   trackNumber?: number | null;
   discNumber?: number | null;
@@ -227,7 +228,10 @@ export interface TrackMetadata {
   artist: string;
   album_artist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
+  track_number: number | null;
+  disc_number: number | null;
   duration_secs: number;
   file_path: string;
   has_cover_art: boolean;
@@ -247,18 +251,39 @@ export type DesktopControlAction =
   | 'toggle-play'
   | 'play'
   | 'pause'
+  | 'stop'
+  | 'next'
+  | 'previous'
+  | 'seek-backward'
+  | 'seek-forward'
+  | 'toggle-shuffle'
+  | 'cycle-repeat'
+  | 'show-main'
+  | 'toggle-mini'
+  | 'hide-mini'
+  | 'quit';
+
+export type DesktopMiniControlAction =
+  | 'toggle-play'
   | 'next'
   | 'previous'
   | 'show-main'
-  | 'toggle-mini'
-  | 'quit';
+  | 'hide-mini';
 
-export interface DesktopSeekPayload {
+export interface DesktopMiniSeekPayload {
   positionSecs: number;
+  sourceId: string;
+}
+
+export interface DesktopPlaybackTrackSnapshot {
+  title: string;
+  artist: string;
+  coverArtHash: string | null;
 }
 
 export interface DesktopPlaybackSnapshot {
-  track: Track | null;
+  track: DesktopPlaybackTrackSnapshot | null;
+  sourceId: string | null;
   isPlaying: boolean;
   position: number;
   duration: number;
@@ -291,4 +316,5 @@ export interface DesktopMediaSessionSyncPayload {
   shuffle: boolean;
   repeatMode: LoopMode;
   playbackRate: number;
+  volume: number;
 }

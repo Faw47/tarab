@@ -13,10 +13,10 @@ import {
 import { type CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
+import { useSmoothTimeState } from '../../contexts/smooth-time';
 
-import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
 
@@ -24,15 +24,18 @@ import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
+import { NEO_POLAROID_CARD_CLASS, NEO_POLAROID_PLAYING_CLASS } from '../shared/neo-surface-classes';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
+import { StatePanel } from '../ui/StatePanel';
 import type { HomeViewProps } from './homeTypes';
-import { useHomeLibraryModel } from './useHomeLibraryModel';
+import { useHomeAlbumDetailsLoader } from './useHomeAlbumDetails';
+import { useHomeViewModel } from './useHomeViewModel';
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
-const BORDER = 'border-2 border-black';
-const SHADOW_COMP = 'shadow-[4px_4px_0_0_#000]';
-const SHADOW_PANEL = 'shadow-[4px_4px_0_0_#000]';
+const BORDER = 'border-2 border-[var(--neo-ink)]';
+const SHADOW_COMP = 'shadow-[var(--neo-shadow-md)]';
+const SHADOW_PANEL = 'shadow-[var(--neo-shadow-md)]';
 const PRESS_EFFECT = 'active:translate-x-[4px] active:translate-y-[4px] active:shadow-none';
 const SNAP = 'transition-none';
 const STROKE = 3;
@@ -50,17 +53,12 @@ const POLAROID_TAPE_ROTATIONS = [
   'rotate-[4deg]',
 ];
 
-const NEO_POLAROID_CARD =
-  'group relative cursor-pointer select-none border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none';
-const NEO_POLAROID_PLAYING =
-  'border-[var(--signal-play)] bg-[var(--signal-play)] shadow-[3px_3px_0_0_var(--signal-play)]';
-
 const NEO_TAPE =
   'pointer-events-none absolute -top-[9px] left-1/2 z-20 h-[18px] w-12 -translate-x-1/2 opacity-90';
 const TAPE_STYLE: CSSProperties = {
-  background: 'rgba(230, 200, 120, 0.28)',
-  border: '1px solid rgba(180, 155, 80, 0.35)',
-  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
+  background: 'var(--neo-tape-bg)',
+  border: '1px solid var(--neo-tape-border)',
+  boxShadow: 'var(--neo-tape-shadow)',
 };
 
 function polaroidRotation(i: number): string {
@@ -71,7 +69,7 @@ function polaroidTapeRotation(i: number): string {
   return POLAROID_TAPE_ROTATIONS[i % POLAROID_TAPE_ROTATIONS.length];
 }
 
-const NeoVolumeControl = memo(() => {
+const NeoVolumeControl = memo(({ reducedEffects }: { reducedEffects: boolean }) => {
   const { volume, setVolume } = usePlayerStore(
     useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
   );
@@ -97,17 +95,21 @@ const NeoVolumeControl = memo(() => {
   );
 
   const onEnter = useCallback(() => {
-    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
     setExpanded(true);
   }, []);
 
   const onLeave = useCallback(() => {
-    leaveTimer.current = setTimeout(() => setExpanded(false), 300);
+    if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      leaveTimer.current = null;
+      setExpanded(false);
+    }, 300);
   }, []);
 
   useEffect(
     () => () => {
-      if (leaveTimer.current) clearTimeout(leaveTimer.current);
+      if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
     },
     [],
   );
@@ -137,7 +139,7 @@ const NeoVolumeControl = memo(() => {
         className={cn(
           'flex items-center overflow-hidden ease-out',
           expanded ? 'w-auto opacity-100' : 'w-0 opacity-0',
-          'transition-[width,opacity] duration-200',
+          !reducedEffects && 'transition-[width,opacity] duration-[var(--motion-standard)]',
         )}
       >
         <div className={cn(BORDER, SHADOW_COMP, 'bg-white px-2 py-1.5')}>
@@ -170,31 +172,32 @@ const NeoVolumeControl = memo(() => {
 });
 NeoVolumeControl.displayName = 'NeoVolumeControl';
 
-const NowPlayingEqualizer = memo(({ isPlaying }: { isPlaying: boolean }) => {
-  return (
-    <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
-            isPlaying && 'animate-pulse',
-          )}
-          style={{
-            height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
-            animationDelay: `${i * 0.15}s`,
-          }}
-        />
-      ))}
-    </div>
-  );
-});
+const NowPlayingEqualizer = memo(
+  ({ isPlaying, reducedEffects }: { isPlaying: boolean; reducedEffects: boolean }) => {
+    return (
+      <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
+              isPlaying && !reducedEffects && 'animate-pulse',
+            )}
+            style={{
+              height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
+              animationDelay: `${i * 0.15}s`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  },
+);
 NowPlayingEqualizer.displayName = 'NowPlayingEqualizer';
 
 const NeoLyricsConsole = memo(() => {
-  const { lyrics, currentTime } = usePlayerStore(
-    useShallow((s) => ({ lyrics: s.lyrics, currentTime: s.currentTime })),
-  );
+  const lyrics = usePlayerStore((s) => s.lyrics);
+  const currentTime = useSmoothTimeState();
 
   const activeLine = useMemo(() => {
     if (!lyrics?.lines) return null;
@@ -266,21 +269,18 @@ const NeoAlbumCard = memo(
     return (
       <div
         className={cn(
-          NEO_POLAROID_CARD,
+          NEO_POLAROID_CARD_CLASS,
           'flex aspect-[4/5] flex-col',
           polaroidRotation(index),
-          isPlayingAlbum && NEO_POLAROID_PLAYING,
+          isPlayingAlbum && NEO_POLAROID_PLAYING_CLASS,
         )}
-        onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}
-        role="button"
-        tabIndex={0}
       >
+        <button
+          type="button"
+          className="absolute inset-0 z-10 border-0 bg-transparent p-0 focus-visible:outline-4 focus-visible:outline-offset-[-4px] focus-visible:outline-[var(--neo-ink)]"
+          onClick={open}
+          aria-label={`Open ${track.album} album`}
+        />
         <div
           className={cn(NEO_TAPE, polaroidTapeRotation(index))}
           style={TAPE_STYLE}
@@ -300,11 +300,11 @@ const NeoAlbumCard = memo(
             type="button"
             className={cn(
               BORDER,
-              'absolute bottom-2 right-2 z-20 flex h-11 w-11 items-center justify-center bg-[#9D80E3]',
+              'absolute bottom-2 right-2 z-20 flex h-11 w-11 items-center justify-center bg-[var(--neo-violet)]',
               SNAP,
               PRESS_EFFECT,
-              'shadow-[3px_3px_0_0_#000] hover:bg-[var(--signal-active)]',
-              'opacity-0 group-hover:opacity-100',
+              'shadow-[var(--neo-shadow-sm)] hover:bg-[var(--signal-active)]',
+              'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
             )}
             onClick={(e) => {
               e.stopPropagation();
@@ -318,8 +318,8 @@ const NeoAlbumCard = memo(
         <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[9px] font-bold uppercase tracking-[0.15em] text-black/50">
-          {track.artist}
+        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-black/50">
+          {getAlbumArtist(track)}
         </p>
       </div>
     );
@@ -336,30 +336,32 @@ export const HomeViewNeo = memo(function HomeViewNeo({
   onRetryLoad,
   onScrollChange,
 }: HomeViewProps) {
-  const { currentTrack, isPlaying } = usePlayerStore(
-    useShallow((s) => ({
-      currentTrack: s.currentTrack,
-      isPlaying: s.isPlaying,
-    })),
-  );
+  const reducedEffects = useEffectiveReducedEffects();
+  const {
+    currentTrack,
+    isPlaying,
 
-  const currentCoverUrl =
-    useCoverArt(
-      currentTrack?.filePath,
-      currentTrack?.hasCoverArt,
-      true,
-      'large',
-      currentTrack?.coverArtHash,
-    ) ?? null;
-
-  const { albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
+    librarySecondaryError,
+    isLibrarySecondaryLoading,
+    retryLibrarySecondaryData,
+    albumTracksByKey,
+    albums: allAlbums,
+    playAlbum,
+    handleTogglePlay,
+    handlePrevious,
+    handleNext,
+  } = useHomeViewModel('home-neo');
+  const handleOpenAlbumDetails = useHomeAlbumDetailsLoader(onOpenAlbumDetails, 'home-neo');
   const albums = allAlbums.slice(0, 24);
 
   if (isLibraryLoading) {
     return (
       <div className="h-full overflow-y-auto bg-transparent custom-scrollbar">
         <div
-          className="mx-auto flex max-w-[1600px] animate-pulse flex-col gap-8 p-6 md:p-8 lg:p-10"
+          className={cn(
+            'mx-auto flex max-w-[1600px] flex-col gap-8 p-6 md:p-8 lg:p-10',
+            !reducedEffects && 'animate-pulse',
+          )}
           role="status"
           aria-label="Loading home"
         >
@@ -410,6 +412,21 @@ export const HomeViewNeo = memo(function HomeViewNeo({
       onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 20)}
     >
       <div className="mx-auto flex max-w-[1600px] flex-col gap-8 p-6 md:p-8 lg:p-10">
+        {librarySecondaryError && (
+          <StatePanel
+            tone="warning"
+            role="alert"
+            title="Some library data is unavailable."
+            description={librarySecondaryError}
+            action={{
+              label: isLibrarySecondaryLoading ? 'Retrying...' : 'Retry library data',
+              onClick: retryLibrarySecondaryData,
+              disabled: isLibrarySecondaryLoading,
+            }}
+            className="rounded-none p-3"
+          />
+        )}
+
         <section
           className={cn(
             BORDER,
@@ -427,11 +444,17 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                 'relative aspect-square w-full overflow-hidden bg-[var(--neo-muted)]',
               )}
             >
-              {currentCoverUrl ? (
-                <img
-                  src={currentCoverUrl}
+              {currentTrack ? (
+                <CoverArtImage
+                  track={currentTrack}
+                  variant="album"
+                  className="h-full w-full"
+                  imgClassName="h-full w-full object-cover"
+                  roundedClassName=""
+                  iconClassName="h-[88px] w-[88px]"
                   alt="Now Playing"
-                  className="h-full w-full object-cover"
+                  lazy={false}
+                  size="large"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
@@ -439,7 +462,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                 </div>
               )}
               <div className="absolute right-3 top-3">
-                <NowPlayingEqualizer isPlaying={isPlaying} />
+                <NowPlayingEqualizer isPlaying={isPlaying} reducedEffects={reducedEffects} />
               </div>
             </div>
 
@@ -453,7 +476,13 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   <h1 className="neo-type-level-1 break-words py-1 text-black">
                     {currentTrack.title}
                   </h1>
-                  <div className={cn(BORDER, SHADOW_COMP, 'self-start bg-[#FFE234] px-3 py-1.5')}>
+                  <div
+                    className={cn(
+                      BORDER,
+                      SHADOW_COMP,
+                      'self-start bg-[var(--neo-active-hover)] px-3 py-1.5',
+                    )}
+                  >
                     <span className="neo-type-level-2 text-black">{currentTrack.artist}</span>
                   </div>
                 </>
@@ -469,7 +498,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                 <div className="flex items-end gap-3 overflow-visible">
                   <button
                     type="button"
-                    onClick={() => playAdjacentTrack('previous')}
+                    onClick={handlePrevious}
                     className={cn(
                       BORDER,
                       'flex h-14 w-14 items-center justify-center bg-white',
@@ -484,7 +513,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   <button
                     type="button"
                     className="neo-play-pause"
-                    onClick={() => toggleCurrentPlayback()}
+                    onClick={handleTogglePlay}
                     aria-label={isPlaying ? 'Pause' : 'Play'}
                   >
                     {isPlaying ? (
@@ -495,7 +524,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   </button>
                   <button
                     type="button"
-                    onClick={() => playAdjacentTrack('next')}
+                    onClick={handleNext}
                     className={cn(
                       BORDER,
                       'flex h-14 w-14 items-center justify-center bg-white',
@@ -527,7 +556,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                       <Maximize2 size={16} strokeWidth={STROKE} />
                     </button>
                   )}
-                  <NeoVolumeControl />
+                  <NeoVolumeControl reducedEffects={reducedEffects} />
                 </div>
               </div>
             </div>
@@ -546,8 +575,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                 const albumTracks = albumTracksByKey.get(key) ?? [];
                 const isPlayingAlbum =
                   !!currentTrack &&
-                  currentTrack.album === item.track.album &&
-                  getAlbumArtist(currentTrack) === getAlbumArtist(item.track) &&
+                  getAlbumKey(currentTrack) === getAlbumKey(item.track) &&
                   isPlaying;
                 return (
                   <NeoAlbumCard
@@ -556,7 +584,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                     albumTracks={albumTracks}
                     index={albumIndex}
                     isPlayingAlbum={isPlayingAlbum}
-                    onOpenAlbumDetails={onOpenAlbumDetails}
+                    onOpenAlbumDetails={handleOpenAlbumDetails}
                     onPlayAlbum={playAlbum}
                   />
                 );
@@ -575,7 +603,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                 onClick={onNavigateToFolders}
                 className={cn(
                   BORDER,
-                  'mt-6 h-16 bg-[#FFE234] px-10 font-black uppercase tracking-[0.2em]',
+                  'mt-6 h-16 bg-[var(--neo-active-hover)] px-10 font-black uppercase tracking-[0.2em]',
                   SNAP,
                   PRESS_EFFECT,
                   SHADOW_COMP,

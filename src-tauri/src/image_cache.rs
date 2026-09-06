@@ -1,12 +1,11 @@
-use image::image_dimensions;
-use image::{imageops::FilterType, DynamicImage, ImageFormat};
+use image::{imageops::FilterType, DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
-use std::path::PathBuf;
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
 
@@ -19,6 +18,85 @@ const THUMBNAIL_SIZES: [(u32, &str); 3] = [
 ];
 
 const MAX_CACHE_SIZE_MB: u64 = 500;
+pub(crate) const MAX_ENCODED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+pub(crate) const SUPPORTED_ARTWORK_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
+const MAX_SOURCE_IMAGE_PIXELS: u64 = 50_000_000;
+const MAX_SOURCE_IMAGE_DIMENSION: u32 = 16_384;
+const MAX_DECODED_IMAGE_BYTES: u64 = MAX_SOURCE_IMAGE_PIXELS * 4;
+const MAX_THUMBNAIL_DIMENSION: u32 = 512;
+const MAX_THUMBNAIL_ALLOCATION_BYTES: u64 =
+    MAX_THUMBNAIL_DIMENSION as u64 * MAX_THUMBNAIL_DIMENSION as u64 * 4;
+
+fn source_image_limits() -> Limits {
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_SOURCE_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_SOURCE_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
+    limits
+}
+
+fn thumbnail_image_limits() -> Limits {
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_THUMBNAIL_DIMENSION);
+    limits.max_image_height = Some(MAX_THUMBNAIL_DIMENSION);
+    limits.max_alloc = Some(MAX_THUMBNAIL_ALLOCATION_BYTES);
+    limits
+}
+
+pub(crate) fn ensure_bounded_image_bytes(bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() || bytes.len() > MAX_ENCODED_IMAGE_BYTES {
+        return Err("Cover image exceeds the encoded byte limit".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn decode_bounded_base64_image(encoded: &str) -> Result<Vec<u8>, String> {
+    const MAX_BASE64_BYTES: usize = MAX_ENCODED_IMAGE_BYTES.div_ceil(3) * 4;
+    if encoded.len() > MAX_BASE64_BYTES {
+        return Err("Cover image exceeds the encoded byte limit".to_string());
+    }
+
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+        .map_err(|error| format!("Failed to decode base64: {error}"))?;
+    ensure_bounded_image_bytes(&bytes)?;
+    Ok(bytes)
+}
+
+pub(crate) fn decode_bounded_image(bytes: &[u8]) -> Result<DynamicImage, String> {
+    ensure_bounded_image_bytes(bytes)?;
+
+    let mut reader = ImageReader::new(Cursor::new(bytes));
+    reader.limits(source_image_limits());
+    let reader = reader
+        .with_guessed_format()
+        .map_err(|error| format!("Failed to inspect image: {error}"))?;
+    let decoder = reader
+        .into_decoder()
+        .map_err(|error| format!("Failed to decode image: {error}"))?;
+    let (width, height) = decoder.dimensions();
+    if u64::from(width).saturating_mul(u64::from(height)) > MAX_SOURCE_IMAGE_PIXELS {
+        return Err("Cover image exceeds the decoded pixel limit".to_string());
+    }
+    if decoder.total_bytes() > MAX_DECODED_IMAGE_BYTES {
+        return Err("Cover image exceeds the decoded allocation limit".to_string());
+    }
+
+    DynamicImage::from_decoder(decoder).map_err(|error| format!("Failed to decode image: {error}"))
+}
+
+pub(crate) fn validated_artwork_mime(bytes: &[u8]) -> Result<&'static str, String> {
+    ensure_bounded_image_bytes(bytes)?;
+    let mime = match image::guess_format(bytes)
+        .map_err(|error| format!("Failed to identify cover image: {error}"))?
+    {
+        ImageFormat::Jpeg => "image/jpeg",
+        ImageFormat::Png => "image/png",
+        ImageFormat::WebP => "image/webp",
+        _ => return Err("Cover image must be JPEG, PNG, or WebP".to_string()),
+    };
+    decode_bounded_image(bytes)?;
+    Ok(mime)
+}
 
 fn max_thumbnail_bytes(size: &str) -> usize {
     match size {
@@ -29,12 +107,62 @@ fn max_thumbnail_bytes(size: &str) -> usize {
     }
 }
 
-fn is_valid_thumbnail_hash(hash: &str) -> bool {
+pub(crate) fn is_valid_thumbnail_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn is_valid_thumbnail_size(size: &str) -> bool {
+pub(crate) fn is_valid_thumbnail_size(size: &str) -> bool {
     THUMBNAIL_SIZES.iter().any(|(_, name)| *name == size)
+}
+
+fn inspect_thumbnail_file(path: &Path, size: &str) -> Result<Option<fs::Metadata>, String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Failed to inspect thumbnail: {}", error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Thumbnail cache entry is not a regular file".to_string());
+    }
+
+    let limit = max_thumbnail_bytes(size);
+    if metadata.len() > limit as u64 {
+        return Err("Thumbnail cache entry exceeds the size limit".to_string());
+    }
+    Ok(Some(metadata))
+}
+
+fn read_thumbnail_file(path: &Path, size: &str) -> Result<Option<Vec<u8>>, String> {
+    let Some(metadata) = inspect_thumbnail_file(path, size)? else {
+        return Ok(None);
+    };
+    let expected_dimension = THUMBNAIL_SIZES
+        .iter()
+        .find_map(|(dimension, name)| (*name == size).then_some(*dimension))
+        .ok_or_else(|| "Unsupported thumbnail size".to_string())?;
+    if limited_thumbnail_dimensions(path)? != (expected_dimension, expected_dimension) {
+        return Err("Thumbnail cache entry has invalid dimensions".to_string());
+    }
+    let limit = max_thumbnail_bytes(size);
+    let file =
+        fs::File::open(path).map_err(|error| format!("Failed to open thumbnail: {}", error))?;
+    let mut data = Vec::with_capacity(metadata.len() as usize);
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|error| format!("Failed to read thumbnail: {}", error))?;
+    if data.len() > limit {
+        return Err("Thumbnail cache entry exceeds the size limit".to_string());
+    }
+    Ok(Some(data))
+}
+
+fn limited_thumbnail_dimensions(path: &Path) -> Result<(u32, u32), String> {
+    let mut reader = ImageReader::open(path)
+        .map_err(|error| format!("Failed to open thumbnail image: {error}"))?;
+    reader.limits(thumbnail_image_limits());
+    reader
+        .into_dimensions()
+        .map_err(|error| format!("Failed to inspect thumbnail image: {error}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +177,7 @@ pub struct ImageCache {
     cache_dir: PathBuf,
     // In-memory LRU for recently accessed hashes
     memory_cache: RwLock<HashMap<String, (Vec<u8>, std::time::Instant)>>,
-    max_memory_items: usize,
+    max_memory_bytes: usize,
 }
 
 impl ImageCache {
@@ -60,7 +188,7 @@ impl ImageCache {
         Self {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
-            max_memory_items: 100,
+            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -77,10 +205,10 @@ impl ImageCache {
         }
         for (size, name) in THUMBNAIL_SIZES {
             let path = self.get_thumbnail_path(hash, name);
-            if !path.exists() {
+            if !matches!(inspect_thumbnail_file(&path, name), Ok(Some(_))) {
                 return false;
             }
-            match image_dimensions(&path) {
+            match limited_thumbnail_dimensions(&path) {
                 Ok((w, h)) if w == size && h == size => {}
                 _ => {
                     let _ = fs::remove_file(&path);
@@ -93,6 +221,7 @@ impl ImageCache {
 
     /// Generate all thumbnail sizes from raw image data
     pub fn generate_thumbnails(&self, image_data: &[u8]) -> Result<String, String> {
+        ensure_bounded_image_bytes(image_data)?;
         let hash = Self::hash_image_data(image_data);
 
         // Check if already cached and square; otherwise regenerate
@@ -101,8 +230,7 @@ impl ImageCache {
         }
 
         // Decode image
-        let img = image::load_from_memory(image_data)
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
+        let img = decode_bounded_image(image_data)?;
 
         // Generate each size
         for (size, name) in THUMBNAIL_SIZES {
@@ -175,35 +303,33 @@ impl ImageCache {
 
         // Load from disk
         let path = self.get_thumbnail_path(hash, size);
-        if !path.exists() {
+        let Some(data) = read_thumbnail_file(&path, size)? else {
             return Ok(None);
-        }
-
-        let data = fs::read(&path).map_err(|e| format!("Failed to read thumbnail: {}", e))?;
+        };
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
 
         // Add to memory cache
         {
             let mut cache = self.memory_cache.write();
-            if cache.len() >= self.max_memory_items {
-                let mut oldest_key = String::new();
-                let mut oldest_time = std::time::Instant::now();
-                for (k, (_, t)) in cache.iter() {
-                    if *t < oldest_time {
-                        oldest_time = *t;
-                        oldest_key = k.clone();
-                    }
-                }
-                if !oldest_key.is_empty() {
-                    cache.remove(&oldest_key);
+            let mut current_bytes: usize = cache.values().map(|(bytes, _)| bytes.len()).sum();
+            while current_bytes.saturating_add(data.len()) > self.max_memory_bytes {
+                let Some(oldest_key) = cache
+                    .iter()
+                    .min_by_key(|(_, (_, accessed))| *accessed)
+                    .map(|(key, _)| key.clone())
+                else {
+                    break;
+                };
+                if let Some((removed, _)) = cache.remove(&oldest_key) {
+                    current_bytes = current_bytes.saturating_sub(removed.len());
                 }
             }
-            cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
+            if data.len() <= self.max_memory_bytes {
+                cache.insert(cache_key, (data, std::time::Instant::now()));
+            }
         }
 
-        Ok(Some(base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        )))
+        Ok(Some(encoded))
     }
 
     /// Get thumbnail as raw bytes (for frontend to display directly)
@@ -212,19 +338,34 @@ impl ImageCache {
             return Ok(None);
         }
 
-        let path = self.get_thumbnail_path(hash, size);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        fs::read(&path)
-            .map(Some)
-            .map_err(|e| format!("Failed to read thumbnail: {}", e))
+        read_thumbnail_file(&self.get_thumbnail_path(hash, size), size)
     }
 
     /// Check if thumbnail exists
     pub fn has_thumbnail(&self, hash: &str) -> bool {
         self.thumbnails_valid(hash)
+    }
+
+    pub fn has_valid_thumbnail(&self, hash: &str, size: &str) -> bool {
+        if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
+            return false;
+        }
+
+        let expected_size = THUMBNAIL_SIZES
+            .iter()
+            .find_map(|(pixels, name)| (*name == size).then_some(*pixels));
+        let Some(expected_size) = expected_size else {
+            return false;
+        };
+        let path = self.get_thumbnail_path(hash, size);
+
+        match (
+            inspect_thumbnail_file(&path, size),
+            limited_thumbnail_dimensions(&path),
+        ) {
+            (Ok(Some(_)), Ok((width, height))) => width == expected_size && height == expected_size,
+            _ => false,
+        }
     }
 
     /// Get cache statistics
@@ -383,8 +524,41 @@ mod tests {
         ImageCache {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
-            max_memory_items: 100,
+            max_memory_bytes: 32 * 1024 * 1024,
         }
+    }
+
+    fn png_with_dimensions(width: u32, height: u32, bit_depth: u8, color_type: u8) -> Vec<u8> {
+        fn crc32(bytes: &[u8]) -> u32 {
+            let mut crc = u32::MAX;
+            for byte in bytes {
+                crc ^= u32::from(*byte);
+                for _ in 0..8 {
+                    crc = (crc >> 1) ^ (0xedb8_8320 & (0_u32.wrapping_sub(crc & 1)));
+                }
+            }
+            !crc
+        }
+
+        fn push_chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+            png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            png.extend_from_slice(kind);
+            png.extend_from_slice(data);
+            let mut checksum_input = Vec::with_capacity(kind.len() + data.len());
+            checksum_input.extend_from_slice(kind);
+            checksum_input.extend_from_slice(data);
+            png.extend_from_slice(&crc32(&checksum_input).to_be_bytes());
+        }
+
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut ihdr = Vec::with_capacity(13);
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[bit_depth, color_type, 0, 0, 0]);
+        push_chunk(&mut png, b"IHDR", &ihdr);
+        push_chunk(&mut png, b"IDAT", &[]);
+        push_chunk(&mut png, b"IEND", &[]);
+        png
     }
 
     #[test]
@@ -440,11 +614,142 @@ mod tests {
     }
 
     #[test]
+    fn thumbnail_read_rejects_oversized_cache_entry() {
+        let root = temp_dir("oversized");
+        let cache_dir = root.join("covers");
+        let hash = "b".repeat(64);
+        let cache = test_cache(cache_dir);
+        let path = cache.get_thumbnail_path(&hash, "small");
+        fs::create_dir_all(path.parent().expect("thumbnail parent")).expect("create parent");
+        let file = fs::File::create(&path).expect("create thumbnail");
+        file.set_len(max_thumbnail_bytes("small") as u64 + 1)
+            .expect("set oversized length");
+
+        let result = cache.get_thumbnail_bytes(&hash, "small");
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("size limit"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn thumbnail_read_rejects_symlink_cache_entry() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("symlink");
+        let cache_dir = root.join("covers");
+        let hash = "c".repeat(64);
+        let cache = test_cache(cache_dir);
+        let path = cache.get_thumbnail_path(&hash, "small");
+        fs::create_dir_all(path.parent().expect("thumbnail parent")).expect("create parent");
+        let outside = root.join("outside.webp");
+        fs::write(&outside, b"outside").expect("write outside");
+        symlink(&outside, &path).expect("create cache symlink");
+
+        let result = cache.get_thumbnail_bytes(&hash, "small");
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("regular file"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn max_thumbnail_bytes_bounds_sizes() {
         assert_eq!(max_thumbnail_bytes("small"), 200_000);
         assert_eq!(max_thumbnail_bytes("medium"), 700_000);
         assert_eq!(max_thumbnail_bytes("large"), 1_800_000);
         assert_eq!(max_thumbnail_bytes("unexpected"), 700_000);
+    }
+
+    #[test]
+    fn source_image_rejects_oversized_encoded_input() {
+        let root = temp_dir("oversized-source");
+        let cache = test_cache(root.join("covers"));
+        let data = vec![0_u8; MAX_ENCODED_IMAGE_BYTES + 1];
+
+        let result = cache.generate_thumbnails(&data);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("encoded byte limit"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn artwork_mime_is_sniffed_for_every_thumbnail_decoder_format() {
+        let image = DynamicImage::new_rgb8(2, 2);
+        for (format, expected_mime) in [
+            (ImageFormat::Jpeg, "image/jpeg"),
+            (ImageFormat::Png, "image/png"),
+            (ImageFormat::WebP, "image/webp"),
+        ] {
+            let mut encoded = Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, format)
+                .expect("encode supported artwork");
+            assert_eq!(
+                validated_artwork_mime(encoded.get_ref()).expect("validate artwork"),
+                expected_mime
+            );
+        }
+    }
+
+    #[test]
+    fn artwork_validation_rejects_formats_outside_the_thumbnail_pipeline() {
+        let gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let error = validated_artwork_mime(gif).expect_err("reject unsupported GIF artwork");
+        assert!(error.contains("JPEG, PNG, or WebP"));
+    }
+
+    #[test]
+    fn decoder_rejects_oversized_dimensions_before_pixel_decode() {
+        let encoded = png_with_dimensions(MAX_SOURCE_IMAGE_DIMENSION + 1, 1, 8, 2);
+
+        let error = decode_bounded_image(&encoded).expect_err("reject oversized width");
+
+        assert!(error.contains("limit"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn decoder_rejects_oversized_pixel_count_before_pixel_decode() {
+        let encoded = png_with_dimensions(10_000, 6_000, 8, 0);
+
+        let error = decode_bounded_image(&encoded).expect_err("reject oversized pixel count");
+
+        assert!(error.contains("decoded pixel limit"));
+    }
+
+    #[test]
+    fn decoder_rejects_oversized_output_allocation_before_pixel_decode() {
+        let encoded = png_with_dimensions(10_000, 5_000, 16, 6);
+
+        let error = decode_bounded_image(&encoded).expect_err("reject oversized allocation");
+
+        assert!(error.contains("limit"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn requested_thumbnail_validation_rejects_wrong_dimensions() {
+        let root = temp_dir("wrong-dimensions");
+        let cache_dir = root.join("covers");
+        fs::create_dir_all(&cache_dir).expect("create cache directory");
+        let cache = test_cache(cache_dir);
+        let image = DynamicImage::new_rgb8(16, 16);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, ImageFormat::WebP)
+            .expect("encode test image");
+        let hash = ImageCache::hash_image_data(encoded.get_ref());
+        cache
+            .save_thumbnail(&hash, "large", &image)
+            .expect("save wrong-sized thumbnail");
+
+        assert!(!cache.has_valid_thumbnail(&hash, "large"));
+        assert!(cache
+            .get_thumbnail_bytes(&hash, "large")
+            .expect_err("reject wrong-sized thumbnail")
+            .contains("invalid dimensions"));
+        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -457,8 +762,7 @@ pub async fn cache_generate_thumbnail(
 ) -> Result<String, String> {
     let cache = cache.inner().clone();
     spawn_blocking(move || {
-        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &image_data)
-            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+        let data = decode_bounded_base64_image(&image_data)?;
 
         cache.generate_thumbnails(&data)
     })

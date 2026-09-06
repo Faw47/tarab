@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
-import { isSameOrSubPath, normalizePath } from '../lib/path-utils';
+import { isSameOrSubPath, isSamePath, normalizeFolderPath } from '../lib/path-utils';
 import { SettingsSchema } from '../lib/validation/settings';
 import { createTauriZustandStorage } from '../platform/tauri-zustand-storage';
 
@@ -29,8 +29,7 @@ const normalizeShortcuts = (shortcuts?: Partial<Record<ShortcutKey, string>>) =>
   previous: normalizeShortcut('previous', shortcuts?.previous),
 });
 
-const normalizeLibraryFolder = (folder: string): string =>
-  normalizePath(folder.trim()).replace(/\/+$/, '');
+const normalizeLibraryFolder = (folder: string): string => normalizeFolderPath(folder);
 
 const mergeLibraryFolders = (
   currentFolders: Iterable<string>,
@@ -54,7 +53,7 @@ const mergeLibraryFolders = (
 const withoutLibraryFolder = (currentFolders: Iterable<string>, folder: string): string[] => {
   const target = normalizeLibraryFolder(folder);
   return mergeLibraryFolders(
-    Array.from(currentFolders).filter((current) => normalizeLibraryFolder(current) !== target),
+    Array.from(currentFolders).filter((current) => !isSamePath(current, target)),
     [],
   );
 };
@@ -152,7 +151,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoWatch: true,
         followSymlinks: false,
         downloadArtwork: true,
-        autoLyrics: true,
+        autoLyrics: false,
         compactMode: false,
         reducedEffects: false,
         debugLiquidControlGlass: false,
@@ -312,7 +311,12 @@ export const useSettingsStore = create<SettingsState>()(
       {
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
-        version: 6,
+        version: 7,
+        partialize: (state) => {
+          if (__DEV__) return state;
+          const { debugLiquidControlGlass: _debugState, ...productionState } = state;
+          return productionState as SettingsState;
+        },
         migrate: (persisted, version) => {
           let incoming = (persisted as Partial<SettingsState>) ?? {};
           if ((version ?? 0) < 2) {
@@ -346,8 +350,15 @@ export const useSettingsStore = create<SettingsState>()(
               desktopMiniWindowEnabled: false,
             } as Partial<SettingsState>;
           }
+          if ((version ?? 0) < 7) {
+            incoming = {
+              ...incoming,
+              autoLyrics: false,
+            } as Partial<SettingsState>;
+          }
           incoming = {
             ...incoming,
+            debugLiquidControlGlass: __DEV__ ? incoming.debugLiquidControlGlass : false,
             libraryFolders: mergeLibraryFolders([], incoming.libraryFolders ?? []),
             shortcuts: normalizeShortcuts(incoming.shortcuts),
           } as Partial<SettingsState>;

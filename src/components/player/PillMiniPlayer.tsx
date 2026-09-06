@@ -3,6 +3,7 @@ import { Pause, Play } from 'lucide-react';
 import type React from 'react';
 import { memo, useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useSmoothTimeState } from '../../contexts/smooth-time';
 import { toggleCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';
@@ -10,6 +11,7 @@ import { CoverArtImage } from '../shared/CoverArtImage';
 
 interface PillMiniPlayerProps {
   onExpand: () => void;
+  className?: string;
 }
 
 const RING_SIZE = 58;
@@ -18,7 +20,7 @@ const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 const ProgressRing = memo(() => {
-  const currentTime = usePlayerStore((s) => s.currentTime);
+  const currentTime = useSmoothTimeState(50);
   const duration = usePlayerStore((s) => s.duration);
 
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
@@ -49,14 +51,14 @@ const ProgressRing = memo(() => {
         strokeLinecap="round"
         strokeDasharray={RING_CIRCUMFERENCE}
         strokeDashoffset={dashOffset}
-        className="transition-[stroke-dashoffset] duration-300 ease-out"
+        className="transition-[stroke-dashoffset] duration-[var(--motion-emphasis)] ease-out"
       />
     </svg>
   );
 });
 ProgressRing.displayName = 'ProgressRing';
 
-export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
+export const PillMiniPlayer = memo(({ onExpand, className }: PillMiniPlayerProps) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const { isPlaying } = usePlayerStore(
     useShallow((s) => ({
@@ -82,15 +84,28 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
 
   return (
     <div
-      className="fixed bottom-6 left-6 z-40 group cursor-pointer"
+      className={clsx(
+        className ?? 'fixed bottom-24 left-6 lg:bottom-6',
+        'relative z-40 group cursor-pointer',
+      )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
+        role="button"
+        tabIndex={0}
         onClick={onExpand}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onExpand();
+          }
+        }}
+        aria-label={'Open full player: ' + currentTrack.title}
         className={clsx(
-          'relative overflow-hidden',
-          'transition-all duration-200',
+          'relative block overflow-hidden outline-none',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
+          'focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2',
           isHovered && 'scale-110',
           isPlaying && !isHovered && 'animate-breathe',
         )}
@@ -124,28 +139,31 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
             iconClassName="w-5 h-5"
             lazy={false}
           />
-
-          <div
-            className={clsx(
-              'absolute inset-0 flex items-center justify-center bg-black/[0.42] backdrop-blur-md',
-              'transition-opacity duration-200',
-              isHovered ? 'opacity-100' : 'opacity-0',
-            )}
-          >
-            <button
-              onClick={handleTogglePlay}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.18] hover:bg-white/[0.28] transition-colors duration-200 active:scale-[0.9] shadow-[0_0_18px_var(--hero-glow)]"
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-            >
-              {isPlaying ? (
-                <Pause className="w-3.5 h-3.5 text-white" fill="currentColor" />
-              ) : (
-                <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" />
-              )}
-            </button>
-          </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={handleTogglePlay}
+        className={clsx(
+          'absolute z-10 flex items-center justify-center rounded-full bg-black/[0.42] backdrop-blur-md',
+          'transition-opacity duration-[var(--motion-standard)]',
+          isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none focus-visible:opacity-100',
+        )}
+        style={{
+          top: RING_STROKE + 1,
+          left: RING_STROKE + 1,
+          right: RING_STROKE + 1,
+          bottom: RING_STROKE + 1,
+        }}
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+      >
+        {isPlaying ? (
+          <Pause className="w-3.5 h-3.5 text-white" fill="currentColor" />
+        ) : (
+          <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" />
+        )}
+      </button>
 
       {/* Hover tooltip with track info */}
       <div
@@ -153,7 +171,7 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
           'absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-2',
           'backdrop-blur-xl rounded-xl text-xs whitespace-nowrap',
           'border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.42)]',
-          'transition-all duration-200',
+          'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
           isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none',
         )}
         style={{
@@ -161,12 +179,10 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
           boxShadow: '0 8px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.08)',
         }}
       >
-        <p className="text-white font-medium text-[11px] truncate max-w-[160px]">
+        <p className="text-white font-medium text-xs truncate max-w-[160px]">
           {currentTrack.title}
         </p>
-        <p className="text-white/[0.55] text-[10px] truncate max-w-[160px]">
-          {currentTrack.artist}
-        </p>
+        <p className="text-white/[0.55] text-xs truncate max-w-[160px]">{currentTrack.artist}</p>
       </div>
     </div>
   );

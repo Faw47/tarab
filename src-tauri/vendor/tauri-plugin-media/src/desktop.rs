@@ -38,6 +38,13 @@ impl<R: Runtime> Media<R> {
             .map_err(|e| crate::Error::String(e.to_string()))
     }
 
+    pub fn disable_session(&self) -> crate::Result<()> {
+        let mut controller = self.controller()?;
+        controller
+            .disable_session()
+            .map_err(|e| crate::Error::String(e.to_string()))
+    }
+
     pub fn set_metadata(&self, metadata: MediaMetadata) -> crate::Result<()> {
         let mut controller = self.controller()?;
         controller
@@ -63,6 +70,13 @@ impl<R: Runtime> Media<R> {
         let mut controller = self.controller()?;
         controller
             .set_position(position)
+            .map_err(|e| crate::Error::String(e.to_string()))
+    }
+
+    pub fn set_volume(&self, volume: f64) -> crate::Result<()> {
+        let mut controller = self.controller()?;
+        controller
+            .set_volume(volume)
             .map_err(|e| crate::Error::String(e.to_string()))
     }
 

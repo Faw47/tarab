@@ -1,12 +1,9 @@
 /**
- * Bridge from DOM liquid controls → shell WebGL pill composite.
+ * Bridge from DOM liquid controls to a future same-canvas composite surface.
  *
- * Limitation (v1): `u_bg` / `u_blurredBg` sample the liquid shell render targets (metaball layer + blur),
- * not arbitrary TopBar HTML/text. Coherent refraction against the shell backdrop only.
- *
- * Pass graph (same R3F Canvas): RT raw background → separable Gaussian blur → composite pill samples raw+blur.
- * Pill uses rounded-rect SDF, gradient normals → refraction UVs, RGB dispersion, Fresnel/glare; motion uniforms
- * come from spring + FSM (velocity stretch, press squash) in `useLiquidControlMotion`.
+ * The live shell intentionally uses direct rendering and keeps no offscreen
+ * render targets. These interaction values remain isolated here so a future
+ * composite can be added without making DOM controls own shell state.
  */
 import { create } from 'zustand';
 

@@ -1,4 +1,4 @@
-import { type RefObject, useEffect } from 'react';
+import { type RefObject, useEffect, useMemo } from 'react';
 
 const isTextEntryTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false;
@@ -7,21 +7,27 @@ const isTextEntryTarget = (target: EventTarget | null): boolean => {
 
 export function useTopBarSearchShortcuts({
   inputId,
+  inputIds,
   inputRef,
+  getInput,
   onFocusSearch,
   onClearSearch,
 }: {
-  inputId: string;
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputId?: string;
+  inputIds?: readonly string[];
+  inputRef?: RefObject<HTMLInputElement | null>;
+  getInput?: () => HTMLInputElement | null;
   onFocusSearch: () => void;
   onClearSearch: () => void;
 }) {
+  const searchInputIds = useMemo(() => inputIds ?? (inputId ? [inputId] : []), [inputId, inputIds]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
 
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const isSearchInput = target?.id === inputId;
+      const isSearchInput = target ? searchInputIds.includes(target.id) : false;
       const isSlash =
         !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === '/';
 
@@ -32,17 +38,18 @@ export function useTopBarSearchShortcuts({
         return;
       }
 
-      if (event.key !== 'Escape' || document.activeElement !== inputRef.current) return;
+      const activeInput = getInput?.() ?? inputRef?.current ?? null;
+      if (event.key !== 'Escape' || !activeInput || document.activeElement !== activeInput) return;
       event.preventDefault();
-      if (inputRef.current?.value) {
+      if (activeInput.value) {
         onClearSearch();
-        inputRef.current.focus();
+        activeInput.focus();
       } else {
-        inputRef.current?.blur();
+        activeInput.blur();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [inputId, inputRef, onClearSearch, onFocusSearch]);
+  }, [getInput, inputId, inputIds, inputRef, onClearSearch, onFocusSearch, searchInputIds]);
 }

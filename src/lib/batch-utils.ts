@@ -12,15 +12,19 @@ export const runBatches = async <T, R>(
   batchSize: number,
   worker: (batch: T[]) => Promise<R[]>,
   onProgress?: (done: number, total: number) => void,
+  isCancelled?: () => boolean,
 ): Promise<R[]> => {
   if (items.length === 0) return [];
   const results: R[] = [];
   let done = 0;
   for (const batch of _chunkArrayInternal(items, batchSize)) {
+    if (isCancelled?.()) throw new Error('Library scan cancelled');
     const batchResult = await worker(batch);
+    if (isCancelled?.()) throw new Error('Library scan cancelled');
     results.push(...batchResult);
     done += batch.length;
     onProgress?.(done, items.length);
   }
+  if (isCancelled?.()) throw new Error('Library scan cancelled');
   return results;
 };

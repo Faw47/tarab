@@ -1,5 +1,5 @@
 import * as Tabs from '@radix-ui/react-tabs';
-import { ChevronDown, Clock3, Edit2, Grid, List, SortAsc, TrendingUp } from 'lucide-react';
+import { ChevronDown, Clock3, Edit2, Grid, List, Search, SortAsc, TrendingUp } from 'lucide-react';
 import type {
   ComponentType,
   DragEvent,
@@ -17,9 +17,10 @@ import {
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
-import { fetchLibraryTracksPage } from '../../features/library/api';
+import { fetchAlbumTracks, fetchArtistTracks } from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumArtist } from '../../lib/album-key';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
@@ -32,7 +33,7 @@ import { useSettingsStore } from '../../store/settings-store';
 import type { ContextMenuPosition, SortBy, Track } from '../../types';
 import { VirtualizedGrid } from '../shared/VirtualizedGrid';
 import { AlbumIcon, ArtistIcon, TrackIcon } from '../ui/Icons';
-
+import { StatePanel } from '../ui/StatePanel';
 import { LibraryDetailFocusHeader } from './LibraryDetailFocusHeader';
 import { LibraryFileInfoModal } from './LibraryFileInfoModal';
 import { LibraryNeoLayout } from './LibraryNeoLayout';
@@ -52,9 +53,11 @@ import {
   buildFacetCounts,
   buildFacetPayload,
   type FacetCounts,
+  LIBRARY_SEARCH_SCOPE_OPTIONS,
   type LibraryDetailScope,
   type LibraryFacet,
   type LibrarySmartFilter,
+  resolveTracksByIds,
 } from './library-view-model';
 
 export type LibraryViewDensity = 'grid' | 'list';
@@ -77,7 +80,7 @@ export interface LibraryViewProps {
   selectedTrackIds?: string[];
   onOpenTagEditor?: (tracks: Track[]) => void;
   smartFilter?: LibrarySmartFilter;
-  onSelectAll?: () => void;
+  onSelectAll?: (tracks: Track[]) => void;
   onClearSelection?: () => void;
   onOpenAlbumDetails?: (payload: {
     album: string;
@@ -105,6 +108,9 @@ export interface CommandDeckProps {
   sortBy: SortBy;
   onSortByChange: (sortBy: SortBy) => void;
   onEditSelected: () => void;
+  searchScope: LibrarySearchScope;
+  onSearchScopeChange: (scope: LibrarySearchScope) => void;
+  enableGpuMotion: boolean;
 }
 
 export interface LibraryShellProps {
@@ -116,12 +122,17 @@ export interface LibraryShellProps {
   iconRailLayout?: boolean;
 }
 
-export type ArtistGroupItem = { artist: string; tracks: Track[]; coverArt?: string };
+export type ArtistGroupItem = {
+  artist: string;
+  tracks: Track[];
+  count: number;
+  coverArt?: string;
+};
 export interface LibraryArtistsGridProps {
   items: ArtistGroupItem[];
   onRangeChange: (start: number, end: number) => void;
   renderItem: (item: ArtistGroupItem, index: number) => ReactNode;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
 }
 
 export type AlbumGroupItem = { track: Track; count: number };
@@ -129,7 +140,7 @@ export interface LibraryAlbumsGridProps {
   items: AlbumGroupItem[];
   onRangeChange: (start: number, end: number) => void;
   renderItem: (item: AlbumGroupItem, index: number) => ReactNode;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
 }
 
 // ============================================================================
@@ -206,6 +217,9 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   sortBy,
   onSortByChange,
   onEditSelected,
+  searchScope,
+  onSearchScopeChange,
+  enableGpuMotion,
 }: CommandDeckProps) {
   const tabsListRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
@@ -215,6 +229,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   const viewModePressingRef = useRef(false);
 
   const sortDropdownRef = useRef<HTMLDivElement>(null);
+  const sortTriggerRef = useRef<HTMLButtonElement>(null);
   const [showSortDropdown, setShowSortDropdown] = useState(false);
 
   useEffect(() => {
@@ -230,6 +245,29 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, [showSortDropdown]);
+
+  const handleSortMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+    );
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setShowSortDropdown(false);
+      sortTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      items[event.key === 'Home' ? 0 : items.length - 1]?.focus();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const offset = event.key === 'ArrowDown' ? 1 : -1;
+      items[(Math.max(0, current) + offset + items.length) % items.length]?.focus();
+    }
+  }, []);
 
   const activeIndex = useMemo(
     () =>
@@ -318,7 +356,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   }, [vmPillLayoutFromDom, vmIsDragging, vmPillGeometryRef]);
 
   useLiquidControlMotionHorizontal({
-    enabled: true,
+    enabled: enableGpuMotion,
     rootRef: viewModeListRef,
     pillStyle: vmPillStyle,
     pillLayoutFromDom: vmPillLayoutFromDom,
@@ -415,8 +453,33 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
           </div>
 
           <div className="library-v2-tablist overflow-visible">
+            <label className="library-v2-tab relative flex items-center gap-2">
+              <Search className="library-v2-tab-icon h-3.5 w-3.5" />
+              <span className="text-[0.81rem] font-medium text-inherit">
+                Search:{' '}
+                {LIBRARY_SEARCH_SCOPE_OPTIONS.find((option) => option.value === searchScope)
+                  ?.label ?? 'ALL'}
+              </span>
+              <ChevronDown className="h-3 w-3 opacity-50" />
+              <select
+                className="absolute inset-0 w-full cursor-pointer text-base opacity-0"
+                value={searchScope}
+                onChange={(event) => onSearchScopeChange(event.target.value as LibrarySearchScope)}
+                aria-label="Search scope"
+              >
+                {LIBRARY_SEARCH_SCOPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="library-v2-tablist overflow-visible">
             <div className="library-v2-tab relative" ref={sortDropdownRef}>
               <button
+                ref={sortTriggerRef}
                 type="button"
                 className="library-v2-tab-label cursor-pointer bg-transparent border-0 outline-none flex items-center gap-2"
                 onClick={(e) => {
@@ -424,9 +487,23 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                   setShowSortDropdown((v) => !v);
                 }}
                 aria-label="Sort library"
+                aria-haspopup="menu"
+                aria-expanded={showSortDropdown}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                  event.preventDefault();
+                  setShowSortDropdown(true);
+                  queueMicrotask(() => {
+                    const items =
+                      sortDropdownRef.current?.querySelectorAll<HTMLButtonElement>(
+                        '[role="menuitemradio"]',
+                      );
+                    items?.[event.key === 'ArrowDown' ? 0 : items.length - 1]?.focus();
+                  });
+                }}
               >
                 <SortAsc className="library-v2-tab-icon h-3.5 w-3.5" />
-                <span className="text-[0.81rem] font-medium text-inherit opacity-70 hover:opacity-100 transition-opacity">
+                <span className="text-[0.81rem] font-medium text-inherit hover:opacity-100 transition-opacity">
                   {sortBy === 'dateAdded'
                     ? 'Date added'
                     : sortBy === 'title'
@@ -439,7 +516,12 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
               </button>
 
               {showSortDropdown && (
-                <div className="library-v2-sort-dropdown">
+                <div
+                  className="library-v2-sort-dropdown"
+                  role="menu"
+                  aria-label="Sort library"
+                  onKeyDown={handleSortMenuKeyDown}
+                >
                   {[
                     { id: 'dateAdded', label: 'Date added' },
                     { id: 'title', label: 'Title' },
@@ -449,6 +531,8 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                     <button
                       key={option.id}
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={sortBy === option.id}
                       onClick={() => {
                         onSortByChange(option.id as CommandDeckProps['sortBy']);
                         setShowSortDropdown(false);
@@ -587,39 +671,56 @@ export const LibraryView = memo(function LibraryView({
   const [viewMode, setViewMode] = useState<LibraryViewDensity>(getPersistedViewMode);
   const [activeFacet, setActiveFacet] = useState<LibraryFacet>('albums');
   const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
+  const [databaseDetailTracks, setDatabaseDetailTracks] = useState<{
+    key: string;
+    tracks: Track[];
+  } | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [showFileInfo, setShowFileInfo] = useState<string | null>(null);
+  const [fileInfoTrack, setFileInfoTrack] = useState<Track | null>(null);
   const libraryScrollRef = useRef<HTMLDivElement | null>(null);
   const loadMoreThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detailRequestGenerationRef = useRef(0);
 
   const {
     searchQuery,
     searchScope,
     setSearchScope,
+    searchError,
+    searchPartialError,
+    retrySearch,
+    isSearching: isSearchingLibrary,
     sortBy,
     setSortBy,
     getFilteredTracks,
     libraryStats,
+    librarySecondaryError,
+    isLibrarySecondaryLoading,
+    retryLibrarySecondaryData,
+    albumAggregates = [],
+    artistAggregates = [],
     recentTracks = [],
     mostPlayedTracks = [],
     trackCount,
     tracks: allTracks,
-    appendTracks,
+    loadMoreTracks,
     applyCoverArtHashes,
     isLyricsMatch,
     getLyricsMatchLine,
   } = useLibraryData({ includeLibraryShelves: true });
 
-  const { downloadArtwork, theme } = useSettingsStore(
+  const { backgroundEnabled, downloadArtwork, theme } = useSettingsStore(
     useShallow((state) => ({
       downloadArtwork: state.downloadArtwork,
       theme: state.theme,
+      backgroundEnabled: state.backgroundEnabled,
     })),
   );
 
   const isNeo = theme === 'neobrutalism';
+  const reducedEffects = useEffectiveReducedEffects();
 
   const { activeTrackId, isPlaying } = usePlayerStore(
     useShallow((state) => ({
@@ -634,50 +735,49 @@ export const LibraryView = memo(function LibraryView({
     }
   }, [searchQuery]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const handlePopState = () => {
-      setDetailScopeState((current) => {
-        if (current) {
-          return null;
-        }
-
-        return current;
-      });
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
   const setDetailScope = useCallback((next: LibraryDetailScope) => {
-    if (typeof window !== 'undefined' && next) {
-      window.history.pushState({ libraryDetailV2: true }, '');
-    }
-
     setDetailScopeState(next);
   }, []);
 
-  const handleViewModeChange = useCallback((next: LibraryViewDensity) => {
-    const apply = () => {
-      setViewMode(next);
-      persistViewMode(next);
-    };
-
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-      (
-        document as Document & {
-          startViewTransition: (callback: () => void) => void;
-        }
-      ).startViewTransition(apply);
-      return;
+  const handleRetrySearch = useCallback(async () => {
+    try {
+      await retrySearch();
+    } catch (error) {
+      reportError('Failed to retry library search', { source: 'library-view', error });
     }
+  }, [retrySearch]);
 
-    apply();
-  }, []);
+  const handleRetrySecondaryData = useCallback(async () => {
+    try {
+      await retryLibrarySecondaryData();
+    } catch (error) {
+      reportError('Failed to retry library data', {
+        source: 'library-view',
+        error,
+      });
+    }
+  }, [retryLibrarySecondaryData]);
+
+  const handleViewModeChange = useCallback(
+    (next: LibraryViewDensity) => {
+      const apply = () => {
+        setViewMode(next);
+        persistViewMode(next);
+      };
+
+      if (!reducedEffects && typeof document !== 'undefined' && 'startViewTransition' in document) {
+        (
+          document as Document & {
+            startViewTransition: (callback: () => void) => void;
+          }
+        ).startViewTransition(apply);
+        return;
+      }
+
+      apply();
+    },
+    [reducedEffects],
+  );
 
   const filteredTracks = getFilteredTracks();
 
@@ -686,10 +786,42 @@ export const LibraryView = memo(function LibraryView({
     [filteredTracks, smartFilter],
   );
 
-  const detailTracks = useMemo(
-    () => buildDetailTracks(allTracks, detailScope),
-    [allTracks, detailScope],
+  const detailKey = detailScope
+    ? detailScope.type === 'album'
+      ? `album:${detailScope.artist}:${detailScope.album}`
+      : `artist:${detailScope.artist}`
+    : null;
+  const resultScopeKey =
+    detailKey ??
+    JSON.stringify([
+      searchQuery.trim() ? 'all' : activeFacet,
+      searchQuery.trim(),
+      searchScope,
+      smartFilter,
+    ]);
+  const previousResultScopeKeyRef = useRef(resultScopeKey);
+
+  useLayoutEffect(
+    () => () => {
+      detailRequestGenerationRef.current += 1;
+    },
+    [],
   );
+
+  useLayoutEffect(() => {
+    if (previousResultScopeKeyRef.current === resultScopeKey) return;
+
+    previousResultScopeKeyRef.current = resultScopeKey;
+    detailRequestGenerationRef.current += 1;
+    if (selectedTrackIds.length > 0) onClearSelection?.();
+  }, [onClearSelection, resultScopeKey, selectedTrackIds.length]);
+
+  const detailTracks = useMemo(() => {
+    if (detailKey && databaseDetailTracks?.key === detailKey) {
+      return databaseDetailTracks.tracks;
+    }
+    return buildDetailTracks(allTracks, detailScope);
+  }, [allTracks, databaseDetailTracks, detailKey, detailScope]);
 
   const usesFullLibraryFacetData = searchQuery.trim().length === 0 && smartFilter === null;
 
@@ -722,14 +854,38 @@ export const LibraryView = memo(function LibraryView({
     return visibleTracks;
   }, [activeFacet, mostPlayedTracks, recentTracks, usesFullLibraryFacetData, visibleTracks]);
 
-  const groupedData = useMemo(
-    () => buildFacetPayload(activeFacet, facetTracks, coverUrlFromHash),
-    [activeFacet, coverUrlFromHash, facetTracks],
-  );
+  const groupedData = useMemo(() => {
+    if (usesFullLibraryFacetData && activeFacet === 'albums' && albumAggregates.length > 0) {
+      return albumAggregates;
+    }
+
+    if (usesFullLibraryFacetData && activeFacet === 'artists' && artistAggregates.length > 0) {
+      return artistAggregates.map((aggregate) => {
+        const representative = aggregate.tracks[0];
+        return {
+          ...aggregate,
+          coverArt:
+            representative?.coverArt ?? coverUrlFromHash(representative?.coverArtHash, 'large'),
+        };
+      });
+    }
+
+    return buildFacetPayload(activeFacet, facetTracks, coverUrlFromHash);
+  }, [
+    activeFacet,
+    albumAggregates,
+    artistAggregates,
+    coverUrlFromHash,
+    facetTracks,
+    usesFullLibraryFacetData,
+  ]);
 
   const resultFacet: LibraryFacet = detailScope ? 'all' : activeFacet;
   const resultRows = detailScope ? detailTracks : groupedData;
   const resultLength = resultRows.length;
+  const handleSelectAll = useCallback(() => {
+    onSelectAll?.(detailScope ? detailTracks : facetTracks);
+  }, [detailScope, detailTracks, facetTracks, onSelectAll]);
 
   const facets = useMemo(
     () => [
@@ -768,10 +924,15 @@ export const LibraryView = memo(function LibraryView({
   );
 
   const selectedTrackSet = useMemo(() => new Set(selectedTrackIds), [selectedTrackIds]);
+  const selectionScopeTracks = detailScope ? detailTracks : facetTracks;
   const selectedTracks = useMemo(
-    () => allTracks.filter((track) => selectedTrackSet.has(track.id)),
-    [allTracks, selectedTrackSet],
+    () => resolveTracksByIds(selectedTrackIds, [selectionScopeTracks]),
+    [selectedTrackIds, selectionScopeTracks],
   );
+  const selectedCount = selectedTracks.length;
+  const handleEditSelected = useCallback(() => {
+    if (selectedTracks.length > 0) onOpenTagEditor?.(selectedTracks);
+  }, [onOpenTagEditor, selectedTracks]);
 
   const prefetchedCoverArt = useRef<Set<string>>(new Set());
 
@@ -809,41 +970,47 @@ export const LibraryView = memo(function LibraryView({
   );
 
   const loadedCount = allTracks.length;
-
+  const canLoadMore =
+    hasMore &&
+    searchQuery.trim().length === 0 &&
+    detailScope === null &&
+    (activeFacet === 'all' || smartFilter !== null);
+  const canRequestMore = canLoadMore && loadMoreError === null;
   useEffect(() => {
     setHasMore(loadedCount < trackCount);
   }, [loadedCount, trackCount]);
 
+  useEffect(() => {
+    if (!canLoadMore) setLoadMoreError(null);
+  }, [canLoadMore]);
   const handleLoadMore = useCallback(async () => {
-    if (isLoadingMore || !hasMore) {
+    if (isLoadingMore || !canLoadMore) {
       return;
     }
 
     setIsLoadingMore(true);
+    setLoadMoreError(null);
 
     try {
-      const offset = loadedCount;
       const limit = 300;
 
-      if (offset >= trackCount) {
+      if (loadedCount >= trackCount) {
         setHasMore(false);
         return;
       }
 
-      const nextTracks = await fetchLibraryTracksPage({
-        offset,
-        limit,
-        sortBy: 'dateAdded',
-        sortOrder: 'desc',
-      });
-
-      appendTracks(nextTracks);
-      prefetchCoverArt(nextTracks);
-
-      if (offset + nextTracks.length >= trackCount || nextTracks.length < limit) {
-        setHasMore(false);
+      const result = await loadMoreTracks(limit);
+      if (result.tracks.length === 0 && result.hasMore) {
+        throw new Error('The library returned no additional tracks. Try again.');
       }
+      prefetchCoverArt(result.tracks);
+      setHasMore(result.hasMore);
     } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Tarab could not load more tracks. Try again.';
+      setLoadMoreError(message);
       reportError('Failed to load more tracks', {
         source: 'library-view',
         error,
@@ -851,10 +1018,14 @@ export const LibraryView = memo(function LibraryView({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, trackCount]);
+  }, [canLoadMore, isLoadingMore, loadMoreTracks, loadedCount, prefetchCoverArt, trackCount]);
+
+  const handleRetryLoadMore = useCallback(() => {
+    void handleLoadMore();
+  }, [handleLoadMore]);
 
   const triggerLoadMoreThrottled = useCallback(() => {
-    if (loadMoreThrottleRef.current) {
+    if (loadMoreThrottleRef.current !== null) {
       return;
     }
 
@@ -866,7 +1037,7 @@ export const LibraryView = memo(function LibraryView({
 
   const checkLoadMoreFromContainer = useCallback(
     (container: HTMLDivElement) => {
-      if (!hasMore) {
+      if (!canRequestMore) {
         return;
       }
 
@@ -879,7 +1050,7 @@ export const LibraryView = memo(function LibraryView({
         triggerLoadMoreThrottled();
       }
     },
-    [hasMore, triggerLoadMoreThrottled],
+    [canRequestMore, triggerLoadMoreThrottled],
   );
 
   const handleLibraryScroll = useCallback(
@@ -913,7 +1084,7 @@ export const LibraryView = memo(function LibraryView({
 
   useEffect(
     () => () => {
-      if (loadMoreThrottleRef.current) {
+      if (loadMoreThrottleRef.current !== null) {
         clearTimeout(loadMoreThrottleRef.current);
         loadMoreThrottleRef.current = null;
       }
@@ -941,69 +1112,80 @@ export const LibraryView = memo(function LibraryView({
     [detailScope, detailTracks, visibleTracks],
   );
 
-  const handlePlayAlbum = useCallback(
-    async (track: Track) => {
-      try {
-        const albumArtist = getAlbumArtist(track);
-        const albumTracks = sortAlbumTracks(
-          allTracks.filter(
-            (entry) => entry.album === track.album && getAlbumArtist(entry) === albumArtist,
-          ),
-        );
-        if (albumTracks.length === 0) return;
+  const handlePlayAlbum = useCallback(async (track: Track) => {
+    try {
+      const albumArtist = getAlbumArtist(track);
+      const albumTracks = sortAlbumTracks(await fetchAlbumTracks(track.album, albumArtist));
+      if (albumTracks.length === 0) return;
 
-        await startPlayback(albumTracks[0], {
-          queue: albumTracks,
-          queueIndex: 0,
-          shuffleEnabled: false,
-        });
-      } catch (error) {
-        reportError('Failed to play album', {
-          source: 'library-view',
-          error,
-        });
-      }
-    },
-    [allTracks],
-  );
+      await startPlayback(albumTracks[0], {
+        queue: albumTracks,
+        queueIndex: 0,
+        shuffleEnabled: false,
+      });
+    } catch (error) {
+      reportError('Failed to play album', {
+        source: 'library-view',
+        error,
+      });
+    }
+  }, []);
 
   const handleAlbumOpen = useCallback(
-    (track: Track) => {
+    async (track: Track) => {
       const albumArtist = getAlbumArtist(track);
-      const albumTracks = allTracks.filter(
-        (entry) => entry.album === track.album && getAlbumArtist(entry) === albumArtist,
-      );
+      const requestGeneration = ++detailRequestGenerationRef.current;
+      try {
+        const albumTracks = await fetchAlbumTracks(track.album, albumArtist);
+        if (detailRequestGenerationRef.current !== requestGeneration) return;
 
-      const coverArt =
-        track.coverArt ??
-        (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
+        const coverArt =
+          track.coverArt ??
+          (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
 
-      if (onOpenAlbumDetails) {
-        onOpenAlbumDetails({
-          album: track.album,
-          artist: albumArtist,
-          coverArt,
+        if (onOpenAlbumDetails) {
+          onOpenAlbumDetails({
+            album: track.album,
+            artist: albumArtist,
+            coverArt,
+            tracks: albumTracks,
+          });
+          return;
+        }
+
+        setDatabaseDetailTracks({
+          key: `album:${albumArtist}:${track.album}`,
           tracks: albumTracks,
         });
-        return;
+        setDetailScope({ type: 'album', album: track.album, artist: albumArtist });
+      } catch (error) {
+        if (detailRequestGenerationRef.current !== requestGeneration) return;
+        reportError('Failed to open album', { source: 'library-view', error });
       }
-
-      setDetailScope({ type: 'album', album: track.album, artist: albumArtist });
     },
-    [allTracks, onOpenAlbumDetails, setDetailScope],
+    [onOpenAlbumDetails, setDetailScope],
   );
 
   const handleArtistOpen = useCallback(
-    (artist: string) => {
-      setDetailScope({ type: 'artist', artist });
+    async (artist: string) => {
+      const requestGeneration = ++detailRequestGenerationRef.current;
+      try {
+        const tracks = await fetchArtistTracks(artist);
+        if (detailRequestGenerationRef.current !== requestGeneration) return;
+
+        setDatabaseDetailTracks({ key: `artist:${artist}`, tracks });
+        setDetailScope({ type: 'artist', artist });
+      } catch (error) {
+        if (detailRequestGenerationRef.current !== requestGeneration) return;
+        reportError('Failed to open artist', { source: 'library-view', error });
+      }
     },
     [setDetailScope],
   );
 
   const handleBackFromDetail = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.history.back();
-    }
+    detailRequestGenerationRef.current += 1;
+    setDetailScopeState(null);
   }, []);
 
   const handleDragStart = useCallback(
@@ -1122,6 +1304,28 @@ export const LibraryView = memo(function LibraryView({
     }
   }, []);
 
+  const resultSectionLabel = detailScope
+    ? detailScope.type === 'album'
+      ? 'Tracks'
+      : 'Artist tracks'
+    : resultFacet === 'albums'
+      ? 'Albums'
+      : resultFacet === 'artists'
+        ? 'Artists'
+        : resultFacet === 'recent'
+          ? 'Recently added'
+          : resultFacet === 'mostPlayed'
+            ? 'Most played'
+            : 'Songs';
+
+  const resultSectionCount = detailScope
+    ? detailTracks.length
+    : resultFacet === 'albums'
+      ? facetCounts.albums
+      : resultFacet === 'artists'
+        ? facetCounts.artists
+        : resultLength;
+
   const trimmedSearchQuery = searchQuery.trim();
   const needsLongerLyricsQuery =
     searchScope === 'lyrics' && trimmedSearchQuery.length > 0 && trimmedSearchQuery.length < 3;
@@ -1129,8 +1333,12 @@ export const LibraryView = memo(function LibraryView({
 
   if (isLibraryLoading) {
     return (
-      <div className="library-v2-state-wrap">
-        <div className="library-v2-loading-shell" role="status" aria-label="Loading library">
+      <div className={cn('library-v2-state-wrap', isNeo && 'library-neo-state-wrap')}>
+        <div
+          className={cn('library-v2-loading-shell', isNeo && 'library-neo-loading-shell')}
+          role="status"
+          aria-label="Loading library"
+        >
           <div className="library-v2-loading-line" />
           <div className="library-v2-loading-line" />
           <div className="library-v2-loading-line" />
@@ -1141,8 +1349,8 @@ export const LibraryView = memo(function LibraryView({
 
   if (libraryError) {
     return (
-      <div className="library-v2-state-wrap">
-        <div className="library-v2-error-shell">
+      <div className={cn('library-v2-state-wrap', isNeo && 'library-neo-state-wrap')}>
+        <div className={cn('library-v2-error-shell', isNeo && 'library-neo-error-shell')}>
           <h2>Could not load library</h2>
           <p>{libraryError}</p>
           {onRetryLoad && (
@@ -1154,10 +1362,6 @@ export const LibraryView = memo(function LibraryView({
       </div>
     );
   }
-
-  const resolvedModalTrack = showFileInfo
-    ? (allTracks.find((track) => track.id === showFileInfo) ?? null)
-    : null;
 
   return (
     <LibraryShell
@@ -1179,7 +1383,7 @@ export const LibraryView = memo(function LibraryView({
           onPlayAlbum={(track) => void handlePlayAlbum(track)}
           onTrackSelect={onTrackSelect}
           onTrackContextMenu={onTrackContextMenu}
-          onShowFileInfo={setShowFileInfo}
+          onShowFileInfo={setFileInfoTrack}
           onAlbumOpen={handleAlbumOpen}
           onArtistOpen={handleArtistOpen}
           onDragStart={handleDragStart}
@@ -1187,24 +1391,31 @@ export const LibraryView = memo(function LibraryView({
           onTrackGridRangeChange={handleTrackGridRangeChange}
           onAlbumGridRangeChange={handleAlbumGridRangeChange}
           onArtistGridRangeChange={handleArtistGridRangeChange}
-          onLoadMore={handleLoadMore}
-          hasMore={hasMore}
+          onLoadMore={canRequestMore ? handleLoadMore : undefined}
+          hasMore={canRequestMore}
+          loadMoreError={loadMoreError}
+          onRetryLoadMore={handleRetryLoadMore}
           formatSize={formatSize}
           getFormatLabel={getFormatLabel}
           isLyricsMatch={isLyricsMatch}
           getLyricsMatchLine={getLyricsMatchLine}
           facets={facets}
           onFacetChange={setActiveFacet}
-          selectedCount={selectedTrackSet.size}
+          selectedCount={selectedCount}
           onViewModeChange={handleViewModeChange}
           sortBy={sortBy}
           onSortByChange={(next: SortBy) => setSortBy(next)}
-          onEditSelected={() => onOpenTagEditor?.(selectedTracks)}
+          onEditSelected={handleEditSelected}
+          onNavigateToFolders={onNavigateToFolders}
           searchQuery={searchQuery}
           searchScope={searchScope}
           onSearchScopeChange={setSearchScope}
+          searchError={searchError}
+          searchPartialError={searchPartialError}
+          onRetrySearch={handleRetrySearch}
+          isSearching={isSearchingLibrary}
           facetCounts={facetCounts}
-          onSelectAll={onSelectAll}
+          onSelectAll={onSelectAll ? handleSelectAll : undefined}
           onClearSelection={onClearSelection}
           detailScope={detailScope}
           onBackFromDetail={handleBackFromDetail}
@@ -1227,16 +1438,19 @@ export const LibraryView = memo(function LibraryView({
             />
           ) : (
             <LibraryCommandDeck
+              enableGpuMotion={!isNeo && !reducedEffects && backgroundEnabled}
               facets={facets}
               onFacetChange={setActiveFacet}
               activeFacet={activeFacet}
               isScrolled={isScrolled}
-              selectedCount={selectedTrackSet.size}
+              selectedCount={selectedCount}
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
               sortBy={sortBy}
               onSortByChange={(next: SortBy) => setSortBy(next)}
-              onEditSelected={() => onOpenTagEditor?.(selectedTracks)}
+              onEditSelected={handleEditSelected}
+              searchScope={searchScope}
+              onSearchScopeChange={setSearchScope}
             />
           )}
 
@@ -1247,14 +1461,53 @@ export const LibraryView = memo(function LibraryView({
             aria-labelledby={detailScope ? undefined : `library-v2-facet-${activeFacet}`}
           >
             <LibrarySelectionBar
-              selectedCount={selectedTrackSet.size}
-              onSelectAll={onSelectAll}
+              selectedCount={selectedCount}
+              onSelectAll={onSelectAll ? handleSelectAll : undefined}
               onClearSelection={onClearSelection}
             />
 
+            {librarySecondaryError && (
+              <StatePanel
+                tone="warning"
+                role="alert"
+                title="Some library data is unavailable."
+                description={librarySecondaryError}
+                action={{
+                  label: isLibrarySecondaryLoading ? 'Retrying...' : 'Retry library data',
+                  onClick: handleRetrySecondaryData,
+                  disabled: isLibrarySecondaryLoading,
+                }}
+                className="shrink-0 rounded-xl p-3"
+              />
+            )}
+
+            {((searchError && resultLength > 0) || searchPartialError) && trimmedSearchQuery ? (
+              <StatePanel
+                tone="warning"
+                role="alert"
+                title={
+                  searchError
+                    ? 'Search is temporarily unavailable.'
+                    : 'Search results may be incomplete.'
+                }
+                description={searchError ?? searchPartialError}
+                action={{
+                  label: isSearchingLibrary ? 'Retrying...' : 'Retry search',
+                  onClick: handleRetrySearch,
+                  disabled: isSearchingLibrary,
+                }}
+                className="shrink-0 rounded-xl p-3"
+              />
+            ) : null}
+
             <div className="library-v2-section-label">
-              <span className="library-v2-section-label-text">Albums</span>
-              <span className="library-v2-section-label-count">{facetCounts.albums}</span>
+              <span className="library-v2-section-label-text">{resultSectionLabel}</span>
+              <span className="library-v2-section-label-count">{resultSectionCount}</span>
+              {!detailScope && !trimmedSearchQuery && resultFacet === 'all' && (
+                <span className="library-v2-section-label-count" aria-live="polite">
+                  {loadedCount.toLocaleString()} of {trackCount.toLocaleString()} loaded
+                </span>
+              )}
             </div>
 
             {resultLength > 0 ? (
@@ -1270,7 +1523,7 @@ export const LibraryView = memo(function LibraryView({
                 onPlayAlbum={(track) => void handlePlayAlbum(track)}
                 onTrackSelect={onTrackSelect}
                 onTrackContextMenu={onTrackContextMenu}
-                onShowFileInfo={setShowFileInfo}
+                onShowFileInfo={setFileInfoTrack}
                 onAlbumOpen={handleAlbumOpen}
                 onArtistOpen={handleArtistOpen}
                 onDragStart={handleDragStart}
@@ -1278,13 +1531,31 @@ export const LibraryView = memo(function LibraryView({
                 onTrackGridRangeChange={handleTrackGridRangeChange}
                 onAlbumGridRangeChange={handleAlbumGridRangeChange}
                 onArtistGridRangeChange={handleArtistGridRangeChange}
-                onLoadMore={handleLoadMore}
-                hasMore={hasMore}
+                onLoadMore={canRequestMore ? handleLoadMore : undefined}
+                hasMore={canRequestMore}
                 formatSize={formatSize}
                 getFormatLabel={getFormatLabel}
                 isLyricsMatch={isLyricsMatch}
                 getLyricsMatchLine={getLyricsMatchLine}
               />
+            ) : searchError && trimmedSearchQuery ? (
+              <div className="library-v2-empty-wrap" role="alert">
+                <div className="library-v2-empty-icon" aria-hidden="true">
+                  <TrackIcon className="h-10 w-10 text-amber-300" />
+                </div>
+                <div className="library-v2-empty-copy">
+                  <h3>Search unavailable</h3>
+                  <p>{searchError}</p>
+                  <button
+                    type="button"
+                    className="library-v2-empty-action"
+                    onClick={handleRetrySearch}
+                    disabled={isSearchingLibrary}
+                  >
+                    {isSearchingLibrary ? 'Retrying...' : 'Retry search'}
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="library-v2-empty-wrap">
                 <div className="library-v2-empty-icon" aria-hidden="true">
@@ -1312,6 +1583,25 @@ export const LibraryView = memo(function LibraryView({
               </div>
             )}
 
+            {loadMoreError && (
+              <div
+                className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--state-error-border)] bg-[var(--state-error-surface)] px-3 py-2 text-[var(--type-primary)]"
+                role="alert"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold">Could not load more library tracks.</p>
+                  <p className="truncate text-xs opacity-75">{loadMoreError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRetryLoadMore}
+                  className="shrink-0 rounded-lg border border-current/30 px-3 py-1.5 text-xs font-semibold hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                >
+                  Retry loading more tracks
+                </button>
+              </div>
+            )}
+
             {isLoadingMore && (
               <div className="library-v2-loading-more" role="status" aria-live="polite">
                 Loading more...
@@ -1321,11 +1611,11 @@ export const LibraryView = memo(function LibraryView({
         </div>
       )}
 
-      {resolvedModalTrack && (
+      {fileInfoTrack && (
         <LibraryFileInfoModal
-          track={resolvedModalTrack}
+          track={fileInfoTrack}
           isOpen={true}
-          onClose={() => setShowFileInfo(null)}
+          onClose={() => setFileInfoTrack(null)}
           onEditTags={(track) => onOpenTagEditor?.([track])}
           formatSize={formatSize}
           getFormatLabel={getFormatLabel}

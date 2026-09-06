@@ -1,6 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, FolderPlus, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { memo, useCallback, useState } from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Square,
+  Trash2,
+} from 'lucide-react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import {
@@ -8,16 +16,26 @@ import {
   DesktopIntegrationForm,
   PlaybackSettingsForm,
 } from '../../features/settings/components/SettingsForms';
-import { liquidGlassSettingsTextInputClassName } from '../../lib/liquid-glass-settings-ui';
 import { useRenderLog } from '../../lib/performance';
 import { reportError } from '../../lib/report-error';
-import { dbDeleteTracksByFolder, selectFolder } from '../../lib/tauri-commands';
+import {
+  dbGetTrackCount,
+  getLibraryHealth,
+  type LibraryGrantSummary,
+  type LibraryHealthState,
+  listRecoverableTrashEntries,
+  purgeTrashedFiles,
+  type RecoverableTrashEntry,
+  reauthorizeLibraryGrant,
+  removeLibrarySource,
+  restoreTrashedFiles,
+  selectLibraryFolder,
+} from '../../lib/tauri-commands';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../store/settings-store';
 import type { SettingsPage } from '../../types';
 import { IconButton } from '../ui';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
 import { LibraryIcon } from '../ui/Icons';
 import { CacheSettings } from './CacheSettings';
 import {
@@ -79,6 +97,12 @@ const formatScanTime = (date?: Date) => {
   }).format(date);
 };
 
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 export const UnifiedSettingsView = memo(
   ({ onScrollChange, libraryScan }: UnifiedSettingsViewProps) => {
     useRenderLog('UnifiedSettingsView');
@@ -91,17 +115,47 @@ export const UnifiedSettingsView = memo(
     const libraryFolders = useSettingsStore((s) => s.libraryFolders);
     const followSymlinks = useSettingsStore((s) => s.followSymlinks);
     const downloadArtwork = useSettingsStore((s) => s.downloadArtwork);
-    const addLibraryFolder = useSettingsStore((s) => s.addLibraryFolder);
-    const removeLibraryFolder = useSettingsStore((s) => s.removeLibraryFolder);
+    const setLibraryFolders = useSettingsStore((s) => s.setLibraryFolders);
     const setFollowSymlinks = useSettingsStore((s) => s.setFollowSymlinks);
     const setDownloadArtwork = useSettingsStore((s) => s.setDownloadArtwork);
 
     const { libraryStats, tracks, setTracks, setTrackCount } = useLibraryData();
-    const { isScanning, folderStatuses, scanFolder, rescanAll } = libraryScan;
+    const { isScanning, folderStatuses, scanFolder, rescanAll, cancelScan } = libraryScan;
 
-    const [showAddInput, setShowAddInput] = useState(false);
-    const [manualPath, setManualPath] = useState('');
     const [folderToRemove, setFolderToRemove] = useState<string | null>(null);
+    const [nativeGrants, setNativeGrants] = useState<LibraryGrantSummary[]>([]);
+    const [libraryHealth, setLibraryHealth] = useState<LibraryHealthState | null>(null);
+    const [trashEntries, setTrashEntries] = useState<RecoverableTrashEntry[]>([]);
+    const [trashBusyToken, setTrashBusyToken] = useState<string | null>(null);
+    const [trashToPurge, setTrashToPurge] = useState<RecoverableTrashEntry | null>(null);
+
+    const refreshNativeGrants = useCallback(async () => {
+      const health = await getLibraryHealth();
+      const grants = health.nativeGrants;
+      setLibraryHealth(health);
+      setNativeGrants(grants);
+      setLibraryFolders(grants.map((item) => item.path));
+      return grants;
+    }, [setLibraryFolders]);
+
+    useEffect(() => {
+      void refreshNativeGrants().catch((error) =>
+        reportError('Failed to read library health', { source: 'settings-view', error }),
+      );
+    }, [refreshNativeGrants]);
+
+    const refreshTrashEntries = useCallback(async () => {
+      const entries = await listRecoverableTrashEntries();
+      setTrashEntries(entries);
+      return entries;
+    }, []);
+
+    useEffect(() => {
+      if (page !== 'storage') return;
+      void refreshTrashEntries().catch((error) =>
+        reportError('Failed to read recoverable Trash', { source: 'settings-view', error }),
+      );
+    }, [page, refreshTrashEntries]);
 
     const trackCount = libraryStats?.trackCount ?? tracks.length;
     const albumsCount = libraryStats?.albumCount ?? 0;
@@ -113,35 +167,64 @@ export const UnifiedSettingsView = memo(
 
     const handleSelectFolder = useCallback(async () => {
       try {
-        const folder = await selectFolder();
-        if (folder && !libraryFolders.includes(folder)) {
-          addLibraryFolder(folder);
-          void scanFolder(folder);
+        const grant = await selectLibraryFolder();
+        if (grant) {
+          await refreshNativeGrants();
+          if (grant.status === 'available') {
+            void scanFolder(grant.path);
+          }
         }
       } catch (error) {
         reportError('Failed to select folder', { source: 'settings-view', error });
-        setShowAddInput(true);
       }
-    }, [addLibraryFolder, libraryFolders, scanFolder]);
+    }, [refreshNativeGrants, scanFolder]);
 
-    const handleAddManualPath = useCallback(() => {
-      const trimmed = manualPath.trim();
-      if (!trimmed || libraryFolders.includes(trimmed)) return;
-      addLibraryFolder(trimmed);
-      setManualPath('');
-      setShowAddInput(false);
-      void scanFolder(trimmed);
-    }, [addLibraryFolder, libraryFolders, manualPath, scanFolder]);
+    const handleReauthorize = useCallback(
+      async (grantId: string) => {
+        try {
+          const grant = await reauthorizeLibraryGrant(grantId);
+          if (!grant) return;
+          await refreshNativeGrants();
+          await invalidateLibraryForMutation(queryClient, 'rename');
+          void scanFolder(grant.path);
+        } catch (error) {
+          reportError('Failed to reconnect library source', {
+            source: 'settings-view',
+            error,
+          });
+          void refreshNativeGrants().catch(() => undefined);
+        }
+      },
+      [queryClient, refreshNativeGrants, scanFolder],
+    );
 
     const handleRemoveFolder = useCallback(
       async (folder: string) => {
         try {
-          await dbDeleteTracksByFolder(folder);
-          removeLibraryFolder(folder);
+          const grant = nativeGrants.find((item) => item.path === folder);
+          if (!grant) {
+            throw new Error('The native library grant no longer exists.');
+          }
+          const removal = await removeLibrarySource(grant.id);
+          await refreshNativeGrants();
           const remaining = tracks.filter((t) => !isSameOrSubPath(t.filePath, folder));
           setTracks(remaining);
-          setTrackCount(remaining.length);
-          await invalidateLibraryForMutation(queryClient, 'delete');
+          if (!removal.databaseCleanupCompleted) {
+            setTrackCount(trackCount);
+            reportError('Library source revoked; indexed cleanup is pending', {
+              source: 'settings-view',
+              error: removal.cleanupError ?? 'Tarab will retry cleanup at startup.',
+            });
+          } else {
+            setTrackCount(await dbGetTrackCount());
+            await invalidateLibraryForMutation(queryClient, 'delete');
+            if (removal.cleanupPending) {
+              reportError('Library source removed; recovery journal cleanup is pending', {
+                source: 'settings-view',
+                error: removal.cleanupError ?? 'Tarab will clear it at startup.',
+              });
+            }
+          }
         } catch (error) {
           reportError('Failed to remove folder tracks from database', {
             source: 'settings-view',
@@ -151,7 +234,56 @@ export const UnifiedSettingsView = memo(
           setFolderToRemove(null);
         }
       },
-      [queryClient, removeLibraryFolder, setTrackCount, setTracks, tracks],
+      [
+        nativeGrants,
+        queryClient,
+        refreshNativeGrants,
+        setTrackCount,
+        setTracks,
+        trackCount,
+        tracks,
+      ],
+    );
+
+    const handleRestoreTrashEntry = useCallback(
+      async (entry: RecoverableTrashEntry) => {
+        setTrashBusyToken(entry.undoToken);
+        try {
+          const [result] = await restoreTrashedFiles([entry.undoToken]);
+          if (!result || result.status !== 'success') {
+            throw new Error(result?.errorMessage ?? 'The Trash entry could not be restored.');
+          }
+          setTrackCount(await dbGetTrackCount());
+          await invalidateLibraryForMutation(queryClient, 'upsert');
+          await refreshTrashEntries();
+        } catch (error) {
+          reportError('Failed to restore Trash entry', { source: 'settings-view', error });
+          await refreshTrashEntries().catch(() => undefined);
+        } finally {
+          setTrashBusyToken(null);
+        }
+      },
+      [queryClient, refreshTrashEntries, setTrackCount],
+    );
+
+    const handlePurgeTrashEntry = useCallback(
+      async (entry: RecoverableTrashEntry) => {
+        setTrashBusyToken(entry.undoToken);
+        try {
+          const [result] = await purgeTrashedFiles([entry.undoToken]);
+          if (!result || result.status !== 'success') {
+            throw new Error(result?.errorMessage ?? 'The Trash entry could not be purged.');
+          }
+          await refreshTrashEntries();
+        } catch (error) {
+          reportError('Failed to purge Trash entry', { source: 'settings-view', error });
+          await refreshTrashEntries().catch(() => undefined);
+        } finally {
+          setTrashBusyToken(null);
+          setTrashToPurge(null);
+        }
+      },
+      [refreshTrashEntries],
     );
 
     const currentCopy = pageCopy[page];
@@ -174,7 +306,7 @@ export const UnifiedSettingsView = memo(
           <div
             className={cn('-mx-2 px-2 pb-3 pt-1', isNeobrutalism ? 'text-black' : 'text-white/50')}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em]">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em]">
               {currentCopy.eyebrow}
             </p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
@@ -199,6 +331,58 @@ export const UnifiedSettingsView = memo(
           {page === 'library' && (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <SettingsSection
+                title="Library Health"
+                description="Indexed music remains available for browsing when a source is disconnected."
+                icon={<AlertTriangle size={16} />}
+                className="md:col-span-2"
+              >
+                {nativeGrants.length === 0 ? (
+                  <SettingsRow
+                    label="No music sources"
+                    description="Add a folder to start indexing music."
+                    control={
+                      <SettingsActionButton onClick={() => void handleSelectFolder()}>
+                        <Plus size={14} /> Add Folder
+                      </SettingsActionButton>
+                    }
+                  />
+                ) : (
+                  nativeGrants.map((grant) => (
+                    <SettingsRow
+                      key={grant.id}
+                      label={grant.displayName}
+                      description={
+                        grant.status === 'available'
+                          ? `${
+                              libraryHealth?.cachedSources
+                                .find((source) => source.grantId === grant.id)
+                                ?.indexedTrackCount.toLocaleString() ?? '0'
+                            } indexed tracks. Source access is active.`
+                          : `Source access is missing. Indexed metadata and cached artwork remain available. ${grant.path}`
+                      }
+                      meta={
+                        <span
+                          className={cn(
+                            'text-xs font-semibold',
+                            grant.status === 'available' ? 'text-emerald-400' : 'text-amber-300',
+                          )}
+                        >
+                          {grant.status === 'available' ? 'Available' : 'Needs access'}
+                        </span>
+                      }
+                      control={
+                        grant.status === 'missing' ? (
+                          <SettingsActionButton onClick={() => void handleReauthorize(grant.id)}>
+                            Reauthorize
+                          </SettingsActionButton>
+                        ) : null
+                      }
+                    />
+                  ))
+                )}
+              </SettingsSection>
+
+              <SettingsSection
                 title="Sources"
                 description="Removing a folder removes indexed records only. Files on disk are not deleted."
                 icon={<LibraryIcon size={16} />}
@@ -211,18 +395,20 @@ export const UnifiedSettingsView = memo(
                     <SettingsActionButton
                       size="sm"
                       tone="ghost"
-                      onClick={() => setShowAddInput(true)}
-                    >
-                      <FolderPlus size={14} /> Manual
-                    </SettingsActionButton>
-                    <SettingsActionButton
-                      size="sm"
-                      tone="ghost"
                       onClick={() => void rescanAll()}
                       disabled={isScanning}
                     >
                       <RefreshCw size={14} className={cn(isScanning && 'animate-spin')} /> Rescan
                     </SettingsActionButton>
+                    {isScanning ? (
+                      <SettingsActionButton
+                        size="sm"
+                        tone="ghost"
+                        onClick={() => void cancelScan()}
+                      >
+                        <Square size={13} /> Cancel
+                      </SettingsActionButton>
+                    ) : null}
                   </SettingsControlGroup>
                 }
               >
@@ -254,7 +440,7 @@ export const UnifiedSettingsView = memo(
                         meta={
                           <span
                             className={cn(
-                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]',
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.08em]',
                               isNeobrutalism
                                 ? 'border-2 border-black bg-white text-black'
                                 : 'border border-white/[0.08] bg-white/[0.06] text-white/60',
@@ -291,7 +477,7 @@ export const UnifiedSettingsView = memo(
                               title="Remove folder"
                               className={
                                 isNeobrutalism
-                                  ? 'rounded-none border-2 border-black bg-[var(--signal-danger)] text-white shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#C62828] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
+                                  ? 'rounded-none border-2 border-black bg-[var(--signal-danger)] text-white shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--neo-danger-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none'
                                   : 'text-red-400 hover:bg-red-500/10'
                               }
                             >
@@ -346,51 +532,62 @@ export const UnifiedSettingsView = memo(
               <MiniPlayerSection />
             </div>
           )}
-          {page === 'storage' && <CacheSettings />}
-        </div>
-
-        <Dialog
-          open={showAddInput}
-          onOpenChange={(open) => {
-            if (!open) {
-              setShowAddInput(false);
-              setManualPath('');
-            }
-          }}
-        >
-          <DialogContent
-            className={cn(
-              'w-full max-w-md p-6',
-              isNeobrutalism
-                ? 'border-2 border-black bg-white'
-                : 'rounded-2xl border border-white/[0.06] bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-xl',
-            )}
-          >
-            <DialogTitle className="mb-4 text-lg font-bold">Add Folder Path</DialogTitle>
-            <input
-              autoFocus
-              type="text"
-              value={manualPath}
-              onChange={(e) => setManualPath(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddManualPath();
-              }}
-              placeholder="/path/to/music"
-              className={cn(
-                'mb-4 w-full outline-none transition-all',
-                isNeobrutalism
-                  ? 'border-2 border-black bg-white p-3 text-black'
-                  : liquidGlassSettingsTextInputClassName('w-full'),
-              )}
-            />
-            <div className="flex justify-end gap-3">
-              <DialogClose asChild>
-                <SettingsActionButton tone="ghost">Cancel</SettingsActionButton>
-              </DialogClose>
-              <SettingsActionButton onClick={handleAddManualPath}>Add Folder</SettingsActionButton>
+          {page === 'storage' && (
+            <div className="space-y-5">
+              <CacheSettings />
+              <SettingsSection
+                title="Recoverable Trash"
+                description={`Files remain here across restarts until restored or purged. Tarab keeps up to 256 entries.`}
+                icon={<Trash2 size={16} />}
+              >
+                {trashEntries.length === 0 ? (
+                  <SettingsRow
+                    label="Trash is empty"
+                    description="Files moved to Tarab Trash will appear here."
+                  />
+                ) : (
+                  trashEntries.map((entry) => (
+                    <SettingsRow
+                      key={entry.undoToken}
+                      label={entry.displayName}
+                      description={
+                        entry.status === 'missing'
+                          ? `Recovery payload is missing. ${entry.originalPath}`
+                          : entry.status === 'restorePending'
+                            ? `Restore interrupted; retry is safe. ${entry.originalPath}`
+                            : entry.originalPath
+                      }
+                      meta={
+                        <span className="text-xs text-text-muted">
+                          {entry.sizeBytes > 0 ? formatBytes(entry.sizeBytes) : 'Metadata only'}
+                        </span>
+                      }
+                      control={
+                        <SettingsControlGroup className="justify-end">
+                          <SettingsActionButton
+                            size="sm"
+                            onClick={() => void handleRestoreTrashEntry(entry)}
+                            disabled={trashBusyToken !== null || entry.status === 'missing'}
+                          >
+                            <RotateCcw size={13} /> Restore
+                          </SettingsActionButton>
+                          <SettingsActionButton
+                            size="sm"
+                            tone="danger"
+                            onClick={() => setTrashToPurge(entry)}
+                            disabled={trashBusyToken !== null || entry.status === 'restorePending'}
+                          >
+                            <Trash2 size={13} /> Purge
+                          </SettingsActionButton>
+                        </SettingsControlGroup>
+                      }
+                    />
+                  ))
+                )}
+              </SettingsSection>
             </div>
-          </DialogContent>
-        </Dialog>
+          )}
+        </div>
 
         {folderToRemove && (
           <ConfirmDialog
@@ -399,8 +596,19 @@ export const UnifiedSettingsView = memo(
             detail="This only removes indexed tracks from Tarab and does not delete files from disk."
             variant="danger"
             confirmLabel="Remove"
-            onConfirm={() => void handleRemoveFolder(folderToRemove)}
+            onConfirm={() => handleRemoveFolder(folderToRemove)}
             onCancel={() => setFolderToRemove(null)}
+          />
+        )}
+        {trashToPurge && (
+          <ConfirmDialog
+            title="Purge file from Trash"
+            message={`Permanently delete "${trashToPurge.displayName}"?`}
+            detail="This removes Tarab's recovery copy and cannot be undone."
+            variant="danger"
+            confirmLabel="Purge permanently"
+            onConfirm={() => handlePurgeTrashEntry(trashToPurge)}
+            onCancel={() => setTrashToPurge(null)}
           />
         )}
       </SettingsShell>

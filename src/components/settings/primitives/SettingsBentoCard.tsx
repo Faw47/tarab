@@ -25,7 +25,7 @@ export const SettingsBentoCard = memo(function SettingsBentoCard({
       className={cn(
         'overflow-hidden flex flex-col p-5',
         isNeobrutalism
-          ? 'rounded-none bg-white border-3 border-black shadow-[6px_6px_0_0_#000] text-black'
+          ? 'rounded-none bg-[var(--neo-paper)] border-3 border-[var(--neo-ink)] shadow-[var(--neo-shadow-lg)] text-[var(--neo-ink)]'
           : 'rounded-2xl border border-white/[0.06] bg-black/20 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.1)]',
         className,
       )}
@@ -62,7 +62,7 @@ export const SettingsBentoCard = memo(function SettingsBentoCard({
               className={cn(
                 'shrink-0',
                 isNeobrutalism &&
-                  'border-[3px] border-black bg-[#f2f0e9] p-2 text-black shadow-[3px_3px_0_0_#000]',
+                  'border-[3px] border-[var(--neo-ink)] bg-[var(--surface-shell)] p-2 text-[var(--neo-ink)] shadow-[var(--neo-shadow-sm)]',
               )}
             >
               {icon}

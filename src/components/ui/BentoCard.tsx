@@ -26,9 +26,9 @@ export const BentoCard = memo(function BentoCard({
   return (
     <div
       className={cn(
-        'overflow-hidden flex flex-col p-5 transition-all duration-300',
+        'overflow-hidden flex flex-col p-5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
         isNeobrutalism
-          ? 'rounded-none bg-white border-3 border-black shadow-[6px_6px_0_0_#000] text-black'
+          ? 'rounded-none bg-white border-3 border-black shadow-[var(--neo-shadow-lg)] text-black'
           : 'rounded-2xl border border-white/[0.06] bg-black/20 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.1)] hover:border-white/[0.08] hover:bg-black/[0.28]',
         className,
       )}
@@ -43,7 +43,7 @@ export const BentoCard = memo(function BentoCard({
                   className={cn(
                     isNeobrutalism
                       ? 'text-sm font-black uppercase tracking-[0.18em] text-black'
-                      : 'text-base font-semibold tracking-tight text-text-primary',
+                      : 'text-base font-semibold tracking-normal text-text-primary',
                   )}
                 >
                   {title}
@@ -68,7 +68,7 @@ export const BentoCard = memo(function BentoCard({
               className={cn(
                 'shrink-0 p-2 transition-colors',
                 isNeobrutalism
-                  ? 'border-[3px] border-black bg-[#f2f0e9] text-black shadow-[3px_3px_0_0_#000]'
+                  ? 'border-[3px] border-black bg-[var(--surface-shell)] text-black shadow-[var(--neo-shadow-sm)]'
                   : 'rounded-full border border-white/[0.06] bg-black/30 text-[var(--hero-accent)] backdrop-blur-md',
               )}
             >

@@ -1,17 +1,21 @@
-use crate::database::{DbPlaylist, DbTrack, SharedDatabase};
+use crate::database::{DbPlaylist, DbTrack, SharedDatabase, TrackCursorPageStatus};
+use crate::file_ops::{ensure_existing_path_allowed, path_to_public_string, SharedLibraryRoots};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use walkdir::WalkDir;
 
-const UNSUPPORTED_GENRE_RULE_MESSAGE: &str =
-    "ByGenre rules are not supported by the current track schema.";
+const LEGACY_PLAYLIST_MIGRATION_KEY: &str = "legacy-playlist-migration-v1";
+const PLAYLIST_TRACK_PAGE_SIZE: u32 = 5_000;
+const MAX_PLAYLIST_TRACK_PAGE_RESTARTS: usize = 3;
 pub struct PlaylistGuard {
     lock: Mutex<()>,
+    recent_mutations: Mutex<VecDeque<(String, PlaylistDetail)>>,
 }
 
 pub type SharedPlaylistGuard = Arc<PlaylistGuard>;
@@ -19,7 +23,61 @@ pub type SharedPlaylistGuard = Arc<PlaylistGuard>;
 pub fn create_playlist_guard() -> SharedPlaylistGuard {
     Arc::new(PlaylistGuard {
         lock: Mutex::new(()),
+        recent_mutations: Mutex::new(VecDeque::new()),
     })
+}
+
+impl PlaylistGuard {
+    fn mutation_result(&self, key: &str) -> Option<PlaylistDetail> {
+        self.recent_mutations
+            .lock()
+            .iter()
+            .find(|(stored_key, _)| stored_key == key)
+            .map(|(_, detail)| detail.clone())
+    }
+
+    fn store_mutation_result(&self, key: String, detail: PlaylistDetail) {
+        const MAX_RECENT_MUTATIONS: usize = 256;
+        let mut recent = self.recent_mutations.lock();
+        if recent.len() >= MAX_RECENT_MUTATIONS {
+            recent.pop_front();
+        }
+        recent.push_back((key, detail));
+    }
+}
+
+fn load_persisted_mutation_result(
+    db: &SharedDatabase,
+    key: &str,
+) -> Result<Option<PlaylistDetail>, String> {
+    let Some(json) = db
+        .get_playlist_mutation_result(key)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|error| format!("Stored playlist mutation result is invalid: {error}"))
+}
+
+fn persist_mutation_result(
+    db: &SharedDatabase,
+    key: &str,
+    detail: &PlaylistDetail,
+) -> Result<(), String> {
+    let json = serde_json::to_string(detail)
+        .map_err(|error| format!("Failed to serialize playlist mutation result: {error}"))?;
+    db.store_playlist_mutation_result(key, &json)
+        .map_err(|error| error.to_string())
+}
+
+fn mutation_key(operation: &str, playlist_id: &str, mutation_id: &str) -> Result<String, String> {
+    let id = mutation_id.trim();
+    if id.is_empty() || id.len() > 128 {
+        return Err("mutationId must contain 1 to 128 characters".to_string());
+    }
+    Ok(format!("{operation}:{playlist_id}:{id}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -303,8 +361,14 @@ fn to_u64(timestamp: i64) -> u64 {
     }
 }
 
+#[cfg(windows)]
 fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+#[cfg(not(windows))]
+fn normalize_path(path: &str) -> String {
+    path.to_string()
 }
 
 #[cfg(windows)]
@@ -326,16 +390,37 @@ fn deserialize_rules(raw: &Option<String>) -> Option<Vec<SmartPlaylistRule>> {
         .and_then(|value| serde_json::from_str::<Vec<SmartPlaylistRule>>(value).ok())
 }
 
-fn validate_supported_smart_rules(rules: &Option<Vec<SmartPlaylistRule>>) -> Result<(), String> {
-    if rules.as_ref().is_some_and(|rules| {
-        rules
-            .iter()
-            .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }))
-    }) {
-        Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
-    } else {
+fn ensure_manual_playlist(playlist_type: &PlaylistType, operation: &str) -> Result<(), String> {
+    if matches!(playlist_type, PlaylistType::Manual) {
         Ok(())
+    } else {
+        Err(format!(
+            "Tracks can only be {operation} in manual playlists"
+        ))
     }
+}
+fn validate_smart_rules(rules: &Option<Vec<SmartPlaylistRule>>) -> Result<(), String> {
+    for rule in rules.as_deref().unwrap_or(&[]) {
+        match rule {
+            SmartPlaylistRule::ByArtist { artist } if artist.trim().is_empty() => {
+                return Err("ByArtist rule requires an artist value".to_string());
+            }
+            SmartPlaylistRule::ByAlbum { album } if album.trim().is_empty() => {
+                return Err("ByAlbum rule requires an album value".to_string());
+            }
+            SmartPlaylistRule::ByGenre { genre } if genre.trim().is_empty() => {
+                return Err("ByGenre rule requires a genre value".to_string());
+            }
+            SmartPlaylistRule::ByYear {
+                start_year,
+                end_year,
+            } if start_year > end_year => {
+                return Err("ByYear rule start year cannot exceed end year".to_string());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn to_entry(track: &DbTrack, position: usize) -> PlaylistEntry {
@@ -358,21 +443,6 @@ fn to_summary_from_detail(detail: &PlaylistDetail) -> PlaylistSummary {
     detail.summary.clone()
 }
 
-fn to_legacy_playlist(detail: &PlaylistDetail) -> Playlist {
-    Playlist {
-        id: detail.summary.id.clone(),
-        name: detail.summary.name.clone(),
-        playlist_type: detail.summary.playlist_type.clone(),
-        track_ids: detail.track_ids.clone(),
-        smart_rules: detail.summary.smart_rules.clone(),
-        folder_path: detail.summary.folder_path.clone(),
-        created_at: detail.summary.created_at,
-        updated_at: detail.summary.updated_at,
-        is_pinned: detail.summary.is_pinned,
-        pinned_at: detail.summary.pinned_at,
-    }
-}
-
 fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) -> bool {
     match rule {
         SmartPlaylistRule::RecentlyAdded { days } => {
@@ -391,7 +461,16 @@ fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) ->
             let needle = album.trim().to_lowercase();
             !needle.is_empty() && track.album.to_lowercase().contains(&needle)
         }
-        SmartPlaylistRule::ByGenre { .. } => false,
+        SmartPlaylistRule::ByGenre { genre } => {
+            let needle = genre.trim().to_lowercase();
+            !needle.is_empty()
+                && track
+                    .genre
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&needle)
+        }
         SmartPlaylistRule::ByYear {
             start_year,
             end_year,
@@ -404,14 +483,12 @@ fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) ->
     }
 }
 
+#[cfg(test)]
 fn resolve_smart_tracks(
     all_tracks: &[DbTrack],
     rules: &[SmartPlaylistRule],
 ) -> (Vec<DbTrack>, Option<String>) {
     let now_ms = to_i64(now_millis_u64().unwrap_or(0));
-    let has_unsupported_genre = rules
-        .iter()
-        .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }));
 
     let filtered = all_tracks
         .iter()
@@ -423,15 +500,18 @@ fn resolve_smart_tracks(
         .cloned()
         .collect::<Vec<_>>();
 
-    let sync_error = if has_unsupported_genre {
-        Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
-    } else {
-        None
-    };
-
-    (filtered, sync_error)
+    (filtered, None)
 }
 
+fn folder_track_matches(track: &DbTrack, normalized_folder: &str) -> bool {
+    if normalized_folder.is_empty() {
+        return false;
+    }
+    let track_path = normalize_path_for_folder_match(&track.file_path);
+    track_path == normalized_folder || track_path.starts_with(&format!("{}/", normalized_folder))
+}
+
+#[cfg(test)]
 fn resolve_folder_tracks(all_tracks: &[DbTrack], folder_path: &str) -> Vec<DbTrack> {
     let normalized_folder = normalize_path_for_folder_match(folder_path)
         .trim_end_matches('/')
@@ -442,13 +522,54 @@ fn resolve_folder_tracks(all_tracks: &[DbTrack], folder_path: &str) -> Vec<DbTra
 
     all_tracks
         .iter()
-        .filter(|track| {
-            let track_path = normalize_path_for_folder_match(&track.file_path);
-            track_path == normalized_folder
-                || track_path.starts_with(&format!("{}/", normalized_folder))
-        })
+        .filter(|track| folder_track_matches(track, &normalized_folder))
         .cloned()
         .collect()
+}
+
+fn collect_library_tracks_matching<F>(
+    db: &SharedDatabase,
+    mut matches: F,
+) -> Result<Vec<DbTrack>, String>
+where
+    F: FnMut(&DbTrack) -> bool,
+{
+    let mut restart_count = 0_usize;
+
+    loop {
+        let mut cursor = None;
+        let mut resolved = Vec::new();
+
+        loop {
+            let page = db
+                .get_tracks_cursor_page(
+                    cursor.as_ref(),
+                    PLAYLIST_TRACK_PAGE_SIZE,
+                    "dateAdded",
+                    "desc",
+                )
+                .map_err(|error| error.to_string())?;
+
+            if page.status == TrackCursorPageStatus::RestartRequired {
+                restart_count += 1;
+                break;
+            }
+
+            resolved.extend(page.tracks.into_iter().filter(|track| matches(track)));
+
+            let Some(next_cursor) = page.next_cursor else {
+                return Ok(resolved);
+            };
+            cursor = Some(next_cursor);
+        }
+
+        if restart_count >= MAX_PLAYLIST_TRACK_PAGE_RESTARTS {
+            return Err(
+                "The library changed repeatedly while resolving this playlist. Try again."
+                    .to_string(),
+            );
+        }
+    }
 }
 
 fn build_detail_from_record(
@@ -517,9 +638,14 @@ fn build_detail_from_record(
             (track_ids, entries, None)
         }
         PlaylistType::Smart => {
-            let tracks = db.get_all_tracks().map_err(|e| e.to_string())?;
             let rules = smart_rules.clone().unwrap_or_default();
-            let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
+            let now_ms = to_i64(now_millis_u64().unwrap_or(0));
+            let resolved = collect_library_tracks_matching(db, |track| {
+                rules
+                    .iter()
+                    .all(|rule| track_matches_rule(track, rule, now_ms))
+            })?;
+            let sync_error = None;
             let entries = resolved
                 .iter()
                 .enumerate()
@@ -540,8 +666,12 @@ fn build_detail_from_record(
                     Some("Folder path is missing.".to_string()),
                 )
             } else {
-                let tracks = db.get_all_tracks().map_err(|e| e.to_string())?;
-                let resolved = resolve_folder_tracks(&tracks, &folder_path);
+                let normalized_folder = normalize_path_for_folder_match(&folder_path)
+                    .trim_end_matches('/')
+                    .to_string();
+                let resolved = collect_library_tracks_matching(db, |track| {
+                    folder_track_matches(track, &normalized_folder)
+                })?;
                 let sync_error = if Path::new(&folder_path).is_dir() {
                     None
                 } else {
@@ -597,8 +727,10 @@ fn get_playlist_detail_internal(
 }
 
 pub fn bootstrap_playlist_storage(app: tauri::AppHandle, db: SharedDatabase) -> Result<(), String> {
-    let current_count = db.get_playlist_count().map_err(|e| e.to_string())?;
-    if current_count > 0 {
+    if db
+        .playlist_migration_completed(LEGACY_PLAYLIST_MIGRATION_KEY)
+        .map_err(|e| e.to_string())?
+    {
         return Ok(());
     }
 
@@ -622,8 +754,10 @@ pub fn bootstrap_playlist_storage(app: tauri::AppHandle, db: SharedDatabase) -> 
     fs::copy(&path, &backup_path)
         .map_err(|e| format!("Failed to back up legacy playlists before migration: {}", e))?;
 
-    if let Err(err) = (|| -> Result<(), String> {
-        for playlist in legacy_data.playlists {
+    let playlists = legacy_data
+        .playlists
+        .into_iter()
+        .map(|playlist| {
             let record = DbPlaylist {
                 id: playlist.id.clone(),
                 name: playlist.name.clone(),
@@ -637,16 +771,17 @@ pub fn bootstrap_playlist_storage(app: tauri::AppHandle, db: SharedDatabase) -> 
                 last_synced_at: None,
                 sync_error: None,
             };
-            db.create_playlist(&record).map_err(|e| e.to_string())?;
+            let track_ids = if matches!(playlist.playlist_type, PlaylistType::Manual) {
+                playlist.track_ids
+            } else {
+                Vec::new()
+            };
+            (record, track_ids)
+        })
+        .collect::<Vec<_>>();
 
-            if matches!(playlist.playlist_type, PlaylistType::Manual) {
-                db.set_playlist_tracks(&playlist.id, &playlist.track_ids, record.updated_at)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-        Ok(())
-    })() {
-        let _ = db.clear_playlists();
+    if let Err(error) = db.import_legacy_playlists(&playlists, LEGACY_PLAYLIST_MIGRATION_KEY) {
+        let err = error.to_string();
         emit_playlist_load_event(
             &app,
             &PlaylistLoadStatus::Corrupt {
@@ -692,36 +827,33 @@ pub fn get_playlist_detail(
 }
 
 #[tauri::command]
-pub fn get_all_playlists(db: tauri::State<'_, SharedDatabase>) -> Vec<Playlist> {
-    let Ok(records) = db.get_all_playlists() else {
-        return Vec::new();
-    };
-
-    let mut playlists = Vec::with_capacity(records.len());
-    for record in records {
-        if let Ok(detail) = build_detail_from_record(db.inner(), &record) {
-            playlists.push(to_legacy_playlist(&detail));
-        }
-    }
-    playlists
-}
-
-#[tauri::command]
 pub fn create_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
     name: String,
     playlist_type: PlaylistType,
     smart_rules: Option<Vec<SmartPlaylistRule>>,
     folder_path: Option<String>,
-) -> Result<Playlist, String> {
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
 
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
         return Err("Playlist name is required".to_string());
     }
-    validate_supported_smart_rules(&smart_rules)?;
+    validate_smart_rules(&smart_rules)?;
+    let mut folder_path = folder_path;
+    if playlist_type == PlaylistType::FolderSync {
+        let path = folder_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| "A folder-synced playlist requires a folder path".to_string())?;
+        let roots = roots_state.read().roots.clone();
+        let canonical =
+            ensure_existing_path_allowed(Path::new(path), &roots, "create folder playlist")?;
+        folder_path = Some(path_to_public_string(&canonical));
+    }
 
     let now = now_millis_u64()?;
     let db_row = DbPlaylist {
@@ -739,21 +871,25 @@ pub fn create_playlist(
     };
 
     db.create_playlist(&db_row).map_err(|e| e.to_string())?;
-    let detail = get_playlist_detail_internal(db.inner(), &db_row.id)?;
-    Ok(to_legacy_playlist(&detail))
+    get_playlist_detail_internal(db.inner(), &db_row.id)
 }
 
 #[tauri::command]
 pub fn update_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
-    playlist_id: String,
-    name: Option<String>,
-    track_ids: Option<Vec<String>>,
-    smart_rules: Option<Vec<SmartPlaylistRule>>,
-    folder_path: Option<String>,
-) -> Result<Playlist, String> {
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+    request: UpdatePlaylistRequest,
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
+    let UpdatePlaylistRequest {
+        playlist_id,
+        name,
+        playlist_type,
+        track_ids,
+        smart_rules,
+        folder_path,
+    } = request;
 
     let mut playlist = db
         .get_playlist_by_id(&playlist_id)
@@ -768,8 +904,18 @@ pub fn update_playlist(
         playlist.name = trimmed.to_string();
     }
 
+    if let Some(next_type) = playlist_type {
+        playlist.playlist_type = next_type.as_db_value().to_string();
+        if next_type != PlaylistType::Smart {
+            playlist.smart_rules = None;
+        }
+        if next_type != PlaylistType::FolderSync {
+            playlist.folder_path = None;
+        }
+    }
+
     if let Some(next_rules) = smart_rules {
-        validate_supported_smart_rules(&Some(next_rules.clone()))?;
+        validate_smart_rules(&Some(next_rules.clone()))?;
         playlist.smart_rules = serialize_rules(&Some(next_rules));
     }
 
@@ -782,6 +928,18 @@ pub fn update_playlist(
         };
     }
 
+    if PlaylistType::from_db_value(&playlist.playlist_type) == PlaylistType::FolderSync {
+        let path = playlist
+            .folder_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| "A folder-synced playlist requires a folder path".to_string())?;
+        let roots = roots_state.read().roots.clone();
+        let canonical =
+            ensure_existing_path_allowed(Path::new(path), &roots, "update folder playlist")?;
+        playlist.folder_path = Some(path_to_public_string(&canonical));
+    }
+
     playlist.updated_at = to_i64(now_millis_u64()?);
     playlist.sync_error = None;
     db.replace_playlist(&playlist).map_err(|e| e.to_string())?;
@@ -791,8 +949,18 @@ pub fn update_playlist(
             .map_err(|e| e.to_string())?;
     }
 
-    let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
-    Ok(to_legacy_playlist(&detail))
+    get_playlist_detail_internal(db.inner(), &playlist_id)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePlaylistRequest {
+    playlist_id: String,
+    name: Option<String>,
+    playlist_type: Option<PlaylistType>,
+    track_ids: Option<Vec<String>>,
+    smart_rules: Option<Vec<SmartPlaylistRule>>,
+    folder_path: Option<String>,
 }
 
 #[tauri::command]
@@ -838,23 +1006,33 @@ pub fn add_tracks_to_playlist(
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
     track_ids: Vec<String>,
-) -> Result<Playlist, String> {
+    mutation_id: String,
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
+    let key = mutation_key("add", &playlist_id, &mutation_id)?;
+    if let Some(detail) = guard.mutation_result(&key) {
+        return Ok(detail);
+    }
+    if let Some(detail) = load_persisted_mutation_result(db.inner(), &key)? {
+        guard.store_mutation_result(key, detail.clone());
+        return Ok(detail);
+    }
 
     let playlist = db
         .get_playlist_by_id(&playlist_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Playlist not found".to_string())?;
 
-    if PlaylistType::from_db_value(&playlist.playlist_type) != PlaylistType::Manual {
-        return Err("Tracks can only be added to manual playlists".to_string());
-    }
+    let playlist_type = PlaylistType::from_db_value(&playlist.playlist_type);
+    ensure_manual_playlist(&playlist_type, "added")?;
 
-    db.add_tracks_to_playlist(&playlist_id, &track_ids)
+    db.add_tracks_to_playlist_idempotent(&playlist_id, &track_ids, &key)
         .map_err(|e| e.to_string())?;
 
     let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
-    Ok(to_legacy_playlist(&detail))
+    persist_mutation_result(db.inner(), &key, &detail)?;
+    guard.store_mutation_result(key, detail.clone());
+    Ok(detail)
 }
 
 #[tauri::command]
@@ -863,14 +1041,46 @@ pub fn remove_tracks_from_playlist(
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
     track_ids: Vec<String>,
-) -> Result<Playlist, String> {
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
+
+    let playlist = db
+        .get_playlist_by_id(&playlist_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Playlist not found".to_string())?;
+    let playlist_type = PlaylistType::from_db_value(&playlist.playlist_type);
+    ensure_manual_playlist(&playlist_type, "removed")?;
 
     db.remove_tracks_from_playlist(&playlist_id, &track_ids)
         .map_err(|e| e.to_string())?;
 
-    let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
-    Ok(to_legacy_playlist(&detail))
+    get_playlist_detail_internal(db.inner(), &playlist_id)
+}
+
+#[tauri::command]
+pub fn relink_playlist_track(
+    guard: tauri::State<'_, SharedPlaylistGuard>,
+    db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    old_track_id: String,
+    new_track_id: String,
+) -> Result<PlaylistDetail, String> {
+    let _lock = guard.lock.lock();
+    let playlist = db
+        .get_playlist_by_id(&playlist_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Playlist not found".to_string())?;
+    let playlist_type = PlaylistType::from_db_value(&playlist.playlist_type);
+    ensure_manual_playlist(&playlist_type, "relinked")?;
+
+    db.relink_playlist_track(
+        &playlist_id,
+        &old_track_id,
+        &new_track_id,
+        to_i64(now_millis_u64()?),
+    )
+    .map_err(|e| e.to_string())?;
+    get_playlist_detail_internal(db.inner(), &playlist_id)
 }
 
 #[tauri::command]
@@ -879,21 +1089,39 @@ pub fn reorder_playlist_tracks(
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
     track_ids: Vec<String>,
-) -> Result<Playlist, String> {
+    mutation_id: String,
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
+    let key = mutation_key("reorder", &playlist_id, &mutation_id)?;
+    if let Some(detail) = guard.mutation_result(&key) {
+        return Ok(detail);
+    }
+    if let Some(detail) = load_persisted_mutation_result(db.inner(), &key)? {
+        guard.store_mutation_result(key, detail.clone());
+        return Ok(detail);
+    }
 
+    let playlist = db
+        .get_playlist_by_id(&playlist_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Playlist not found".to_string())?;
+    let playlist_type = PlaylistType::from_db_value(&playlist.playlist_type);
+    ensure_manual_playlist(&playlist_type, "reordered")?;
     let now = to_i64(now_millis_u64()?);
-    db.set_playlist_tracks(&playlist_id, &track_ids, now)
+    db.set_playlist_tracks_idempotent(&playlist_id, &track_ids, now, &key)
         .map_err(|e| e.to_string())?;
 
     let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
-    Ok(to_legacy_playlist(&detail))
+    persist_mutation_result(db.inner(), &key, &detail)?;
+    guard.store_mutation_result(key, detail.clone());
+    Ok(detail)
 }
 
 #[tauri::command]
 pub fn sync_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
     playlist_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
@@ -908,23 +1136,45 @@ pub fn sync_playlist(
 
     if matches!(playlist_type, PlaylistType::FolderSync) {
         match playlist.folder_path.clone() {
-            Some(path) if Path::new(&path).is_dir() => {}
-            Some(_) => {
-                sync_error = Some("Folder is not available on disk.".to_string());
+            Some(path) => {
+                let roots = roots_state.read().roots.clone();
+                match ensure_existing_path_allowed(Path::new(&path), &roots, "sync folder playlist")
+                {
+                    Err(_) => {
+                        sync_error = Some(
+                            "Folder access is missing. Reauthorize the library source, then sync again."
+                                .to_string(),
+                        );
+                    }
+                    Ok(open_path) if open_path.is_dir() => {
+                        let track_ids = db
+                            .get_track_ids_by_folder(&path)
+                            .map_err(|e| e.to_string())?;
+                        let supported_file_count = WalkDir::new(&open_path)
+                            .follow_links(false)
+                            .into_iter()
+                            .filter_map(Result::ok)
+                            .filter(|entry| {
+                                entry.file_type().is_file()
+                                    && crate::library::is_supported_audio_path(entry.path())
+                            })
+                            .count();
+                        db.set_playlist_tracks(&playlist_id, &track_ids, to_i64(now_millis_u64()?))
+                            .map_err(|e| e.to_string())?;
+                        let not_indexed = supported_file_count.saturating_sub(track_ids.len());
+                        if not_indexed > 0 {
+                            sync_error = Some(format!(
+                            "{not_indexed} supported file(s) are not indexed. Scan this library folder, then sync again."
+                        ));
+                        }
+                    }
+                    Ok(_) => {
+                        sync_error = Some("The synced folder is no longer available.".to_string());
+                    }
+                }
             }
             None => {
                 sync_error = Some("Folder path is missing.".to_string());
-            }
-        }
-    }
-
-    if matches!(playlist_type, PlaylistType::Smart) {
-        if let Some(rules) = deserialize_rules(&playlist.smart_rules) {
-            let has_unsupported_genre = rules
-                .iter()
-                .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }));
-            if has_unsupported_genre {
-                sync_error = Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string());
             }
         }
     }
@@ -945,6 +1195,7 @@ pub fn remove_missing_from_playlist(
     let _lock = guard.lock.lock();
 
     let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
+    ensure_manual_playlist(&detail.summary.playlist_type, "removed")?;
     let unavailable_ids = detail
         .entries
         .iter()
@@ -958,36 +1209,6 @@ pub fn remove_missing_from_playlist(
     }
 
     get_playlist_detail_internal(db.inner(), &playlist_id)
-}
-
-// Legacy helper - kept for compatibility
-#[tauri::command]
-pub fn sync_folder_playlist(folder_path: String) -> Result<Vec<String>, String> {
-    let path = PathBuf::from(&folder_path);
-    if !path.exists() || !path.is_dir() {
-        return Err("Folder does not exist".to_string());
-    }
-
-    let audio_extensions = crate::library::SUPPORTED_EXTENSIONS;
-    let mut files = Vec::new();
-
-    for entry in WalkDir::new(&path)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if audio_extensions.iter().any(|e| ext.eq_ignore_ascii_case(e)) {
-                    files.push(path.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    files.sort();
-    Ok(files)
 }
 
 #[tauri::command]
@@ -1008,14 +1229,61 @@ pub fn reset_playlists_data(
     Ok(())
 }
 
-#[tauri::command]
-pub fn get_playlists_data_path(app: tauri::AppHandle) -> Result<String, String> {
-    Ok(get_playlists_path(&app).to_string_lossy().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_detail(id: &str) -> PlaylistDetail {
+        PlaylistDetail {
+            summary: PlaylistSummary {
+                id: id.to_string(),
+                name: "Playlist".to_string(),
+                playlist_type: PlaylistType::Manual,
+                track_count: 0,
+                missing_count: 0,
+                smart_rules: None,
+                folder_path: None,
+                created_at: 1,
+                updated_at: 1,
+                is_pinned: false,
+                pinned_at: None,
+                last_synced_at: None,
+                sync_error: None,
+            },
+            track_ids: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn derived_playlist_mutations_are_rejected() {
+        for playlist_type in [PlaylistType::Smart, PlaylistType::FolderSync] {
+            let error = ensure_manual_playlist(&playlist_type, "removed")
+                .expect_err("derived playlist mutation should be rejected");
+            assert_eq!(error, "Tracks can only be removed in manual playlists");
+        }
+
+        assert!(ensure_manual_playlist(&PlaylistType::Manual, "removed").is_ok());
+    }
+    #[test]
+    fn playlist_mutation_cache_returns_the_original_result_for_a_retry() {
+        let guard = create_playlist_guard();
+        let key = mutation_key("add", "playlist-1", "mutation-1").expect("valid key");
+        let detail = sample_detail("playlist-1");
+
+        guard.store_mutation_result(key.clone(), detail);
+
+        assert_eq!(
+            guard
+                .mutation_result(&key)
+                .expect("cached mutation result")
+                .summary
+                .id,
+            "playlist-1"
+        );
+        assert!(mutation_key("add", "playlist-1", "").is_err());
+        assert!(mutation_key("add", "playlist-1", &"x".repeat(129)).is_err());
+    }
 
     fn sample_track(
         id: &str,
@@ -1042,6 +1310,13 @@ mod tests {
             play_count,
             last_played: None,
             rating,
+            track_number: None,
+            disc_number: None,
+            file_format: Some("MP3".to_string()),
+            bitrate: None,
+            sample_rate: None,
+            file_size: None,
+            genre: None,
         }
     }
 
@@ -1062,6 +1337,38 @@ mod tests {
         let (resolved, _) = resolve_smart_tracks(&tracks, &rules);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "a");
+    }
+
+    #[test]
+    fn cursor_playlist_resolution_handles_more_than_one_track_page() {
+        let db = std::sync::Arc::new(
+            crate::database::Database::in_memory_for_tests().expect("create in-memory database"),
+        );
+        let tracks = (0..5_001)
+            .map(|index| {
+                let mut track = sample_track(
+                    &format!("page-{index:04}"),
+                    "Artist",
+                    "Album",
+                    Some(2024),
+                    180.0,
+                    0,
+                    None,
+                );
+                track.file_path = format!("/tmp/playlist-page-{index:04}.mp3");
+                track.id = track.file_path.clone();
+                track
+            })
+            .collect::<Vec<_>>();
+        db.upsert_tracks_batch(&tracks)
+            .expect("seed large playlist library");
+
+        let resolved =
+            collect_library_tracks_matching(&db, |_| true).expect("resolve large playlist library");
+
+        assert_eq!(resolved.len(), 5_001);
+        assert_eq!(resolved[0].file_path, "/tmp/playlist-page-0000.mp3");
+        assert_eq!(resolved[5_000].file_path, "/tmp/playlist-page-5000.mp3");
     }
 
     #[test]
@@ -1090,34 +1397,40 @@ mod tests {
     }
 
     #[test]
-    fn by_genre_rule_returns_sync_error_without_matching_every_track() {
-        let tracks = vec![sample_track(
-            "a",
-            "Artist",
-            "Album",
-            Some(2024),
-            200.0,
-            1,
-            None,
-        )];
+    fn by_genre_rule_matches_case_insensitive_metadata() {
+        let mut classical =
+            sample_track("classical", "Artist", "Album", Some(2024), 200.0, 1, None);
+        classical.genre = Some("Classical".to_string());
+
+        let mut rock = sample_track("rock", "Artist", "Album", Some(2024), 200.0, 1, None);
+        rock.genre = Some("Rock".to_string());
+
         let rules = vec![SmartPlaylistRule::ByGenre {
-            genre: "Classical".to_string(),
+            genre: "class".to_string(),
         }];
 
-        let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
-        assert_eq!(resolved.len(), 0);
-        assert!(sync_error.is_some());
+        let (resolved, sync_error) = resolve_smart_tracks(&[classical, rock], &rules);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "classical");
+        assert_eq!(sync_error, None);
     }
 
     #[test]
-    fn genre_rule_validation_rejects_new_rules() {
+    fn genre_rule_validation_accepts_non_empty_values() {
         let rules = Some(vec![SmartPlaylistRule::ByGenre {
             genre: "Classical".to_string(),
         }]);
 
-        let result = validate_supported_smart_rules(&rules);
+        assert!(validate_smart_rules(&rules).is_ok());
+    }
 
-        assert_eq!(result, Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string()));
+    #[test]
+    fn genre_rule_validation_rejects_empty_values() {
+        let rules = Some(vec![SmartPlaylistRule::ByGenre {
+            genre: "  ".to_string(),
+        }]);
+
+        assert!(validate_smart_rules(&rules).is_err());
     }
 
     #[test]

@@ -11,38 +11,34 @@ import {
   Tag,
   X,
 } from 'lucide-react';
-import {
-  type CSSProperties,
-  memo,
-  type ReactNode,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import { type CSSProperties, memo, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import type { NavView } from './FloatingDock';
-import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
+import { QueueIcon } from '../ui/Icons';
+import { type NavView, normalizeDockActiveView } from './navigation-model';
+import {
+  getTopBarLabel,
+  TOP_BAR_PRIMARY_VIEWS,
+  TOP_BAR_SECONDARY_VIEWS,
+  type TopBarProcessingTask,
+  type TopBarStatus,
+} from './top-bar-model';
+import { useTopBarController } from './useTopBarController';
 import { WindowsWindowControls } from './WindowsWindowControls';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface ProcessingTask {
-  label: string;
-  progress?: number;
-}
-
 interface TopBarNeoProps {
   navMode: 'iconRail' | 'topNav';
-  currentView: string;
+  currentView: NavView;
   onNavigate: (view: NavView) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   isScanning: boolean;
   scanProgress: number;
-  activeProcessing?: ProcessingTask;
+  activeProcessing?: TopBarProcessingTask;
   titlebarInsetLeft?: number;
   onShuffleAll?: () => void;
   isSearching?: boolean;
@@ -55,12 +51,6 @@ interface TopBarNeoProps {
   // deliberate design contract, not an oversight.
 }
 
-interface StatusData {
-  label: string;
-  progressText: string | null;
-  progressValue: number | null;
-}
-
 // ---------------------------------------------------------------------------
 // Module-level constants
 //
@@ -71,28 +61,27 @@ interface StatusData {
 
 const SEARCH_INPUT_ID = 'global-library-search-neo';
 
-const PLATFORM_SHORTCUT = {
-  shortcutLabel: '/',
-  ariaShortcut: 'Slash',
-} as const;
+const PRIMARY_TABS = TOP_BAR_PRIMARY_VIEWS.map((item) => ({
+  ...item,
+  icon: {
+    home: Home,
+    library: Library,
+    queue: QueueIcon as LucideIcon,
+    playlists: ListMusic,
+  }[item.view],
+}));
 
-const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
-  { view: 'home', label: 'Home', icon: Home },
-  { view: 'library', label: 'Library', icon: Library },
-  { view: 'queue', label: 'Queue', icon: ListMusic },
-];
-
-const SECONDARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
-  { view: 'tags', label: 'Tags', icon: Tag },
-  { view: 'settings', label: 'Settings', icon: Settings },
-];
+const SECONDARY_TABS = TOP_BAR_SECONDARY_VIEWS.map((item) => ({
+  ...item,
+  icon: {
+    tags: Tag,
+    settings: Settings,
+  }[item.view],
+}));
 
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value));
 
 const chromeNoDragStyle = {
   WebkitAppRegion: 'no-drag',
@@ -113,27 +102,27 @@ const titleDragStyle = {
 //
 // TopBarNeo palette (this bar only):
 //   Header shell:             var(--neo-muted)
-//   Primary nav idle:         #FFFFFF  | hover: #A4B680 (sage)
-//   Search field:             #FFFFFF at rest | focus-within: #A091D0 (lavender)
+//   Primary nav idle:         #FFFFFF  | hover: var(--neo-sage)
+//   Search field:             #FFFFFF at rest | focus-within: var(--neo-lavender)
 //   Secondary actions idle:   var(--neo-panel)  | hover: var(--neo-utility-hover) (mustard)
 //   Active / pressed:         #000000 bg, #FFFFFF text
 // ---------------------------------------------------------------------------
 
 const BUTTON_BASE_CLASS =
-  'inline-flex items-center justify-center gap-3 border-2 border-black font-black uppercase tracking-[0.15em] transition-none focus-visible:outline-none rounded-none cursor-pointer';
+  'inline-flex items-center justify-center gap-3 border-2 border-[var(--neo-ink)] font-black uppercase tracking-[0.15em] transition-none focus-visible:outline-none rounded-none cursor-pointer';
 
 // Primary nav buttons — 4px hard shadow
 // Active state: background: var(--signal-active), border: 2px solid #000000, padding: 6px equivalent
 const primaryButtonStateClass = (active: boolean) =>
   active
     ? 'bg-transparent text-black border-2 border-black shadow-none'
-    : 'bg-white text-black shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:bg-[#A4B680]';
+    : 'bg-[var(--neo-paper)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-md)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:bg-[var(--neo-sage)]';
 
 // Secondary action buttons — 2px hard shadow
 const secondaryButtonStateClass = (active: boolean) =>
   active
     ? 'bg-black text-white translate-x-[2px] translate-y-[2px] shadow-none'
-    : 'bg-[var(--neo-panel)] text-black shadow-[4px_4px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]';
+    : 'bg-[var(--neo-panel)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-md)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -160,7 +149,7 @@ const NeoNavButton = memo(function NeoNavButton({
       className={cn(
         BUTTON_BASE_CLASS,
         primaryButtonStateClass(isActive),
-        'h-10 px-0 pr-5 text-[12px] overflow-hidden hover-neo-wiggle',
+        'h-10 px-0 pr-5 text-[12px] overflow-hidden',
       )}
     >
       <div
@@ -195,11 +184,7 @@ const NeoSecondaryAction = memo(function NeoSecondaryAction({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={cn(
-        BUTTON_BASE_CLASS,
-        secondaryButtonStateClass(active),
-        'h-10 px-4 text-[12px] hover-neo-wiggle',
-      )}
+      className={cn(BUTTON_BASE_CLASS, secondaryButtonStateClass(active), 'h-10 px-4 text-[12px]')}
     >
       {icon}
       <span className="hidden lg:inline-block">{label}</span>
@@ -209,15 +194,25 @@ const NeoSecondaryAction = memo(function NeoSecondaryAction({
 
 NeoSecondaryAction.displayName = 'NeoSecondaryAction';
 
-const ProcessingStatus = memo(function ProcessingStatus({ status }: { status: StatusData }) {
+const ProcessingStatus = memo(function ProcessingStatus({
+  status,
+  reducedEffects,
+}: {
+  status: TopBarStatus;
+  reducedEffects: boolean;
+}) {
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className="relative flex h-10 min-w-[180px] max-w-[240px] items-center gap-3 overflow-hidden border-2 border-black bg-white px-3 shadow-[4px_4px_0_0_#000]"
+      className="relative flex h-10 min-w-[180px] max-w-[240px] items-center gap-3 overflow-hidden border-2 border-black bg-white px-3 shadow-[var(--neo-shadow-md)]"
     >
-      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-black" strokeWidth={3} aria-hidden />
+      <Loader2
+        className={cn('h-4 w-4 shrink-0 text-black', !reducedEffects && 'animate-spin')}
+        strokeWidth={3}
+        aria-hidden
+      />
       <span className="truncate text-[12px] font-black uppercase tracking-[0.1em] text-black">
         {status.label}
       </span>
@@ -229,7 +224,7 @@ const ProcessingStatus = memo(function ProcessingStatus({ status }: { status: St
       {status.progressValue != null && (
         <div className="absolute inset-x-0 bottom-0 h-[8px] border-t-2 border-black bg-white">
           <div
-            className="h-full border-r-2 border-black bg-[#DAB852]"
+            className="h-full border-r-2 border-black bg-[var(--state-warning-surface)]"
             style={{ width: `${status.progressValue}%` }}
           />
         </div>
@@ -260,72 +255,37 @@ export const TopBarNeo = memo(function TopBarNeo({
   onBack,
   canGoBack = false,
 }: TopBarNeoProps) {
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const isWindowsDesktop = /Win/i.test(navigator.platform);
-
-  const focusSearchInput = useCallback(() => {
-    requestAnimationFrame(() => {
-      const input = searchInputRef.current;
-      if (!input) return;
-      input.focus();
-      input.select();
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!focusSearchNonce) return;
-    focusSearchInput();
-  }, [focusSearchNonce, focusSearchInput]);
-
-  const status = useMemo<StatusData | null>(() => {
-    if (isScanning) {
-      const progressValue = scanProgress > 0 ? clamp(Math.round(scanProgress), 0, 100) : null;
-      return {
-        label: activeProcessing?.label ?? 'Scanning Library',
-        progressText: progressValue != null ? `${progressValue}%` : null,
-        progressValue,
-      };
-    }
-
-    if (activeProcessing) {
-      const progressValue =
-        typeof activeProcessing.progress === 'number'
-          ? clamp(Math.round(activeProcessing.progress), 0, 100)
-          : null;
-      return {
-        label: activeProcessing.label,
-        progressText: progressValue != null ? `${progressValue}%` : null,
-        progressValue,
-      };
-    }
-
-    return null;
-  }, [activeProcessing, isScanning, scanProgress]);
-
-  const showShuffle =
-    onShuffleAll != null && (currentView === 'library' || currentView === 'search');
-
-  // currentView is in the dep array directly so the callback never captures a
-  // stale isSearchSurface derivation from a previous render.
-  const clearSearch = useCallback(() => onSearchChange(''), [onSearchChange]);
-
-  useTopBarSearchShortcuts({
+  const reducedEffects = useEffectiveReducedEffects();
+  const {
+    registerSearchInput,
+    shortcutLabel,
+    ariaShortcut,
+    status,
+    showShuffle,
+    focusSearchInput,
+    handleSearchChange,
+  } = useTopBarController({
     inputId: SEARCH_INPUT_ID,
-    inputRef: searchInputRef,
-    onFocusSearch: focusSearchInput,
-    onClearSearch: clearSearch,
+    currentView,
+    searchQuery,
+    onSearchChange,
+    onNavigate,
+    isScanning,
+    scanProgress,
+    activeProcessing,
+    onShuffleAll,
+    focusSearchNonce,
+    scanningLabel: 'Scanning Library',
   });
+  const isWindowsDesktop = /Win/i.test(navigator.platform);
+  const navigationView = normalizeDockActiveView(currentView);
 
-  const handleSearchChange = useCallback(
-    (query: string) => {
-      onSearchChange(query);
-      const onSearchSurface = currentView === 'library' || currentView === 'search';
-      if (query.trim() && !onSearchSurface) {
-        onNavigate('library');
-      }
-    },
-    [currentView, onNavigate, onSearchChange],
-  );
+  const currentSectionLabel =
+    (currentView === 'search'
+      ? 'Search'
+      : currentView === 'album'
+        ? 'Album'
+        : getTopBarLabel(currentView)) ?? 'Browse';
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center border-b-2 border-black bg-[var(--neo-muted)] px-4">
@@ -349,31 +309,38 @@ export const TopBarNeo = memo(function TopBarNeo({
               onClick={onBack}
               aria-label="Back"
               title="Back"
-              className="mr-2 inline-flex h-10 w-10 items-center justify-center border-2 border-black bg-white text-black shadow-[4px_4px_0_0_#000] hover:bg-[var(--neo-utility-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+              className="mr-2 inline-flex h-10 w-10 items-center justify-center border-2 border-black bg-white text-black shadow-[var(--neo-shadow-md)] hover:bg-[var(--neo-utility-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={3} aria-hidden />
             </button>
           )}
           {navMode === 'topNav' ? (
-            <nav
-              aria-label="Primary sections"
-              className="flex items-center gap-2 border-2 border-black bg-white p-1 shadow-[4px_4px_0_0_#000]"
-            >
-              {PRIMARY_TABS.map((item) => (
-                <NeoNavButton
-                  key={item.view}
-                  view={item.view}
-                  label={item.label}
-                  icon={item.icon}
-                  isActive={currentView === item.view}
-                  onNavigate={onNavigate}
-                />
-              ))}
-            </nav>
+            <>
+              <div className="flex h-10 items-center border-2 border-black bg-[var(--neo-sage)] px-4 shadow-[var(--neo-shadow-md)] md:hidden">
+                <span className="text-[13px] font-black uppercase tracking-[0.1em] text-black">
+                  {currentSectionLabel}
+                </span>
+              </div>
+              <nav
+                aria-label="Primary sections"
+                className="hidden items-center gap-2 border-2 border-black bg-white p-1 shadow-[var(--neo-shadow-md)] md:flex"
+              >
+                {PRIMARY_TABS.map((item) => (
+                  <NeoNavButton
+                    key={item.view}
+                    view={item.view}
+                    label={item.label}
+                    icon={item.icon}
+                    isActive={navigationView === item.view}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </nav>
+            </>
           ) : (
-            <div className="inline-flex h-10 items-center border-2 border-black bg-[#A4B680] px-4 shadow-[4px_4px_0_0_#000]">
+            <div className="inline-flex h-10 items-center border-2 border-black bg-[var(--neo-sage)] px-4 shadow-[var(--neo-shadow-md)]">
               <span className="text-[13px] font-black uppercase tracking-[0.1em] text-black">
-                {PRIMARY_TABS.find((item) => item.view === currentView)?.label ?? 'Browse'}
+                {currentSectionLabel}
               </span>
             </div>
           )}
@@ -391,23 +358,28 @@ export const TopBarNeo = memo(function TopBarNeo({
           className="pointer-events-auto flex min-w-0 flex-1 items-center gap-2"
           style={chromeNoDragStyle}
         >
-          <div className="flex h-10 w-full items-center gap-3 border-2 border-black bg-white px-4 shadow-[4px_4px_0_0_#000] transition-none focus-within:bg-[#A091D0]">
+          <div className="flex h-10 w-full items-center gap-3 border-2 border-black bg-white px-4 shadow-[var(--neo-shadow-md)] transition-none focus-within:bg-[var(--neo-lavender)]">
             <div className="flex shrink-0 items-center justify-center">
               {isSearching ? (
-                <Loader2 className="h-4 w-4 animate-spin text-black" strokeWidth={3} aria-hidden />
+                <Loader2
+                  className={cn('h-4 w-4 text-black', !reducedEffects && 'animate-spin')}
+                  strokeWidth={3}
+                  aria-hidden
+                />
               ) : (
                 <Search className="h-4 w-4 text-black" strokeWidth={3} />
               )}
             </div>
 
             <input
-              ref={searchInputRef}
+              ref={registerSearchInput(0)}
               id={SEARCH_INPUT_ID}
               type="text"
               value={searchQuery}
               onChange={(event) => handleSearchChange(event.target.value)}
               placeholder="SEARCH..."
               aria-label="Search library"
+              aria-keyshortcuts={ariaShortcut}
               className="h-full min-w-0 flex-1 bg-transparent text-[13px] font-black uppercase tracking-[0.05em] text-black placeholder:text-black/30 outline-none"
             />
 
@@ -417,15 +389,15 @@ export const TopBarNeo = memo(function TopBarNeo({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   onSearchChange('');
-                  searchInputRef.current?.focus();
+                  focusSearchInput();
                 }}
-                className="inline-flex h-6 w-6 items-center justify-center border-2 border-black bg-[var(--neo-panel)] text-black shadow-[2px_2px_0_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]"
+                className="inline-flex h-6 w-6 items-center justify-center border-2 border-black bg-[var(--neo-panel)] text-black shadow-[var(--neo-shadow-xs)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none hover:bg-[var(--neo-utility-hover)]"
               >
                 <X className="h-3 w-3" strokeWidth={3} />
               </button>
             ) : (
-              <kbd className="hidden h-6 items-center border-2 border-black bg-[var(--neo-panel)] px-2 shadow-[2px_2px_0_0_#000] md:inline-flex">
-                <span className="text-[10px] font-black">{PLATFORM_SHORTCUT.shortcutLabel}</span>
+              <kbd className="hidden h-6 items-center border-2 border-black bg-[var(--neo-panel)] px-2 shadow-[var(--neo-shadow-xs)] md:inline-flex">
+                <span className="text-xs font-black">{shortcutLabel}</span>
               </kbd>
             )}
           </div>
@@ -451,17 +423,17 @@ export const TopBarNeo = memo(function TopBarNeo({
           className="pointer-events-auto flex shrink-0 items-center justify-end gap-3"
           style={chromeNoDragStyle}
         >
-          {status && <ProcessingStatus status={status} />}
+          {status && <ProcessingStatus status={status} reducedEffects={reducedEffects} />}
 
           {navMode === 'topNav' && (
-            <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2 md:flex">
               {SECONDARY_TABS.map((item) => (
                 <NeoSecondaryAction
                   key={item.view}
                   label={item.label}
                   icon={<item.icon className="h-4 w-4" strokeWidth={3} />}
                   onClick={() => onNavigate(item.view)}
-                  active={currentView === item.view}
+                  active={navigationView === item.view}
                 />
               ))}
             </div>

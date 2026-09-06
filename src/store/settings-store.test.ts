@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SHORTCUTS, useSettingsStore } from './settings-store';
 
@@ -29,6 +29,19 @@ describe('settings-store library folders', () => {
     useSettingsStore.getState().removeLibraryFolder('C:\\Music\\');
 
     expect(useSettingsStore.getState().libraryFolders).toEqual([]);
+  });
+
+  it('removes Windows paths case-insensitively', () => {
+    vi.stubGlobal('navigator', { platform: 'Win32' });
+    useSettingsStore.getState().setLibraryFolders(['C:/Music']);
+    useSettingsStore.getState().removeLibraryFolder('c:/music');
+    expect(useSettingsStore.getState().libraryFolders).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+  it('preserves POSIX and Windows filesystem roots', () => {
+    useSettingsStore.getState().setLibraryFolders(['/', 'C:\\']);
+
+    expect(useSettingsStore.getState().libraryFolders).toEqual(['/', 'C:/']);
   });
 });
 describe('settings-store shortcuts', () => {

@@ -6,6 +6,7 @@ import { type ReactNode, useState } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { Toaster } from 'sonner';
 import { setLibraryQueryClient } from '../features/library/queryClientBridge';
+import { useSettingsStore } from '../store/settings-store';
 
 const QUERY_CACHE_KEY = 'tarab-query-cache';
 const PERSIST_MAX_AGE_MS = 86400000;
@@ -46,6 +47,7 @@ const persister = createAsyncStoragePersister({
 });
 
 export function AppProviders({ children }: { children: ReactNode }) {
+  const theme = useSettingsStore((state) => state.theme);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -75,7 +77,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
           position="top-right"
           richColors
           closeButton
-          theme="dark"
+          theme={theme === 'neobrutalism' ? 'light' : 'dark'}
           toastOptions={{
             style: {
               background: 'var(--toast-surface)',

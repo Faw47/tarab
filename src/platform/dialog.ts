@@ -1,4 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
+import { SUPPORTED_AUDIO_EXTENSIONS } from '../lib/media-formats';
 import { logger } from './logger';
 
 const DOMAIN = 'Dialog';
@@ -45,39 +46,13 @@ export const dialog = {
         filters: [
           {
             name: 'Audio',
-            extensions: ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus'],
+            extensions: [...SUPPORTED_AUDIO_EXTENSIONS],
           },
         ],
       });
       return selectionList(selected);
     } catch (err) {
       logger.error(DOMAIN, 'Failed to open file dialog', err);
-      return null;
-    }
-  },
-
-  /**
-   * Open a file selection dialog for images.
-   */
-  openImageFiles: async (
-    title = 'Select Image Files',
-    multiple = false,
-  ): Promise<string[] | null> => {
-    try {
-      const selected = await open({
-        multiple,
-        directory: false,
-        title,
-        filters: [
-          {
-            name: 'Images',
-            extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-          },
-        ],
-      });
-      return selectionList(selected);
-    } catch (err) {
-      logger.error(DOMAIN, 'Failed to open image dialog', err);
       return null;
     }
   },

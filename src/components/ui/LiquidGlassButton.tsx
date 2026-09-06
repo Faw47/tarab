@@ -8,7 +8,7 @@ const DEFAULT_SCALE = 1;
 const PRESSED_SCALE = 0.95;
 
 const INSET_SUBMERGE_SHADOW =
-  'inset 0 5px 16px rgba(0, 0, 0, 0.42), inset 0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05)';
+  'inset 0 5px 16px color-mix(in oklch, var(--glass-shadow) 100%, transparent), inset 0 2px 8px color-mix(in oklch, var(--glass-shadow) 80%, transparent), inset 0 1px 0 color-mix(in oklch, var(--type-primary) 5%, transparent)';
 
 const BUTTON_TRACKER_VARS = {
   x: '--adl-liquid-x',
@@ -26,22 +26,23 @@ const buttonVariants = cva(
   [
     'relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium',
     'isolate overflow-hidden select-none touch-manipulation outline-none',
-    'transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+    'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] ease-[cubic-bezier(0.16,1,0.3,1)]',
     'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
     'shrink-0',
     'focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-    '[&_svg]:pointer-events-none [&_svg]:shrink-0[&_svg:not([class*="size-"])]:size-4',
+    '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4',
   ].join(' '),
   {
     variants: {
       variant: {
         default: 'text-text-primary',
         primary: 'font-semibold',
-        danger: 'text-red-100',
-        destructive: 'text-red-50',
-        outline: 'border border-border bg-transparent text-text-primary hover:bg-white/5',
+        danger: 'text-[var(--signal-danger-ink)]',
+        destructive: 'text-[var(--signal-danger-ink)]',
+        outline:
+          'border border-border bg-transparent text-text-primary hover:bg-[var(--button-ghost-hover)]',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost: 'text-text-secondary hover:text-white',
+        ghost: 'text-text-secondary hover:text-[var(--type-primary)]',
         link: 'bg-transparent text-primary underline-offset-4 hover:underline !shadow-none !backdrop-blur-none !backdrop-saturate-100',
       },
       size: {
@@ -79,82 +80,92 @@ function getMergedLiquidVars(
 ): React.CSSProperties {
   const safeVariant = variant ?? 'default';
   const baseHighlight =
-    'inset 0 1px 1px rgba(255, 255, 255, 0.2), inset 0 -1px 1px rgba(0, 0, 0, 0.05)';
+    'inset 0 1px 1px color-mix(in oklch, var(--type-primary) 20%, transparent), inset 0 -1px 1px color-mix(in oklch, var(--glass-shadow) 12%, transparent)';
 
   let vars: Record<string, string> = {
     '--adl-liquid-highlight': baseHighlight,
-    '--adl-liquid-shadow': '0 8px 24px -8px rgba(0, 0, 0, 0.15)',
-    '--adl-liquid-shadow-hover': '0 12px 32px -6px rgba(0, 0, 0, 0.25)',
+    '--adl-liquid-shadow':
+      '0 8px 24px -8px color-mix(in oklch, var(--glass-shadow) 38%, transparent)',
+    '--adl-liquid-shadow-hover':
+      '0 12px 32px -6px color-mix(in oklch, var(--glass-shadow) 62%, transparent)',
     '--adl-liquid-bg':
-      'linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.09) 40%, rgba(255, 255, 255, 0.018) 100%)',
+      'linear-gradient(180deg, color-mix(in oklch, var(--type-primary) 15%, transparent) 0%, color-mix(in oklch, var(--type-primary) 9%, transparent) 40%, color-mix(in oklch, var(--type-primary) 2%, transparent) 100%)',
     '--adl-liquid-bg-hover':
-      'linear-gradient(180deg, rgba(255, 255, 255, 0.21) 0%, rgba(255, 255, 255, 0.13) 42%, rgba(255, 255, 255, 0.04) 100%)',
+      'linear-gradient(180deg, color-mix(in oklch, var(--type-primary) 21%, transparent) 0%, color-mix(in oklch, var(--type-primary) 13%, transparent) 42%, color-mix(in oklch, var(--type-primary) 4%, transparent) 100%)',
     '--adl-liquid-bg-active':
-      'linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 100%)',
-    '--adl-liquid-text': 'rgba(255, 255, 255, 0.92)',
-    '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.16)',
-    '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.45)',
+      'linear-gradient(180deg, color-mix(in oklch, var(--type-primary) 7%, transparent) 0%, color-mix(in oklch, var(--type-primary) 2%, transparent) 100%)',
+    '--adl-liquid-text': 'color-mix(in oklch, var(--type-primary) 92%, transparent)',
+    '--adl-liquid-spotlight': 'color-mix(in oklch, var(--type-primary) 16%, transparent)',
+    '--adl-liquid-ripple': 'color-mix(in oklch, var(--type-primary) 45%, transparent)',
   };
 
   if (safeVariant === 'primary') {
-    const base = accentColor ?? 'rgba(255, 255, 255, 0.92)';
-    const ink = accentForeground ?? '#070707';
+    const base = accentColor ?? 'var(--type-primary)';
+    const ink = accentForeground ?? 'var(--signal-play-ink)';
     vars = {
       ...vars,
-      '--adl-liquid-bg': `linear-gradient(180deg, color-mix(in oklch, ${base} 34%, rgba(255,255,255,0.14)) 0%, color-mix(in oklch, ${base} 22%, rgba(255,255,255,0.08)) 38%, color-mix(in oklch, ${base} 7%, rgba(255,255,255,0.02)) 100%)`,
-      '--adl-liquid-bg-hover': `linear-gradient(180deg, color-mix(in oklch, ${base} 42%, rgba(255,255,255,0.16)) 0%, color-mix(in oklch, ${base} 28%, rgba(255,255,255,0.10)) 40%, color-mix(in oklch, ${base} 12%, rgba(255,255,255,0.04)) 100%)`,
-      '--adl-liquid-bg-active': `linear-gradient(180deg, color-mix(in oklch, ${base} 14%, rgba(255,255,255,0.05)) 0%, color-mix(in oklch, ${base} 5%, transparent) 100%)`,
+      '--adl-liquid-bg': `linear-gradient(180deg, color-mix(in oklch, ${base} 34%, color-mix(in oklch, var(--button-liquid-light) 14%, transparent)) 0%, color-mix(in oklch, ${base} 22%, color-mix(in oklch, var(--button-liquid-light) 8%, transparent)) 38%, color-mix(in oklch, ${base} 7%, color-mix(in oklch, var(--button-liquid-light) 2%, transparent)) 100%)`,
+      '--adl-liquid-bg-hover': `linear-gradient(180deg, color-mix(in oklch, ${base} 42%, color-mix(in oklch, var(--button-liquid-light) 16%, transparent)) 0%, color-mix(in oklch, ${base} 28%, color-mix(in oklch, var(--button-liquid-light) 10%, transparent)) 40%, color-mix(in oklch, ${base} 12%, color-mix(in oklch, var(--button-liquid-light) 4%, transparent)) 100%)`,
+      '--adl-liquid-bg-active': `linear-gradient(180deg, color-mix(in oklch, ${base} 14%, color-mix(in oklch, var(--button-liquid-light) 5%, transparent)) 0%, color-mix(in oklch, ${base} 5%, transparent) 100%)`,
       '--adl-liquid-text': ink,
-      '--adl-liquid-highlight': `inset 0 1px 1px color-mix(in oklch, ${base} 80%, rgba(255,255,255,0.7)), inset 0 -1px 1px rgba(0, 0, 0, 0.1)`,
-      '--adl-liquid-spotlight': `color-mix(in oklch, ${base} 32%, rgba(255,255,255,0.2))`,
-      '--adl-liquid-ripple': `color-mix(in oklch, ${base} 60%, rgba(255,255,255,0.6))`,
-      '--adl-liquid-shadow': '0 12px 32px -12px rgba(0, 0, 0, 0.25)',
-      '--adl-liquid-shadow-hover': '0 16px 40px -10px rgba(0, 0, 0, 0.35)',
+      '--adl-liquid-highlight': `inset 0 1px 1px color-mix(in oklch, ${base} 80%, color-mix(in oklch, var(--button-liquid-light) 70%, transparent)), inset 0 -1px 1px color-mix(in oklch, var(--button-liquid-shadow) 10%, transparent)`,
+      '--adl-liquid-spotlight': `color-mix(in oklch, ${base} 32%, color-mix(in oklch, var(--button-liquid-light) 20%, transparent))`,
+      '--adl-liquid-ripple': `color-mix(in oklch, ${base} 60%, color-mix(in oklch, var(--button-liquid-light) 60%, transparent))`,
+      '--adl-liquid-shadow':
+        '0 12px 32px -12px color-mix(in oklch, var(--button-liquid-shadow) 25%, transparent)',
+      '--adl-liquid-shadow-hover':
+        '0 16px 40px -10px color-mix(in oklch, var(--button-liquid-shadow) 35%, transparent)',
     };
   } else if (safeVariant === 'danger' || safeVariant === 'destructive') {
     vars = {
       ...vars,
       '--adl-liquid-bg':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.26) 0%, rgba(255, 59, 48, 0.14) 40%, rgba(255, 59, 48, 0.045) 100%)',
+        'linear-gradient(180deg, color-mix(in oklch, var(--signal-danger) 26%, transparent) 0%, color-mix(in oklch, var(--signal-danger) 14%, transparent) 40%, color-mix(in oklch, var(--signal-danger) 5%, transparent) 100%)',
       '--adl-liquid-bg-hover':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.34) 0%, rgba(255, 59, 48, 0.20) 42%, rgba(255, 59, 48, 0.09) 100%)',
+        'linear-gradient(180deg, color-mix(in oklch, var(--signal-danger) 34%, transparent) 0%, color-mix(in oklch, var(--signal-danger) 20%, transparent) 42%, color-mix(in oklch, var(--signal-danger) 9%, transparent) 100%)',
       '--adl-liquid-bg-active':
-        'linear-gradient(180deg, rgba(255, 59, 48, 0.14) 0%, rgba(255, 59, 48, 0.03) 100%)',
-      '--adl-liquid-text': 'rgba(255, 236, 236, 0.98)',
+        'linear-gradient(180deg, color-mix(in oklch, var(--signal-danger) 14%, transparent) 0%, color-mix(in oklch, var(--signal-danger) 3%, transparent) 100%)',
+      '--adl-liquid-text': 'var(--signal-danger-ink)',
       '--adl-liquid-highlight':
-        'inset 0 1px 1px rgba(255, 160, 160, 0.60), inset 0 -1px 1px rgba(0, 0, 0, 0.1)',
-      '--adl-liquid-spotlight': 'rgba(255, 100, 100, 0.22)',
-      '--adl-liquid-ripple': 'rgba(255, 59, 48, 0.55)',
-      '--adl-liquid-shadow': '0 8px 24px -8px rgba(255, 59, 48, 0.3)',
-      '--adl-liquid-shadow-hover': '0 12px 32px -6px rgba(255, 59, 48, 0.4)',
+        'inset 0 1px 1px color-mix(in oklch, var(--signal-danger) 60%, var(--type-primary)), inset 0 -1px 1px color-mix(in oklch, var(--glass-shadow) 12%, transparent)',
+      '--adl-liquid-spotlight': 'color-mix(in oklch, var(--signal-danger) 22%, transparent)',
+      '--adl-liquid-ripple': 'color-mix(in oklch, var(--signal-danger) 55%, transparent)',
+      '--adl-liquid-shadow':
+        '0 8px 24px -8px color-mix(in oklch, var(--signal-danger) 30%, transparent)',
+      '--adl-liquid-shadow-hover':
+        '0 12px 32px -6px color-mix(in oklch, var(--signal-danger) 40%, transparent)',
     };
   } else if (safeVariant === 'ghost') {
     vars = {
       ...vars,
-      '--adl-liquid-bg': 'rgba(255, 255, 255, 0.01)',
-      '--adl-liquid-bg-hover': 'rgba(255, 255, 255, 0.05)',
-      '--adl-liquid-bg-active': 'rgba(255, 255, 255, 0.02)',
+      '--adl-liquid-bg': 'color-mix(in oklch, var(--button-liquid-light) 1%, transparent)',
+      '--adl-liquid-bg-hover': 'color-mix(in oklch, var(--button-liquid-light) 5%, transparent)',
+      '--adl-liquid-bg-active': 'color-mix(in oklch, var(--button-liquid-light) 2%, transparent)',
       '--adl-liquid-text': 'inherit',
-      '--adl-liquid-highlight': 'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
-      '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.09)',
-      '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.25)',
+      '--adl-liquid-highlight':
+        'inset 0 1px 1px color-mix(in oklch, var(--button-liquid-light) 10%, transparent)',
+      '--adl-liquid-spotlight': 'color-mix(in oklch, var(--button-liquid-light) 9%, transparent)',
+      '--adl-liquid-ripple': 'color-mix(in oklch, var(--button-liquid-light) 25%, transparent)',
       '--adl-liquid-shadow': 'none',
       '--adl-liquid-shadow-hover': 'none',
     };
   } else if (safeVariant === 'outline') {
     vars = {
       ...vars,
-      '--adl-liquid-bg': 'rgba(255, 255, 255, 0.02)',
-      '--adl-liquid-bg-hover': 'rgba(255, 255, 255, 0.06)',
-      '--adl-liquid-bg-active': 'rgba(255, 255, 255, 0.01)',
-      '--adl-liquid-border': 'rgba(255, 255, 255, 0.20)',
-      '--adl-liquid-border-hover': 'rgba(255, 255, 255, 0.30)',
+      '--adl-liquid-bg': 'color-mix(in oklch, var(--button-liquid-light) 2%, transparent)',
+      '--adl-liquid-bg-hover': 'color-mix(in oklch, var(--button-liquid-light) 6%, transparent)',
+      '--adl-liquid-bg-active': 'color-mix(in oklch, var(--button-liquid-light) 1%, transparent)',
+      '--adl-liquid-border': 'color-mix(in oklch, var(--button-liquid-light) 20%, transparent)',
+      '--adl-liquid-border-hover':
+        'color-mix(in oklch, var(--button-liquid-light) 30%, transparent)',
       '--adl-liquid-text': 'inherit',
       '--adl-liquid-highlight': baseHighlight,
-      '--adl-liquid-spotlight': 'rgba(255, 255, 255, 0.09)',
-      '--adl-liquid-ripple': 'rgba(255, 255, 255, 0.25)',
-      '--adl-liquid-shadow': '0 4px 16px -4px rgba(0, 0, 0, 0.1)',
-      '--adl-liquid-shadow-hover': '0 8px 24px -4px rgba(0, 0, 0, 0.15)',
+      '--adl-liquid-spotlight': 'color-mix(in oklch, var(--button-liquid-light) 9%, transparent)',
+      '--adl-liquid-ripple': 'color-mix(in oklch, var(--button-liquid-light) 25%, transparent)',
+      '--adl-liquid-shadow':
+        '0 4px 16px -4px color-mix(in oklch, var(--button-liquid-shadow) 10%, transparent)',
+      '--adl-liquid-shadow-hover':
+        '0 8px 24px -4px color-mix(in oklch, var(--button-liquid-shadow) 15%, transparent)',
     };
   }
 
@@ -202,12 +213,15 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const prefersReducedMotion = usePrefersReducedMotion();
     const { theme, reducedEffects: contextReducedEffects } = useGlassSystem();
 
-    const finalReducedEffects = reducedEffects ?? contextReducedEffects ?? prefersReducedMotion;
+    const finalReducedEffects =
+      Boolean(reducedEffects) || Boolean(contextReducedEffects) || prefersReducedMotion;
     const isNeobrutalism = theme === 'neobrutalism';
 
     const [hovered, setHovered] = React.useState(false);
     const [pressed, setPressed] = React.useState(false);
     const [ripples, setRipples] = React.useState<Ripple[]>([]);
+    const nextRippleIdRef = React.useRef(0);
+    const rippleTimersRef = React.useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
     // We still call the hook, but disable it if it's a link or child to save work
     const bypassEffects = asChild || variant === 'link';
@@ -237,10 +251,20 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
       if (!disabled) return;
       setHovered(false);
       setPressed(false);
+      for (const timer of rippleTimersRef.current.values()) clearTimeout(timer);
+      rippleTimersRef.current.clear();
       setRipples([]);
       clearVars();
       invalidateRect();
     }, [clearVars, disabled, invalidateRect]);
+
+    React.useEffect(
+      () => () => {
+        for (const timer of rippleTimersRef.current.values()) clearTimeout(timer);
+        rippleTimersRef.current.clear();
+      },
+      [],
+    );
 
     const handlePointerEnter = React.useCallback(
       (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -287,12 +311,14 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
             const x = event.clientX - rect.left;
             const y = event.clientY - rect.top;
 
-            const newRipple = { id: Date.now(), x, y };
+            const newRipple = { id: nextRippleIdRef.current++, x, y };
             setRipples((prev) => [...prev, newRipple]);
 
-            setTimeout(() => {
+            const timer = setTimeout(() => {
+              rippleTimersRef.current.delete(newRipple.id);
               setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
             }, 650);
+            rippleTimersRef.current.set(newRipple.id, timer);
           }
 
           if (trackerEnabled) {
@@ -389,7 +415,8 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
         if (useInsetPress && pressed) {
           boxShadow = INSET_SUBMERGE_SHADOW;
         } else if (pressed) {
-          boxShadow = 'inset 0 1px 1px rgba(0, 0, 0, 0.15), inset 0 2px 8px rgba(0, 0, 0, 0.2)';
+          boxShadow =
+            'inset 0 1px 1px color-mix(in oklch, var(--glass-shadow) 38%, transparent), inset 0 2px 8px color-mix(in oklch, var(--glass-shadow) 50%, transparent)';
         } else if (hovered) {
           boxShadow =
             toneVarsRecord['--adl-liquid-shadow-hover'] !== 'none'
@@ -415,7 +442,8 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
           !isNeobrutalism && !pressed && !useInsetPress
             ? 'cubic-bezier(0.34, 1.56, 0.64, 1)'
             : undefined,
-        transitionDuration: !isNeobrutalism && !pressed && !useInsetPress ? '400ms' : undefined,
+        transitionDuration:
+          !isNeobrutalism && !pressed && !useInsetPress ? 'var(--motion-standard)' : undefined,
         willChange:
           !finalReducedEffects && !isNeobrutalism && (hovered || pressed) && !useInsetPress
             ? 'transform'
@@ -482,12 +510,12 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
             <span
               className={cn(
                 'pointer-events-none absolute inset-x-2 top-0 z-[1] h-px rounded-full',
-                'transition-opacity duration-300',
+                'transition-opacity duration-[var(--motion-emphasis)]',
                 pressed ? 'opacity-40' : 'opacity-80',
               )}
               style={{
                 background:
-                  'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
+                  'linear-gradient(90deg, transparent, color-mix(in oklch, var(--type-primary) 50%, transparent), transparent)',
               }}
               aria-hidden="true"
             />
@@ -495,7 +523,7 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
             {!finalReducedEffects && (
               <>
                 <span
-                  className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] transition-opacity duration-300"
+                  className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] transition-opacity duration-[var(--motion-emphasis)]"
                   aria-hidden="true"
                   style={{
                     opacity: hovered && !pressed ? 0.55 : 0,

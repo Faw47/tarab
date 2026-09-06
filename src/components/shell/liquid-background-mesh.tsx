@@ -35,10 +35,10 @@ export function LiquidBackgroundPlane({
     [colors],
   );
 
-  useFrame((state) => {
+  useFrame((_, delta) => {
     if (!materialRef.current || pauseAnimation) return;
     const speed = 0.15;
-    materialRef.current.uniforms.uTime.value += state.clock.getDelta() * speed;
+    materialRef.current.uniforms.uTime.value += delta * speed;
   });
 
   return (

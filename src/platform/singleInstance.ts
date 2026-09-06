@@ -4,8 +4,7 @@ import { logger } from './logger';
 const DOMAIN = 'SingleInstance';
 
 export interface SecondInstancePayload {
-  argv: string[];
-  cwd: string;
+  argumentCount: number;
 }
 
 /**
@@ -17,7 +16,9 @@ export async function setupSingleInstanceListener(
   logger.debug(DOMAIN, 'Setting up second-instance listener');
 
   return await listen<SecondInstancePayload>('app://second-instance', (event) => {
-    logger.info(DOMAIN, 'Second instance detected', { argv: event.payload.argv });
+    logger.info(DOMAIN, 'Second instance detected', {
+      argumentCount: event.payload.argumentCount,
+    });
     onLaunch(event.payload);
   });
 }

@@ -59,7 +59,7 @@ export const SettingsSection = memo(function SettingsSection({
         className={cn(
           'flex flex-wrap items-start justify-between gap-3 px-4 py-3 sm:px-5',
           isNeobrutalism
-            ? 'border-b-2 border-black bg-white'
+            ? 'border-b-2 border-[var(--neo-ink)] bg-[var(--neo-paper)]'
             : 'border-b border-[var(--settings-section-border)]',
         )}
       >
@@ -69,7 +69,7 @@ export const SettingsSection = memo(function SettingsSection({
               className={cn(
                 'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center',
                 isNeobrutalism
-                  ? 'border-2 border-[var(--settings-section-icon-border)] bg-[var(--settings-section-icon-surface)] text-black shadow-[var(--neo-shadow-sm)]'
+                  ? 'border-2 border-[var(--settings-section-icon-border)] bg-[var(--settings-section-icon-surface)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-sm)]'
                   : 'rounded-full border border-[var(--settings-section-icon-border)] bg-[var(--settings-section-icon-surface)] text-primary',
               )}
             >
@@ -86,7 +86,7 @@ export const SettingsSection = memo(function SettingsSection({
               {title}
             </h3>
             {description ? (
-              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-muted">
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-foreground/70">
                 {description}
               </p>
             ) : null}
@@ -132,7 +132,6 @@ export const SettingsRow = memo(function SettingsRow({
     <div
       className={cn(
         'grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5',
-        disabled && 'opacity-60',
         isNeobrutalism ? 'bg-[var(--surface-card)]' : 'bg-transparent',
         className,
       )}
@@ -147,12 +146,19 @@ export const SettingsRow = memo(function SettingsRow({
           {label}
         </div>
         {description ? (
-          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-muted">{description}</p>
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-foreground/70">{description}</p>
         ) : null}
         {meta ? <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">{meta}</div> : null}
       </div>
       {control ? (
-        <div className="flex min-w-0 items-center justify-start sm:justify-end">{control}</div>
+        <div
+          className={cn(
+            'flex min-w-0 items-center justify-start sm:justify-end',
+            disabled && 'opacity-60',
+          )}
+        >
+          {control}
+        </div>
       ) : null}
       {children ? <div className="min-w-0 sm:col-span-2">{children}</div> : null}
     </div>
@@ -202,8 +208,8 @@ export const SettingsSwitch = memo(function SettingsSwitch({
         'relative inline-flex h-6 w-11 shrink-0 items-center transition-colors disabled:cursor-not-allowed',
         isNeobrutalism
           ? cn(
-              'rounded-none border-2 border-black shadow-[3px_3px_0_0_#000]',
-              checked ? 'bg-[var(--accent)]' : 'bg-white',
+              'rounded-none border-2 border-[var(--neo-ink)] shadow-[var(--neo-shadow-sm)]',
+              checked ? 'bg-[var(--accent)]' : 'bg-[var(--neo-paper)]',
             )
           : cn(
               'rounded-full border border-white/[0.10] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
@@ -214,7 +220,9 @@ export const SettingsSwitch = memo(function SettingsSwitch({
       <span
         className={cn(
           'inline-block h-4 w-4 transform transition-transform',
-          isNeobrutalism ? 'border-2 border-black bg-black' : 'rounded-full bg-white shadow-sm',
+          isNeobrutalism
+            ? 'border-2 border-[var(--neo-ink)] bg-[var(--neo-ink)]'
+            : 'rounded-full bg-white shadow-sm',
           checked ? 'translate-x-5' : 'translate-x-1',
         )}
       />
@@ -286,7 +294,7 @@ export function SettingsSegmentedControl<T extends string>({
                 : cn(
                     'rounded-full',
                     active
-                      ? 'bg-primary/75 text-white shadow-sm'
+                      ? 'bg-primary/75 text-primary-foreground shadow-sm'
                       : 'text-white/55 hover:text-white/85',
                   ),
             )}
@@ -340,7 +348,7 @@ export const SettingsSlider = memo(function SettingsSlider({
   return (
     <div className="w-48 max-w-full min-w-[12rem] space-y-2">
       {valueLabel ? (
-        <div className="text-right text-xs font-semibold text-text-muted">{valueLabel}</div>
+        <div className="text-right text-xs font-semibold text-foreground/70">{valueLabel}</div>
       ) : null}
       {isNeobrutalism ? (
         <div className="settings-neo-volume w-full">{input}</div>
@@ -354,15 +362,26 @@ export const SettingsSlider = memo(function SettingsSlider({
 interface SettingsSelectOption {
   value: string;
   label: ReactNode;
+  disabled: boolean;
 }
 
 const getSettingsSelectOptions = (children: ReactNode): SettingsSelectOption[] =>
   Children.toArray(children).flatMap((child) => {
     if (!isValidElement(child)) return [];
-    const element = child as ReactElement<{ value?: string | number; children?: ReactNode }>;
+    const element = child as ReactElement<{
+      value?: string | number;
+      children?: ReactNode;
+      disabled?: boolean;
+    }>;
     const value = element.props.value;
     if (value === undefined) return [];
-    return [{ value: String(value), label: element.props.children }];
+    return [
+      {
+        value: String(value),
+        label: element.props.children,
+        disabled: Boolean(element.props.disabled),
+      },
+    ];
   });
 
 export const SettingsSelect = memo(function SettingsSelect({
@@ -414,13 +433,21 @@ export const SettingsSelect = memo(function SettingsSelect({
   }, [open]);
 
   const commitValue = (nextValue: string) => {
+    const option = options.find((candidate) => candidate.value === nextValue);
+    if (!option || option.disabled) return;
     onChange?.(nextValue);
     setOpen(false);
   };
 
   const moveActiveOption = (direction: 1 | -1) => {
     if (options.length === 0) return;
-    setActiveIndex((current) => (current + direction + options.length) % options.length);
+    setActiveIndex((current) => {
+      for (let offset = 1; offset <= options.length; offset += 1) {
+        const next = (current + direction * offset + options.length) % options.length;
+        if (!options[next]?.disabled) return next;
+      }
+      return current;
+    });
   };
 
   const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -440,13 +467,21 @@ export const SettingsSelect = memo(function SettingsSelect({
       case 'Home':
         if (open && options.length > 0) {
           event.preventDefault();
-          setActiveIndex(0);
+          const firstEnabled = options.findIndex((option) => !option.disabled);
+          setActiveIndex(firstEnabled >= 0 ? firstEnabled : 0);
         }
         break;
       case 'End':
         if (open && options.length > 0) {
           event.preventDefault();
-          setActiveIndex(options.length - 1);
+          let lastEnabled = -1;
+          for (let index = options.length - 1; index >= 0; index -= 1) {
+            if (!options[index]?.disabled) {
+              lastEnabled = index;
+              break;
+            }
+          }
+          setActiveIndex(lastEnabled >= 0 ? lastEnabled : options.length - 1);
         }
         break;
       case 'Enter':
@@ -546,6 +581,7 @@ export const SettingsSelect = memo(function SettingsSelect({
                 type="button"
                 role="option"
                 aria-selected={selected}
+                disabled={option.disabled}
                 tabIndex={-1}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={(event) => {
@@ -553,7 +589,7 @@ export const SettingsSelect = memo(function SettingsSelect({
                   commitValue(option.value);
                 }}
                 className={cn(
-                  'w-full rounded-lg border-0 bg-transparent px-3 py-2 text-left text-[0.81rem] font-medium text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white',
+                  'w-full rounded-lg border-0 bg-transparent px-3 py-2 text-left text-[0.81rem] font-medium text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-50',
                   active && 'bg-white/[0.06] text-white',
                   selected && 'bg-white/[0.10] font-semibold text-[var(--hero-accent,#fff)]',
                 )}

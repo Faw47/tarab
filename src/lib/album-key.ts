@@ -1,7 +1,9 @@
 import type { Track } from '../types';
 
 const normalizePart = (value: string | null | undefined): string =>
-  (value ?? '').trim().toLocaleLowerCase();
+  (value ?? '').trim().toLowerCase();
+
+export const getArtistKey = (artist: string | null | undefined): string => normalizePart(artist);
 
 export const getAlbumArtist = (track: Pick<Track, 'artist' | 'albumArtist'>): string =>
   track.albumArtist?.trim() || track.artist;

@@ -1,37 +1,60 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import { usePlayerStore } from '../store/player-store';
 
-export const useSmoothTime = () => {
-  const { currentTime, isPlaying, playbackSpeed } = usePlayerStore(
-    useShallow((s) => ({
-      currentTime: s.currentTime,
-      isPlaying: s.isPlaying,
-      playbackSpeed: s.playbackSpeed,
-    })),
-  );
+type PlaybackClockState = {
+  isPlaying: boolean;
+  playbackSpeed: number;
+};
 
-  const anchorRef = useRef<{ baseMs: number; at: number }>({
-    baseMs: currentTime * 1000,
-    at: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+type PlaybackClockAnchor = {
+  baseMs: number;
+  at: number;
+};
+
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const projectTime = (
+  anchor: PlaybackClockAnchor,
+  state: PlaybackClockState,
+  now: number,
+): number => {
+  if (!state.isPlaying) return anchor.baseMs;
+  return anchor.baseMs + (now - anchor.at) * state.playbackSpeed;
+};
+
+export const useSmoothTime = () => {
+  const initial = usePlayerStore.getState();
+  const anchorRef = useRef<PlaybackClockAnchor>({
+    baseMs: initial.currentTime * 1000,
+    at: nowMs(),
+  });
+  const playbackStateRef = useRef<PlaybackClockState>({
+    isPlaying: initial.isPlaying,
+    playbackSpeed: initial.playbackSpeed,
   });
 
-  // Sync anchor when coarse time changes (seek, track change)
-  // We use a threshold to avoid resetting on minor drift updates if we wanted,
-  // but simpler to just reset for now as store.currentTime is usually stable unless polled or sought.
   useEffect(() => {
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    anchorRef.current = { baseMs: currentTime * 1000, at: now };
-  }, [currentTime]);
+    let previous = usePlayerStore.getState();
 
-  const getTimeMs = useCallback(() => {
-    if (!isPlaying) {
-      return anchorRef.current.baseMs;
-    }
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const elapsed = now - anchorRef.current.at;
-    return anchorRef.current.baseMs + elapsed * playbackSpeed;
-  }, [isPlaying, playbackSpeed]);
+    return usePlayerStore.subscribe((state) => {
+      const timeChanged = state.currentTime !== previous.currentTime;
+      const playbackChanged =
+        state.isPlaying !== previous.isPlaying || state.playbackSpeed !== previous.playbackSpeed;
 
-  return getTimeMs;
+      if (timeChanged || playbackChanged) {
+        const at = nowMs();
+        const baseMs = timeChanged
+          ? state.currentTime * 1000
+          : projectTime(anchorRef.current, playbackStateRef.current, at);
+        anchorRef.current = { baseMs, at };
+        playbackStateRef.current = {
+          isPlaying: state.isPlaying,
+          playbackSpeed: state.playbackSpeed,
+        };
+      }
+      previous = state;
+    });
+  }, []);
+
+  return useCallback(() => projectTime(anchorRef.current, playbackStateRef.current, nowMs()), []);
 };

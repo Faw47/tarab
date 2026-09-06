@@ -41,7 +41,7 @@ const makePlaylist = (id: string, name: string) => ({
 
 describe('PlaylistPickerDialog', () => {
   const mockAddTracks = vi.fn().mockResolvedValue(undefined);
-  const mockCreatePlaylist = vi.fn().mockResolvedValue(undefined);
+  const mockCreatePlaylist = vi.fn().mockResolvedValue(makePlaylist('pl_new', 'Late Night'));
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -49,6 +49,8 @@ describe('PlaylistPickerDialog', () => {
     mockedQueries.usePlaylistsQuery.mockReturnValue({
       data: [makePlaylist('pl_chill', 'Chill Nights'), makePlaylist('pl_road', 'Road Trip')],
       isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     });
 
     mockedMutations.useAddTracksMutation.mockReturnValue({
@@ -59,6 +61,29 @@ describe('PlaylistPickerDialog', () => {
     mockedMutations.useCreatePlaylistMutation.mockReturnValue({
       mutateAsync: mockCreatePlaylist,
       isPending: false,
+    });
+  });
+
+  it('does not load playlists while the picker is closed', () => {
+    render(<PlaylistPickerDialog open={false} trackIds={['t1']} onClose={vi.fn()} />);
+
+    expect(mockedQueries.usePlaylistsQuery).toHaveBeenCalledWith(false);
+  });
+
+  it('resets its transient state after closing and reopening', async () => {
+    const view = render(<PlaylistPickerDialog open trackIds={['t1']} onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Search playlists'), {
+      target: { value: 'road' },
+    });
+    expect(screen.queryByText('Chill Nights')).not.toBeInTheDocument();
+
+    view.rerender(<PlaylistPickerDialog open={false} trackIds={['t1']} onClose={vi.fn()} />);
+    view.rerender(<PlaylistPickerDialog open trackIds={['t1']} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search playlists')).toHaveValue('');
+      expect(screen.getByText('Chill Nights')).toBeInTheDocument();
     });
   });
 
@@ -109,6 +134,7 @@ describe('PlaylistPickerDialog', () => {
           playlistType: 'Manual',
         }),
       );
+      expect(mockAddTracks).toHaveBeenCalledWith({ playlistId: 'pl_new', trackIds: ['t1'] });
     });
   });
 });

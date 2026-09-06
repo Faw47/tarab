@@ -31,7 +31,7 @@ describe('tag manager model', () => {
       track({
         id: '2',
         title: 'Alpha',
-        artist: 'Unknown Artist',
+        artist: ' UNKNOWN ARTIST ',
         filePath: 'C:/Music/A/alpha.mp3',
         hasCoverArt: true,
         duration: 10,
@@ -61,6 +61,16 @@ describe('tag manager model', () => {
         sortDirection: 'asc',
       }).map((item) => item.id),
     ).toEqual(['1']);
+    expect(
+      filterAndSortTracks({
+        tracks,
+        selectedFolder: null,
+        query: '',
+        fileFilter: 'untagged',
+        sortColumn: 'title',
+        sortDirection: 'asc',
+      }).map((item) => item.id),
+    ).toEqual(['2']);
 
     expect(
       filterAndSortTracks({

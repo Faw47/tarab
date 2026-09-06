@@ -32,14 +32,14 @@ export const SettingsNavTab = memo(function SettingsNavTab({
       }}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'group relative z-10 flex w-full items-center justify-start gap-3 transition-all duration-300 motion-reduce:transition-none',
+        'group relative z-10 flex w-full items-center justify-start gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] motion-reduce:transition-none',
         isNeobrutalism
           ? 'h-auto rounded-none px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black'
           : 'rounded-xl px-3.5 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
         isNeobrutalism
           ? active
-            ? 'translate-x-0 translate-y-0 border-[3px] border-black bg-[#facc15] text-black shadow-[4px_4px_0_0_#000] transition-none'
-            : 'border-[3px] border-black bg-white text-black shadow-[4px_4px_0_0_#000] transition-none hover:bg-[#84cc16]'
+            ? 'translate-x-0 translate-y-0 border-[3px] border-[var(--neo-ink)] bg-[var(--signal-active)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-md)] transition-none'
+            : 'border-[3px] border-[var(--neo-ink)] bg-[var(--neo-paper)] text-[var(--neo-ink)] shadow-[var(--neo-shadow-md)] transition-none hover:bg-[var(--signal-play)]'
           : active
             ? 'text-white'
             : 'text-white/50 hover:bg-white/[0.04] hover:text-white/90',
@@ -47,7 +47,7 @@ export const SettingsNavTab = memo(function SettingsNavTab({
     >
       <span
         className={cn(
-          'shrink-0 transition-[transform,color] duration-300',
+          'shrink-0 transition-[transform,color] duration-[var(--motion-emphasis)]',
           isNeobrutalism
             ? active
               ? 'scale-110 text-black'

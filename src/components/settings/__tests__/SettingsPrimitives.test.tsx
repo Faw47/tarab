@@ -77,6 +77,50 @@ describe('settings primitives', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('keeps disabled custom settings options visible but not selectable', () => {
+    const onChange = vi.fn();
+
+    render(
+      <SettingsSelect value="saved" aria-label="Select saved output device" onChange={onChange}>
+        <option value="system">System default</option>
+        <option value="saved" disabled>
+          Saved device (unavailable)
+        </option>
+      </SettingsSelect>,
+    );
+
+    const select = screen.getByRole('combobox', { name: 'Select saved output device' });
+    fireEvent.click(select);
+
+    const unavailable = screen.getByRole('option', { name: 'Saved device (unavailable)' });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(unavailable);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+  it('skips disabled custom settings options during keyboard navigation', () => {
+    const onChange = vi.fn();
+
+    render(
+      <SettingsSelect value="system" aria-label="Keyboard output device" onChange={onChange}>
+        <option value="system">System default</option>
+        <option value="saved" disabled>
+          Saved device (unavailable)
+        </option>
+        <option value="headphones">Headphones</option>
+      </SettingsSelect>,
+    );
+
+    const select = screen.getByRole('combobox', { name: 'Keyboard output device' });
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.keyDown(select, { key: 'Enter' });
+
+    expect(onChange).toHaveBeenCalledWith('headphones');
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
   it('dismisses the custom settings select with Escape', () => {
     render(
       <SettingsSelect value="system" aria-label="Select audio output device">

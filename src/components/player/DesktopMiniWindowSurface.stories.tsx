@@ -1,29 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { DesktopPlaybackSnapshot, Track } from '../../types';
+import type { DesktopPlaybackSnapshot, DesktopPlaybackTrackSnapshot } from '../../types';
 import { DesktopMiniWindowSurface } from './DesktopMiniWindowSurface';
 
-const track: Track = {
-  id: 'story-track',
+const track: DesktopPlaybackTrackSnapshot = {
   title: 'Ya Rayah',
   artist: 'Rachid Taha',
-  album: 'Carte Blanche',
-  albumArtist: 'Rachid Taha',
-  year: 1997,
-  duration: 302,
-  filePath: 'C:/Music/Rachid Taha/Ya Rayah.flac',
-  hasCoverArt: false,
   coverArtHash: null,
-  dateAdded: 1_735_689_600_000,
-  rating: 4,
-  playCount: 12,
-  lastPlayed: 1_767_221_200_000,
 };
 
 const snapshot = (overrides: Partial<DesktopPlaybackSnapshot>): DesktopPlaybackSnapshot => ({
   track,
+  sourceId: 'source-1',
   isPlaying: true,
   position: 84,
-  duration: track.duration,
+  duration: 302,
   hasPrevious: true,
   hasNext: true,
   ...overrides,
@@ -77,7 +67,6 @@ export const LongMetadata: Story = {
     initialSnapshot: snapshot({
       track: {
         ...track,
-        id: 'story-track-long',
         title:
           'A Very Long Track Title That Must Truncate Inside The Mini Player Without Pushing Controls',
         artist: 'A Very Long Artist Name Featuring Several Collaborators And A Remix Credit',

@@ -1,4 +1,5 @@
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
+import { getInitialDeepLinks } from '../lib/tauri-commands';
 import { logger } from './logger';
 
 const DOMAIN = 'DeepLinks';
@@ -7,6 +8,7 @@ const DOMAIN = 'DeepLinks';
  * Platform deep link wrapper.
  */
 export const deepLinks = {
+  getInitial: getInitialDeepLinks,
   /**
    * Listen for incoming deep links while the app is running.
    */
@@ -19,7 +21,7 @@ export const deepLinks = {
       });
     } catch (err) {
       logger.error(DOMAIN, 'Failed to subscribe to deep links', err);
-      return () => {};
+      throw err;
     }
   },
 };

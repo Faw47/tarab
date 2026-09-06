@@ -3,6 +3,11 @@ import { Mic2, Play, Volume2, VolumeX } from 'lucide-react';
 import type { CSSProperties, ElementType, PointerEvent as ReactPointerEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import {
+  useSmoothTimeState,
+  useSmoothTimeSubscription,
+  useSmoothTimeValue,
+} from '../../contexts/smooth-time';
 import { getAlbumArtist } from '../../lib/album-key';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
@@ -39,7 +44,7 @@ export const NowPlayingBars = memo(
       {([0, 1, 2, 3] as const).map((i) => (
         <div
           key={i}
-          className="flex-1 rounded-t-[1.5px] origin-bottom transition-[height] duration-300"
+          className="flex-1 rounded-t-[1.5px] origin-bottom transition-[height] duration-[var(--motion-emphasis)]"
           style={{
             backgroundColor: color,
             opacity: 0.78,
@@ -66,56 +71,41 @@ export const CardLyricsDisplay = memo(() => {
     useShallow((s) => ({ lyrics: s.lyrics, isPlaying: s.isPlaying })),
   );
   const [text, setText] = useState<string | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const baseTime = useRef(0);
-  const baseAt = useRef(0);
+  const { timeSec } = useSmoothTimeValue();
 
-  const resync = () => {
-    baseTime.current = usePlayerStore.getState().currentTime || 0;
-    baseAt.current = performance.now();
-  };
+  const updateText = useCallback(
+    (nextTimeSec: number) => {
+      if (!lyrics?.lines?.length) {
+        setText(null);
+        return;
+      }
 
-  useEffect(() => {
-    if (!lyrics?.lines?.length) {
-      setText(null);
-      return;
-    }
-    resync();
-
-    const tick = () => {
-      const s = usePlayerStore.getState();
-      const smooth = s.isPlaying
-        ? baseTime.current + (performance.now() - baseAt.current) / 1000
-        : s.currentTime || baseTime.current;
-      if (Math.abs((s.currentTime || 0) - smooth) > 0.35) resync();
-
-      const ms = smooth * 1000;
+      const timeMs = Math.max(0, nextTimeSec) * 1000;
       let line: string | null = null;
       for (let i = lyrics.lines.length - 1; i >= 0; i--) {
-        if (ms >= lyrics.lines[i].startTime) {
+        if (timeMs >= lyrics.lines[i].startTime) {
           line = lyrics.lines[i].text;
           break;
         }
       }
-      setText((p) => (p !== line ? line : p));
-      if (usePlayerStore.getState().isPlaying) rafRef.current = requestAnimationFrame(tick);
-    };
+      setText((previous) => (previous === line ? previous : line));
+    },
+    [lyrics],
+  );
 
-    if (isPlaying) rafRef.current = requestAnimationFrame(tick);
-    else tick();
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [lyrics, isPlaying]);
+  useSmoothTimeSubscription(updateText);
+
+  useEffect(() => {
+    updateText(timeSec);
+  }, [isPlaying, timeSec, updateText]);
 
   if (!text) return null;
-
   return (
     <div className="mt-3.5 flex items-start gap-2 w-full select-none tarab-fade-up">
       <Mic2 className="w-3 h-3 mt-[5px] shrink-0 text-white/25" />
       <p
         className={clsx(
-          'text-sm italic leading-relaxed line-clamp-2 transition-colors duration-300',
+          'text-sm italic leading-relaxed line-clamp-2 transition-colors duration-[var(--motion-emphasis)]',
           isPlaying ? 'text-white/50' : 'text-white/28',
         )}
       >
@@ -148,6 +138,7 @@ export const VolumeControl = memo(
     const [expanded, setExpanded] = useState(false);
     const restoreRef = useRef(0.55);
     const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const volumeCommitRef = useRef(0);
 
     useEffect(() => {
       if (volume > 0.001) restoreRef.current = volume;
@@ -156,10 +147,18 @@ export const VolumeControl = memo(
     const commit = useCallback(
       async (v: number) => {
         const clamped = clamp01(v);
+        const previousVolume = usePlayerStore.getState().volume;
+        const commitId = ++volumeCommitRef.current;
         setVolume(clamped);
         try {
           await setAudioVolume(clamped);
         } catch (e) {
+          if (
+            commitId === volumeCommitRef.current &&
+            usePlayerStore.getState().volume === clamped
+          ) {
+            setVolume(previousVolume);
+          }
           reportError('volume commit failed', { source: 'home-volume', error: e });
         }
       },
@@ -169,17 +168,21 @@ export const VolumeControl = memo(
     // Removed toggleMute as per instruction's direct onClick logic
 
     const onEnter = useCallback(() => {
-      if (leaveTimer.current) clearTimeout(leaveTimer.current);
+      if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
       setExpanded(true);
     }, []);
 
     const onLeave = useCallback(() => {
-      leaveTimer.current = setTimeout(() => setExpanded(false), 300);
+      if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
+      leaveTimer.current = setTimeout(() => {
+        leaveTimer.current = null;
+        setExpanded(false);
+      }, 300);
     }, []);
 
     useEffect(
       () => () => {
-        if (leaveTimer.current) clearTimeout(leaveTimer.current);
+        if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
       },
       [],
     );
@@ -189,8 +192,8 @@ export const VolumeControl = memo(
     return (
       <div className="inline-flex items-center gap-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
         <Button
-          onClick={() => setVolume(volume === 0 ? Math.max(restoreRef.current, 0.5) : 0)}
-          className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-all duration-200"
+          onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
+          className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
           aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
           title="Volume"
           accentColor={accentColor}
@@ -205,7 +208,7 @@ export const VolumeControl = memo(
         {/* Slide-out slider */}
         <div
           className={clsx(
-            'overflow-hidden transition-all duration-250 ease-out',
+            'overflow-hidden transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] ease-out',
             expanded ? 'ml-2 w-[96px] opacity-100' : 'ml-0 w-0 opacity-0',
           )}
         >
@@ -242,7 +245,7 @@ VolumeControl.displayName = 'VolumeControl';
 
 export const HeroStatusBar = memo(() => {
   const duration = usePlayerStore((s) => s.duration);
-  const currentTime = usePlayerStore((s) => s.currentTime);
+  const currentTime = useSmoothTimeState();
   const remaining = Math.max(0, (duration || 0) - (currentTime || 0));
 
   return (
@@ -278,20 +281,20 @@ export const StatTile = memo(
         'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
         'bg-gradient-to-b from-white/[0.065] to-white/[0.028]',
         'hover:from-white/[0.09] hover:to-white/[0.04]',
-        'transition-all duration-300',
+        'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
         !reducedEffects && 'tarab-fade-up',
       )}
       style={{ animationDelay: !reducedEffects ? `${staggerIndex * 75 + 50}ms` : undefined }}
     >
       {/* Background glow (appears on hover) */}
       <div
-        className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-35 transition-opacity duration-500"
+        className="absolute -left-2 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full blur-[22px] pointer-events-none opacity-0 group-hover:opacity-35 transition-opacity duration-[var(--motion-emphasis)]"
         style={{ background: glowColor }}
       />
 
       {/* Icon container */}
       <div
-        className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.07]"
+        className="relative isolate shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.07]"
         style={{
           background: `linear-gradient(180deg, color-mix(in oklch, ${glowColor} 28%, rgba(255,255,255,0.08)) 0%, color-mix(in oklch, ${glowColor} 14%, rgba(255,255,255,0.03)) 100%)`,
           boxShadow: `inset 0 1px 0 rgba(255,255,255,0.09), inset 0 -1px 0 rgba(0,0,0,0.12)`,
@@ -302,10 +305,7 @@ export const StatTile = memo(
 
       {/* Number + label */}
       <div className="min-w-0">
-        <p
-          className="font-display font-extrabold text-white tabular-nums leading-none tracking-tight"
-          style={{ fontSize: 'clamp(1.3rem, 2.4vw, 1.7rem)' }}
-        >
+        <p className="font-display font-extrabold text-white tabular-nums leading-none tracking-normal text-[1.3rem] md:text-[1.5rem] lg:text-[1.7rem]">
           {value.toLocaleString()}
         </p>
         <p className="text-[9.5px] font-bold uppercase tracking-[0.24em] text-white/32 mt-[5px]">
@@ -315,7 +315,7 @@ export const StatTile = memo(
 
       {/* Bottom accent strip */}
       <div
-        className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+        className="absolute bottom-0 left-4 right-4 h-[1.5px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--motion-emphasis)]"
         style={{ background: `linear-gradient(90deg, transparent, ${glowColor}, transparent)` }}
       />
     </div>
@@ -409,8 +409,8 @@ export const AlbumSpotlightCard = memo(
         ref={cardRef}
         className={clsx(
           'home-spotlight-card group relative overflow-hidden',
-          'transition-[transform,box-shadow] duration-300',
-          'hover:-translate-y-[3px] hover:shadow-[0_20px_56px_rgba(0,0,0,0.56)]',
+          'transition-[transform,box-shadow] duration-[var(--motion-emphasis)]',
+          'hover:-translate-y-[2px] active:translate-y-[0px] active:scale-[0.99] hover:shadow-[0_20px_56px_rgba(0,0,0,0.56)]',
           featured ? 'h-full min-h-0 rounded-[22px]' : 'aspect-square rounded-[18px]',
           !reducedEffects && 'tarab-fade-up',
         )}
@@ -426,6 +426,7 @@ export const AlbumSpotlightCard = memo(
           })
         }
         onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key !== 'Enter' && e.key !== ' ') return;
           e.preventDefault();
           onOpenAlbumDetails?.({
@@ -435,9 +436,9 @@ export const AlbumSpotlightCard = memo(
             tracks: albumTracks,
           });
         }}
-        role="button"
+        role="group"
         tabIndex={0}
-        aria-label={`Open ${track.album} by ${track.artist}`}
+        aria-label={`Open ${track.album} by ${getAlbumArtist(track)}`}
       >
         {/* Cursor spotlight overlay */}
         <div
@@ -454,7 +455,7 @@ export const AlbumSpotlightCard = memo(
             track={track}
             size="large"
             className="w-full h-full"
-            imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+            imgClassName="w-full h-full object-cover transition-transform duration-[var(--motion-emphasis)] group-hover:scale-[1.05]"
             roundedClassName=""
             iconClassName="w-7 h-7"
           />
@@ -462,7 +463,7 @@ export const AlbumSpotlightCard = memo(
           {/* Gradient overlay */}
           <div
             className={clsx(
-              'absolute inset-0 transition-opacity duration-250',
+              'absolute inset-0 transition-opacity duration-[var(--motion-emphasis)]',
               featured ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
             )}
             style={{
@@ -475,9 +476,9 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full',
-              'text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70',
+              'text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70',
               'bg-black/50 backdrop-blur-none',
-              'transition-[opacity,transform] duration-200',
+              'transition-[opacity,transform] duration-[var(--motion-standard)]',
               featured
                 ? 'opacity-70'
                 : 'opacity-0 translate-y-[-4px] group-hover:opacity-100 group-hover:translate-y-0',
@@ -489,7 +490,7 @@ export const AlbumSpotlightCard = memo(
           {/* Album info */}
           <div
             className={clsx(
-              'absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-all duration-250',
+              'absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
               featured
                 ? 'p-4 opacity-100 translate-y-0'
                 : 'p-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0',
@@ -510,7 +511,7 @@ export const AlbumSpotlightCard = memo(
                   featured ? 'text-[0.75rem]' : 'text-[0.68rem]',
                 )}
               >
-                {track.artist}
+                {getAlbumArtist(track)}
               </p>
             </div>
 
@@ -523,7 +524,7 @@ export const AlbumSpotlightCard = memo(
               }}
               className={clsx(
                 'shrink-0 rounded-full border border-black/10 bg-white/95 text-black inline-flex items-center justify-center',
-                'shadow-[0_4px_12px_rgba(0,0,0,0.20)] transition-all duration-200',
+                'shadow-[0_4px_12px_rgba(0,0,0,0.20)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 'hover:scale-[1.08] active:scale-[0.95]',
                 'focus-visible:outline-none',
                 featured ? 'w-11 h-11' : 'w-9 h-9',

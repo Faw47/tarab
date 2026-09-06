@@ -39,7 +39,7 @@ export const AppDialogHost = memo(function AppDialogHost({
 }: AppDialogHostProps) {
   return (
     <>
-      {tagEditorTracks ? (
+      {tagEditorTracks?.length ? (
         <Suspense fallback={null}>
           <TagEditorModal
             tracks={tagEditorTracks}

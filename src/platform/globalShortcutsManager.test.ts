@@ -1,25 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  errorMock,
-  playAdjacentTrackMock,
-  registerMock,
-  toggleCurrentPlaybackMock,
-  unregisterAllMock,
-  warnMock,
-} = vi.hoisted(() => ({
+const { errorMock, emitToMock, registerMock, unregisterMock, warnMock } = vi.hoisted(() => ({
   errorMock: vi.fn(),
-  playAdjacentTrackMock: vi.fn(async () => null),
+  emitToMock: vi.fn(async () => undefined),
   registerMock: vi.fn(async () => true),
-  toggleCurrentPlaybackMock: vi.fn(async () => undefined),
-  unregisterAllMock: vi.fn(async () => undefined),
+  unregisterMock: vi.fn(async () => true),
   warnMock: vi.fn(),
 }));
 
 vi.mock('./globalShortcuts', () => ({
   globalShortcuts: {
     register: registerMock,
-    unregisterAll: unregisterAllMock,
+    unregister: unregisterMock,
   },
 }));
 
@@ -32,18 +24,94 @@ vi.mock('./logger', () => ({
   },
 }));
 
-vi.mock('../lib/playback-actions', () => ({
-  playAdjacentTrack: playAdjacentTrackMock,
-  toggleCurrentPlayback: toggleCurrentPlaybackMock,
+vi.mock('@tauri-apps/api/event', () => ({
+  emitTo: emitToMock,
 }));
 
-import { globalShortcutsManager } from './globalShortcutsManager';
+import { getGlobalShortcutOwner, globalShortcutsManager } from './globalShortcutsManager';
+
+describe('global shortcut platform policy', () => {
+  it.each([
+    ['Linux x86_64', 'CommandOrControl+Alt+Right'],
+    ['Linux aarch64', 'Alt+Ctrl+ArrowLeft'],
+    ['linux', 'cmdorctrl + alt + arrowright'],
+  ])('assigns the Linux menu-owned chords to the native menu on %s', (platform, shortcut) => {
+    expect(getGlobalShortcutOwner(shortcut, platform)).toBe('linux-menu');
+  });
+
+  it.each(['Win32', 'MacIntel'])('leaves default chords renderer-owned on %s', (platform) => {
+    expect(getGlobalShortcutOwner('CommandOrControl+Alt+Right', platform)).toBe('renderer-global');
+    expect(getGlobalShortcutOwner('CommandOrControl+Alt+Left', platform)).toBe('renderer-global');
+  });
+
+  it('leaves user-custom Linux chords renderer-owned', () => {
+    expect(getGlobalShortcutOwner('CommandOrControl+Shift+Right', 'Linux x86_64')).toBe(
+      'renderer-global',
+    );
+    expect(getGlobalShortcutOwner('CommandOrControl+Shift+Left', 'Linux x86_64')).toBe(
+      'renderer-global',
+    );
+  });
+});
 
 describe('globalShortcutsManager', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await globalShortcutsManager.unregisterAll();
     vi.clearAllMocks();
-    playAdjacentTrackMock.mockResolvedValue(null);
-    toggleCurrentPlaybackMock.mockResolvedValue(undefined);
+    emitToMock.mockResolvedValue(undefined);
+    registerMock.mockResolvedValue(true);
+    unregisterMock.mockResolvedValue(true);
+    vi.stubGlobal('navigator', { platform: 'Win32' });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('leaves default Next and Previous chords to the Linux app menu', async () => {
+    vi.stubGlobal('navigator', { platform: 'Linux x86_64' });
+
+    const result = await globalShortcutsManager.registerAll({
+      playPause: 'CommandOrControl+Alt+Space',
+      next: 'CommandOrControl+Alt+Right',
+      previous: 'CommandOrControl+Alt+Left',
+    });
+
+    expect(result).toBe(true);
+    expect(registerMock).toHaveBeenCalledTimes(1);
+    expect(registerMock).toHaveBeenCalledWith('CommandOrControl+Alt+Space', expect.any(Function));
+  });
+
+  it('registers user-custom Next and Previous chords on Linux', async () => {
+    vi.stubGlobal('navigator', { platform: 'Linux x86_64' });
+
+    const result = await globalShortcutsManager.registerAll({
+      playPause: 'CommandOrControl+Alt+Space',
+      next: 'CommandOrControl+Shift+Right',
+      previous: 'CommandOrControl+Shift+Left',
+    });
+
+    expect(result).toBe(true);
+    expect(registerMock).toHaveBeenCalledTimes(3);
+    expect(registerMock).toHaveBeenNthCalledWith(
+      2,
+      'CommandOrControl+Shift+Right',
+      expect.any(Function),
+    );
+    expect(registerMock).toHaveBeenNthCalledWith(
+      3,
+      'CommandOrControl+Shift+Left',
+      expect.any(Function),
+    );
+  });
+
+  it('registers the default chords through the renderer off Linux', async () => {
+    const result = await globalShortcutsManager.registerAll({
+      playPause: 'CommandOrControl+Alt+Space',
+      next: 'CommandOrControl+Alt+Right',
+      previous: 'CommandOrControl+Alt+Left',
+    });
+
+    expect(result).toBe(true);
+    expect(registerMock).toHaveBeenCalledTimes(3);
   });
 
   it('skips duplicate shortcut bindings instead of registering collisions', async () => {
@@ -54,7 +122,7 @@ describe('globalShortcutsManager', () => {
     });
 
     expect(result).toBe(false);
-    expect(unregisterAllMock).toHaveBeenCalledTimes(1);
+    expect(unregisterMock).not.toHaveBeenCalled();
     expect(registerMock).toHaveBeenCalledTimes(2);
     expect(registerMock).toHaveBeenNthCalledWith(
       1,
@@ -72,9 +140,9 @@ describe('globalShortcutsManager', () => {
     );
   });
 
-  it('logs playback action failures raised by registered shortcut callbacks', async () => {
+  it('routes callbacks through the canonical desktop action event', async () => {
     const failure = new Error('audio backend unavailable');
-    toggleCurrentPlaybackMock.mockRejectedValueOnce(failure);
+    emitToMock.mockRejectedValueOnce(failure);
 
     await globalShortcutsManager.registerAll({
       playPause: 'CommandOrControl+Alt+Space',
@@ -88,8 +156,26 @@ describe('globalShortcutsManager', () => {
 
     expect(errorMock).toHaveBeenCalledWith(
       'GlobalShortcutsManager',
-      'Global shortcut action failed: playPause',
+      'Global shortcut action failed: toggle-play',
       failure,
     );
+  });
+
+  it('retains ownership when unregistration fails so cleanup can retry', async () => {
+    await globalShortcutsManager.registerAll({
+      playPause: 'CommandOrControl+Alt+Space',
+      next: 'CommandOrControl+Alt+Right',
+      previous: 'CommandOrControl+Alt+Left',
+    });
+    unregisterMock.mockResolvedValueOnce(false);
+
+    await expect(globalShortcutsManager.unregisterAll()).rejects.toThrow(
+      'Failed to unregister 1 owned global shortcut',
+    );
+    unregisterMock.mockClear();
+    await globalShortcutsManager.unregisterAll();
+
+    expect(unregisterMock).toHaveBeenCalledTimes(1);
+    expect(unregisterMock).toHaveBeenCalledWith('CommandOrControl+Alt+Space');
   });
 });

@@ -1,9 +1,4 @@
-import {
-  isRegistered,
-  register,
-  unregister,
-  unregisterAll,
-} from '@tauri-apps/plugin-global-shortcut';
+import { isRegistered, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 import { logger } from './logger';
 
 const DOMAIN = 'GlobalShortcuts';
@@ -22,8 +17,8 @@ export const globalShortcuts = {
     try {
       const alreadyRegistered = await isRegistered(shortcut);
       if (alreadyRegistered) {
-        logger.warn(DOMAIN, `Shortcut "${shortcut}" is already registered. Re-registering...`);
-        await unregister(shortcut);
+        logger.warn(DOMAIN, `Shortcut "${shortcut}" is already registered.`);
+        return false;
       }
 
       await register(shortcut, (event) => {
@@ -41,24 +36,14 @@ export const globalShortcuts = {
   /**
    * Unregister a global shortcut.
    */
-  unregister: async (shortcut: string): Promise<void> => {
+  unregister: async (shortcut: string): Promise<boolean> => {
     try {
       await unregister(shortcut);
       logger.info(DOMAIN, `Unregistered shortcut: ${shortcut}`);
+      return true;
     } catch (err) {
       logger.error(DOMAIN, `Failed to unregister shortcut: ${shortcut}`, err);
-    }
-  },
-
-  /**
-   * Unregister all global shortcuts registered by this app.
-   */
-  unregisterAll: async (): Promise<void> => {
-    try {
-      await unregisterAll();
-      logger.info(DOMAIN, 'Unregistered all shortcuts');
-    } catch (err) {
-      logger.error(DOMAIN, 'Failed to unregister all shortcuts', err);
+      return false;
     }
   },
 

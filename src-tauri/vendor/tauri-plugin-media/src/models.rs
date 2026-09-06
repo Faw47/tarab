@@ -92,7 +92,10 @@ pub enum MediaControlEventType {
     Rewind,
     SeekTo(f64),
     SetPosition(f64),
+    SetVolume(f64),
     SetPlaybackRate(f64),
+    Raise,
+    Quit,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

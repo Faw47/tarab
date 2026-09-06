@@ -54,7 +54,7 @@ export const useAnimatedCounter = (target: number, duration = 1500, disabled = f
     }
 
     const animate = (now: number) => {
-      if (!startTime.current) startTime.current = now;
+      if (startTime.current === null) startTime.current = now;
       const progress = Math.min((now - startTime.current) / duration, 1);
       const eased = 1 - (1 - progress) ** 3;
       const next = Math.floor(startVal.current + (target - startVal.current) * eased);

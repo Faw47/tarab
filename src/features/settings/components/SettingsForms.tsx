@@ -1,8 +1,9 @@
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
-import { Eye, HardDrive, Layout, ListMusic, Monitor, Shuffle } from 'lucide-react';
+import { Eye, HardDrive, Layout, ListMusic, Monitor, RefreshCw, Shuffle } from 'lucide-react';
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  SettingsActionButton,
   SettingsRow,
   SettingsSection,
   SettingsSegmentedControl,
@@ -10,6 +11,7 @@ import {
   SettingsSlider,
   SettingsSwitch,
 } from '../../../components/settings/primitives';
+import { Input } from '../../../components/ui';
 import { liquidGlassSettingsTextInputClassName } from '../../../lib/liquid-glass-settings-ui';
 import { reportError } from '../../../lib/report-error';
 import { type AudioOutputDeviceInfo, listAudioOutputDevices } from '../../../lib/tauri-commands';
@@ -34,30 +36,38 @@ export const PlaybackSettingsForm = memo(() => {
 
   const [devices, setDevices] = useState<AudioOutputDeviceInfo[]>([]);
   const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const devicesRequestIdRef = useRef(0);
+
+  const refreshDevices = useCallback(async () => {
+    const requestId = ++devicesRequestIdRef.current;
+    setIsLoadingDevices(true);
+    try {
+      const list = await listAudioOutputDevices();
+      if (requestId !== devicesRequestIdRef.current) return;
+      setDevices(list);
+      setDevicesError(null);
+    } catch (err) {
+      if (requestId !== devicesRequestIdRef.current) return;
+      setDevicesError(err instanceof Error ? err.message : 'Failed to list audio output devices');
+    } finally {
+      if (requestId === devicesRequestIdRef.current) setIsLoadingDevices(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void listAudioOutputDevices()
-      .then((list) => {
-        if (cancelled) return;
-        setDevices(list);
-        setDevicesError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setDevicesError(err instanceof Error ? err.message : 'Failed to list audio output devices');
-        setDevices([]);
-      });
-
+    void refreshDevices();
     return () => {
-      cancelled = true;
+      devicesRequestIdRef.current += 1;
     };
-  }, []);
+  }, [refreshDevices]);
 
   useEffect(() => {
     if (devices.length === 0) return;
     const ids = new Set(devices.map((d) => d.id));
-    if (outputDevice !== 'system' && !ids.has(outputDevice)) setOutputDevice('system');
+    if (outputDevice === 'system' || ids.has(outputDevice)) return;
+    const legacyMatches = devices.filter((device) => device.name === outputDevice);
+    setOutputDevice(legacyMatches.length === 1 ? legacyMatches[0]!.id : 'system');
   }, [devices, outputDevice, setOutputDevice]);
 
   const handleOutputDeviceChange = (deviceId: string) => {
@@ -66,12 +76,26 @@ export const PlaybackSettingsForm = memo(() => {
 
   const outputDevices = useMemo(() => {
     const seen = new Set<string>();
-    return [{ id: 'system', name: 'System default' }, ...devices].filter((device) => {
+    const unique = [{ id: 'system', name: 'System default' }, ...devices].filter((device) => {
       if (seen.has(device.id)) return false;
       seen.add(device.id);
       return true;
     });
-  }, [devices]);
+    if (devicesError && outputDevice !== 'system' && !seen.has(outputDevice)) {
+      unique.push({ id: outputDevice, name: 'Saved device (unavailable)' });
+    }
+    const nameCounts = new Map<string, number>();
+    for (const device of unique) {
+      nameCounts.set(device.name, (nameCounts.get(device.name) ?? 0) + 1);
+    }
+    const nameOccurrences = new Map<string, number>();
+    return unique.map((device) => {
+      if ((nameCounts.get(device.name) ?? 0) < 2) return device;
+      const occurrence = (nameOccurrences.get(device.name) ?? 0) + 1;
+      nameOccurrences.set(device.name, occurrence);
+      return { ...device, name: `${device.name} (${occurrence})` };
+    });
+  }, [devices, devicesError, outputDevice]);
 
   return (
     <>
@@ -135,6 +159,19 @@ export const PlaybackSettingsForm = memo(() => {
         title="Output Device"
         description="Choose where Tarab sends audio."
         icon={<HardDrive size={16} />}
+        actions={
+          <SettingsActionButton
+            size="sm"
+            tone="ghost"
+            onClick={() => void refreshDevices()}
+            disabled={isLoadingDevices}
+            aria-label="Refresh audio output devices"
+            title="Refresh audio output devices"
+          >
+            <RefreshCw size={14} className={isLoadingDevices ? 'animate-spin' : undefined} />{' '}
+            Refresh
+          </SettingsActionButton>
+        }
       >
         <SettingsRow
           label="Output device"
@@ -146,7 +183,11 @@ export const PlaybackSettingsForm = memo(() => {
               aria-label="Select audio output device"
             >
               {outputDevices.map((d) => (
-                <option key={d.id} value={d.id}>
+                <option
+                  key={d.id}
+                  value={d.id}
+                  disabled={d.id === outputDevice && Boolean(devicesError)}
+                >
                   {d.name}
                 </option>
               ))}
@@ -179,8 +220,16 @@ export const DesktopIntegrationForm = memo(() => {
   const setShortcut = useSettingsStore((s) => s.setShortcut);
   const setAutostartEnabled = useSettingsStore((s) => s.setAutostartEnabled);
 
-  const autostartHydratedRef = useRef(false);
+  const autostartRevisionRef = useRef(0);
+  const autostartDesiredRef = useRef(autostartEnabled);
+  const autostartOsStateRef = useRef<boolean | null>(null);
+  const autostartInitialReadRef = useRef<Promise<void>>(Promise.resolve());
+  const autostartQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const autostartMountedRef = useRef(false);
   const skipNextShortcutCommitRef = useRef(false);
+  const [settingsHydrated, setSettingsHydrated] = useState(() =>
+    useSettingsStore.persist.hasHydrated(),
+  );
 
   const [draftPlayPause, setDraftPlayPause] = useState(shortcuts.playPause);
   const [draftNext, setDraftNext] = useState(shortcuts.next);
@@ -237,39 +286,92 @@ export const DesktopIntegrationForm = memo(() => {
   );
 
   useEffect(() => {
-    const syncAutostart = async () => {
-      const wasHydrated = autostartHydratedRef.current;
-      let currentlyEnabled: boolean | null = null;
-      try {
-        currentlyEnabled = await isEnabled();
-        if (!wasHydrated) {
-          autostartHydratedRef.current = true;
-          if (currentlyEnabled !== autostartEnabled) {
-            setAutostartEnabled(currentlyEnabled);
-          }
+    const unsubscribe = useSettingsStore.persist.onFinishHydration(() => {
+      setSettingsHydrated(true);
+    });
+    if (useSettingsStore.persist.hasHydrated()) setSettingsHydrated(true);
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    let active = true;
+    autostartMountedRef.current = true;
+    const readRevision = autostartRevisionRef.current;
+    autostartInitialReadRef.current = isEnabled()
+      .then((currentlyEnabled) => {
+        if (!active) return;
+        autostartOsStateRef.current = currentlyEnabled;
+        if (autostartRevisionRef.current !== readRevision) return;
+        autostartDesiredRef.current = currentlyEnabled;
+        if (useSettingsStore.getState().autostartEnabled !== currentlyEnabled) {
+          setAutostartEnabled(currentlyEnabled);
+        }
+      })
+      .catch((error) => {
+        if (!active) return;
+        reportError('Failed to read open at login setting', {
+          source: 'desktop-settings',
+          error,
+        });
+      });
+
+    return () => {
+      active = false;
+      autostartMountedRef.current = false;
+      autostartRevisionRef.current += 1;
+    };
+  }, [setAutostartEnabled, settingsHydrated]);
+
+  const handleAutostartChange = useCallback(
+    (enabled: boolean) => {
+      autostartDesiredRef.current = enabled;
+      const revision = ++autostartRevisionRef.current;
+      setAutostartEnabled(enabled);
+
+      const applyIntent = async () => {
+        await autostartInitialReadRef.current;
+        if (
+          !autostartMountedRef.current ||
+          autostartRevisionRef.current !== revision ||
+          autostartDesiredRef.current !== enabled
+        ) {
           return;
         }
-        if (currentlyEnabled !== autostartEnabled) {
-          if (autostartEnabled) await enable();
+        if (autostartOsStateRef.current === enabled) return;
+
+        try {
+          if (enabled) await enable();
           else await disable();
-        }
-      } catch (error) {
-        if (wasHydrated) {
-          if (currentlyEnabled !== null && currentlyEnabled !== autostartEnabled) {
-            setAutostartEnabled(currentlyEnabled);
+          autostartOsStateRef.current = enabled;
+        } catch (error) {
+          let actualState = autostartOsStateRef.current;
+          try {
+            actualState = await isEnabled();
+            autostartOsStateRef.current = actualState;
+          } catch {
+            // Keep the last confirmed OS state when reconciliation cannot be read back.
           }
-          reportError('Failed to sync open at login', { source: 'desktop-settings', error });
-        } else {
-          reportError('Failed to read open at login setting', {
+
+          if (
+            autostartMountedRef.current &&
+            autostartRevisionRef.current === revision &&
+            actualState !== null
+          ) {
+            autostartDesiredRef.current = actualState;
+            setAutostartEnabled(actualState);
+          }
+          reportError('Failed to sync open at login', {
             source: 'desktop-settings',
             error,
           });
-          autostartHydratedRef.current = true;
         }
-      }
-    };
-    void syncAutostart();
-  }, [autostartEnabled, setAutostartEnabled]);
+      };
+
+      autostartQueueRef.current = autostartQueueRef.current.then(applyIntent, applyIntent);
+    },
+    [setAutostartEnabled],
+  );
 
   const shortcutInputClassName = cn(
     'w-full max-w-[14rem] outline-none transition-colors',
@@ -288,7 +390,8 @@ export const DesktopIntegrationForm = memo(() => {
         label="Open at login"
         description="Start Tarab automatically when you log in."
         checked={autostartEnabled}
-        onChange={setAutostartEnabled}
+        onChange={handleAutostartChange}
+        disabled={!settingsHydrated}
       />
       <SettingsSwitch
         label="Status icon"
@@ -314,7 +417,7 @@ export const DesktopIntegrationForm = memo(() => {
           <SettingsRow
             label="Play/Pause shortcut"
             control={
-              <input
+              <Input
                 type="text"
                 value={draftPlayPause}
                 aria-label="Play/Pause shortcut"
@@ -330,7 +433,7 @@ export const DesktopIntegrationForm = memo(() => {
           <SettingsRow
             label="Next shortcut"
             control={
-              <input
+              <Input
                 type="text"
                 value={draftNext}
                 aria-label="Next shortcut"
@@ -344,7 +447,7 @@ export const DesktopIntegrationForm = memo(() => {
           <SettingsRow
             label="Previous shortcut"
             control={
-              <input
+              <Input
                 type="text"
                 value={draftPrevious}
                 aria-label="Previous shortcut"

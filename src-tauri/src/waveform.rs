@@ -53,7 +53,7 @@ impl WaveformGenerator {
     }
 
     /// Generate waveform from audio file
-    pub fn generate(&self, file_path: &str) -> Result<WaveformData, String> {
+    pub fn generate(&self, file_path: &str, open_path: &str) -> Result<WaveformData, String> {
         self.clear_cancel(file_path);
         // Check memory cache
         {
@@ -74,7 +74,7 @@ impl WaveformGenerator {
         }
 
         // Generate waveform
-        let data = self.extract_waveform(file_path)?;
+        let data = self.extract_waveform(file_path, open_path)?;
 
         // Save to disk cache
         self.save_to_cache(&cache_path, &data).ok();
@@ -86,8 +86,8 @@ impl WaveformGenerator {
     }
 
     /// Extract waveform peaks from audio file
-    fn extract_waveform(&self, file_path: &str) -> Result<WaveformData, String> {
-        let file = File::open(file_path).map_err(|e| format!("Failed to open file: {}", e))?;
+    fn extract_waveform(&self, file_path: &str, open_path: &str) -> Result<WaveformData, String> {
+        let file = File::open(open_path).map_err(|e| format!("Failed to open file: {}", e))?;
 
         let reader = BufReader::with_capacity(256 * 1024, file);
         let source = Decoder::new(reader).map_err(|e| format!("Failed to decode: {}", e))?;
@@ -284,9 +284,8 @@ pub fn create_waveform_generator() -> SharedWaveformGenerator {
 
 // ========== Tauri Commands ==========
 
-fn ensure_waveform_path_allowed(file_path: &str, roots: &[PathBuf]) -> Result<(), String> {
-    ensure_existing_path_allowed(&PathBuf::from(file_path), roots, "generate waveform")?;
-    Ok(())
+fn ensure_waveform_path_allowed(file_path: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    ensure_existing_path_allowed(&PathBuf::from(file_path), roots, "generate waveform")
 }
 
 #[tauri::command]
@@ -298,8 +297,8 @@ pub async fn waveform_generate(
     let gen = gen.inner().clone();
     let roots = roots_state.inner().read().roots.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_waveform_path_allowed(&file_path, &roots)?;
-        gen.generate(&file_path)
+        let open_path = ensure_waveform_path_allowed(&file_path, &roots)?;
+        gen.generate(&file_path, &open_path.to_string_lossy())
     })
     .await
     .map_err(|e| e.to_string())?

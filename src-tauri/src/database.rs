@@ -1,15 +1,44 @@
 use parking_lot::Mutex;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use tauri::async_runtime::spawn_blocking;
 
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
+use crate::library::SharedLibraryScanControl;
 
-const CURRENT_SCHEMA_VERSION: i32 = 7;
-const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
+mod aggregates;
+mod lyrics;
+mod migrations;
+mod playlists;
+mod tracks;
+
+const CURRENT_SCHEMA_VERSION: i32 = 12;
+const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v2";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+const APP_STORAGE_DIRECTORY: &str = "com.fawaz.tarab";
+const LEGACY_STORAGE_DIRECTORY: &str = "music-player";
+const LEGACY_STORAGE_MARKER: &str = ".legacy-storage-migration-v1.json";
+const LEGACY_STORAGE_CONFLICT_BACKUP: &str = "music-player.legacy-conflict-v1";
+const DATABASE_FILE: &str = "library.db";
+const DATABASE_MOVE_ORDER: [&str; 4] = [
+    "library.db-wal",
+    "library.db-shm",
+    "library.db-journal",
+    DATABASE_FILE,
+];
+
+static STORAGE_MIGRATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn now_millis_i64_or_default() -> i64 {
     std::time::SystemTime::now()
@@ -45,6 +74,70 @@ pub struct DbTrack {
     pub play_count: i32,
     pub last_played: Option<i64>,
     pub rating: Option<i32>,
+    #[serde(default)]
+    pub track_number: Option<u32>,
+    #[serde(default)]
+    pub disc_number: Option<u32>,
+    #[serde(default)]
+    pub file_format: Option<String>,
+    #[serde(default)]
+    pub bitrate: Option<u32>,
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
+    #[serde(default)]
+    pub file_size: Option<u64>,
+    #[serde(default)]
+    pub genre: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbAlbumAggregate {
+    pub album: String,
+    pub artist: String,
+    pub track_count: usize,
+    pub representative: DbTrack,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbArtistAggregate {
+    pub artist: String,
+    pub track_count: usize,
+    pub representative: DbTrack,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanReconcileError {
+    pub path: Option<String>,
+    pub code: String,
+    pub message: String,
+    pub recoverable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanReconcileRequest {
+    pub folder_path: String,
+    pub discovered_paths: Vec<String>,
+    pub tracks: Vec<DbTrack>,
+    pub traversal_complete: bool,
+    pub errors: Vec<ScanReconcileError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanReconcileResult {
+    pub status: String,
+    pub folder_path: String,
+    pub discovered_count: usize,
+    pub added_count: usize,
+    pub updated_count: usize,
+    pub unchanged_count: usize,
+    pub missing_count: usize,
+    pub preserved_count: usize,
+    pub errors: Vec<ScanReconcileError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,20 +216,78 @@ pub struct TrackPathRow {
     pub file_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackPageCursor {
+    pub revision: i64,
+    pub last_id: String,
+    pub sort_by: String,
+    pub sort_order: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackCursorPageStatus {
+    Ready,
+    RestartRequired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbTrackCursorPage {
+    pub status: TrackCursorPageStatus,
+    pub tracks: Vec<DbTrack>,
+    pub next_cursor: Option<TrackPageCursor>,
+    pub revision: i64,
+    pub total_count: i64,
+}
+
+#[derive(Debug)]
+pub struct TrackPathCursorPage {
+    pub tracks: Vec<TrackPathRow>,
+    pub next_cursor: Option<TrackPageCursor>,
+    pub revision: i64,
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsIndexSyncApply {
+    Applied(usize),
+    RestartRequired,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
 
 impl Database {
-    /// Normalize file paths by replacing backslashes with forward slashes.
-    /// This ensures consistent path representation across Windows and Unix-like systems.
     fn normalize_path(path: &str) -> String {
-        path.replace('\\', "/")
+        #[cfg(windows)]
+        {
+            let normalized = path.replace('\\', "/");
+            if let Some(network_path) = normalized.strip_prefix("//?/UNC/") {
+                format!("//{network_path}")
+            } else {
+                normalized
+                    .strip_prefix("//?/")
+                    .unwrap_or(&normalized)
+                    .to_string()
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            path.to_string()
+        }
     }
 
-    pub fn new() -> SqliteResult<Self> {
-        let db_path = get_database_path();
+    fn public_track_id(path: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"tarab-track-v1\0");
+        hasher.update(Self::normalize_path(path).as_bytes());
+        hex::encode(hasher.finalize())
+    }
 
+    pub fn new(db_path: PathBuf) -> SqliteResult<Self> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
@@ -147,6 +298,7 @@ impl Database {
         // Enable WAL mode for better concurrent performance
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
 
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self {
             conn: Mutex::new(conn),
         };
@@ -160,1643 +312,30 @@ impl Database {
     #[cfg(test)]
     pub(crate) fn in_memory_for_tests() -> SqliteResult<Self> {
         let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self {
             conn: Mutex::new(conn),
         };
         db.run_migrations()?;
         Ok(db)
     }
-    fn run_migrations(&self) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-
-        // Create schema version table
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
-            [],
-        )?;
-
-        let current_version: i32 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        if current_version < 1 {
-            self.apply_migration_tx(&mut conn, 1, |tx| self.migrate_v1(tx))?;
-        }
-
-        if current_version < 2 {
-            self.apply_migration_tx(&mut conn, 2, |tx| self.migrate_v2(tx))?;
-        }
-
-        if current_version < 3 {
-            self.apply_migration_tx(&mut conn, 3, |tx| self.migrate_v3(tx))?;
-        }
-
-        if current_version < 4 {
-            self.apply_migration_tx(&mut conn, 4, |tx| self.migrate_v4(tx))?;
-        }
-
-        if current_version < 5 {
-            self.apply_migration_tx(&mut conn, 5, |tx| self.migrate_v5(tx))?;
-        }
-
-        if current_version < 6 {
-            self.apply_migration_tx(&mut conn, 6, |tx| self.migrate_v6(tx))?;
-        }
-
-        if current_version < CURRENT_SCHEMA_VERSION {
-            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v7(tx))?;
-        }
-
-        // Guard against schema drift: ensure lyrics index schema exists even if
-        // schema_version metadata is stale or manually modified.
-        self.ensure_lyrics_schema(&conn)?;
-
-        Ok(())
-    }
-
-    fn apply_migration_tx<F>(
-        &self,
-        conn: &mut Connection,
-        version: i32,
-        migrate: F,
-    ) -> SqliteResult<()>
-    where
-        F: FnOnce(&Connection) -> SqliteResult<()>,
-    {
-        let tx = conn.transaction()?;
-        migrate(&tx)?;
-        tx.execute(
-            "INSERT INTO schema_version (version) VALUES (?1)",
-            [version],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    fn ensure_path_cleanup_once(&self) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let already_cleaned = conn
-            .query_row(
-                "SELECT 1 FROM cache_metadata WHERE key = ?1 LIMIT 1",
-                [PATH_NORMALIZATION_CLEANUP_KEY],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .is_some();
-
-        if already_cleaned {
-            return Ok(());
-        }
-
-        let tx = conn.transaction()?;
-        self.cleanup_duplicates_and_normalize_with_conn(&tx)?;
-        tx.execute(
-            r#"
-            INSERT INTO cache_metadata (key, value, created_at, expires_at)
-            VALUES (?1, 'done', ?2, NULL)
-            ON CONFLICT(key) DO UPDATE
-            SET value = excluded.value,
-                created_at = excluded.created_at,
-                expires_at = NULL
-            "#,
-            params![PATH_NORMALIZATION_CLEANUP_KEY, now_millis_i64_or_default()],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
 
     #[cfg(test)]
-    fn cleanup_duplicates_and_normalize(&self) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        self.cleanup_duplicates_and_normalize_with_conn(&tx)?;
-        tx.commit()
+    pub(crate) fn execute_batch_for_tests(&self, sql: &str) -> SqliteResult<()> {
+        self.conn.lock().execute_batch(sql)
     }
-
-    fn cleanup_duplicates_and_normalize_with_conn(&self, conn: &Connection) -> SqliteResult<()> {
-        conn.execute_batch("PRAGMA defer_foreign_keys=ON;")?;
-
-        // Dedupe playlist memberships that collapse to the same normalized track id.
-        // This prevents primary-key conflicts when normalizing `track_id` values.
-        conn.execute(
-            r#"
-            DELETE FROM playlist_tracks
-            WHERE rowid NOT IN (
-                SELECT MIN(rowid)
-                FROM playlist_tracks
-                GROUP BY playlist_id, REPLACE(track_id, '\', '/')
-            )
-            "#,
-            [],
-        )?;
-
-        // Normalize playlist path fields.
-        conn.execute(
-            "UPDATE playlist_tracks
-             SET track_id = REPLACE(track_id, '\\', '/'),
-                 snapshot_file_path = CASE
-                     WHEN snapshot_file_path LIKE '%\\%' THEN REPLACE(snapshot_file_path, '\\', '/')
-                     ELSE snapshot_file_path
-                 END
-             WHERE track_id LIKE '%\\%' OR snapshot_file_path LIKE '%\\%'",
-            [],
-        )?;
-
-        // Dedupe tracks that collapse to the same normalized file path.
-        // This prevents unique-key conflicts when normalizing `file_path` and `id`.
-        conn.execute(
-            r#"
-            DELETE FROM tracks 
-            WHERE rowid NOT IN (
-                SELECT MIN(rowid) 
-                FROM tracks 
-                GROUP BY REPLACE(file_path, '\', '/')
-            )
-            "#,
-            [],
-        )?;
-
-        // Final cleanup: normalize remaining path/id values.
-        conn.execute(
-            "UPDATE tracks SET file_path = REPLACE(file_path, '\\', '/'), id = REPLACE(id, '\\', '/') WHERE file_path LIKE '%\\%' OR id LIKE '%\\%'",
-            [],
-        )?;
-
-        conn.execute(
-            "UPDATE lyrics_index
-             SET track_id = REPLACE(track_id, '\\', '/'),
-                 lyrics_path = REPLACE(lyrics_path, '\\', '/')
-             WHERE track_id LIKE '%\\%' OR lyrics_path LIKE '%\\%'",
-            [],
-        )?;
-
-        Ok(())
-    }
-    fn migrate_v1(&self, conn: &Connection) -> SqliteResult<()> {
-        // Main tracks table
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS tracks (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                artist TEXT NOT NULL,
-                album TEXT NOT NULL,
-                year INTEGER,
-                duration REAL NOT NULL,
-                file_path TEXT UNIQUE NOT NULL,
-                has_cover_art INTEGER NOT NULL DEFAULT 0,
-                cover_art_hash TEXT,
-                blurhash TEXT,
-                date_added INTEGER NOT NULL,
-                play_count INTEGER NOT NULL DEFAULT 0,
-                last_played INTEGER,
-                rating INTEGER
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
-            CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
-            CREATE INDEX IF NOT EXISTS idx_tracks_date_added ON tracks(date_added DESC);
-            CREATE INDEX IF NOT EXISTS idx_tracks_play_count ON tracks(play_count DESC);
-            CREATE INDEX IF NOT EXISTS idx_tracks_file_path ON tracks(file_path);
-            
-            -- FTS5 virtual table for full-text search
-            CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
-                title, artist, album,
-                content='tracks',
-                content_rowid='rowid'
-            );
-            
-            -- Triggers to keep FTS in sync
-            CREATE TRIGGER IF NOT EXISTS tracks_ai AFTER INSERT ON tracks BEGIN
-                INSERT INTO tracks_fts(rowid, title, artist, album) 
-                VALUES (NEW.rowid, NEW.title, NEW.artist, NEW.album);
-            END;
-            
-            CREATE TRIGGER IF NOT EXISTS tracks_ad AFTER DELETE ON tracks BEGIN
-                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) 
-                VALUES ('delete', OLD.rowid, OLD.title, OLD.artist, OLD.album);
-            END;
-            
-            CREATE TRIGGER IF NOT EXISTS tracks_au AFTER UPDATE ON tracks BEGIN
-                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) 
-                VALUES ('delete', OLD.rowid, OLD.title, OLD.artist, OLD.album);
-                INSERT INTO tracks_fts(rowid, title, artist, album) 
-                VALUES (NEW.rowid, NEW.title, NEW.artist, NEW.album);
-            END;
-            
-            -- Playlists table
-            CREATE TABLE IF NOT EXISTS playlists (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                playlist_type TEXT NOT NULL DEFAULT 'manual',
-                folder_path TEXT,
-                smart_rules TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                is_pinned INTEGER NOT NULL DEFAULT 0,
-                pinned_at INTEGER
-            );
-            
-            -- Playlist tracks junction table
-            CREATE TABLE IF NOT EXISTS playlist_tracks (
-                playlist_id TEXT NOT NULL,
-                track_id TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                added_at INTEGER NOT NULL,
-                snapshot_title TEXT,
-                snapshot_artist TEXT,
-                snapshot_album TEXT,
-                snapshot_duration REAL,
-                snapshot_file_path TEXT,
-                snapshot_has_cover_art INTEGER NOT NULL DEFAULT 0,
-                snapshot_cover_art_hash TEXT,
-                snapshot_blurhash TEXT,
-                PRIMARY KEY (playlist_id, track_id),
-                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id, position);
-            
-            -- Cache metadata table
-            CREATE TABLE IF NOT EXISTS cache_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER
-            );
-            "#,
-        )?;
-
-        Ok(())
-    }
-
-    fn migrate_v2(&self, conn: &Connection) -> SqliteResult<()> {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS lyrics_index (
-                track_id TEXT PRIMARY KEY,
-                lyrics_path TEXT NOT NULL,
-                lyrics_mtime INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_lyrics_index_track_id ON lyrics_index(track_id);
-            CREATE INDEX IF NOT EXISTS idx_lyrics_index_path ON lyrics_index(lyrics_path);
-            CREATE INDEX IF NOT EXISTS idx_lyrics_index_mtime ON lyrics_index(lyrics_mtime);
-
-            CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
-                content,
-                content='lyrics_index',
-                content_rowid='rowid'
-            );
-
-            CREATE TRIGGER IF NOT EXISTS lyrics_index_ai AFTER INSERT ON lyrics_index BEGIN
-                INSERT INTO lyrics_fts(rowid, content)
-                VALUES (NEW.rowid, NEW.content);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS lyrics_index_ad AFTER DELETE ON lyrics_index BEGIN
-                INSERT INTO lyrics_fts(lyrics_fts, rowid, content)
-                VALUES ('delete', OLD.rowid, OLD.content);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS lyrics_index_au AFTER UPDATE ON lyrics_index BEGIN
-                INSERT INTO lyrics_fts(lyrics_fts, rowid, content)
-                VALUES ('delete', OLD.rowid, OLD.content);
-                INSERT INTO lyrics_fts(rowid, content)
-                VALUES (NEW.rowid, NEW.content);
-            END;
-            "#,
-        )?;
-        Ok(())
-    }
-
-    fn migrate_v3(&self, conn: &Connection) -> SqliteResult<()> {
-        let mut stmt = conn.prepare("PRAGMA table_info(playlists)")?;
-        let mut has_last_synced = false;
-        let mut has_sync_error = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "last_synced_at" {
-                has_last_synced = true;
-            } else if name == "sync_error" {
-                has_sync_error = true;
-            }
-        }
-
-        if !has_last_synced {
-            conn.execute(
-                "ALTER TABLE playlists ADD COLUMN last_synced_at INTEGER",
-                [],
-            )?;
-        }
-        if !has_sync_error {
-            conn.execute("ALTER TABLE playlists ADD COLUMN sync_error TEXT", [])?;
-        }
-        Ok(())
-    }
-
-    fn migrate_v4(&self, conn: &Connection) -> SqliteResult<()> {
-        let mut stmt = conn.prepare("PRAGMA table_info(playlist_tracks)")?;
-        let mut has_snapshot_title = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "snapshot_title" {
-                has_snapshot_title = true;
-                break;
-            }
-        }
-
-        if has_snapshot_title {
-            return Ok(());
-        }
-
-        let duplicate_memberships: i64 = conn.query_row(
-            r#"
-            SELECT COALESCE(SUM(dup_count - 1), 0)
-            FROM (
-                SELECT COUNT(*) AS dup_count
-                FROM playlist_tracks
-                GROUP BY playlist_id, track_id
-                HAVING COUNT(*) > 1
-            )
-            "#,
-            [],
-            |row| row.get(0),
-        )?;
-        if duplicate_memberships > 0 {
-            eprintln!(
-                "migrate_v4: detected {} duplicate playlist membership rows; preserving one per (playlist_id, track_id)",
-                duplicate_memberships
-            );
-        }
-
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS playlist_tracks_v4 (
-                playlist_id TEXT NOT NULL,
-                track_id TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                added_at INTEGER NOT NULL,
-                snapshot_title TEXT,
-                snapshot_artist TEXT,
-                snapshot_album TEXT,
-                snapshot_duration REAL,
-                snapshot_file_path TEXT,
-                snapshot_has_cover_art INTEGER NOT NULL DEFAULT 0,
-                snapshot_cover_art_hash TEXT,
-                snapshot_blurhash TEXT,
-                PRIMARY KEY (playlist_id, track_id),
-                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
-            );
-
-            INSERT OR IGNORE INTO playlist_tracks_v4 (
-                playlist_id,
-                track_id,
-                position,
-                added_at,
-                snapshot_title,
-                snapshot_artist,
-                snapshot_album,
-                snapshot_duration,
-                snapshot_file_path,
-                snapshot_has_cover_art,
-                snapshot_cover_art_hash
-            )
-            SELECT
-                pt.playlist_id,
-                pt.track_id,
-                pt.position,
-                pt.added_at,
-                t.title,
-                t.artist,
-                t.album,
-                t.duration,
-                t.file_path,
-                COALESCE(t.has_cover_art, 0),
-                t.cover_art_hash
-            FROM playlist_tracks pt
-            LEFT JOIN tracks t ON t.id = pt.track_id;
-
-            DROP TABLE playlist_tracks;
-            ALTER TABLE playlist_tracks_v4 RENAME TO playlist_tracks;
-            CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id, position);
-            "#,
-        )?;
-
-        Ok(())
-    }
-
-    fn migrate_v5(&self, conn: &Connection) -> SqliteResult<()> {
-        let mut stmt = conn.prepare("PRAGMA table_info(playlists)")?;
-        let mut has_is_pinned = false;
-        let mut has_pinned_at = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "is_pinned" {
-                has_is_pinned = true;
-            } else if name == "pinned_at" {
-                has_pinned_at = true;
-            }
-        }
-
-        if !has_is_pinned {
-            conn.execute(
-                "ALTER TABLE playlists ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0",
-                [],
-            )?;
-        }
-
-        if !has_pinned_at {
-            conn.execute("ALTER TABLE playlists ADD COLUMN pinned_at INTEGER", [])?;
-        }
-
-        Ok(())
-    }
-
-    fn migrate_v6(&self, conn: &Connection) -> SqliteResult<()> {
-        let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
-        let mut has_blurhash = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "blurhash" {
-                has_blurhash = true;
-                break;
-            }
-        }
-
-        if !has_blurhash {
-            conn.execute("ALTER TABLE tracks ADD COLUMN blurhash TEXT", [])?;
-        }
-
-        let mut stmt = conn.prepare("PRAGMA table_info(playlist_tracks)")?;
-        let mut has_snapshot_blurhash = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "snapshot_blurhash" {
-                has_snapshot_blurhash = true;
-                break;
-            }
-        }
-
-        if !has_snapshot_blurhash {
-            conn.execute(
-                "ALTER TABLE playlist_tracks ADD COLUMN snapshot_blurhash TEXT",
-                [],
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn migrate_v7(&self, conn: &Connection) -> SqliteResult<()> {
-        let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
-        let mut has_album_artist = false;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        for name in rows.flatten() {
-            if name == "album_artist" {
-                has_album_artist = true;
-                break;
-            }
-        }
-
-        if !has_album_artist {
-            conn.execute("ALTER TABLE tracks ADD COLUMN album_artist TEXT", [])?;
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_tracks_album_artist ON tracks(album_artist)",
-                [],
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn ensure_lyrics_schema(&self, conn: &Connection) -> SqliteResult<()> {
-        let had_lyrics_fts = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='lyrics_fts')",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            != 0;
-
-        // If FTS was missing and got recreated, rebuild from existing lyrics_index rows.
-        if !had_lyrics_fts {
-            self.migrate_v2(conn)?;
-            let _ = conn.execute("INSERT INTO lyrics_fts(lyrics_fts) VALUES ('rebuild')", []);
-        }
-
-        Ok(())
-    }
-
-    // ========== Track Operations ==========
-
-    pub fn upsert_tracks_batch(&self, tracks: &[DbTrack]) -> SqliteResult<usize> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-
-        {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, 
-                                   has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-                ON CONFLICT(file_path) DO UPDATE SET
-                    id = excluded.id,
-                    title = excluded.title,
-                    artist = excluded.artist,
-                    album_artist = excluded.album_artist,
-                    album = excluded.album,
-                    year = excluded.year,
-                    duration = excluded.duration,
-                    has_cover_art = excluded.has_cover_art,
-                    cover_art_hash = excluded.cover_art_hash,
-                    blurhash = excluded.blurhash
-                "#,
-            )?;
-
-            for track in tracks {
-                // Normalize paths to ensure consistent representation
-                let normalized_id = Self::normalize_path(&track.id);
-                let normalized_file_path = Self::normalize_path(&track.file_path);
-
-                stmt.execute(params![
-                    &normalized_id,
-                    &track.title,
-                    &track.artist,
-                    &track.album_artist,
-                    &track.album,
-                    track.year,
-                    track.duration,
-                    &normalized_file_path,
-                    track.has_cover_art as i32,
-                    &track.cover_art_hash,
-                    &track.blurhash,
-                    track.date_added,
-                    track.play_count,
-                    track.last_played,
-                    track.rating,
-                ])?;
-            }
-        }
-
-        tx.commit()?;
-        Ok(tracks.len())
-    }
-
-    pub fn delete_tracks(&self, ids: &[String]) -> SqliteResult<usize> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let normalized_ids: Vec<String> = ids.iter().map(|id| Self::normalize_path(id)).collect();
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        let mut removed = 0;
-        {
-            let mut delete_lyrics =
-                tx.prepare_cached("DELETE FROM lyrics_index WHERE track_id = ?1")?;
-            let mut delete_track = tx.prepare_cached("DELETE FROM tracks WHERE id = ?1")?;
-            for id in &normalized_ids {
-                delete_lyrics.execute([id])?;
-                removed += delete_track.execute([id])?;
-            }
-        }
-        tx.commit()?;
-        Ok(removed)
-    }
-
-    pub fn rename_track_path(&self, old_path: &str, new_path: &str) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        tx.execute_batch("PRAGMA defer_foreign_keys=ON;")?;
-        // Normalize both paths for consistent database operations
-        let normalized_old = Self::normalize_path(old_path);
-        let normalized_new = Self::normalize_path(new_path);
-        tx.execute(
-            "UPDATE playlist_tracks
-             SET track_id = ?1,
-                 snapshot_file_path = CASE WHEN snapshot_file_path = ?2 THEN ?1 ELSE snapshot_file_path END
-             WHERE track_id = ?2",
-            params![normalized_new, normalized_old],
-        )?;
-        tx.execute(
-            "UPDATE lyrics_index SET track_id = ?1 WHERE track_id = ?2",
-            params![normalized_new, normalized_old],
-        )?;
-        tx.execute(
-            "UPDATE tracks SET id = ?1, file_path = ?1 WHERE file_path = ?2",
-            params![normalized_new, normalized_old],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    fn map_db_track_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DbTrack> {
-        Ok(DbTrack {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            artist: row.get(2)?,
-            album_artist: row.get(3)?,
-            album: row.get(4)?,
-            year: row.get(5)?,
-            duration: row.get(6)?,
-            file_path: row.get(7)?,
-            has_cover_art: row.get::<_, i32>(8)? != 0,
-            cover_art_hash: row.get(9)?,
-            blurhash: row.get(10)?,
-            date_added: row.get(11)?,
-            play_count: row.get(12)?,
-            last_played: row.get(13)?,
-            rating: row.get(14)?,
-        })
-    }
-
-    fn map_search_result_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
-        Ok(SearchResult {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            artist: row.get(2)?,
-            album: row.get(3)?,
-            duration: row.get(4)?,
-            file_path: row.get(5)?,
-            cover_art_hash: row.get(6)?,
-            blurhash: row.get(7)?,
-        })
-    }
-
-    pub fn get_tracks_paginated(
-        &self,
-        offset: u32,
-        limit: u32,
-        sort_by: &str,
-        sort_order: &str,
-    ) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
-
-        let order_clause = match sort_by {
-            "title" => "title",
-            "artist" => "artist",
-            "album" => "album",
-            "dateAdded" => "date_added",
-            "playCount" => "play_count",
-            "duration" => "duration",
-            _ => "date_added",
-        };
-
-        let order_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
-
-        let query = format!(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
-             FROM tracks ORDER BY {} {} LIMIT ?1 OFFSET ?2",
-            order_clause, order_dir
-        );
-
-        let mut stmt = conn.prepare(&query)?;
-        let tracks = stmt
-            .query_map(params![limit, offset], Self::map_db_track_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(tracks)
-    }
-
-    pub fn get_all_tracks(&self) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
-
-        let mut stmt = conn.prepare(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
-             FROM tracks ORDER BY date_added DESC",
-        )?;
-
-        let tracks = stmt
-            .query_map([], Self::map_db_track_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(tracks)
-    }
-
-    pub fn get_track_paths_page(&self, offset: u32, limit: u32) -> SqliteResult<Vec<TrackPathRow>> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, file_path FROM tracks ORDER BY id COLLATE NOCASE ASC LIMIT ?1 OFFSET ?2",
-        )?;
-        let tracks = stmt
-            .query_map(params![limit, offset], |row| {
-                Ok(TrackPathRow {
-                    id: row.get(0)?,
-                    file_path: row.get(1)?,
-                })
-            })?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(tracks)
-    }
-
-    pub fn get_tracks_by_ids(&self, ids: &[String]) -> SqliteResult<Vec<DbTrack>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn.lock();
-        // Normalize IDs since they're typically file paths
-        let normalized_ids: Vec<String> = ids.iter().map(|id| Self::normalize_path(id)).collect();
-        let mut tracks_by_id: std::collections::HashMap<String, DbTrack> =
-            std::collections::HashMap::with_capacity(normalized_ids.len());
-
-        for chunk in normalized_ids.chunks(900) {
-            let placeholders = (0..chunk.len())
-                .map(|i| format!("?{}", i + 1))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let query = format!(
-                "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                        cover_art_hash, blurhash, date_added, play_count, last_played, rating
-                 FROM tracks WHERE id IN ({})",
-                placeholders
-            );
-            let mut stmt = conn.prepare(&query)?;
-            let tracks = stmt
-                .query_map(params_from_iter(chunk.iter()), Self::map_db_track_row)?
-                .collect::<SqliteResult<Vec<_>>>()?;
-            for track in tracks {
-                tracks_by_id.insert(track.id.clone(), track);
-            }
-        }
-
-        let mut ordered_tracks = Vec::with_capacity(normalized_ids.len());
-        for id in &normalized_ids {
-            if let Some(track) = tracks_by_id.get(id) {
-                ordered_tracks.push(track.clone());
-            }
-        }
-
-        Ok(ordered_tracks)
-    }
-
-    pub fn get_tracks_by_album_artist(
-        &self,
-        album: &str,
-        artist: &str,
-    ) -> SqliteResult<Vec<DbTrack>> {
-        if album.trim().is_empty() || artist.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
-             FROM tracks
-             WHERE album = ?1 AND COALESCE(NULLIF(album_artist, ''), artist) = ?2
-             ORDER BY title COLLATE NOCASE ASC, file_path COLLATE NOCASE ASC",
-        )?;
-
-        let tracks = stmt
-            .query_map(params![album, artist], Self::map_db_track_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(tracks)
-    }
-
-    pub fn search_tracks(&self, query: &str, limit: u32) -> SqliteResult<Vec<SearchResult>> {
-        let conn = self.conn.lock();
-
-        let fts_terms = query
-            .split_whitespace()
-            .map(|word| {
-                word.chars()
-                    .filter(|ch| ch.is_alphanumeric() || *ch == '-' || *ch == '\'' || *ch == '.')
-                    .collect::<String>()
-            })
-            .filter(|word| !word.is_empty())
-            .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
-            .collect::<Vec<_>>();
-
-        if !fts_terms.is_empty() {
-            let search_query = fts_terms.join(" ");
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT t.id, t.title, t.artist, t.album, t.duration, t.file_path, t.cover_art_hash, t.blurhash
-                FROM tracks t
-                INNER JOIN tracks_fts fts ON t.rowid = fts.rowid
-                WHERE tracks_fts MATCH ?1
-                ORDER BY bm25(tracks_fts)
-                LIMIT ?2
-                "#,
-            )?;
-
-            match stmt.query_map(params![search_query, limit], Self::map_search_result_row) {
-                Ok(rows) => {
-                    let results = rows.collect::<SqliteResult<Vec<_>>>()?;
-                    if !results.is_empty() {
-                        return Ok(results);
-                    }
-                }
-                Err(_) => {
-                    // Fall through to LIKE search for punctuation-heavy or otherwise invalid FTS input.
-                }
-            };
-        }
-
-        let escaped_like = query
-            .trim()
-            .to_lowercase()
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_query = format!("%{}%", escaped_like);
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT id, title, artist, album, duration, file_path, cover_art_hash, blurhash
-            FROM tracks
-            WHERE LOWER(title) LIKE ?1 ESCAPE '\'
-               OR LOWER(artist) LIKE ?1 ESCAPE '\'
-               OR LOWER(album) LIKE ?1 ESCAPE '\'
-            ORDER BY title COLLATE NOCASE ASC, artist COLLATE NOCASE ASC
-            LIMIT ?2
-            "#,
-        )?;
-
-        let results = stmt
-            .query_map(params![like_query, limit], Self::map_search_result_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(results)
-    }
-
-    pub fn get_existing_paths(&self, paths: &[String]) -> SqliteResult<Vec<String>> {
-        if paths.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let conn = self.conn.lock();
-        let normalized_paths: Vec<String> = paths.iter().map(|p| Self::normalize_path(p)).collect();
-        let mut existing = Vec::new();
-
-        for chunk in normalized_paths.chunks(900) {
-            let placeholders = (0..chunk.len())
-                .map(|i| format!("?{}", i + 1))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let query = format!(
-                "SELECT file_path FROM tracks WHERE file_path IN ({})",
-                placeholders
-            );
-            let mut stmt = conn.prepare(&query)?;
-            let found: Vec<String> = stmt
-                .query_map(params_from_iter(chunk.iter()), |row| {
-                    row.get::<_, String>(0)
-                })?
-                .collect::<SqliteResult<Vec<_>>>()?;
-            existing.extend(found);
-        }
-
-        Ok(existing)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn insert_lyrics_index_orphan_for_tests(
-        &self,
-        entry: &LyricsIndexEntry,
-    ) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
-        let result = conn.execute(
-            "INSERT OR REPLACE INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                entry.track_id,
-                entry.lyrics_path,
-                entry.lyrics_mtime,
-                entry.content
-            ],
-        );
-        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
-        result.map(|_| ())
-    }
-    pub fn get_lyrics_index_meta(&self) -> SqliteResult<Vec<LyricsIndexMeta>> {
-        let conn = self.conn.lock();
-        let mut stmt =
-            conn.prepare("SELECT track_id, lyrics_path, lyrics_mtime FROM lyrics_index")?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(LyricsIndexMeta {
-                    track_id: row.get(0)?,
-                    lyrics_path: row.get(1)?,
-                    lyrics_mtime: row.get(2)?,
-                })
-            })?
-            .collect::<SqliteResult<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    pub fn upsert_lyrics_index_batch(&self, entries: &[LyricsIndexEntry]) -> SqliteResult<usize> {
-        if entries.is_empty() {
-            return Ok(0);
-        }
-
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                INSERT INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content)
-                VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT(track_id) DO UPDATE SET
-                    lyrics_path = excluded.lyrics_path,
-                    lyrics_mtime = excluded.lyrics_mtime,
-                    content = excluded.content
-                "#,
-            )?;
-
-            for entry in entries {
-                stmt.execute(params![
-                    Self::normalize_path(&entry.track_id),
-                    entry.lyrics_path,
-                    entry.lyrics_mtime,
-                    entry.content,
-                ])?;
-            }
-        }
-        tx.commit()?;
-        Ok(entries.len())
-    }
-
-    pub fn delete_lyrics_index_tracks(&self, track_ids: &[String]) -> SqliteResult<usize> {
-        if track_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        let mut deleted = 0;
-        let normalized_track_ids: Vec<String> = track_ids
-            .iter()
-            .map(|track_id| Self::normalize_path(track_id))
-            .collect();
-        for chunk in normalized_track_ids.chunks(900) {
-            let placeholders = std::iter::repeat_n("?", chunk.len())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let query = format!(
-                "DELETE FROM lyrics_index WHERE track_id IN ({})",
-                placeholders
-            );
-            deleted += tx.execute(&query, params_from_iter(chunk.iter().map(String::as_str)))?;
-        }
-        tx.commit()?;
-        Ok(deleted)
-    }
-
-    pub fn cleanup_lyrics_index_orphans(&self) -> SqliteResult<usize> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "DELETE FROM lyrics_index WHERE track_id NOT IN (SELECT id FROM tracks)",
-            [],
-        )
-    }
-
-    pub fn lyrics_index_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM lyrics_index", [], |row| row.get(0))
-    }
-
-    pub fn search_lyrics_index_candidates(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> SqliteResult<Vec<LyricsSearchCandidate>> {
-        if query.trim().is_empty() {
-            return Ok(vec![]);
-        }
-
-        let conn = self.conn.lock();
-        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<LyricsSearchCandidate> {
-            Ok(LyricsSearchCandidate {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                artist: row.get(2)?,
-                album: row.get(3)?,
-                duration: row.get(4)?,
-                file_path: row.get(5)?,
-                cover_art_hash: row.get(6)?,
-                content: row.get(7)?,
-            })
-        };
-
-        let fts_terms = query
-            .split_whitespace()
-            .map(|word| {
-                word.chars()
-                    .filter(|ch| ch.is_alphanumeric())
-                    .collect::<String>()
-            })
-            .filter(|word| !word.is_empty())
-            .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
-            .collect::<Vec<_>>();
-
-        if !fts_terms.is_empty() {
-            let search_query = fts_terms.join(" ");
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT t.id, t.title, t.artist, t.album, t.duration, t.file_path, t.cover_art_hash, li.content
-                FROM lyrics_index li
-                INNER JOIN tracks t ON t.id = li.track_id
-                INNER JOIN lyrics_fts fts ON fts.rowid = li.rowid
-                WHERE lyrics_fts MATCH ?1
-                ORDER BY bm25(lyrics_fts)
-                LIMIT ?2
-                "#,
-            )?;
-
-            match stmt.query_map(params![search_query, limit], map_row) {
-                Ok(rows) => {
-                    let results = rows.collect::<SqliteResult<Vec<_>>>()?;
-                    if !results.is_empty() {
-                        return Ok(results);
-                    }
-                }
-                Err(_) => {
-                    // Fall through to LIKE search for punctuation-heavy or invalid FTS input.
-                }
-            };
-        }
-
-        let escaped_like = query
-            .trim()
-            .to_lowercase()
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_query = format!("%{}%", escaped_like);
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT t.id, t.title, t.artist, t.album, t.duration, t.file_path, t.cover_art_hash, li.content
-            FROM lyrics_index li
-            INNER JOIN tracks t ON t.id = li.track_id
-            WHERE LOWER(li.content) LIKE ?1 ESCAPE '\'
-            ORDER BY t.title COLLATE NOCASE ASC, t.artist COLLATE NOCASE ASC
-            LIMIT ?2
-            "#,
-        )?;
-
-        let results = stmt
-            .query_map(params![like_query, limit], map_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(results)
-    }
-
-    pub fn get_track_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
-    }
-
-    #[allow(dead_code)]
-    pub fn delete_track(&self, track_id: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute("DELETE FROM tracks WHERE id = ?1", params![track_id])?;
-        Ok(())
-    }
-
-    pub fn delete_tracks_by_folder(&self, folder_path: &str) -> SqliteResult<usize> {
-        let mut conn = self.conn.lock();
-        // Normalize the folder path first
-        let normalized_folder = Self::normalize_path(folder_path);
-        let normalized = if normalized_folder.ends_with('/') {
-            normalized_folder.clone()
-        } else {
-            format!("{}/", normalized_folder)
-        };
-        // Escape special LIKE characters with a backslash
-        let escaped = normalized
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_pattern = format!("{}%", escaped);
-        let tx = conn.transaction()?;
-        tx.execute(
-            "DELETE FROM lyrics_index WHERE track_id = ?1 OR track_id LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
-        )?;
-        // Query using normalized paths only (database should have normalized paths)
-        let count = tx.execute(
-            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
-        )?;
-        tx.commit()?;
-        Ok(count)
-    }
-
-    pub fn update_play_stats(&self, track_id: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        let normalized_id = Self::normalize_path(track_id);
-        let now = now_unix_secs_i64();
-
-        conn.execute(
-            "UPDATE tracks SET play_count = play_count + 1, last_played = ?1 WHERE id = ?2",
-            params![now, normalized_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn set_track_rating(&self, track_id: &str, rating: Option<i32>) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        let normalized_id = Self::normalize_path(track_id);
-        conn.execute(
-            "UPDATE tracks SET rating = ?1 WHERE id = ?2",
-            params![rating, normalized_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_cover_art_hash(&self, file_path: &str) -> SqliteResult<Option<String>> {
-        let conn = self.conn.lock();
-        let normalized_path = Self::normalize_path(file_path);
-        conn.query_row(
-            "SELECT cover_art_hash FROM tracks WHERE file_path = ?1",
-            params![normalized_path],
-            |row| row.get(0),
-        )
-        .optional()
-    }
-
-    pub fn set_cover_art_hash(&self, file_path: &str, hash: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        let normalized_path = Self::normalize_path(file_path);
-        conn.execute(
-            "UPDATE tracks SET cover_art_hash = ?1, has_cover_art = 1 WHERE file_path = ?2",
-            params![hash, normalized_path],
-        )?;
-        Ok(())
-    }
-
-    // ========== Playlist Operations ==========
-
-    pub fn get_playlist_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
-        conn.query_row("SELECT COUNT(*) FROM playlists", [], |row| row.get(0))
-    }
-
-    pub fn clear_playlists(&self) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute("DELETE FROM playlists", [])?;
-        Ok(())
-    }
-
-    pub fn create_playlist(&self, playlist: &DbPlaylist) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            r#"
-            INSERT INTO playlists (
-              id, name, playlist_type, folder_path, smart_rules, created_at, updated_at, is_pinned, pinned_at, last_synced_at, sync_error
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#,
-            params![
-                playlist.id,
-                playlist.name,
-                playlist.playlist_type,
-                playlist.folder_path,
-                playlist.smart_rules,
-                playlist.created_at,
-                playlist.updated_at,
-                playlist.is_pinned,
-                playlist.pinned_at,
-                playlist.last_synced_at,
-                playlist.sync_error,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn replace_playlist(&self, playlist: &DbPlaylist) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            r#"
-            UPDATE playlists
-            SET name = ?2,
-                playlist_type = ?3,
-                folder_path = ?4,
-                smart_rules = ?5,
-                created_at = ?6,
-                updated_at = ?7,
-                is_pinned = ?8,
-                pinned_at = ?9,
-                last_synced_at = ?10,
-                sync_error = ?11
-            WHERE id = ?1
-            "#,
-            params![
-                playlist.id,
-                playlist.name,
-                playlist.playlist_type,
-                playlist.folder_path,
-                playlist.smart_rules,
-                playlist.created_at,
-                playlist.updated_at,
-                playlist.is_pinned,
-                playlist.pinned_at,
-                playlist.last_synced_at,
-                playlist.sync_error,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_all_playlists(&self) -> SqliteResult<Vec<DbPlaylist>> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, playlist_type, folder_path, smart_rules, created_at, updated_at, is_pinned, pinned_at, last_synced_at, sync_error
-             FROM playlists
-             ORDER BY is_pinned DESC, COALESCE(pinned_at, 0) DESC, updated_at DESC, name COLLATE NOCASE ASC",
-        )?;
-
-        let playlists = stmt
-            .query_map([], |row| {
-                Ok(DbPlaylist {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    playlist_type: row.get(2)?,
-                    folder_path: row.get(3)?,
-                    smart_rules: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    is_pinned: row.get::<_, i32>(7)? != 0,
-                    pinned_at: row.get(8)?,
-                    last_synced_at: row.get(9)?,
-                    sync_error: row.get(10)?,
-                })
-            })?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(playlists)
-    }
-
-    pub fn get_playlist_by_id(&self, playlist_id: &str) -> SqliteResult<Option<DbPlaylist>> {
-        let conn = self.conn.lock();
-        conn.query_row(
-            "SELECT id, name, playlist_type, folder_path, smart_rules, created_at, updated_at, is_pinned, pinned_at, last_synced_at, sync_error
-             FROM playlists
-             WHERE id = ?1",
-            params![playlist_id],
-            |row| {
-                Ok(DbPlaylist {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    playlist_type: row.get(2)?,
-                    folder_path: row.get(3)?,
-                    smart_rules: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    is_pinned: row.get::<_, i32>(7)? != 0,
-                    pinned_at: row.get(8)?,
-                    last_synced_at: row.get(9)?,
-                    sync_error: row.get(10)?,
-                })
-            },
-        )
-        .optional()
-    }
-
-    pub fn get_playlist_track_entries(
-        &self,
-        playlist_id: &str,
-    ) -> SqliteResult<Vec<DbPlaylistTrackEntry>> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT
-                track_id,
-                position,
-                snapshot_title,
-                snapshot_artist,
-                snapshot_album,
-                snapshot_duration,
-                snapshot_file_path,
-                snapshot_has_cover_art,
-                snapshot_cover_art_hash,
-                snapshot_blurhash
-            FROM playlist_tracks
-            WHERE playlist_id = ?1
-            ORDER BY position ASC
-            "#,
-        )?;
-
-        let entries = stmt
-            .query_map(params![playlist_id], |row| {
-                Ok(DbPlaylistTrackEntry {
-                    track_id: row.get(0)?,
-                    position: row.get(1)?,
-                    snapshot_title: row.get(2)?,
-                    snapshot_artist: row.get(3)?,
-                    snapshot_album: row.get(4)?,
-                    snapshot_duration: row.get(5)?,
-                    snapshot_file_path: row.get(6)?,
-                    snapshot_has_cover_art: row.get::<_, i32>(7)? != 0,
-                    snapshot_cover_art_hash: row.get(8)?,
-                    snapshot_blurhash: row.get(9)?,
-                })
-            })?
-            .collect::<SqliteResult<Vec<_>>>()?;
-        Ok(entries)
-    }
-
-    pub fn set_playlist_tracks(
-        &self,
-        playlist_id: &str,
-        track_ids: &[String],
-        updated_at: i64,
-    ) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-
-        // Preserve snapshots for references that are no longer in the tracks table.
-        let old_snapshots = {
-            let mut old_snapshot_stmt = tx.prepare_cached(
-                r#"
-                SELECT
-                    track_id,
-                    snapshot_title,
-                    snapshot_artist,
-                    snapshot_album,
-                    snapshot_duration,
-                    snapshot_file_path,
-                    snapshot_has_cover_art,
-                    snapshot_cover_art_hash,
-                    snapshot_blurhash
-                FROM playlist_tracks
-                WHERE playlist_id = ?1
-                "#,
-            )?;
-            let rows = old_snapshot_stmt
-                .query_map(params![playlist_id], |row| {
-                    let track_id: String = row.get(0)?;
-                    Ok((
-                        Self::normalize_path(&track_id),
-                        (
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<f64>>(4)?,
-                            row.get::<_, Option<String>>(5)?,
-                            row.get::<_, i32>(6)?,
-                            row.get::<_, Option<String>>(7)?,
-                            row.get::<_, Option<String>>(8)?,
-                        ),
-                    ))
-                })?
-                .collect::<SqliteResult<Vec<_>>>()?;
-            rows.into_iter().collect::<std::collections::HashMap<
-                String,
-                (
-                    Option<String>,
-                    Option<String>,
-                    Option<String>,
-                    Option<f64>,
-                    Option<String>,
-                    i32,
-                    Option<String>,
-                    Option<String>,
-                ),
-            >>()
-        };
-
-        tx.execute(
-            "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
-            params![playlist_id],
-        )?;
-
-        {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                INSERT OR IGNORE INTO playlist_tracks (
-                    playlist_id,
-                    track_id,
-                    position,
-                    added_at,
-                    snapshot_title,
-                    snapshot_artist,
-                    snapshot_album,
-                    snapshot_duration,
-                    snapshot_file_path,
-                    snapshot_has_cover_art,
-                    snapshot_cover_art_hash,
-                    snapshot_blurhash
-                )
-                SELECT
-                    ?1,
-                    ?2,
-                    ?3,
-                    ?4,
-                    COALESCE(t.title, ?5),
-                    COALESCE(t.artist, ?6),
-                    COALESCE(t.album, ?7),
-                    COALESCE(t.duration, ?8),
-                    COALESCE(t.file_path, ?9),
-                    COALESCE(t.has_cover_art, ?10),
-                    COALESCE(t.cover_art_hash, ?11),
-                    COALESCE(t.blurhash, ?12)
-                FROM (SELECT 1)
-                LEFT JOIN tracks t ON t.id = ?2
-                "#,
-            )?;
-            for (i, track_id) in track_ids.iter().enumerate() {
-                let normalized = Self::normalize_path(track_id);
-                let snapshot = old_snapshots.get(&normalized);
-                stmt.execute(params![
-                    playlist_id,
-                    normalized,
-                    i as i32,
-                    updated_at,
-                    snapshot.and_then(|value| value.0.clone()),
-                    snapshot.and_then(|value| value.1.clone()),
-                    snapshot.and_then(|value| value.2.clone()),
-                    snapshot.and_then(|value| value.3),
-                    snapshot.and_then(|value| value.4.clone()),
-                    snapshot.map(|value| value.5).unwrap_or(0),
-                    snapshot.and_then(|value| value.6.clone()),
-                    snapshot.and_then(|value| value.7.clone()),
-                ])?;
-            }
-        }
-
-        tx.execute(
-            "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
-            params![updated_at, playlist_id],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn add_tracks_to_playlist(
-        &self,
-        playlist_id: &str,
-        track_ids: &[String],
-    ) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-
-        let now = now_millis_i64_or_default();
-
-        // Get current max position
-        let max_pos: i32 = tx
-            .query_row(
-                "SELECT COALESCE(MAX(position), 0) FROM playlist_tracks WHERE playlist_id = ?1",
-                params![playlist_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        {
-            let mut stmt = tx.prepare_cached(
-                r#"
-                INSERT OR IGNORE INTO playlist_tracks (
-                    playlist_id,
-                    track_id,
-                    position,
-                    added_at,
-                    snapshot_title,
-                    snapshot_artist,
-                    snapshot_album,
-                    snapshot_duration,
-                    snapshot_file_path,
-                    snapshot_has_cover_art,
-                    snapshot_cover_art_hash,
-                    snapshot_blurhash
-                )
-                SELECT
-                    ?1,
-                    ?2,
-                    ?3,
-                    ?4,
-                    t.title,
-                    t.artist,
-                    t.album,
-                    t.duration,
-                    t.file_path,
-                    COALESCE(t.has_cover_art, 0),
-                    t.cover_art_hash,
-                    t.blurhash
-                FROM (SELECT 1)
-                LEFT JOIN tracks t ON t.id = ?2
-                "#,
-            )?;
-
-            for (i, track_id) in track_ids.iter().enumerate() {
-                let normalized = Self::normalize_path(track_id);
-                stmt.execute(params![
-                    playlist_id,
-                    normalized,
-                    max_pos + 1 + i as i32,
-                    now
-                ])?;
-            }
-        }
-
-        // Update playlist timestamp
-        tx.execute(
-            "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
-            params![now, playlist_id],
-        )?;
-
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn remove_tracks_from_playlist(
-        &self,
-        playlist_id: &str,
-        track_ids: &[String],
-    ) -> SqliteResult<()> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
-        let normalized_track_ids: Vec<String> = track_ids
-            .iter()
-            .map(|track_id| Self::normalize_path(track_id))
-            .collect();
-        for chunk in normalized_track_ids.chunks(900) {
-            let placeholders = std::iter::repeat_n("?", chunk.len())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let query = format!(
-                "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN ({})",
-                placeholders
-            );
-            let params_iter = std::iter::once(playlist_id).chain(chunk.iter().map(String::as_str));
-            tx.execute(&query, params_from_iter(params_iter))?;
-        }
-
-        // Update playlist timestamp
-        let now = now_millis_i64_or_default();
-        tx.execute(
-            "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
-            params![now, playlist_id],
-        )?;
-
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn set_playlist_sync_state(
-        &self,
-        playlist_id: &str,
-        last_synced_at: Option<i64>,
-        sync_error: Option<&str>,
-        updated_at: i64,
-    ) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "UPDATE playlists
-             SET last_synced_at = ?1, sync_error = ?2, updated_at = ?3
-             WHERE id = ?4",
-            params![last_synced_at, sync_error, updated_at, playlist_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn set_playlist_pinned(
-        &self,
-        playlist_id: &str,
-        is_pinned: bool,
-        pinned_at: Option<i64>,
-        updated_at: i64,
-    ) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "UPDATE playlists
-             SET is_pinned = ?1, pinned_at = ?2, updated_at = ?3
-             WHERE id = ?4",
-            params![is_pinned, pinned_at, updated_at, playlist_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_playlist(&self, playlist_id: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock();
-        conn.execute("DELETE FROM playlists WHERE id = ?1", params![playlist_id])?;
-        Ok(())
-    }
-
-    // ========== Smart Playlist Queries ==========
 
     pub fn get_recently_added(&self, days: i32, limit: u32) -> SqliteResult<Vec<DbTrack>> {
         let conn = self.conn.lock();
         let cutoff = now_millis_i64_or_default() - (days as i64 * 24 * 60 * 60 * 1000);
 
         let mut stmt = conn.prepare(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
-             FROM tracks 
-             WHERE date_added >= ?1 
-             ORDER BY date_added DESC 
+            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
+                    cover_art_hash, blurhash, date_added, play_count, last_played, rating,
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
+             FROM tracks
+             WHERE date_added >= ?1
+             ORDER BY date_added DESC
              LIMIT ?2",
         )?;
 
@@ -1810,11 +349,12 @@ impl Database {
     pub fn get_most_played(&self, limit: u32) -> SqliteResult<Vec<DbTrack>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating
-             FROM tracks 
+            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
+                    cover_art_hash, blurhash, date_added, play_count, last_played, rating,
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
+             FROM tracks
              WHERE play_count > 0
-             ORDER BY play_count DESC 
+             ORDER BY play_count DESC
              LIMIT ?1",
         )?;
 
@@ -1832,69 +372,65 @@ impl Database {
             return Ok(vec![]);
         }
 
-        let conn = self.conn.lock();
         let normalized_ids: Vec<String> = track_ids
             .iter()
             .map(|id| Self::normalize_path(id))
             .collect();
-        let mut weighted: Vec<(String, String, f64)> = Vec::new();
         let now = now_unix_secs_i64();
         let seven_days_secs: i64 = 7 * 24 * 3600;
+        let weighted: Vec<(String, String, f64)> = {
+            let conn = self.conn.lock();
+            let mut candidates = Vec::new();
+            for chunk in normalized_ids.chunks(900) {
+                let placeholders = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let query = format!(
+                    "SELECT id, artist, play_count, last_played FROM tracks WHERE id IN ({})",
+                    placeholders
+                );
+                let mut stmt = conn.prepare(&query)?;
+                let rows = stmt.query_map(params_from_iter(chunk.iter()), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i32>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                })?;
 
-        for chunk in normalized_ids.chunks(900) {
-            let placeholders = (0..chunk.len())
-                .map(|i| format!("?{}", i + 1))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let query = format!(
-                "SELECT id, artist, play_count, last_played FROM tracks WHERE id IN ({})",
-                placeholders
-            );
-            let mut stmt = conn.prepare(&query)?;
-            let rows = stmt.query_map(params_from_iter(chunk.iter()), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i32>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                ))
-            })?;
-
-            for row in rows {
-                let (id, artist, play_count, last_played) = row?;
-                let base = 1.0 / (play_count as f64 + 1.0);
-                let recency = match last_played {
-                    None => 2.0,
-                    Some(ts) if now.saturating_sub(ts) > seven_days_secs => 2.0,
-                    _ => 1.0,
-                };
-                weighted.push((id, artist, base * recency));
+                for row in rows {
+                    let (id, artist, play_count, last_played) = row?;
+                    let base = 1.0 / (play_count as f64 + 1.0);
+                    let recency = match last_played {
+                        None => 2.0,
+                        Some(ts) if now.saturating_sub(ts) > seven_days_secs => 2.0,
+                        _ => 1.0,
+                    };
+                    candidates.push((id, artist, base * recency));
+                }
             }
-        }
+            candidates
+        };
 
         if weighted.is_empty() {
             return Ok(track_ids);
         }
 
         let mut rng = rand::thread_rng();
-        let mut ordered: Vec<(String, String)> = Vec::with_capacity(weighted.len());
-        while !weighted.is_empty() {
-            let total: f64 = weighted.iter().map(|(_, _, w)| w).sum();
-            if total <= 0.0 {
-                break;
-            }
-            let mut pick = rng.gen::<f64>() * total;
-            let mut idx = weighted.len().saturating_sub(1);
-            for (i, (_, _, w)) in weighted.iter().enumerate() {
-                pick -= w;
-                if pick <= 0.0 {
-                    idx = i;
-                    break;
-                }
-            }
-            let (id, artist, _) = weighted.swap_remove(idx);
-            ordered.push((id, artist));
-        }
+        let mut ranked: Vec<(String, String, f64)> = weighted
+            .into_iter()
+            .map(|(id, artist, weight)| {
+                let draw = rng.gen_range(f64::EPSILON..1.0_f64);
+                (id, artist, -draw.ln() / weight.max(f64::EPSILON))
+            })
+            .collect();
+        ranked.sort_unstable_by(|left, right| left.2.total_cmp(&right.2));
+        let mut ordered: Vec<(String, String)> = ranked
+            .into_iter()
+            .map(|(id, artist, _)| (id, artist))
+            .collect();
 
         let n = ordered.len();
         for _ in 0..(n * 3).min(512) {
@@ -1935,8 +471,15 @@ impl Database {
                 SELECT
                     COUNT(*),
                     COALESCE(SUM(duration), 0),
-                    COUNT(DISTINCT artist),
-                    COUNT(DISTINCT album),
+                    COUNT(DISTINCT artist COLLATE NOCASE),
+                    (
+                        SELECT COUNT(*)
+                        FROM (
+                            SELECT album, COALESCE(NULLIF(TRIM(album_artist), ''), artist)
+                            FROM tracks
+                            GROUP BY album COLLATE NOCASE, COALESCE(NULLIF(TRIM(album_artist), ''), artist) COLLATE NOCASE
+                        )
+                    ),
                     COALESCE(SUM(play_count), 0)
                 FROM tracks
                 "#,
@@ -1972,24 +515,444 @@ pub struct LibraryStats {
     pub total_plays: i64,
 }
 
-fn get_database_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("music-player")
-        .join("library.db")
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct LegacyStorageResolution {
+    version: u8,
+    policy: String,
+    legacy_backup: Option<String>,
+}
+
+fn read_legacy_storage_marker(app_dir: &Path) -> Result<Option<LegacyStorageResolution>, String> {
+    let marker_path = app_dir.join(LEGACY_STORAGE_MARKER);
+    if !marker_path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&marker_path).map_err(|error| {
+        format!(
+            "Failed to read legacy storage marker {}: {}",
+            marker_path.display(),
+            error
+        )
+    })?;
+    let marker: LegacyStorageResolution = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "Legacy storage marker {} is invalid: {}",
+            marker_path.display(),
+            error
+        )
+    })?;
+    if marker.version != 1 {
+        return Err(format!(
+            "Legacy storage marker {} has unsupported version {}",
+            marker_path.display(),
+            marker.version
+        ));
+    }
+    Ok(Some(marker))
+}
+
+fn write_legacy_storage_marker(
+    app_dir: &Path,
+    resolution: &LegacyStorageResolution,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    if let Some(existing) = read_legacy_storage_marker(app_dir)? {
+        return if existing == *resolution {
+            Ok(())
+        } else {
+            Err(format!(
+                "Legacy storage marker in {} conflicts with the resolved migration policy",
+                app_dir.display()
+            ))
+        };
+    }
+
+    let marker_path = app_dir.join(LEGACY_STORAGE_MARKER);
+    let temp_path = app_dir.join(format!("{LEGACY_STORAGE_MARKER}.tmp"));
+    if temp_path.exists() {
+        std::fs::remove_file(&temp_path).map_err(|error| {
+            format!(
+                "Failed to remove interrupted legacy storage marker {}: {}",
+                temp_path.display(),
+                error
+            )
+        })?;
+    }
+    let bytes = serde_json::to_vec_pretty(resolution)
+        .map_err(|error| format!("Failed to encode legacy storage marker: {error}"))?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .map_err(|error| {
+            format!(
+                "Failed to create legacy storage marker {}: {}",
+                temp_path.display(),
+                error
+            )
+        })?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("Failed to persist legacy storage marker: {error}"))?;
+    drop(file);
+    std::fs::rename(&temp_path, &marker_path).map_err(|error| {
+        format!(
+            "Failed to install legacy storage marker {}: {}",
+            marker_path.display(),
+            error
+        )
+    })
+}
+
+fn directory_is_empty(path: &Path) -> Result<bool, String> {
+    std::fs::read_dir(path)
+        .map_err(|error| {
+            format!(
+                "Failed to inspect data directory {}: {}",
+                path.display(),
+                error
+            )
+        })
+        .map(|mut entries| entries.next().is_none())
+}
+
+#[cfg(unix)]
+fn sync_storage_directory(path: &Path) {
+    let _ = std::fs::File::open(path).and_then(|directory| directory.sync_all());
+}
+
+#[cfg(not(unix))]
+fn sync_storage_directory(_path: &Path) {}
+
+fn regular_storage_file_exists(path: &Path) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(format!(
+            "Legacy database path {} is not a regular file",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "Failed to inspect legacy database path {}: {}",
+            path.display(),
+            error
+        )),
+    }
+}
+
+fn ensure_regular_storage_directory(path: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "Failed to inspect storage directory {}: {}",
+            path.display(),
+            error
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "Storage directory {} is not a regular directory",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn rename_storage_file_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::MoveFileW;
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    unsafe { MoveFileW(PCWSTR(source.as_ptr()), PCWSTR(target.as_ptr())) }
+        .map_err(|_| std::io::Error::last_os_error())
+}
+
+#[cfg(unix)]
+fn rename_storage_file_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
+    use rustix::fs::{renameat_with, RenameFlags, CWD};
+
+    renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE).map_err(std::io::Error::from)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn rename_storage_file_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
+    if target.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "target already exists",
+        ));
+    }
+    std::fs::rename(source, target)
+}
+
+fn move_legacy_database_family(source_dir: &Path, app_dir: &Path) -> Result<bool, String> {
+    ensure_regular_storage_directory(source_dir)?;
+    ensure_regular_storage_directory(app_dir)?;
+    if !regular_storage_file_exists(&source_dir.join(DATABASE_FILE))?
+        || regular_storage_file_exists(&app_dir.join(DATABASE_FILE))?
+    {
+        return Ok(false);
+    }
+
+    for file_name in DATABASE_MOVE_ORDER {
+        let source = source_dir.join(file_name);
+        let target = app_dir.join(file_name);
+        if regular_storage_file_exists(&source)? && regular_storage_file_exists(&target)? {
+            return Err(format!(
+                "Cannot merge legacy database because both {} and {} exist",
+                source.display(),
+                target.display()
+            ));
+        }
+    }
+
+    // Sidecars move first and the main database moves last. Until the final rename, a crash leaves
+    // the authoritative database in the legacy directory and a retry can finish the same layout.
+    for file_name in DATABASE_MOVE_ORDER {
+        let source = source_dir.join(file_name);
+        if !regular_storage_file_exists(&source)? {
+            continue;
+        }
+        let target = app_dir.join(file_name);
+        rename_storage_file_no_replace(&source, &target).map_err(|error| {
+            format!(
+                "Failed to move legacy database file from {} to {}: {}",
+                source.display(),
+                target.display(),
+                error
+            )
+        })?;
+        sync_storage_directory(source_dir);
+        sync_storage_directory(app_dir);
+    }
+
+    Ok(true)
+}
+
+fn archive_legacy_remainder(
+    legacy_dir: &Path,
+    conflict_backup: &Path,
+) -> Result<Option<String>, String> {
+    if directory_is_empty(legacy_dir)? {
+        std::fs::remove_dir(legacy_dir).map_err(|error| {
+            format!(
+                "Failed to remove migrated legacy directory {}: {}",
+                legacy_dir.display(),
+                error
+            )
+        })?;
+        sync_storage_directory(legacy_dir.parent().unwrap_or_else(|| Path::new(".")));
+        return Ok(None);
+    }
+
+    std::fs::rename(legacy_dir, conflict_backup).map_err(|error| {
+        format!(
+            "Failed to preserve remaining legacy Tarab data from {} at {}: {}",
+            legacy_dir.display(),
+            conflict_backup.display(),
+            error
+        )
+    })?;
+    sync_storage_directory(conflict_backup.parent().unwrap_or_else(|| Path::new(".")));
+    Ok(Some(LEGACY_STORAGE_CONFLICT_BACKUP.to_string()))
+}
+
+fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(base_dir).map_err(|error| {
+        format!(
+            "Failed to create application data root {}: {}",
+            base_dir.display(),
+            error
+        )
+    })?;
+    let _migration_guard = STORAGE_MIGRATION_LOCK.get_or_init(|| Mutex::new(())).lock();
+    let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+    let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+    let conflict_backup = base_dir.join(LEGACY_STORAGE_CONFLICT_BACKUP);
+
+    if app_dir.exists() && legacy_dir.exists() {
+        if read_legacy_storage_marker(&app_dir)?.is_some() {
+            return Err(format!(
+                "Both {} and {} exist after legacy storage was already resolved; refusing to ignore the newly reappeared legacy directory",
+                app_dir.display(),
+                legacy_dir.display()
+            ));
+        }
+        if conflict_backup.exists() {
+            return Err(format!(
+                "Cannot resolve legacy storage conflict because backup {} already exists; both active directories were preserved",
+                conflict_backup.display()
+            ));
+        }
+
+        if directory_is_empty(&app_dir)? {
+            std::fs::remove_dir(&app_dir).map_err(|error| {
+                format!(
+                    "Failed to remove empty Tarab data directory {}: {}",
+                    app_dir.display(),
+                    error
+                )
+            })?;
+            write_legacy_storage_marker(
+                &legacy_dir,
+                &LegacyStorageResolution {
+                    version: 1,
+                    policy: "legacyRenamedIntoEmptyAppDirectory".to_string(),
+                    legacy_backup: None,
+                },
+            )?;
+            std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
+                format!(
+                    "Failed to migrate legacy Tarab data from {} to {}: {}",
+                    legacy_dir.display(),
+                    app_dir.display(),
+                    error
+                )
+            })?;
+            return Ok(app_dir);
+        }
+
+        if move_legacy_database_family(&legacy_dir, &app_dir)? {
+            let legacy_backup = archive_legacy_remainder(&legacy_dir, &conflict_backup)?;
+            write_legacy_storage_marker(
+                &app_dir,
+                &LegacyStorageResolution {
+                    version: 1,
+                    policy: "legacyDatabaseMergedIntoAppDirectory".to_string(),
+                    legacy_backup,
+                },
+            )?;
+            return Ok(app_dir);
+        }
+
+        std::fs::rename(&legacy_dir, &conflict_backup).map_err(|error| {
+            format!(
+                "Failed to preserve conflicting legacy Tarab data from {} at {}: {}",
+                legacy_dir.display(),
+                conflict_backup.display(),
+                error
+            )
+        })?;
+        write_legacy_storage_marker(
+            &app_dir,
+            &LegacyStorageResolution {
+                version: 1,
+                policy: "appDirectoryAuthoritativeLegacyArchived".to_string(),
+                legacy_backup: Some(LEGACY_STORAGE_CONFLICT_BACKUP.to_string()),
+            },
+        )?;
+        eprintln!(
+            "Both Tarab data directories existed; using {} and preserving legacy data at {}",
+            app_dir.display(),
+            conflict_backup.display()
+        );
+        return Ok(app_dir);
+    }
+
+    if app_dir.exists() {
+        let marker = read_legacy_storage_marker(&app_dir)?;
+        let recovered_database = if conflict_backup.exists() {
+            move_legacy_database_family(&conflict_backup, &app_dir)?
+        } else {
+            false
+        };
+        if conflict_backup.exists() && marker.is_none() {
+            write_legacy_storage_marker(
+                &app_dir,
+                &LegacyStorageResolution {
+                    version: 1,
+                    policy: if recovered_database {
+                        "legacyDatabaseRecoveredFromConflictBackup".to_string()
+                    } else {
+                        "appDirectoryAuthoritativeLegacyArchived".to_string()
+                    },
+                    legacy_backup: Some(LEGACY_STORAGE_CONFLICT_BACKUP.to_string()),
+                },
+            )?;
+        }
+        if recovered_database {
+            eprintln!(
+                "Recovered the legacy Tarab database from {} into {}",
+                conflict_backup.display(),
+                app_dir.display()
+            );
+        }
+        return Ok(app_dir);
+    }
+
+    if legacy_dir.exists() {
+        if conflict_backup.exists() {
+            return Err(format!(
+                "Cannot migrate {} while unresolved legacy backup {} exists",
+                legacy_dir.display(),
+                conflict_backup.display()
+            ));
+        }
+        write_legacy_storage_marker(
+            &legacy_dir,
+            &LegacyStorageResolution {
+                version: 1,
+                policy: "legacyDirectoryRenamed".to_string(),
+                legacy_backup: None,
+            },
+        )?;
+        std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
+            format!(
+                "Failed to migrate legacy Tarab data from {} to {}: {}",
+                legacy_dir.display(),
+                app_dir.display(),
+                error
+            )
+        })?;
+    } else {
+        std::fs::create_dir_all(&app_dir).map_err(|error| {
+            format!(
+                "Failed to create Tarab data directory {}: {}",
+                app_dir.display(),
+                error
+            )
+        })?;
+    }
+
+    Ok(app_dir)
+}
+
+fn get_database_path() -> Result<PathBuf, String> {
+    let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    prepare_app_directory(&base_dir).map(|directory| directory.join(DATABASE_FILE))
+}
+
+pub fn get_app_data_dir() -> Result<PathBuf, String> {
+    let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    prepare_app_directory(&base_dir)
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("music-player")
+    let base_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
+    prepare_app_directory(&base_dir).unwrap_or_else(|error| {
+        eprintln!("{}", error);
+        base_dir.join(APP_STORAGE_DIRECTORY)
+    })
 }
 
 // Shared database instance
 pub type SharedDatabase = Arc<Database>;
 
 pub fn create_database() -> Result<SharedDatabase, String> {
-    Database::new()
+    let db_path = get_database_path()?;
+    Database::new(db_path)
         .map(Arc::new)
         .map_err(|e| format!("Failed to create database: {}", e))
 }
@@ -2012,7 +975,7 @@ pub async fn db_get_all_tracks(
         let count = db.get_track_count().map_err(|e| e.to_string())?;
         if count > DB_GET_ALL_TRACKS_HARD_LIMIT {
             return Err(format!(
-                "db_get_all_tracks is disabled for libraries larger than {} tracks (current: {}); use db_get_tracks_paginated instead",
+                "db_get_all_tracks is disabled for libraries larger than {} tracks (current: {}); use db_get_tracks_cursor_page instead",
                 DB_GET_ALL_TRACKS_HARD_LIMIT, count
             ));
         }
@@ -2020,6 +983,17 @@ pub async fn db_get_all_tracks(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn db_get_all_track_ids(
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<String>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_all_track_ids())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2032,6 +1006,34 @@ pub async fn db_get_tracks_by_ids(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn db_get_track_by_public_id(
+    public_id: String,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<DbTrack>, String> {
+    let db = db.inner().clone();
+    let roots = roots_state.read().roots.clone();
+    spawn_blocking(move || {
+        let track = db
+            .get_track_by_public_id(&public_id)
+            .map_err(|error| error.to_string())?;
+        match track {
+            Some(track) => {
+                ensure_existing_path_allowed(
+                    Path::new(&track.file_path),
+                    &roots,
+                    "resolve public track link",
+                )?;
+                Ok(Some(track))
+            }
+            None => Ok(None),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2051,6 +1053,38 @@ pub async fn db_get_tracks_by_album_artist(
 }
 
 #[tauri::command]
+pub async fn db_get_tracks_by_artist(
+    db: tauri::State<'_, SharedDatabase>,
+    artist: String,
+) -> Result<Vec<DbTrack>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_tracks_by_artist(&artist).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn db_get_album_aggregates(
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<DbAlbumAggregate>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_album_aggregates().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn db_get_artist_aggregates(
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<DbArtistAggregate>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_artist_aggregates().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+/// Compatibility-only random access. Multi-page traversals must use the revision-bound cursor API.
 pub async fn db_get_tracks_paginated(
     offset: u32,
     limit: u32,
@@ -2060,6 +1094,21 @@ pub async fn db_get_tracks_paginated(
 ) -> Result<Vec<DbTrack>, String> {
     let db = db.inner().clone();
     spawn_blocking(move || db.get_tracks_paginated(offset, limit, &sort_by, &sort_order))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn db_get_tracks_cursor_page(
+    cursor: Option<TrackPageCursor>,
+    limit: u32,
+    sort_by: String,
+    sort_order: String,
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<DbTrackCursorPage, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_tracks_cursor_page(cursor.as_ref(), limit, &sort_by, &sort_order))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
@@ -2110,6 +1159,27 @@ pub async fn db_upsert_tracks(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn db_reconcile_folder_scan(
+    scan_id: String,
+    request: ScanReconcileRequest,
+    db: tauri::State<'_, SharedDatabase>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+    scan_control: tauri::State<'_, SharedLibraryScanControl>,
+) -> Result<ScanReconcileResult, String> {
+    let db = db.inner().clone();
+    let roots = roots_state.inner().read().roots.clone();
+    let cancellation = scan_control.cancellation(&scan_id)?;
+    spawn_blocking(move || {
+        ensure_existing_path_allowed(Path::new(&request.folder_path), &roots, "reconcile scan")?;
+        ensure_upsert_tracks_allowed(&request.tracks, &roots)?;
+        db.reconcile_folder_scan_cancellable(request, Some(&cancellation))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2245,6 +1315,247 @@ mod tests {
     }
 
     #[test]
+    fn legacy_storage_directory_is_migrated_to_app_identifier() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-{}",
+            now_millis_i64_or_default()
+        ));
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let migrated = prepare_app_directory(&base_dir).expect("migrate legacy directory");
+
+        assert_eq!(migrated, base_dir.join(APP_STORAGE_DIRECTORY));
+        assert!(migrated.join("library.db").exists());
+        assert!(migrated.join(LEGACY_STORAGE_MARKER).exists());
+        assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn populated_app_directory_merges_the_legacy_database_family() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-split-layout-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"settings").expect("seed settings");
+        std::fs::write(app_dir.join("playlists.json"), b"playlists").expect("seed playlists");
+        std::fs::write(legacy_dir.join(DATABASE_FILE), b"legacy database")
+            .expect("seed legacy database");
+        std::fs::write(legacy_dir.join("library.db-wal"), b"legacy wal").expect("seed legacy wal");
+        std::fs::write(legacy_dir.join("library.db-shm"), b"legacy shm").expect("seed legacy shm");
+
+        let selected = prepare_app_directory(&base_dir).expect("merge split storage layout");
+
+        assert_eq!(selected, app_dir);
+        assert_eq!(
+            std::fs::read(app_dir.join(DATABASE_FILE)).expect("read merged database"),
+            b"legacy database"
+        );
+        assert_eq!(
+            std::fs::read(app_dir.join("library.db-wal")).expect("read merged wal"),
+            b"legacy wal"
+        );
+        assert_eq!(
+            std::fs::read(app_dir.join("settings.json")).expect("read settings"),
+            b"settings"
+        );
+        assert_eq!(
+            std::fs::read(app_dir.join("playlists.json")).expect("read playlists"),
+            b"playlists"
+        );
+        assert!(!legacy_dir.exists());
+        assert!(!base_dir.join(LEGACY_STORAGE_CONFLICT_BACKUP).exists());
+        let marker = read_legacy_storage_marker(&app_dir)
+            .expect("read migration marker")
+            .expect("migration marker");
+        assert_eq!(marker.policy, "legacyDatabaseMergedIntoAppDirectory");
+        assert_eq!(marker.legacy_backup, None);
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn split_layout_archives_only_non_database_legacy_remainders() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-split-remainder-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        let backup_dir = base_dir.join(LEGACY_STORAGE_CONFLICT_BACKUP);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"settings").expect("seed settings");
+        std::fs::write(legacy_dir.join(DATABASE_FILE), b"legacy database")
+            .expect("seed legacy database");
+        std::fs::write(legacy_dir.join("old-cache"), b"cache").expect("seed legacy remainder");
+
+        prepare_app_directory(&base_dir).expect("merge legacy database");
+
+        assert_eq!(
+            std::fs::read(app_dir.join(DATABASE_FILE)).expect("read merged database"),
+            b"legacy database"
+        );
+        assert!(!backup_dir.join(DATABASE_FILE).exists());
+        assert_eq!(
+            std::fs::read(backup_dir.join("old-cache")).expect("read archived remainder"),
+            b"cache"
+        );
+        let marker = read_legacy_storage_marker(&app_dir)
+            .expect("read migration marker")
+            .expect("migration marker");
+        assert_eq!(
+            marker.legacy_backup.as_deref(),
+            Some(LEGACY_STORAGE_CONFLICT_BACKUP)
+        );
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn interrupted_split_layout_move_finishes_main_database_last() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-split-crash-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"settings").expect("seed settings");
+        std::fs::write(app_dir.join("library.db-wal"), b"already moved wal")
+            .expect("seed moved wal");
+        std::fs::write(legacy_dir.join(DATABASE_FILE), b"legacy database")
+            .expect("seed legacy database");
+
+        prepare_app_directory(&base_dir).expect("resume interrupted database move");
+
+        assert_eq!(
+            std::fs::read(app_dir.join(DATABASE_FILE)).expect("read recovered database"),
+            b"legacy database"
+        );
+        assert_eq!(
+            std::fs::read(app_dir.join("library.db-wal")).expect("read retained wal"),
+            b"already moved wal"
+        );
+        assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn interrupted_legacy_archive_recovers_database_before_marker_creation() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-archive-crash-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let backup_dir = base_dir.join(LEGACY_STORAGE_CONFLICT_BACKUP);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&backup_dir).expect("create interrupted backup");
+        std::fs::write(app_dir.join("settings.json"), b"settings").expect("seed settings");
+        std::fs::write(backup_dir.join(DATABASE_FILE), b"legacy database")
+            .expect("seed archived database");
+
+        prepare_app_directory(&base_dir).expect("recover interrupted archive");
+
+        assert_eq!(
+            std::fs::read(app_dir.join(DATABASE_FILE)).expect("read recovered database"),
+            b"legacy database"
+        );
+        assert!(!backup_dir.join(DATABASE_FILE).exists());
+        let marker = read_legacy_storage_marker(&app_dir)
+            .expect("read recovery marker")
+            .expect("recovery marker");
+        assert_eq!(marker.policy, "legacyDatabaseRecoveredFromConflictBackup");
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn both_storage_directories_archive_legacy_data_with_a_durable_policy() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-both-{}-{}",
+            std::process::id(),
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("library.db"), b"current").expect("seed current database");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let selected = prepare_app_directory(&base_dir).expect("resolve dual directories");
+
+        assert_eq!(selected, app_dir);
+        assert_eq!(
+            std::fs::read(selected.join("library.db")).expect("read current database"),
+            b"current"
+        );
+        assert!(!legacy_dir.exists());
+        assert_eq!(
+            std::fs::read(
+                base_dir
+                    .join(LEGACY_STORAGE_CONFLICT_BACKUP)
+                    .join("library.db")
+            )
+            .expect("read archived legacy database"),
+            b"legacy"
+        );
+        let marker = read_legacy_storage_marker(&selected)
+            .expect("read resolution marker")
+            .expect("resolution marker");
+        assert_eq!(marker.policy, "appDirectoryAuthoritativeLegacyArchived");
+        assert_eq!(
+            prepare_app_directory(&base_dir).expect("repeat resolved migration"),
+            selected
+        );
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn storage_migration_conflict_preserves_all_directories_and_returns_an_error() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-conflict-{}-{}",
+            std::process::id(),
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        let backup_dir = base_dir.join(LEGACY_STORAGE_CONFLICT_BACKUP);
+        for directory in [&app_dir, &legacy_dir, &backup_dir] {
+            std::fs::create_dir_all(directory).expect("create data directory");
+            std::fs::write(
+                directory.join("owner"),
+                directory.to_string_lossy().as_bytes(),
+            )
+            .expect("seed data directory");
+        }
+
+        let error = prepare_app_directory(&base_dir).expect_err("reject ambiguous migration");
+
+        assert!(error.contains("backup"));
+        assert!(app_dir.join("owner").exists());
+        assert!(legacy_dir.join("owner").exists());
+        assert!(backup_dir.join("owner").exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
     fn upsert_track_validation_rejects_paths_outside_library_roots() {
         let allowed_root =
             std::env::temp_dir().join(format!("tarab-db-allowed-{}", now_millis_i64_or_default()));
@@ -2271,6 +1582,13 @@ mod tests {
             play_count: 0,
             last_played: None,
             rating: None,
+            track_number: None,
+            disc_number: None,
+            file_format: Some("MP3".to_string()),
+            bitrate: None,
+            sample_rate: None,
+            file_size: None,
+            genre: None,
         };
 
         let result = ensure_upsert_tracks_allowed(&[track], &roots);
@@ -2300,7 +1618,176 @@ mod tests {
             play_count: 0,
             last_played: None,
             rating: None,
+            track_number: None,
+            disc_number: None,
+            file_format: Some("MP3".to_string()),
+            bitrate: None,
+            sample_rate: None,
+            file_size: None,
+            genre: None,
         }
+    }
+
+    #[test]
+    fn public_track_id_resolves_without_exposing_the_path() {
+        let db = test_db();
+        let track = sample_track("public-link");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+        let public_id = Database::public_track_id(&track.file_path);
+
+        assert_eq!(public_id.len(), 64);
+        assert!(!public_id.contains("public-link"));
+        {
+            let conn = db.conn.lock();
+            let stored_id: String = conn
+                .query_row(
+                    "SELECT public_id FROM tracks WHERE id = ?1",
+                    [&track.id],
+                    |row| row.get(0),
+                )
+                .expect("stored public id");
+            assert_eq!(stored_id, public_id);
+            let public_id_index: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_tracks_public_id'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("public id index");
+            assert_eq!(public_id_index, 1);
+        }
+        assert_eq!(
+            db.get_track_by_public_id(&public_id)
+                .expect("resolve public id")
+                .expect("linked track")
+                .id,
+            track.id
+        );
+        assert!(db
+            .get_track_by_public_id("../not-an-id")
+            .expect("reject invalid public id")
+            .is_none());
+    }
+
+    #[test]
+    fn migrate_v10_backfills_and_indexes_public_track_ids() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT UNIQUE NOT NULL);
+            CREATE TABLE playlist_tracks (
+                playlist_id TEXT NOT NULL,
+                track_id TEXT NOT NULL,
+                snapshot_file_path TEXT
+            );
+            CREATE TABLE lyrics_index (track_id TEXT PRIMARY KEY, lyrics_path TEXT NOT NULL);
+            INSERT INTO tracks (id, file_path) VALUES ('legacy', '/music/legacy.mp3');
+            "#,
+        )
+        .expect("seed legacy tracks schema");
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
+
+        {
+            let conn = db.conn.lock();
+            db.migrate_v10(&conn).expect("migrate public ids");
+            let public_id: String = conn
+                .query_row(
+                    "SELECT public_id FROM tracks WHERE id = 'legacy'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("backfilled public id");
+            assert_eq!(public_id, Database::public_track_id("/music/legacy.mp3"));
+            let index_is_unique: i64 = conn
+                .query_row(
+                    "SELECT \"unique\" FROM pragma_index_list('tracks') WHERE name = 'idx_tracks_public_id'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("public id index");
+            assert_eq!(index_is_unique, 1);
+        }
+    }
+
+    #[test]
+    fn migrate_v12_adds_genre_to_existing_track_tables() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tracks (
+                id TEXT PRIMARY KEY,
+                file_path TEXT UNIQUE NOT NULL
+            );
+            INSERT INTO tracks (id, file_path) VALUES ('legacy', '/music/legacy.mp3');
+            "#,
+        )
+        .expect("create pre-genre schema");
+
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
+
+        {
+            let conn = db.conn.lock();
+            db.migrate_v12(&conn).expect("add genre column");
+            db.migrate_v12(&conn).expect("repeat genre migration");
+
+            let genre_columns: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('tracks') WHERE name = 'genre'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count genre columns");
+            assert_eq!(genre_columns, 1);
+
+            let genre_indexes: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_index_list('tracks') WHERE name = 'idx_tracks_genre'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count genre indexes");
+            assert_eq!(genre_indexes, 1);
+
+            let track_count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+                .expect("count legacy tracks");
+            assert_eq!(track_count, 1);
+        }
+    }
+
+    #[test]
+    fn track_order_and_technical_metadata_survive_database_reload() {
+        let db = test_db();
+        let mut track = sample_track("metadata");
+        track.track_number = Some(7);
+        track.disc_number = Some(2);
+        track.file_format = Some("FLAC".to_string());
+        track.bitrate = Some(921_000);
+        track.sample_rate = Some(96_000);
+        track.file_size = Some(42_000_000);
+        track.genre = Some("Classical".to_string());
+
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("store metadata");
+
+        let loaded = db
+            .get_tracks_by_ids(std::slice::from_ref(&track.id))
+            .expect("reload metadata")
+            .into_iter()
+            .next()
+            .expect("stored track");
+        assert_eq!(loaded.track_number, track.track_number);
+        assert_eq!(loaded.disc_number, track.disc_number);
+        assert_eq!(loaded.file_format, track.file_format);
+        assert_eq!(loaded.bitrate, track.bitrate);
+        assert_eq!(loaded.sample_rate, track.sample_rate);
+        assert_eq!(loaded.file_size, track.file_size);
+        assert_eq!(loaded.genre, track.genre);
     }
 
     fn sample_playlist(id: &str) -> DbPlaylist {
@@ -2341,6 +1828,72 @@ mod tests {
     }
 
     #[test]
+    fn playlist_reorder_mutation_survives_cache_loss_without_deleting_later_additions() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
+            .expect("seed tracks");
+        db.create_playlist(&sample_playlist("pl_retry"))
+            .expect("create playlist");
+        let key = "reorder:pl_retry:mutation-1";
+
+        assert!(
+            db.set_playlist_tracks_idempotent(
+                "pl_retry",
+                &["b".to_string(), "a".to_string()],
+                1,
+                key,
+            )
+            .expect("first reorder")
+        );
+        db.add_tracks_to_playlist("pl_retry", &["c".to_string()])
+            .expect("later addition");
+        assert!(
+            !db.set_playlist_tracks_idempotent(
+                "pl_retry",
+                &["b".to_string(), "a".to_string()],
+                2,
+                key,
+            )
+            .expect("retry reorder")
+        );
+
+        let ids = db
+            .get_playlist_track_entries("pl_retry")
+            .expect("read tracks")
+            .into_iter()
+            .map(|entry| entry.track_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn legacy_playlist_import_fills_interrupted_empty_rows_and_marks_completion() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("b")])
+            .expect("seed tracks");
+        let playlist = sample_playlist("legacy");
+        db.create_playlist(&playlist)
+            .expect("seed interrupted playlist row");
+
+        db.import_legacy_playlists(
+            &[(playlist, vec!["a".to_string(), "b".to_string()])],
+            "legacy-migration-test",
+        )
+        .expect("recover migration");
+
+        assert!(db
+            .playlist_migration_completed("legacy-migration-test")
+            .expect("read marker"));
+        let ids = db
+            .get_playlist_track_entries("legacy")
+            .expect("read imported tracks")
+            .into_iter()
+            .map(|entry| entry.track_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
     fn set_playlist_tracks_preserves_order_and_unknown_ids() {
         let db = test_db();
         db.upsert_tracks_batch(&[sample_track("a"), sample_track("b")])
@@ -2374,6 +1927,44 @@ mod tests {
                 "a".to_string(),
                 "missing_2".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn relink_playlist_track_replaces_missing_reference_and_snapshot() {
+        let db = test_db();
+        let replacement = sample_track("replacement");
+        db.upsert_tracks_batch(std::slice::from_ref(&replacement))
+            .expect("seed replacement");
+        db.create_playlist(&sample_playlist("relink-playlist"))
+            .expect("create playlist");
+        db.set_playlist_tracks(
+            "relink-playlist",
+            &["missing-track".to_string()],
+            now_millis_i64_or_default(),
+        )
+        .expect("seed missing reference");
+
+        db.relink_playlist_track(
+            "relink-playlist",
+            "missing-track",
+            &replacement.id,
+            now_millis_i64_or_default(),
+        )
+        .expect("relink track");
+
+        let entries = db
+            .get_playlist_track_entries("relink-playlist")
+            .expect("read relinked entry");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].track_id, replacement.id);
+        assert_eq!(
+            entries[0].snapshot_title.as_deref(),
+            Some("Track replacement")
+        );
+        assert_eq!(
+            entries[0].snapshot_file_path.as_deref(),
+            Some(replacement.file_path.as_str())
         );
     }
 
@@ -2501,6 +2092,396 @@ mod tests {
     }
 
     #[test]
+    fn deleting_tracks_by_folder_rejects_empty_and_root_paths() {
+        let db = test_db();
+        let track = sample_track("kept");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+
+        for invalid in ["", " ", "/", ".", ".."] {
+            assert!(
+                db.delete_tracks_by_folder(invalid).is_err(),
+                "expected invalid folder path to fail: {invalid:?}"
+            );
+        }
+
+        assert_eq!(db.get_track_count().expect("track count"), 1);
+    }
+
+    #[test]
+    fn reconcile_folder_scan_preserves_user_fields_and_unreadable_discovered_rows() {
+        let db = test_db();
+        let mut updated = sample_track("updated");
+        updated.id = "/tmp/folder/updated.mp3".to_string();
+        updated.file_path = updated.id.clone();
+        updated.rating = Some(4);
+        updated.play_count = 9;
+        updated.last_played = Some(1234);
+        updated.date_added = 42;
+        let mut unreadable = sample_track("unreadable");
+        unreadable.id = "/tmp/folder/unreadable.mp3".to_string();
+        unreadable.file_path = unreadable.id.clone();
+        db.upsert_tracks_batch(&[updated.clone(), unreadable.clone()])
+            .expect("seed tracks");
+
+        let mut incoming = updated.clone();
+        incoming.title = "Updated title".to_string();
+        incoming.rating = None;
+        incoming.play_count = 0;
+        incoming.last_played = None;
+        incoming.date_added = 9999;
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp/folder".to_string(),
+                discovered_paths: vec![updated.file_path.clone(), unreadable.file_path.clone()],
+                tracks: vec![incoming],
+                traversal_complete: true,
+                errors: vec![ScanReconcileError {
+                    path: Some(unreadable.file_path.clone()),
+                    code: "metadataReadFailed".to_string(),
+                    message: "metadata failed".to_string(),
+                    recoverable: true,
+                }],
+            })
+            .expect("reconcile scan");
+
+        assert_eq!(result.status, "partial");
+        assert_eq!(result.preserved_count, 1);
+        assert_eq!(result.missing_count, 0);
+        let stored = db
+            .get_tracks_by_ids(&[updated.id.clone(), unreadable.id.clone()])
+            .expect("read reconciled tracks");
+        let stored_updated = stored
+            .iter()
+            .find(|track| track.id == updated.id)
+            .expect("updated track");
+        assert_eq!(stored_updated.title, "Updated title");
+        assert_eq!(stored_updated.rating, Some(4));
+        assert_eq!(stored_updated.play_count, 9);
+        assert_eq!(stored_updated.last_played, Some(1234));
+        assert_eq!(stored_updated.date_added, 42);
+        assert!(stored.iter().any(|track| track.id == unreadable.id));
+    }
+
+    #[test]
+    fn reconcile_folder_scan_clears_stale_art_cache_fields_when_hashes_are_not_precomputed() {
+        let db = test_db();
+        let mut changed = sample_track("art-reindexed");
+        changed.id = "/tmp/folder/art-reindexed.mp3".to_string();
+        changed.file_path = changed.id.clone();
+        changed.has_cover_art = true;
+        changed.cover_art_hash = Some("old-art-hash".to_string());
+        changed.blurhash = Some("old-blurhash".to_string());
+
+        let mut removed = sample_track("art-removed");
+        removed.id = "/tmp/folder/art-removed.mp3".to_string();
+        removed.file_path = removed.id.clone();
+        removed.has_cover_art = true;
+        removed.cover_art_hash = Some("removed-art-hash".to_string());
+        removed.blurhash = Some("removed-blurhash".to_string());
+
+        db.upsert_tracks_batch(&[changed.clone(), removed.clone()])
+            .expect("seed artwork cache fields");
+
+        let mut changed_scan = changed.clone();
+        changed_scan.cover_art_hash = None;
+        changed_scan.blurhash = None;
+        let mut removed_scan = removed.clone();
+        removed_scan.has_cover_art = false;
+        removed_scan.cover_art_hash = None;
+        removed_scan.blurhash = None;
+
+        db.reconcile_folder_scan(ScanReconcileRequest {
+            folder_path: "/tmp/folder".to_string(),
+            discovered_paths: vec![changed.file_path.clone(), removed.file_path.clone()],
+            tracks: vec![changed_scan, removed_scan],
+            traversal_complete: true,
+            errors: Vec::new(),
+        })
+        .expect("reconcile artwork refresh");
+
+        let stored = db
+            .get_tracks_by_ids(&[changed.id, removed.id])
+            .expect("read refreshed artwork fields");
+        let changed_stored = stored
+            .iter()
+            .find(|track| track.file_path.ends_with("art-reindexed.mp3"))
+            .expect("changed artwork track");
+        let removed_stored = stored
+            .iter()
+            .find(|track| track.file_path.ends_with("art-removed.mp3"))
+            .expect("removed artwork track");
+
+        assert!(changed_stored.has_cover_art);
+        assert_eq!(changed_stored.cover_art_hash, None);
+        assert_eq!(changed_stored.blurhash, None);
+        assert!(!removed_stored.has_cover_art);
+        assert_eq!(removed_stored.cover_art_hash, None);
+        assert_eq!(removed_stored.blurhash, None);
+    }
+
+    #[test]
+    fn reconcile_folder_scan_does_not_delete_rows_after_incomplete_traversal() {
+        let db = test_db();
+        let mut existing = sample_track("kept-after-failure");
+        existing.id = "/tmp/folder/kept.mp3".to_string();
+        existing.file_path = existing.id.clone();
+        db.upsert_tracks_batch(std::slice::from_ref(&existing))
+            .expect("seed track");
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp/folder".to_string(),
+                discovered_paths: Vec::new(),
+                tracks: Vec::new(),
+                traversal_complete: false,
+                errors: vec![ScanReconcileError {
+                    path: None,
+                    code: "traversalFailed".to_string(),
+                    message: "scan failed".to_string(),
+                    recoverable: true,
+                }],
+            })
+            .expect("reconcile incomplete scan");
+
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.missing_count, 0);
+        assert_eq!(db.get_track_count().expect("track count"), 1);
+    }
+
+    #[test]
+    fn cancelled_reconciliation_rolls_back_without_deleting_rows() {
+        let db = test_db();
+        let mut existing = sample_track("kept-after-cancel");
+        existing.id = "/tmp/folder/kept.mp3".to_string();
+        existing.file_path = existing.id.clone();
+        db.upsert_tracks_batch(std::slice::from_ref(&existing))
+            .expect("seed track");
+        let cancellation = AtomicBool::new(true);
+
+        let result = db.reconcile_folder_scan_cancellable(
+            ScanReconcileRequest {
+                folder_path: "/tmp/folder".to_string(),
+                discovered_paths: Vec::new(),
+                tracks: Vec::new(),
+                traversal_complete: true,
+                errors: Vec::new(),
+            },
+            Some(&cancellation),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(db.get_track_count().expect("track count"), 1);
+    }
+
+    #[test]
+    fn reconcile_rejects_tracks_missing_from_discovery_evidence() {
+        let db = test_db();
+        let mut existing = sample_track("kept-after-invalid-request");
+        existing.id = "/tmp/folder/kept.mp3".to_string();
+        existing.file_path = existing.id.clone();
+        existing.rating = Some(5);
+        db.upsert_tracks_batch(std::slice::from_ref(&existing))
+            .expect("seed track");
+
+        let result = db.reconcile_folder_scan(ScanReconcileRequest {
+            folder_path: "/tmp/folder".to_string(),
+            discovered_paths: Vec::new(),
+            tracks: vec![existing.clone()],
+            traversal_complete: true,
+            errors: Vec::new(),
+        });
+
+        assert!(result.is_err());
+        let stored = db
+            .get_tracks_by_ids(&[existing.id.clone()])
+            .expect("read preserved track");
+        assert_eq!(stored.first().and_then(|track| track.rating), Some(5));
+    }
+
+    #[test]
+    fn reconcile_complete_scan_reports_counts_and_removes_only_confirmed_missing_rows() {
+        let db = test_db();
+        let mut unchanged = sample_track("unchanged");
+        unchanged.id = "/tmp/folder/unchanged.mp3".to_string();
+        unchanged.file_path = unchanged.id.clone();
+        let mut missing = sample_track("missing");
+        missing.id = "/tmp/folder/missing.mp3".to_string();
+        missing.file_path = missing.id.clone();
+        let mut outside = sample_track("outside");
+        outside.id = "/tmp/other/outside.mp3".to_string();
+        outside.file_path = outside.id.clone();
+        db.upsert_tracks_batch(&[unchanged.clone(), missing.clone(), outside.clone()])
+            .expect("seed tracks");
+
+        let mut added = sample_track("added");
+        added.id = "/tmp/folder/added.mp3".to_string();
+        added.file_path = added.id.clone();
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp/folder".to_string(),
+                discovered_paths: vec![unchanged.file_path.clone(), added.file_path.clone()],
+                tracks: vec![unchanged.clone(), added.clone()],
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile complete scan");
+
+        assert_eq!(result.status, "complete");
+        assert_eq!(result.discovered_count, 2);
+        assert_eq!(result.added_count, 1);
+        assert_eq!(result.updated_count, 0);
+        assert_eq!(result.unchanged_count, 1);
+        assert_eq!(result.missing_count, 1);
+        assert_eq!(result.preserved_count, 0);
+        let stored = db
+            .get_tracks_by_ids(&[
+                unchanged.id.clone(),
+                missing.id.clone(),
+                outside.id.clone(),
+                added.id.clone(),
+            ])
+            .expect("read reconciled tracks");
+        assert!(stored.iter().any(|track| track.id == unchanged.id));
+        assert!(stored.iter().any(|track| track.id == added.id));
+        assert!(stored.iter().any(|track| track.id == outside.id));
+        assert!(!stored.iter().any(|track| track.id == missing.id));
+    }
+
+    #[test]
+    fn reconcile_preserves_a_file_restored_after_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "tarab-reconcile-restored-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        std::fs::create_dir_all(&root).expect("create scan root");
+        let restored_path = root.join("restored.mp3");
+        let normalized_root = Database::normalize_path(&root.to_string_lossy());
+        let normalized_path = Database::normalize_path(&restored_path.to_string_lossy());
+        let db = test_db();
+        let mut restored = sample_track("restored-after-traversal");
+        restored.id = normalized_path.clone();
+        restored.file_path = normalized_path.clone();
+        db.upsert_tracks_batch(std::slice::from_ref(&restored))
+            .expect("seed omitted track");
+        let request = ScanReconcileRequest {
+            folder_path: normalized_root,
+            discovered_paths: Vec::new(),
+            tracks: Vec::new(),
+            traversal_complete: true,
+            errors: Vec::new(),
+        };
+
+        std::fs::write(&restored_path, b"restored after traversal").expect("restore file");
+        let result = db
+            .reconcile_folder_scan(request)
+            .expect("reconcile restored file");
+
+        assert_eq!(result.missing_count, 0);
+        assert_eq!(result.preserved_count, 1);
+        assert_eq!(
+            db.get_tracks_by_ids(&[normalized_path])
+                .expect("read preserved track")
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reconcile_does_not_treat_a_symlink_escape_as_a_restored_file() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "tarab-reconcile-symlink-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "tarab-reconcile-outside-{}-{:032x}",
+            std::process::id(),
+            rand::random::<u128>()
+        ));
+        std::fs::create_dir_all(&root).expect("create scan root");
+        std::fs::create_dir_all(&outside).expect("create outside root");
+        std::fs::write(outside.join("escaped.mp3"), b"outside audio").expect("write outside file");
+        symlink(&outside, root.join("escape")).expect("create escape symlink");
+        let normalized_root = Database::normalize_path(&root.to_string_lossy());
+        let escaped_path =
+            Database::normalize_path(&root.join("escape").join("escaped.mp3").to_string_lossy());
+        let db = test_db();
+        let mut escaped = sample_track("escaped-track");
+        escaped.id = escaped_path.clone();
+        escaped.file_path = escaped_path.clone();
+        db.upsert_tracks_batch(std::slice::from_ref(&escaped))
+            .expect("seed escaped track");
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: normalized_root,
+                discovered_paths: Vec::new(),
+                tracks: Vec::new(),
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile symlink escape");
+
+        assert_eq!(result.missing_count, 1);
+        assert_eq!(result.preserved_count, 0);
+        assert!(db
+            .get_tracks_by_ids(&[escaped_path])
+            .expect("read tracks")
+            .is_empty());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn reconcile_large_scan_counts_preserved_paths_from_precomputed_sets() {
+        const TRACK_COUNT: usize = 2_048;
+
+        let db = test_db();
+        let tracks = (0..TRACK_COUNT)
+            .map(|index| sample_track(&format!("large-{index:04}")))
+            .collect::<Vec<_>>();
+        db.upsert_tracks_batch(&tracks).expect("seed large scan");
+
+        let mut discovered_paths = tracks
+            .iter()
+            .map(|track| track.file_path.clone())
+            .collect::<Vec<_>>();
+        discovered_paths.push(tracks[0].file_path.clone());
+        let reconciled_tracks = tracks.iter().step_by(2).cloned().collect::<Vec<_>>();
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp".to_string(),
+                discovered_paths,
+                tracks: reconciled_tracks,
+                traversal_complete: true,
+                errors: vec![ScanReconcileError {
+                    path: None,
+                    code: "metadataReadFailed".to_string(),
+                    message: "some metadata was unavailable".to_string(),
+                    recoverable: true,
+                }],
+            })
+            .expect("reconcile large scan");
+
+        assert_eq!(result.status, "partial");
+        assert_eq!(result.discovered_count, TRACK_COUNT);
+        assert_eq!(result.unchanged_count, TRACK_COUNT / 2);
+        assert_eq!(result.preserved_count, TRACK_COUNT / 2);
+        assert_eq!(result.missing_count, 0);
+        assert_eq!(
+            db.get_track_count().expect("track count"),
+            TRACK_COUNT as i64
+        );
+    }
+
+    #[test]
     fn migrate_v4_backfills_snapshots_and_allows_missing_references() {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
         conn.execute_batch(
@@ -2616,6 +2597,17 @@ mod tests {
     }
 
     #[test]
+    fn all_track_ids_are_returned_in_a_stable_order() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("b"), sample_track("a")])
+            .expect("seed tracks");
+
+        let ids = db.get_all_track_ids().expect("read track ids");
+
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
     fn smart_shuffle_fetches_requested_tracks_in_batch() {
         let db = test_db();
         db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
@@ -2645,6 +2637,431 @@ mod tests {
     }
 
     #[test]
+    fn paginated_track_sort_uses_id_to_stabilize_ties() {
+        let db = test_db();
+        let mut tracks = [sample_track("z"), sample_track("m"), sample_track("a")];
+        for track in &mut tracks {
+            track.title = "Tied title".to_string();
+        }
+        db.upsert_tracks_batch(&tracks).expect("seed tied tracks");
+
+        let ids = (0..tracks.len() as u32)
+            .map(|offset| {
+                db.get_tracks_paginated(offset, 1, "title", "asc")
+                    .expect("read tied page")[0]
+                    .id
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["a", "m", "z"]);
+    }
+
+    #[test]
+    fn cursor_track_pages_use_id_to_stabilize_sort_ties() {
+        let db = test_db();
+        let mut tracks = [sample_track("z"), sample_track("m"), sample_track("a")];
+        for track in &mut tracks {
+            track.title = "Tied title".to_string();
+        }
+        db.upsert_tracks_batch(&tracks).expect("seed tied tracks");
+
+        let mut cursor = None;
+        let mut ids = Vec::new();
+        loop {
+            let page = db
+                .get_tracks_cursor_page(cursor.as_ref(), 1, "title", "asc")
+                .expect("read cursor page");
+            assert_eq!(page.status, TrackCursorPageStatus::Ready);
+            ids.extend(page.tracks.into_iter().map(|track| track.id));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+
+        assert_eq!(ids, vec!["a", "m", "z"]);
+    }
+
+    #[test]
+    fn cursor_track_pages_require_restart_after_insert_and_delete() {
+        let db = test_db();
+        let mut tracks = [sample_track("a"), sample_track("b"), sample_track("c")];
+        for track in &mut tracks {
+            track.title = "Tied title".to_string();
+        }
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+        let first = db
+            .get_tracks_cursor_page(None, 1, "title", "asc")
+            .expect("read first page");
+        let cursor = first.next_cursor.expect("next cursor");
+        assert_eq!(first.tracks[0].id, "a");
+
+        db.delete_tracks(&["b".to_string()])
+            .expect("delete between pages");
+        let mut inserted = sample_track("d");
+        inserted.title = "Tied title".to_string();
+        db.upsert_tracks_batch(&[inserted])
+            .expect("insert between pages");
+
+        let stale = db
+            .get_tracks_cursor_page(Some(&cursor), 1, "title", "asc")
+            .expect("reject stale cursor");
+        assert_eq!(stale.status, TrackCursorPageStatus::RestartRequired);
+        assert!(stale.tracks.is_empty());
+
+        let mut restarted_cursor = None;
+        let mut restarted_ids = Vec::new();
+        loop {
+            let page = db
+                .get_tracks_cursor_page(restarted_cursor.as_ref(), 1, "title", "asc")
+                .expect("read restarted page");
+            assert_eq!(page.status, TrackCursorPageStatus::Ready);
+            restarted_ids.extend(page.tracks.into_iter().map(|track| track.id));
+            match page.next_cursor {
+                Some(next) => restarted_cursor = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(restarted_ids, vec!["a", "c", "d"]);
+    }
+
+    #[test]
+    fn lyrics_track_pages_break_nocase_id_ties_with_unique_id() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("A")])
+            .expect("seed case-tied tracks");
+
+        let first = db
+            .get_track_paths_page(0, 1)
+            .expect("read first lyrics track page");
+        let second = db
+            .get_track_paths_page(1, 1)
+            .expect("read second lyrics track page");
+
+        assert_eq!(first[0].id, "A");
+        assert_eq!(second[0].id, "a");
+    }
+
+    #[test]
+    fn lyrics_cursor_and_apply_reject_a_mutation_between_traversal_and_commit() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[sample_track("a"), sample_track("b")])
+            .expect("seed tracks");
+        db.upsert_lyrics_index_batch(&[LyricsIndexEntry {
+            track_id: "a".to_string(),
+            lyrics_path: "/tmp/a.lrc".to_string(),
+            lyrics_mtime: 1,
+            content: "original".to_string(),
+        }])
+        .expect("seed lyrics");
+        let first = db
+            .get_track_paths_cursor_page(None, 1)
+            .expect("read lyrics cursor page");
+        let cursor = first.next_cursor.expect("next lyrics cursor");
+
+        db.delete_tracks(&["b".to_string()])
+            .expect("mutate library between pages");
+        let stale_page = db
+            .get_track_paths_cursor_page(Some(&cursor), 1)
+            .expect("reject stale lyrics cursor");
+        assert!(stale_page.restart_required);
+        assert_eq!(
+            db.apply_lyrics_index_sync(first.revision, &[], &["a".to_string()])
+                .expect("reject stale lyrics apply"),
+            LyricsIndexSyncApply::RestartRequired
+        );
+        assert_eq!(db.lyrics_index_count().expect("lyrics count"), 1);
+    }
+
+    #[test]
+    fn folder_track_ids_are_sorted_and_do_not_include_siblings() {
+        let db = test_db();
+        let mut second = sample_track("folder-second");
+        second.id = "/music/album/02.mp3".to_string();
+        second.file_path = second.id.clone();
+        let mut first = sample_track("folder-first");
+        first.id = "/music/album/01.mp3".to_string();
+        first.file_path = first.id.clone();
+        let mut sibling = sample_track("folder-sibling");
+        sibling.id = "/music/album-live/01.mp3".to_string();
+        sibling.file_path = sibling.id.clone();
+        db.upsert_tracks_batch(&[second, sibling, first])
+            .expect("seed folder tracks");
+
+        let ids = db
+            .get_track_ids_by_folder("/music/album")
+            .expect("read folder track IDs");
+
+        assert_eq!(
+            ids,
+            vec![
+                "/music/album/01.mp3".to_string(),
+                "/music/album/02.mp3".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn album_and_artist_aggregates_cover_the_full_library() {
+        let db = test_db();
+        let mut first = sample_track("aggregate-a");
+        first.artist = "Track Artist".to_string();
+        first.album_artist = Some("Album Artist".to_string());
+        first.album = "Shared Album".to_string();
+        let mut second = sample_track("aggregate-b");
+        second.artist = "Track Artist".to_string();
+        second.album_artist = Some("Album Artist".to_string());
+        second.album = "Shared Album".to_string();
+        second.has_cover_art = true;
+        second.cover_art_hash = Some("b".repeat(64));
+        let mut third = sample_track("aggregate-c");
+        third.artist = "Other Artist".to_string();
+        third.album = "Other Album".to_string();
+        db.upsert_tracks_batch(&[first, second, third])
+            .expect("seed aggregate tracks");
+
+        let albums = db.get_album_aggregates().expect("read album aggregates");
+        let shared_album = albums
+            .iter()
+            .find(|album| album.album == "Shared Album")
+            .expect("shared album aggregate");
+        assert_eq!(shared_album.artist, "Album Artist");
+        assert_eq!(shared_album.track_count, 2);
+        assert!(shared_album.representative.has_cover_art);
+
+        let artists = db.get_artist_aggregates().expect("read artist aggregates");
+        let track_artist = artists
+            .iter()
+            .find(|artist| artist.artist == "Track Artist")
+            .expect("track artist aggregate");
+        assert_eq!(track_artist.track_count, 2);
+        assert!(track_artist.representative.has_cover_art);
+    }
+
+    #[test]
+    fn album_aggregates_and_detail_queries_ignore_case_differences() {
+        let db = test_db();
+        let mut first = sample_track("case-album-first");
+        first.album = "Shared Album".to_string();
+        first.artist = "Various".to_string();
+        let mut second = sample_track("case-album-second");
+        second.album = "shared album".to_string();
+        second.artist = "various".to_string();
+
+        db.upsert_tracks_batch(&[first, second])
+            .expect("seed case-variant album tracks");
+
+        let aggregates = db.get_album_aggregates().expect("read album aggregates");
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(
+            db.get_tracks_by_album_artist("SHARED ALBUM", "VARIOUS")
+                .expect("read case-insensitive album details")
+                .len(),
+            2
+        );
+    }
+    #[test]
+    fn artist_aggregates_and_detail_queries_ignore_case_differences() {
+        let db = test_db();
+        let mut first = sample_track("case-artist-first");
+        first.artist = "Various".to_string();
+        let mut second = sample_track("case-artist-second");
+        second.artist = "various".to_string();
+
+        db.upsert_tracks_batch(&[first, second])
+            .expect("seed case-variant artist tracks");
+
+        let aggregates = db.get_artist_aggregates().expect("read artist aggregates");
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].track_count, 2);
+        assert!(aggregates[0].artist.eq_ignore_ascii_case("various"));
+        assert_eq!(
+            db.get_tracks_by_artist("VARIOUS")
+                .expect("read case-insensitive artist details")
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn library_stats_count_albums_by_effective_artist() {
+        let db = test_db();
+        let mut first = sample_track("stats-first");
+        first.album = "Shared Album".to_string();
+        first.artist = "First Artist".to_string();
+        let mut second = sample_track("stats-second");
+        second.album = "Shared Album".to_string();
+        second.artist = "Second Artist".to_string();
+        let mut third = sample_track("stats-third");
+        third.album = "Shared Album".to_string();
+        third.artist = "First Artist".to_string();
+
+        db.upsert_tracks_batch(&[first, second, third])
+            .expect("seed library stats tracks");
+
+        let stats = db.get_library_stats().expect("read library stats");
+
+        assert_eq!(stats.track_count, 3);
+        assert_eq!(stats.artist_count, 2);
+        assert_eq!(stats.album_count, 2);
+    }
+    #[test]
+    fn library_stats_count_artist_names_without_case_splits() {
+        let db = test_db();
+        let mut first = sample_track("stats-case-first");
+        first.artist = "Artist".to_string();
+        let mut second = sample_track("stats-case-second");
+        second.artist = "artist".to_string();
+
+        db.upsert_tracks_batch(&[first, second])
+            .expect("seed case-variant stats tracks");
+
+        let stats = db.get_library_stats().expect("read library stats");
+
+        assert_eq!(stats.track_count, 2);
+        assert_eq!(stats.artist_count, 1);
+    }
+
+    #[test]
+    fn whitespace_album_artist_falls_back_to_track_artist() {
+        let db = test_db();
+        let mut first = sample_track("whitespace-album-artist-first");
+        first.album = "Shared Album".to_string();
+        first.artist = "Artist".to_string();
+        first.album_artist = Some("   ".to_string());
+
+        let mut second = sample_track("whitespace-album-artist-second");
+        second.album = "shared album".to_string();
+        second.artist = "Artist".to_string();
+
+        db.upsert_tracks_batch(&[first, second])
+            .expect("seed whitespace album artist tracks");
+
+        let albums = db
+            .get_album_aggregates()
+            .expect("read whitespace aggregate");
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].artist, "Artist");
+        assert_eq!(albums[0].track_count, 2);
+        assert_eq!(
+            db.get_tracks_by_album_artist("SHARED ALBUM", "ARTIST")
+                .expect("read whitespace album detail")
+                .len(),
+            2
+        );
+        assert_eq!(
+            db.get_library_stats()
+                .expect("read whitespace stats")
+                .album_count,
+            1
+        );
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_path_normalization_preserves_backslashes() {
+        let path = "/tmp/artist\\live/song.mp3";
+        assert_eq!(Database::normalize_path(path), path);
+    }
+
+    #[test]
+    fn rebase_track_paths_preserves_track_and_playlist_identity() {
+        let db = test_db();
+        let old_path = "/missing/music/album/song.mp3";
+        let new_path = "/restored/music/album/song.mp3";
+        let mut track = sample_track("rebase");
+        track.id = old_path.to_string();
+        track.file_path = old_path.to_string();
+        track.rating = Some(4);
+        track.play_count = 12;
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+        db.create_playlist(&sample_playlist("rebase-playlist"))
+            .expect("create playlist");
+        db.add_tracks_to_playlist("rebase-playlist", &[old_path.to_string()])
+            .expect("add track");
+        let mut folder_playlist = sample_playlist("rebase-folder-playlist");
+        folder_playlist.playlist_type = "foldersync".to_string();
+        folder_playlist.folder_path = Some("/missing/music/album".to_string());
+        db.create_playlist(&folder_playlist)
+            .expect("create folder playlist");
+
+        let count = db
+            .rebase_track_paths("/missing/music", "/restored/music")
+            .expect("rebase source");
+
+        assert_eq!(count, 1);
+        let updated = db
+            .get_tracks_by_ids(&[new_path.to_string()])
+            .expect("read updated track");
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].rating, Some(4));
+        assert_eq!(updated[0].play_count, 12);
+        let entries = db
+            .get_playlist_track_entries("rebase-playlist")
+            .expect("read playlist");
+        assert_eq!(entries[0].track_id, new_path);
+        assert_eq!(entries[0].snapshot_file_path.as_deref(), Some(new_path));
+        assert_eq!(
+            db.get_playlist_by_id("rebase-folder-playlist")
+                .expect("read folder playlist")
+                .expect("folder playlist")
+                .folder_path
+                .as_deref(),
+            Some("/restored/music/album")
+        );
+    }
+
+    #[test]
+    fn revoked_root_source_cleanup_is_explicit_and_root_safe() {
+        let db = test_db();
+        let mut first = sample_track("root-a");
+        first.id = "/music/a.mp3".to_string();
+        first.file_path = first.id.clone();
+        let mut second = sample_track("root-b");
+        second.id = "/other/b.mp3".to_string();
+        second.file_path = second.id.clone();
+        db.upsert_tracks_batch(&[first, second])
+            .expect("seed root tracks");
+
+        assert!(db.delete_tracks_by_folder("/").is_err());
+        assert_eq!(
+            db.delete_tracks_for_library_source("/")
+                .expect("clean revoked root source"),
+            2
+        );
+        assert_eq!(db.get_track_count().expect("track count"), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn revoked_windows_drive_root_cleanup_matches_only_that_drive() {
+        let db = test_db();
+        let mut c_drive = sample_track("drive-c");
+        c_drive.id = "C:/Music/a.mp3".to_string();
+        c_drive.file_path = c_drive.id.clone();
+        let mut d_drive = sample_track("drive-d");
+        d_drive.id = "D:/Music/b.mp3".to_string();
+        d_drive.file_path = d_drive.id.clone();
+        db.upsert_tracks_batch(&[c_drive, d_drive.clone()])
+            .expect("seed drive tracks");
+
+        assert!(db.delete_tracks_by_folder("C:/").is_err());
+        assert_eq!(
+            db.delete_tracks_for_library_source("C:/")
+                .expect("clean revoked drive root"),
+            1
+        );
+        assert_eq!(
+            db.get_tracks_by_ids(&[d_drive.id])
+                .expect("remaining drive track")
+                .len(),
+            1
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn cleanup_duplicates_and_normalize_merges_path_variants() {
         let db = test_db();
         let now = now_millis_i64_or_default();
@@ -2658,31 +3075,36 @@ mod tests {
             let conn = db.conn.lock();
             conn.execute(
                 "INSERT INTO tracks (id, title, artist, album, year, duration, file_path, has_cover_art, cover_art_hash, date_added, play_count, last_played, rating)
-                 VALUES (?1, ?2, ?3, ?4, NULL, 180, ?5, 0, NULL, ?6, 0, NULL, NULL)",
+                 VALUES (?1, ?2, ?3, ?4, NULL, 180, ?5, 0, NULL, ?6, 7, 20, 5)",
                 params![backslash_path, "Backslash", "Artist", "Album", backslash_path, now],
             )
             .expect("insert backslash track");
             conn.execute(
                 "INSERT INTO tracks (id, title, artist, album, year, duration, file_path, has_cover_art, cover_art_hash, date_added, play_count, last_played, rating)
-                 VALUES (?1, ?2, ?3, ?4, NULL, 180, ?5, 0, NULL, ?6, 0, NULL, NULL)",
+                 VALUES (?1, ?2, ?3, ?4, NULL, 180, ?5, 0, NULL, ?6, 3, 10, NULL)",
                 params![slash_path, "Slash", "Artist", "Album", slash_path, now + 1],
             )
             .expect("insert slash track");
             conn.execute(
-                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_file_path) VALUES (?1, ?2, 0, ?3, ?4)",
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_title, snapshot_file_path) VALUES (?1, ?2, 0, ?3, 'Backslash snapshot', ?4)",
                 params!["pl_cleanup", backslash_path, now, backslash_path],
             )
             .expect("insert backslash playlist track");
             conn.execute(
-                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_file_path) VALUES (?1, ?2, 1, ?3, ?4)",
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_artist, snapshot_file_path) VALUES (?1, ?2, 1, ?3, 'Slash snapshot artist', ?4)",
                 params!["pl_cleanup", slash_path, now + 1, slash_path],
             )
             .expect("insert slash playlist track");
             conn.execute(
-                "INSERT OR REPLACE INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content) VALUES (?1, ?2, 1, 'line')",
+                "INSERT INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content) VALUES (?1, ?2, 1, 'old line')",
                 params![backslash_path, r"C:\music\song.lrc"],
             )
             .expect("insert backslash lyrics index");
+            conn.execute(
+                "INSERT INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content) VALUES (?1, ?2, 2, 'new line')",
+                params![slash_path, "C:/music/song.lrc"],
+            )
+            .expect("insert slash lyrics index");
         }
 
         db.cleanup_duplicates_and_normalize()
@@ -2692,12 +3114,25 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].id, slash_path);
         assert_eq!(tracks[0].file_path, slash_path);
+        assert_eq!(tracks[0].title, "Slash");
+        assert_eq!(tracks[0].rating, Some(5));
+        assert_eq!(tracks[0].play_count, 10);
+        assert_eq!(tracks[0].last_played, Some(20));
+        assert_eq!(tracks[0].date_added, now);
 
         let playlist_entries = db
             .get_playlist_track_entries("pl_cleanup")
             .expect("read playlist entries");
         assert_eq!(playlist_entries.len(), 1);
         assert_eq!(playlist_entries[0].track_id, slash_path);
+        assert_eq!(
+            playlist_entries[0].snapshot_title.as_deref(),
+            Some("Backslash snapshot")
+        );
+        assert_eq!(
+            playlist_entries[0].snapshot_artist.as_deref(),
+            Some("Slash snapshot artist")
+        );
         assert_eq!(
             playlist_entries[0].snapshot_file_path.as_deref(),
             Some(slash_path)
@@ -2706,6 +3141,99 @@ mod tests {
         let lyrics_entries = db.get_lyrics_index_meta().expect("read lyrics index");
         assert_eq!(lyrics_entries.len(), 1);
         assert_eq!(lyrics_entries[0].track_id, slash_path);
+        assert_eq!(lyrics_entries[0].lyrics_path, "C:/music/song.lrc");
+        assert_eq!(lyrics_entries[0].lyrics_mtime, 2);
+        let lyrics_content: String = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT content FROM lyrics_index WHERE track_id = ?1",
+                [slash_path],
+                |row| row.get(0),
+            )
+            .expect("read merged lyrics content");
+        assert_eq!(lyrics_content, "new line");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reconcile_accepts_verbatim_prefixed_folder_with_public_discovered_paths() {
+        let db = test_db();
+        let mut track = sample_track("verbatim");
+        track.id = "C:/music/song.mp3".to_string();
+        track.file_path = track.id.clone();
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "//?/C:/music".to_string(),
+                discovered_paths: vec!["C:/music/song.mp3".to_string()],
+                tracks: vec![track.clone()],
+                traversal_complete: true,
+                errors: vec![],
+            })
+            .expect("reconcile verbatim folder path");
+
+        assert_eq!(result.status, "complete");
+        assert_eq!(result.added_count, 1);
+        let stored = db
+            .get_tracks_by_ids(&["C:/music/song.mp3".to_string()])
+            .expect("read reconciled track");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].file_path, "C:/music/song.mp3");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_normalizes_verbatim_prefixed_legacy_rows() {
+        let db = test_db();
+        let now = now_millis_i64_or_default();
+        let verbatim_path = "//?/C:/music/song.mp3";
+        let public_path = "C:/music/song.mp3";
+
+        db.create_playlist(&sample_playlist("pl_verbatim"))
+            .expect("create playlist");
+
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, album, year, duration, file_path, has_cover_art, cover_art_hash, date_added, play_count, last_played, rating)
+                 VALUES (?1, ?2, ?3, ?4, NULL, 180, ?5, 0, NULL, ?6, 7, 20, 5)",
+                params![verbatim_path, "Verbatim", "Artist", "Album", verbatim_path, now],
+            )
+            .expect("insert verbatim track");
+            conn.execute(
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, snapshot_title, snapshot_file_path) VALUES (?1, ?2, 0, ?3, 'Verbatim snapshot', ?4)",
+                params!["pl_verbatim", verbatim_path, now, verbatim_path],
+            )
+            .expect("insert verbatim playlist track");
+            conn.execute(
+                "INSERT INTO lyrics_index (track_id, lyrics_path, lyrics_mtime, content) VALUES (?1, ?2, 1, 'verbatim line')",
+                params![verbatim_path, "//?/C:/music/song.lrc"],
+            )
+            .expect("insert verbatim lyrics index");
+        }
+
+        db.cleanup_duplicates_and_normalize()
+            .expect("cleanup_duplicates_and_normalize");
+
+        let tracks = db.get_all_tracks().expect("read tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, public_path);
+        assert_eq!(tracks[0].file_path, public_path);
+
+        let playlist_entries = db
+            .get_playlist_track_entries("pl_verbatim")
+            .expect("read playlist entries");
+        assert_eq!(playlist_entries.len(), 1);
+        assert_eq!(playlist_entries[0].track_id, public_path);
+        assert_eq!(
+            playlist_entries[0].snapshot_file_path.as_deref(),
+            Some(public_path)
+        );
+
+        let lyrics_entries = db.get_lyrics_index_meta().expect("read lyrics index");
+        assert_eq!(lyrics_entries.len(), 1);
+        assert_eq!(lyrics_entries[0].track_id, public_path);
         assert_eq!(lyrics_entries[0].lyrics_path, "C:/music/song.lrc");
     }
 }

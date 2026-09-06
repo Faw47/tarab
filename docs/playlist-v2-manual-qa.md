@@ -1,4 +1,8 @@
 # Playlist v2 Manual QA Checklist
+The playlist keyboard and inline-rename contracts also have automated coverage in
+src/components/playlist/PlaylistsView.test.tsx and
+src/components/playlist/usePlaylistTrackSelection.test.tsx. The checkboxes below remain
+manual native QA and must not be marked complete from unit or Storybook results alone.
 
 ## Migration
 
@@ -21,7 +25,7 @@
 - [ ] Pin and unpin playlists, then confirm pinned collections stay at the top of the playlist surface.
 - [ ] Edit manual playlist name and verify list/detail update.
 - [ ] Rename a playlist inline from the playlist surface and verify the name updates without opening a modal.
-- [ ] Create smart playlist (preset + params), run sync, and verify resolved tracks.
+- [ ] Create smart playlist (preset + params, including a genre filter), run sync, and verify resolved tracks.
 - [ ] Create folder playlist, run sync, and verify resolved tracks.
 - [ ] Delete playlist and confirm list/detail state updates cleanly.
 

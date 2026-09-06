@@ -25,13 +25,13 @@ import {
 } from 'lucide-react';
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useSmoothTimeSubscription } from '../../contexts/smooth-time';
 import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { lazyWithRetry } from '../../lib/lazy-with-retry';
 import { useRenderLog } from '../../lib/performance';
 import {
   playAdjacentTrack,
-  seekToPosition,
+  startPlayback,
   toggleCurrentPlayback,
 } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
@@ -42,17 +42,17 @@ import {
   setPlaybackSpeed as setAudioPlaybackSpeed,
 } from '../../lib/tauri-commands';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
-import { usePlayerStore } from '../../store/player-store';
+import { resolveQueueTrackIndex, usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
+import { CoverArtImage } from '../shared/CoverArtImage';
+import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { IconButton } from '../ui/IconButton';
 import { QueueIcon as ListMusic, TrackIcon, VinylIcon } from '../ui/Icons';
+import { StatePanel } from '../ui/StatePanel';
 import { LyricsDisplay } from './LyricsDisplay';
 import { LyricsSnippet } from './LyricsSnippet';
-import { ParallaxCoverArt } from './ParallaxCoverArt';
-import { PlayerProgressBar } from './PlayerProgressBar';
 import { PlayerVolume } from './PlayerVolume';
-import { TiltAlbumArt } from './TiltAlbumArt';
 
 interface PlayerContentProps {
   onClose: () => void;
@@ -67,7 +67,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   const {
     currentTrack,
     isPlaying,
-    duration,
     playbackSpeed,
     shuffleEnabled,
     loopMode,
@@ -76,11 +75,13 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
     toggleShuffle,
     toggleLoop,
     addToQueue: addTrackToQueue,
+    playbackError,
+    setPlaybackError,
+    removeFromQueue,
   } = usePlayerStore(
     useShallow((s) => ({
       currentTrack: s.currentTrack,
       isPlaying: s.isPlaying,
-      duration: s.duration,
       playbackSpeed: s.playbackSpeed,
       shuffleEnabled: s.shuffleEnabled,
       loopMode: s.loopMode,
@@ -89,6 +90,9 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       toggleShuffle: s.toggleShuffle,
       toggleLoop: s.toggleLoop,
       addToQueue: s.addToQueue,
+      playbackError: s.playbackError,
+      setPlaybackError: s.setPlaybackError,
+      removeFromQueue: s.removeFromQueue,
     })),
   );
 
@@ -100,21 +104,36 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
     currentTrack?.coverArtHash,
   );
 
-  const lyricsEnabled = useSettingsStore((s) => s.lyricsEnabled);
-  const reducedEffects = useSettingsStore((s) => s.reducedEffects);
-  const fullscreenPlayerLayout = useSettingsStore((s) => s.fullscreenPlayerLayout);
-  const fullscreenHideCoverArt = useSettingsStore((s) => s.fullscreenHideCoverArt);
-  const fullscreenLyricSize = useSettingsStore((s) => s.fullscreenLyricSize);
-  const fullscreenLyricAlignment = useSettingsStore((s) => s.fullscreenLyricAlignment);
-  const fullscreenBackgroundAnimation = useSettingsStore((s) => s.fullscreenBackgroundAnimation);
-  const fullscreenBackgroundBlur = useSettingsStore((s) => s.fullscreenBackgroundBlur);
-  const setFullscreenHideCoverArt = useSettingsStore((s) => s.setFullscreenHideCoverArt);
-  const setFullscreenLyricSize = useSettingsStore((s) => s.setFullscreenLyricSize);
-  const setFullscreenLyricAlignment = useSettingsStore((s) => s.setFullscreenLyricAlignment);
-  const setFullscreenBackgroundAnimation = useSettingsStore(
-    (s) => s.setFullscreenBackgroundAnimation,
+  const {
+    lyricsEnabled,
+    fullscreenPlayerLayout,
+    fullscreenHideCoverArt,
+    fullscreenLyricSize,
+    fullscreenLyricAlignment,
+    fullscreenBackgroundAnimation,
+    fullscreenBackgroundBlur,
+    setFullscreenHideCoverArt,
+    setFullscreenLyricSize,
+    setFullscreenLyricAlignment,
+    setFullscreenBackgroundAnimation,
+    setFullscreenBackgroundBlur,
+  } = useSettingsStore(
+    useShallow((s) => ({
+      lyricsEnabled: s.lyricsEnabled,
+      fullscreenPlayerLayout: s.fullscreenPlayerLayout,
+      fullscreenHideCoverArt: s.fullscreenHideCoverArt,
+      fullscreenLyricSize: s.fullscreenLyricSize,
+      fullscreenLyricAlignment: s.fullscreenLyricAlignment,
+      fullscreenBackgroundAnimation: s.fullscreenBackgroundAnimation,
+      fullscreenBackgroundBlur: s.fullscreenBackgroundBlur,
+      setFullscreenHideCoverArt: s.setFullscreenHideCoverArt,
+      setFullscreenLyricSize: s.setFullscreenLyricSize,
+      setFullscreenLyricAlignment: s.setFullscreenLyricAlignment,
+      setFullscreenBackgroundAnimation: s.setFullscreenBackgroundAnimation,
+      setFullscreenBackgroundBlur: s.setFullscreenBackgroundBlur,
+    })),
   );
-  const setFullscreenBackgroundBlur = useSettingsStore((s) => s.setFullscreenBackgroundBlur);
+  const reducedEffects = useEffectiveReducedEffects();
   const hasLyrics = lyricsEnabled && !!lyrics && lyrics.lines.length > 0;
 
   const [viewMode, setViewMode] = useState<'card' | 'lyrics'>('card');
@@ -131,28 +150,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const actionsRef = useRef<HTMLButtonElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
-  // Fullscreen cover-art progress bar (updated imperatively to avoid 60fps re-renders)
-  const progressRef = useRef<HTMLDivElement>(null);
-
-  const setCoverProgress = useCallback(
-    (timeSec: number) => {
-      if (!progressRef.current) return;
-      const clamped = Math.max(0, Math.min(timeSec, duration || 0));
-      const progress = duration > 0 ? (clamped / duration) * 100 : 0;
-      progressRef.current.style.background = `linear-gradient(to right,
-            rgba(255,255,255,0.9) ${progress}%,
-            rgba(255,255,255,0.2) ${progress}%)`;
-    },
-    [duration],
-  );
-
-  useSmoothTimeSubscription((timeSec) => {
-    setCoverProgress(timeSec);
-  });
-
-  useEffect(() => {
-    setCoverProgress(usePlayerStore.getState().currentTime || 0);
-  }, [currentTrack?.id, duration, setCoverProgress]);
 
   useEffect(() => {
     if (!showActions) return;
@@ -214,22 +211,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       reportError('Failed to play next track', { source: 'player-content', error: e });
     }
   }, []);
-
-  const handleSeekClick = useCallback(
-    async (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!progressRef.current || duration === 0) return;
-      const rect = progressRef.current.getBoundingClientRect();
-      const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const newTime = percent * duration;
-      setCoverProgress(newTime);
-      try {
-        await seekToPosition(newTime);
-      } catch (err) {
-        reportError('Failed to seek playback', { source: 'player-content', error: err });
-      }
-    },
-    [duration, setCoverProgress],
-  );
 
   const handleEditTags = useCallback(() => {
     setTagEditorInitialTab(undefined);
@@ -302,15 +283,106 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   if (!currentTrack) return null;
 
+  const handleRetryPlayback = async () => {
+    try {
+      await startPlayback(currentTrack, {
+        startPos: usePlayerStore.getState().currentTime,
+      });
+      setPlaybackError(null);
+    } catch (error) {
+      reportError('Playback retry failed', { source: 'player-content', error });
+    }
+  };
+
+  const handleSkipPlaybackError = async () => {
+    try {
+      const nextTrack = await playAdjacentTrack('next');
+      if (nextTrack) setPlaybackError(null);
+    } catch (error) {
+      reportError('Failed to skip unavailable track', { source: 'player-content', error });
+    }
+  };
+
+  const handleRemoveFailedTrack = async () => {
+    const failedTrack = currentTrack;
+    try {
+      await playAdjacentTrack('next');
+    } catch {
+      // The failed item can still be removed when there is no playable next item.
+    }
+    const state = usePlayerStore.getState();
+    const index = resolveQueueTrackIndex(state.queue, failedTrack);
+    if (index >= 0) removeFromQueue(index);
+
+    const latest = usePlayerStore.getState();
+    const currentIsFailedOccurrence = latest.currentTrack
+      ? failedTrack._queueId !== undefined
+        ? latest.currentTrack._queueId === failedTrack._queueId
+        : latest.currentTrack.id === failedTrack.id &&
+          latest.currentTrack.filePath === failedTrack.filePath
+      : false;
+    if (currentIsFailedOccurrence) {
+      latest.setCurrentTrack(null);
+      latest.setQueueIndex(-1);
+      latest.setCurrentTime(0);
+      latest.setDuration(0);
+      latest.setIsPlaying(false);
+      latest.setHasActivePlayback(false);
+    }
+    setPlaybackError(null);
+  };
+
+  const playbackErrorBanner = playbackError ? (
+    <StatePanel
+      tone="error"
+      title="Playback could not continue"
+      description={playbackError.message}
+      actions={
+        <>
+          <button
+            type="button"
+            className="rounded-lg border border-current/35 px-3 py-2 text-sm hover:bg-black/10"
+            onClick={handleRetryPlayback}
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-current/35 px-3 py-2 text-sm hover:bg-black/10"
+            onClick={handleSkipPlaybackError}
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-current/35 px-3 py-2 text-sm hover:bg-black/10"
+            onClick={handleRevealInFinder}
+          >
+            Reveal in Finder
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-current/35 px-3 py-2 text-sm hover:bg-black/10"
+            onClick={handleRemoveFailedTrack}
+          >
+            Remove from Queue
+          </button>
+        </>
+      }
+      className="absolute inset-x-6 top-20 z-[70] mx-auto max-w-3xl text-sm shadow-2xl backdrop-blur-xl"
+    />
+  ) : null;
+
   // ============================================
   // FULLSCREEN LAYOUT (Two-column with animated background)
   // ============================================
   if (fullscreenPlayerLayout) {
     return (
       <>
+        {playbackErrorBanner}
         {/* Animated Cover Art Background */}
-        <div className="absolute inset-0 -z-20 overflow-hidden">
-          {coverArt && (
+        <div className="absolute inset-0 -z-20 overflow-hidden bg-[var(--surface-shell)]">
+          {coverArt && !reduceBlur && (
             <div className="absolute inset-0">
               <div
                 className={clsx(
@@ -346,6 +418,8 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           <IconButton
             onClick={onClose}
             title="Collapse player"
+            aria-label="Collapse player"
+            data-collapse-player
             className="w-10 h-10 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white backdrop-blur-md"
           >
             <ChevronDown className="w-5 h-5" />
@@ -370,25 +444,19 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               {/* Album Art with Integrated Progress Bar */}
               <div className="relative w-full max-w-md aspect-square group">
                 {/* Cover Art Container */}
-                <div className="w-full h-full rounded-2xl relative">
-                  {coverArt ? (
-                    <TiltAlbumArt src={coverArt} className="w-full h-full" />
-                  ) : (
-                    <div className="w-full h-full bg-zinc-800 flex items-center justify-center rounded-2xl shadow-2xl shadow-black/50">
-                      <VinylIcon className="w-24 h-24 text-zinc-600" />
-                    </div>
-                  )}
-
-                  {/* Progress Bar - Integrated at bottom of cover art, expands on hover */}
-                  <div
-                    ref={progressRef}
-                    onClick={handleSeekClick}
-                    className="absolute bottom-0 left-0 right-0 h-1 group-hover:h-2.5 cursor-pointer transition-all duration-200 z-10"
-                    style={{
-                      background:
-                        'linear-gradient(to right, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.2) 0%)',
-                    }}
+                <div className="w-full h-full rounded-2xl overflow-hidden relative">
+                  <CoverArtImage
+                    track={currentTrack}
+                    alt={`${currentTrack.album} cover`}
+                    lazy={false}
+                    size="large"
+                    className="w-full h-full shadow-2xl shadow-black/50"
+                    imgClassName="w-full h-full"
+                    roundedClassName="rounded-2xl"
+                    iconClassName="w-24 h-24"
                   />
+
+                  <HidingProgressBar accentColor="var(--hero-accent)" />
                 </div>
               </div>
 
@@ -445,6 +513,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                   onClick={handleTogglePlay}
                   title={isPlaying ? 'Pause' : 'Play'}
                   className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/30"
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.96)', color: '#09090b' }}
                 >
                   {isPlaying ? (
                     <Pause className="w-6 h-6" fill="currentColor" />
@@ -594,7 +663,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                   <div className="px-3 py-1.5">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-xs text-text-muted">Lyric Size</div>
-                      <div className="text-[10px] text-zinc-400 font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                      <div className="text-xs text-zinc-400 font-mono bg-white/5 px-1.5 py-0.5 rounded">
                         {fullscreenLyricSize}
                       </div>
                     </div>
@@ -705,23 +774,21 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
         )}
 
         {showTagEditor && (
-          <div className="fixed inset-0 z-[100]">
-            <Suspense fallback={null}>
-              <TagEditorModal
-                tracks={tagEditorTracks}
-                onClose={() => {
-                  setShowTagEditor(false);
-                  setTagEditorInitialTab(undefined);
-                }}
-                onSave={() => {
-                  if (currentTrack) {
-                    refreshTracksByFilePaths([currentTrack.filePath]);
-                  }
-                }}
-                initialTab={tagEditorInitialTab}
-              />
-            </Suspense>
-          </div>
+          <Suspense fallback={null}>
+            <TagEditorModal
+              tracks={tagEditorTracks}
+              onClose={() => {
+                setShowTagEditor(false);
+                setTagEditorInitialTab(undefined);
+              }}
+              onSave={() => {
+                if (currentTrack) {
+                  refreshTracksByFilePaths([currentTrack.filePath]);
+                }
+              }}
+              initialTab={tagEditorInitialTab}
+            />
+          </Suspense>
         )}
 
         <PlaylistPickerDialog
@@ -738,8 +805,9 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   // ============================================
   return (
     <>
+      {playbackErrorBanner}
       {/* Ambient Background (Reduced Blur) */}
-      <div className="absolute inset-0 -z-20 overflow-hidden">
+      <div className="absolute inset-0 -z-20 overflow-hidden bg-[var(--surface-shell)]">
         {coverArt && !reduceBlur ? (
           <>
             <div
@@ -761,14 +829,14 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               }}
             />
           </>
-        ) : (
+        ) : !reduceBlur ? (
           <div
             className="absolute inset-0"
             style={{
               background: 'radial-gradient(circle at top, rgba(56,189,248,0.2), transparent 60%)',
             }}
           />
-        )}
+        ) : null}
         <div className="absolute inset-0 bg-black/70" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-transparent to-black/85" />
       </div>
@@ -777,6 +845,8 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       <IconButton
         onClick={onClose}
         title="Collapse player"
+        aria-label="Collapse player"
+        data-collapse-player
         className="absolute top-6 left-6 z-40 p-2 text-white/70 hover:text-white transition-colors"
       >
         <ChevronDown className="w-5 h-5" />
@@ -786,19 +856,19 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       <div className="flex-1 w-full h-full flex items-center justify-center p-6 sm:p-12 relative">
         {/* The "Card" Container */}
         <div className="relative w-full max-w-5xl bg-black/40 backdrop-blur-2xl border border-white/5 rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[500px] md:h-[400px] animate-fade-in-up">
-          {/* Top Progress Bar */}
-          <div className="absolute top-0 left-0 right-0 z-50 h-1 hover:h-4 group transition-all duration-300">
-            <PlayerProgressBar showLabels={false} variant="mini" className="h-full" />
-          </div>
+          <HidingProgressBar accentColor="var(--hero-accent)" />
 
           {/* Left: Cover Art */}
           <div className="w-full md:w-[400px] h-[300px] md:h-full relative shrink-0">
-            <ParallaxCoverArt
-              src={coverArt || undefined}
-              isPlaying={isPlaying}
-              style={{ width: '100%', height: '100%' }}
-              className="rounded-none md:rounded-l-3xl h-full w-full object-cover"
-              coverArtHash={currentTrack.coverArtHash}
+            <CoverArtImage
+              track={currentTrack}
+              alt={`${currentTrack.album} cover`}
+              lazy={false}
+              size="large"
+              className="h-full w-full"
+              imgClassName="h-full w-full object-cover"
+              roundedClassName="rounded-none md:rounded-l-3xl"
+              iconClassName="h-20 w-20"
             />
             <div className="absolute inset-0 ring-1 ring-inset ring-white/5 md:rounded-l-3xl pointer-events-none" />
           </div>
@@ -807,20 +877,20 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           <div className="flex-1 flex flex-col justify-between p-6 md:p-8 relative min-w-0 bg-gradient-to-b from-white/[0.02] to-transparent">
             {/* Top: Header & Metadata */}
             <div className="space-y-6">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted/80">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-white/55">
                 <Headphones className="w-3 h-3" />
                 <span>Now Playing</span>
               </div>
 
               <div className="space-y-1">
-                <h1 className="text-3xl md:text-5xl font-bold text-white truncate leading-tight tracking-tight">
+                <h1 className="text-3xl md:text-5xl font-bold text-white truncate leading-tight tracking-normal">
                   {currentTrack.title}
                 </h1>
                 <div className="flex flex-col">
                   <p className="text-lg md:text-xl text-text-secondary truncate font-medium">
                     {currentTrack.artist}
                   </p>
-                  <p className="text-xs md:text-sm text-text-muted truncate mt-0.5">
+                  <p className="text-xs md:text-sm text-white/50 truncate mt-0.5">
                     {currentTrack.album}
                   </p>
                 </div>
@@ -832,7 +902,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               <LyricsSnippet />
             </div>
 
-            {/* Bottom: Controls */}
             {/* Bottom: Controls */}
             <div className="flex items-center justify-between gap-4 mt-auto">
               <div className="flex items-center gap-4">
@@ -861,7 +930,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 >
                   <SkipForward className="w-5 h-5" fill="currentColor" />
                 </IconButton>
-                <div className="hidden sm:block ml-2">
+                <div className="hidden lg:block ml-2">
                   <PlayerVolume />
                 </div>
               </div>
@@ -872,7 +941,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                     onClick={() => setViewMode((v) => (v === 'lyrics' ? 'card' : 'lyrics'))}
                     title={viewMode === 'lyrics' ? 'Hide lyrics' : 'Show lyrics'}
                     className={clsx(
-                      'w-10 h-10 p-2 transition-all',
+                      'w-10 h-10 p-2 transition-[color,background-color,transform] duration-[var(--motion-fast)]',
                       viewMode === 'lyrics' ? 'text-primary' : 'text-text-muted hover:text-white',
                     )}
                   >
@@ -883,7 +952,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                   onClick={() => setShowActions(!showActions)}
                   title="More actions"
                   ref={actionsRef}
-                  className="w-10 h-10 p-2 text-text-muted hover:text-white transition-all"
+                  className="w-10 h-10 p-2 text-text-muted hover:text-white transition-colors duration-[var(--motion-fast)]"
                 >
                   <MoreHorizontal className="w-5 h-5" />
                 </IconButton>

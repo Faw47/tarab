@@ -1,5 +1,5 @@
 /**
- * Separable Gaussian weights for shell blur passes (`fragment-bg-*blur.glsl`).
+ * Optional separable Gaussian weights for shader consumers.
  * Normalized so discrete convolution preserves energy (symmetric taps, center + pairs).
  */
 

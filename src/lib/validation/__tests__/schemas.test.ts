@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DbTrackSchema } from '../library';
+import { DbTrackCursorPageSchema, DbTrackSchema } from '../library';
 import { PlaylistSummarySchema } from '../playlist';
 import { LyricsSearchResultSchema, SearchResultSchema } from '../search';
 import { SettingsSchema } from '../settings';
@@ -81,7 +81,10 @@ describe('Zod Schemas', () => {
         title: 'Song',
         artist: 'Artist',
         album: 'Album',
+        genre: 'Classical',
         year: 2024,
+        trackNumber: 7,
+        discNumber: 2,
         duration: 245,
         filePath: '/music/song.mp3',
         hasCoverArt: true,
@@ -94,6 +97,37 @@ describe('Zod Schemas', () => {
 
       const result = DbTrackSchema.safeParse(validDbTrack);
       expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.trackNumber).toBe(7);
+        expect(result.data.discNumber).toBe(2);
+        expect(result.data.genre).toBe('Classical');
+      }
+    });
+  });
+
+  describe('DbTrackCursorPageSchema', () => {
+    it('parses a typed restart response without track rows', () => {
+      const result = DbTrackCursorPageSchema.safeParse({
+        status: 'restartRequired',
+        tracks: [],
+        nextCursor: null,
+        revision: 12,
+        totalCount: 42,
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects an unknown cursor status', () => {
+      const result = DbTrackCursorPageSchema.safeParse({
+        status: 'continueAnyway',
+        tracks: [],
+        nextCursor: null,
+        revision: 12,
+        totalCount: 42,
+      });
+
+      expect(result.success).toBe(false);
     });
   });
 

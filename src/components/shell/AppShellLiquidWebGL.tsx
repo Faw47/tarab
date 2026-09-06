@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { topBarAuroraFragmentShader, topBarAuroraVertexShader } from './header-aurora-shaders';
 import { LiquidBackgroundPlane, type LiquidBgColors } from './liquid-background-mesh';
 import { LiquidShellRenderPipeline } from './liquid-shell-render-pipeline';
+
 import { useDocumentHidden } from './use-document-hidden';
 import { LIQUID_HEADER_STRIP_PX, liquidShellGl, liquidShellOrthoCamera } from './webgl-defaults';
 
@@ -201,7 +202,7 @@ export const AppShellLiquidWebGL = memo(function AppShellLiquidWebGL({
   if (reducedEffects) return null;
 
   return (
-    <div className="fixed inset-0 z-0 pointer-events-none select-none overflow-hidden bg-[#040408]">
+    <div className="fixed inset-0 z-0 pointer-events-none select-none overflow-hidden bg-[var(--surface-shell)]">
       <Canvas
         className="h-full w-full"
         gl={liquidShellGl}

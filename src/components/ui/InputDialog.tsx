@@ -4,8 +4,16 @@ import { memo, useCallback, useEffect, useId, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSettingsStore } from '../../store/settings-store';
 import { Button } from './button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './dialog';
 import { IconButton } from './IconButton';
+import { Input } from './Input';
 
 export interface InputDialogProps {
   title: string;
@@ -62,7 +70,7 @@ export const InputDialog = memo(
           className={clsx(
             'w-full max-w-md p-6',
             isNeobrutalism
-              ? 'bg-white border-3 border-black shadow-[12px_12px_0_0_#000] rounded-none'
+              ? 'bg-white border-3 border-black shadow-[var(--neo-shadow-2xl)] rounded-none'
               : 'rounded-2xl border border-zinc-800 bg-surface shadow-2xl',
           )}
         >
@@ -71,7 +79,7 @@ export const InputDialog = memo(
               className={clsx(
                 'text-lg',
                 isNeobrutalism
-                  ? 'font-black uppercase tracking-tight text-black'
+                  ? 'font-black uppercase tracking-normal text-black'
                   : 'font-semibold text-text-primary',
               )}
             >
@@ -87,6 +95,10 @@ export const InputDialog = memo(
             </IconButton>
           </DialogHeader>
 
+          <DialogDescription className="sr-only">
+            {label ? `${label} for ${title}.` : `Enter a value for ${title}.`}
+          </DialogDescription>
+
           <div className="space-y-3 mb-6">
             {label && (
               <label
@@ -99,19 +111,15 @@ export const InputDialog = memo(
                 {label}
               </label>
             )}
-            <input
+            <Input
               id={inputId}
               type="text"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder={placeholder}
               aria-label={label ?? title}
-              className={clsx(
-                'w-full px-4 py-3 outline-none transition-all duration-200',
-                isNeobrutalism
-                  ? 'bg-white border-2 border-black rounded-none shadow-[4px_4px_0_0_#000] focus:shadow-[6px_6px_0_0_#000] focus:-translate-x-0.5 focus:-translate-y-0.5 text-black font-bold placeholder:text-black/40'
-                  : 'bg-surface-light text-text-primary rounded-lg border border-zinc-700 focus:ring-2 focus:ring-primary',
-              )}
+              theme={isNeobrutalism ? 'neobrutalism' : 'liquid-glass'}
+              className="w-full px-4 py-3"
               autoFocus
               onKeyDown={handleKeyDown}
             />

@@ -1,6 +1,10 @@
 import { useCallback, useRef } from 'react';
 import type { NavView } from '../components/navigation';
-import { savePlayerStateToStore } from '../features/app/player-state-store';
+import {
+  isPlayerStateHydrated,
+  savePlayerStateToStore,
+  waitForPlayerStateHydration,
+} from '../features/app/player-state-store';
 import { getAlbumKeyFromParts } from '../lib/album-key';
 import { usePlayerStore } from '../store/player-store';
 
@@ -11,6 +15,7 @@ export function useSessionPersistence(
   const lastSessionSaveRef = useRef(0);
   const sessionSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedPositionRef = useRef(0);
+  const quiescingRef = useRef(false);
 
   const buildSessionPayload = useCallback(() => {
     const state = usePlayerStore.getState();
@@ -56,40 +61,59 @@ export function useSessionPersistence(
   }, [currentView, albumDetails?.album, albumDetails?.artist]);
 
   const flushSessionSave = useCallback(async () => {
+    if (sessionSaveTimeoutRef.current !== null) {
+      clearTimeout(sessionSaveTimeoutRef.current);
+      sessionSaveTimeoutRef.current = null;
+    }
+    if (!isPlayerStateHydrated()) return;
     const payload = buildSessionPayload();
     lastSessionSaveRef.current = Date.now();
     lastSavedPositionRef.current = payload.currentTime;
-    try {
-      await savePlayerStateToStore(payload);
-    } catch (err) {
-      console.error('Failed to save playback session:', err);
-    }
+    await savePlayerStateToStore(payload);
   }, [buildSessionPayload]);
 
   const scheduleSessionSave = useCallback(
     (immediate = false) => {
+      if (quiescingRef.current) return;
+      if (!isPlayerStateHydrated()) return;
       if (immediate) {
-        if (sessionSaveTimeoutRef.current) {
+        if (sessionSaveTimeoutRef.current !== null) {
           clearTimeout(sessionSaveTimeoutRef.current);
           sessionSaveTimeoutRef.current = null;
         }
-        flushSessionSave();
+        void flushSessionSave().catch((error) => {
+          console.error('Failed to save playback session:', error);
+        });
         return;
       }
-      if (sessionSaveTimeoutRef.current) return;
+      if (sessionSaveTimeoutRef.current !== null) return;
       const now = Date.now();
       const elapsed = now - lastSessionSaveRef.current;
       const delay = elapsed >= 5000 ? 0 : 5000 - elapsed;
       sessionSaveTimeoutRef.current = setTimeout(() => {
         sessionSaveTimeoutRef.current = null;
-        flushSessionSave();
+        void flushSessionSave().catch((error) => {
+          console.error('Failed to save playback session:', error);
+        });
       }, delay);
     },
     [flushSessionSave],
   );
 
+  const prepareSessionForQuit = useCallback(async () => {
+    quiescingRef.current = true;
+    if (sessionSaveTimeoutRef.current !== null) {
+      clearTimeout(sessionSaveTimeoutRef.current);
+      sessionSaveTimeoutRef.current = null;
+    }
+    await waitForPlayerStateHydration();
+    await flushSessionSave();
+  }, [flushSessionSave]);
+
   return {
     scheduleSessionSave,
+    flushSessionSave,
+    prepareSessionForQuit,
     lastSavedPositionRef,
     lastSessionSaveRef,
   };

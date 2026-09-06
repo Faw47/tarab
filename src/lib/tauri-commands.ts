@@ -1,4 +1,5 @@
 import { invoke as originalInvoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { ipcBatchLimit } from './ipc-concurrency';
 import { Perf } from './performance';
 
@@ -9,8 +10,10 @@ const invoke = <T>(cmd: string, args?: unknown): Promise<T> => {
 import type {
   BackendSmartPlaylistRule,
   DesktopMediaSessionSyncPayload,
+  DesktopMiniControlAction,
+  DesktopMiniSeekPayload,
   DesktopNativeUiState,
-  Playlist,
+  LoopMode,
   PlaylistDetail,
   PlaylistSummary,
   PlaylistType,
@@ -20,21 +23,75 @@ import type {
 } from '../types';
 
 // Audio playback commands
-export const playTrack = async (filePath: string, startPos?: number): Promise<void> => {
-  return invoke('play_track', { filePath, startPos });
+export interface GaplessPreloadIdentity {
+  preloadId: string;
+  generation: number;
+  path: string;
+}
+
+export interface GaplessHandoff {
+  outgoingPath: string;
+  outgoingGeneration: number;
+  preload: GaplessPreloadIdentity;
+}
+
+export type GaplessCancellationOutcome =
+  | { status: 'cancelled'; preload: GaplessPreloadIdentity }
+  | { status: 'handedOff'; handoff: GaplessHandoff }
+  | { status: 'stale'; preload: GaplessPreloadIdentity };
+
+export interface PlaybackSourceIdentity {
+  generation: number;
+  path: string;
+}
+
+export type SeekPlaybackOutcome =
+  | {
+      status: 'applied';
+      position: number;
+      gaplessCancellation: GaplessCancellationOutcome | null;
+    }
+  | {
+      status: 'stale';
+      expectedSource: PlaybackSourceIdentity;
+      activeSource: PlaybackSourceIdentity | null;
+      gaplessCancellation: GaplessCancellationOutcome | null;
+    }
+  | {
+      status: 'failed';
+      message: string;
+      gaplessCancellation: GaplessCancellationOutcome | null;
+    };
+
+export const playTrack = async (
+  filePath: string,
+  startPos?: number,
+  authorityId?: string,
+): Promise<number> => {
+  return invoke('play_track', {
+    filePath,
+    startPos,
+    ...(authorityId ? { authorityId } : {}),
+  });
 };
 
 export const crossfadeToTrack = async (
   filePath: string,
   durationSecs: number,
   startPos?: number,
-): Promise<void> => {
+): Promise<number> => {
   return invoke('crossfade_to_track', { filePath, startPos, durationSecs });
 };
 
 /** Queue-decoded next file on the current Sink for gapless playback (no crossfade). */
-export const preloadNextTrack = async (filePath: string | null): Promise<void> => {
+export const preloadNextTrack = async (filePath: string): Promise<GaplessPreloadIdentity> => {
   return invoke('preload_next_track', { filePath });
+};
+
+export const cancelGaplessPreload = async (
+  preload: GaplessPreloadIdentity,
+): Promise<GaplessCancellationOutcome> => {
+  return invoke('cancel_gapless_preload', { preload });
 };
 
 export const pausePlayback = async (): Promise<void> => {
@@ -45,12 +102,15 @@ export const resumePlayback = async (): Promise<void> => {
   return invoke('resume_playback');
 };
 
-export const stopPlayback = async (): Promise<void> => {
+export const stopPlayback = async (): Promise<number> => {
   return invoke('stop_playback');
 };
 
-export const seekPlayback = async (positionSecs: number): Promise<void> => {
-  return invoke('seek_playback', { positionSecs });
+export const seekPlayback = async (
+  positionSecs: number,
+  expectedSource: PlaybackSourceIdentity,
+): Promise<SeekPlaybackOutcome> => {
+  return invoke('seek_playback', { positionSecs, expectedSource });
 };
 
 export const getPlaybackPosition = async (): Promise<number> => {
@@ -92,6 +152,7 @@ export const setAudioBooster = async (level: number): Promise<void> => {
 // Playback session persistence
 export interface PlaybackSessionPayload {
   version: number;
+  revision?: number;
   currentTrackId: string | null;
   queueIds: string[];
   queueIndex: number;
@@ -100,9 +161,9 @@ export interface PlaybackSessionPayload {
   volume: number;
   wasPlaying: boolean;
   shuffleEnabled: boolean;
-  loopMode: string;
+  loopMode: LoopMode;
   stopAfterCurrent: boolean;
-  lastView?: string;
+  lastView?: string | null;
   lastOpenedAlbum: string | null;
   lastOpenedArtist: string | null;
   lastOpenedAlbumKey?: string | null;
@@ -117,16 +178,48 @@ export const savePlaybackSession = async (session: PlaybackSessionPayload): Prom
   return invoke('save_playback_session', { session });
 };
 
+type FixedStoreName = 'settings' | 'player';
+
+export const fixedStoreGet = async <T>(store: FixedStoreName, key: string): Promise<T | null> => {
+  return invoke('fixed_store_get', { store, key });
+};
+
+export const fixedStoreSet = async (
+  store: FixedStoreName,
+  key: string,
+  value: unknown,
+): Promise<void> => {
+  return invoke('fixed_store_set', { store, key, value });
+};
+
+export const fixedStoreRemove = async (store: FixedStoreName, key: string): Promise<void> => {
+  return invoke('fixed_store_remove', { store, key });
+};
+
 export interface AudioOutputDeviceInfo {
   id: string;
   name: string;
+}
+
+export type AudioOutputSelection =
+  | { status: 'selected'; deviceId: string }
+  | { status: 'migrated'; deviceId: string }
+  | {
+      status: 'fallback';
+      deviceId: 'system';
+      reason: 'notFound' | 'ambiguousLegacyName' | 'unavailable';
+    };
+
+export interface AudioOutputSwitchOutcome {
+  selection: AudioOutputSelection;
+  gaplessCancellation: GaplessCancellationOutcome | null;
 }
 
 export const listAudioOutputDevices = (): Promise<AudioOutputDeviceInfo[]> => {
   return invoke('list_audio_output_devices');
 };
 
-export const setAudioOutputDevice = (deviceId: string): Promise<void> => {
+export const setAudioOutputDevice = (deviceId: string): Promise<AudioOutputSwitchOutcome> => {
   return invoke('set_audio_output_device', { deviceId });
 };
 
@@ -139,16 +232,87 @@ export const moveFile = async (oldPath: string, newPath: string): Promise<string
   return invoke('move_file', { oldPath, newPath });
 };
 
-export const deleteFiles = async (filePaths: string[]): Promise<number> => {
+export const deleteFiles = async (filePaths: string[]): Promise<FileMutationResult[]> => {
   return invoke('delete_files', { filePaths });
+};
+
+export const trashFiles = async (filePaths: string[]): Promise<FileMutationResult[]> => {
+  return invoke('trash_files', { filePaths });
+};
+
+export const restoreTrashedFiles = async (undoTokens: string[]): Promise<FileMutationResult[]> => {
+  return invoke('restore_trashed_files', { undoTokens });
+};
+
+export interface RecoverableTrashEntry {
+  undoToken: string;
+  originalPath: string;
+  displayName: string;
+  sizeBytes: number;
+  createdAtMs: number;
+  status: 'available' | 'restorePending' | 'missing';
+}
+
+export const listRecoverableTrashEntries = async (): Promise<RecoverableTrashEntry[]> => {
+  return invoke('list_recoverable_trash_entries');
+};
+
+export const purgeTrashedFiles = async (undoTokens: string[]): Promise<FileMutationResult[]> => {
+  return invoke('purge_trashed_files', { undoTokens });
 };
 
 export const revealInFileManager = async (path: string): Promise<void> => {
   return invoke('reveal_in_file_manager', { path });
 };
 
-export const setLibraryRoots = async (roots: string[]): Promise<void> => {
-  return invoke('set_library_roots', { roots });
+export interface LibraryGrantSummary {
+  id: string;
+  path: string;
+  displayName: string;
+  status: 'available' | 'missing';
+}
+
+export interface LibraryHealthState {
+  nativeGrants: LibraryGrantSummary[];
+  cachedSources: Array<{
+    grantId: string;
+    path: string;
+    indexedTrackCount: number;
+  }>;
+  unavailableSources: LibraryGrantSummary[];
+  watcherState: 'inactive' | 'ready';
+  repairActions: Array<'reauthorize' | 'addFolder' | 'viewDetails' | 'rescan'>;
+}
+
+export const listLibraryGrants = async (): Promise<LibraryGrantSummary[]> => {
+  return invoke('list_library_grants');
+};
+
+export const getLibraryHealth = async (): Promise<LibraryHealthState> => {
+  return invoke('get_library_health');
+};
+
+export const selectLibraryFolder = async (): Promise<LibraryGrantSummary | null> => {
+  return invoke('select_library_folder');
+};
+
+export const reauthorizeLibraryGrant = async (
+  grantId: string,
+): Promise<LibraryGrantSummary | null> => {
+  return invoke('reauthorize_library_grant', { grantId });
+};
+
+export interface LibrarySourceRemovalResult {
+  grantId: string;
+  path: string;
+  removedTrackCount: number;
+  databaseCleanupCompleted: boolean;
+  cleanupPending: boolean;
+  cleanupError: string | null;
+}
+
+export const removeLibrarySource = async (grantId: string): Promise<LibrarySourceRemovalResult> => {
+  return invoke('remove_library_source', { grantId });
 };
 
 export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
@@ -156,23 +320,142 @@ export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
 };
 
 // Library commands
-export const scanLibrary = async (folderPath: string, followLinks?: boolean): Promise<string[]> => {
-  return invoke('scan_library', { folderPath, followLinks });
+interface LibraryScanPathChunk {
+  scanId: string;
+  paths: string[];
+}
+
+interface LibraryScanStreamSummary {
+  scanId: string;
+  pathCount: number;
+}
+
+const streamLibraryScan = async (
+  scanId: string,
+  runScan: (scanId: string) => Promise<LibraryScanStreamSummary>,
+): Promise<string[]> => {
+  const paths: string[] = [];
+  let expectedCount: number | null = null;
+  let resolveComplete: (() => void) | null = null;
+  let streamTimeout: number | null = null;
+  const unlisten = await listen<LibraryScanPathChunk>('library-scan-path-chunk', (event) => {
+    if (event.payload.scanId === scanId) {
+      paths.push(...event.payload.paths);
+      if (expectedCount !== null && paths.length >= expectedCount) {
+        resolveComplete?.();
+      }
+    }
+  });
+  try {
+    const summary = await runScan(scanId);
+    if (summary.scanId !== scanId) {
+      throw new Error('Library scan stream returned an invalid scan identifier.');
+    }
+    expectedCount = summary.pathCount;
+    if (paths.length < expectedCount) {
+      await new Promise<void>((resolve, reject) => {
+        resolveComplete = () => {
+          if (streamTimeout !== null) {
+            window.clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+          resolve();
+        };
+        streamTimeout = window.setTimeout(() => {
+          streamTimeout = null;
+          reject(new Error('Library scan path stream timed out.'));
+        }, 5_000);
+      });
+    }
+    if (summary.pathCount !== paths.length) {
+      throw new Error('Library scan stream did not deliver the expected number of paths.');
+    }
+    return paths;
+  } finally {
+    if (streamTimeout !== null) {
+      window.clearTimeout(streamTimeout);
+      streamTimeout = null;
+    }
+    resolveComplete = null;
+    unlisten();
+  }
+};
+
+export const finishLibraryScan = async (scanId: string): Promise<void> => {
+  return invoke('finish_library_scan', { scanId });
+};
+
+export const scanLibrary = async (
+  folderPath: string,
+  followLinks?: boolean,
+  providedScanId?: string,
+): Promise<string[]> => {
+  const scanId = providedScanId ?? crypto.randomUUID();
+  try {
+    return await streamLibraryScan(scanId, (id) =>
+      invoke('scan_library', {
+        scanId: id,
+        folderPath,
+        followLinks,
+      }),
+    );
+  } finally {
+    if (!providedScanId) await finishLibraryScan(scanId).catch(() => undefined);
+  }
+};
+
+export const cancelLibraryScan = async (scanId: string): Promise<void> => {
+  return invoke('cancel_library_scan', { scanId });
 };
 
 export const scanLibraryParallel = async (
   folderPath: string,
   followLinks?: boolean,
+  providedScanId?: string,
 ): Promise<string[]> => {
-  return invoke('scan_library_parallel', { folderPath, followLinks });
+  const scanId = providedScanId ?? crypto.randomUUID();
+  try {
+    return await streamLibraryScan(scanId, (id) =>
+      invoke('scan_library_parallel', {
+        scanId: id,
+        folderPath,
+        followLinks,
+      }),
+    );
+  } finally {
+    if (!providedScanId) await finishLibraryScan(scanId).catch(() => undefined);
+  }
 };
 
-export const getTrackMetadata = async (filePath: string): Promise<TrackMetadata> => {
-  return invoke('get_track_metadata', { filePath });
+export const getTrackMetadata = async (
+  filePath: string,
+  authorityId?: string,
+): Promise<TrackMetadata> => {
+  return invoke('get_track_metadata', {
+    filePath,
+    ...(authorityId ? { authorityId } : {}),
+  });
 };
 
 export const getCoverArt = async (filePath: string): Promise<string | null> => {
   return invoke('get_cover_art', { filePath });
+};
+
+export interface CoverArtResolution {
+  status: 'ready' | 'noArt' | 'sourceUnavailable' | 'invalidRequest';
+  hash: string | null;
+  size: 'small' | 'medium' | 'large';
+  cacheAvailable: boolean;
+  regenerated: boolean;
+  failureReason: 'missingLibraryGrant' | 'sourceAccessDenied' | 'unsupportedSize' | null;
+}
+
+export const resolveCoverArt = async (
+  filePath: string,
+  preferredHash: string | null,
+  size: 'small' | 'medium' | 'large',
+): Promise<CoverArtResolution> => {
+  return invoke('resolve_cover_art', { filePath, preferredHash, size });
 };
 
 export interface CoverArtPalette {
@@ -194,7 +477,10 @@ export interface BatchTrackMetadata {
   artist: string;
   album_artist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
+  track_number: number | null;
+  disc_number: number | null;
   duration_secs: number;
   file_path: string;
   has_cover_art: boolean;
@@ -211,7 +497,10 @@ export interface BatchTrackMetadataWithArt {
   artist: string;
   album_artist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
+  track_number: number | null;
+  disc_number: number | null;
   duration_secs: number;
   file_path: string;
   cover_art: string | null;
@@ -238,11 +527,12 @@ export const getBatchCoverArt = async (filePaths: string[]): Promise<[string, st
 
 export const generateCoverArtHashes = async (
   filePaths: string[],
+  force = false,
 ): Promise<[string, string | null][]> => {
   return ipcBatchLimit(async () => {
     const result: [string, [string, string | null] | null][] = await invoke(
       'generate_cover_art_hashes',
-      { filePaths },
+      { filePaths, force },
     );
     return result.map(([path, data]) => [path, data ? data[0] : null]);
   });
@@ -302,13 +592,15 @@ export const selectFolder = async (): Promise<string | null> => {
   return dialog.openFolder();
 };
 
-export const selectImageFile = async (): Promise<string | null> => {
-  const selected = await dialog.openImageFiles('Select Cover Art', false);
-  return selected ? selected[0] : null;
-};
+export type ArtworkMime = 'image/jpeg' | 'image/png' | 'image/webp';
 
-export const readImageAsBase64 = async (filePath: string): Promise<[string, string]> => {
-  return invoke('read_image_as_base64', { filePath });
+export interface SelectedArtwork {
+  base64: string;
+  mime: ArtworkMime;
+}
+
+export const pickCoverArt = async (): Promise<SelectedArtwork | null> => {
+  return invoke('pick_cover_art');
 };
 
 // Playlist commands
@@ -320,27 +612,26 @@ export const getPlaylistDetail = async (playlistId: string): Promise<PlaylistDet
   return invoke('get_playlist_detail', { playlistId });
 };
 
-export const getAllPlaylists = async (): Promise<Playlist[]> => {
-  return invoke('get_all_playlists');
-};
-
 export const createPlaylist = async (
   name: string,
   playlistType: PlaylistType,
   smartRules?: BackendSmartPlaylistRule[],
   folderPath?: string,
-): Promise<Playlist> => {
+): Promise<PlaylistDetail> => {
   return invoke('create_playlist', { name, playlistType, smartRules, folderPath });
 };
 
 export const updatePlaylist = async (
   playlistId: string,
   name?: string,
+  playlistType?: PlaylistType,
   trackIds?: string[],
   smartRules?: BackendSmartPlaylistRule[],
   folderPath?: string,
-): Promise<Playlist> => {
-  return invoke('update_playlist', { playlistId, name, trackIds, smartRules, folderPath });
+): Promise<PlaylistDetail> => {
+  return invoke('update_playlist', {
+    request: { playlistId, name, playlistType, trackIds, smartRules, folderPath },
+  });
 };
 
 export const setPlaylistPinned = async (
@@ -357,22 +648,32 @@ export const deletePlaylist = async (playlistId: string): Promise<void> => {
 export const addTracksToPlaylist = async (
   playlistId: string,
   trackIds: string[],
-): Promise<Playlist> => {
-  return invoke('add_tracks_to_playlist', { playlistId, trackIds });
+  mutationId: string,
+): Promise<PlaylistDetail> => {
+  return invoke('add_tracks_to_playlist', { playlistId, trackIds, mutationId });
 };
 
 export const removeTracksFromPlaylist = async (
   playlistId: string,
   trackIds: string[],
-): Promise<Playlist> => {
+): Promise<PlaylistDetail> => {
   return invoke('remove_tracks_from_playlist', { playlistId, trackIds });
+};
+
+export const relinkPlaylistTrack = async (
+  playlistId: string,
+  oldTrackId: string,
+  newTrackId: string,
+): Promise<PlaylistDetail> => {
+  return invoke('relink_playlist_track', { playlistId, oldTrackId, newTrackId });
 };
 
 export const reorderPlaylistTracks = async (
   playlistId: string,
   trackIds: string[],
-): Promise<Playlist> => {
-  return invoke('reorder_playlist_tracks', { playlistId, trackIds });
+  mutationId: string,
+): Promise<PlaylistDetail> => {
+  return invoke('reorder_playlist_tracks', { playlistId, trackIds, mutationId });
 };
 
 export const syncPlaylist = async (playlistId: string): Promise<PlaylistDetail> => {
@@ -387,12 +688,8 @@ export const resetPlaylistsData = async (): Promise<void> => {
   return invoke('reset_playlists_data');
 };
 
-export const getPlaylistsDataPath = async (): Promise<string> => {
-  return invoke('get_playlists_data_path');
-};
-
-export const syncFolderPlaylist = async (folderPath: string): Promise<string[]> => {
-  return invoke('sync_folder_playlist', { folderPath });
+export const revealPlaylistsDataFolder = async (): Promise<void> => {
+  return invoke('reveal_playlists_data_folder');
 };
 
 // Tag editor commands
@@ -400,14 +697,27 @@ export const readFullTags = async (filePath: string): Promise<TagInfo> => {
   return invoke('read_full_tags', { filePath });
 };
 
-export const writeTags = async (filePath: string, updates: TagUpdate): Promise<void> => {
+export const writeTags = async (
+  filePath: string,
+  updates: TagUpdate,
+): Promise<FileMutationResult> => {
   return invoke('write_tags', { filePath, updates });
 };
+
+export interface FileMutationResult {
+  path: string;
+  status: 'success' | 'failed';
+  operation: 'writeTags' | 'trash' | 'restore' | 'purge' | 'delete';
+  errorCode: string | null;
+  recoverable: boolean;
+  errorMessage: string | null;
+  undoToken: string | null;
+}
 
 export const writeTagsBatch = async (
   filePaths: string[],
   updates: TagUpdate,
-): Promise<string[]> => {
+): Promise<FileMutationResult[]> => {
   return invoke('write_tags_batch', { filePaths, updates });
 };
 
@@ -423,7 +733,10 @@ export interface DbTrack {
   artist: string;
   albumArtist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
+  trackNumber?: number | null;
+  discNumber?: number | null;
   duration: number;
   filePath: string;
   hasCoverArt: boolean;
@@ -433,6 +746,65 @@ export interface DbTrack {
   lastPlayed: number | null;
   rating: number | null;
   blurhash: string | null;
+  fileFormat?: string | null;
+  bitrate?: number | null;
+  sampleRate?: number | null;
+  fileSize?: number | null;
+}
+
+export interface DbTrackPageCursor {
+  revision: number;
+  lastId: string;
+  sortBy: string;
+  sortOrder: string;
+}
+
+export interface DbTrackCursorPage {
+  status: 'ready' | 'restartRequired';
+  tracks: DbTrack[];
+  nextCursor: DbTrackPageCursor | null;
+  revision: number;
+  totalCount: number;
+}
+
+export interface DbAlbumAggregate {
+  album: string;
+  artist: string;
+  trackCount: number;
+  representative: DbTrack;
+}
+
+export interface DbArtistAggregate {
+  artist: string;
+  trackCount: number;
+  representative: DbTrack;
+}
+
+export interface ScanReconcileError {
+  path: string | null;
+  code: string;
+  message: string;
+  recoverable: boolean;
+}
+
+export interface ScanReconcileRequest {
+  folderPath: string;
+  discoveredPaths: string[];
+  tracks: DbTrack[];
+  traversalComplete: boolean;
+  errors: ScanReconcileError[];
+}
+
+export interface ScanReconcileResult {
+  status: 'complete' | 'partial' | 'failed';
+  folderPath: string;
+  discoveredCount: number;
+  addedCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  missingCount: number;
+  preservedCount: number;
+  errors: ScanReconcileError[];
 }
 
 export interface SearchResult {
@@ -443,6 +815,7 @@ export interface SearchResult {
   duration: number;
   filePath: string;
   coverArtHash: string | null;
+  blurhash: string | null;
 }
 
 export interface LyricsSearchResult {
@@ -469,8 +842,49 @@ export const dbGetAllTracks = async (): Promise<DbTrack[]> => {
   return invoke('db_get_all_tracks');
 };
 
+export const dbGetAllTrackIds = async (): Promise<string[]> => {
+  return invoke('db_get_all_track_ids');
+};
+
 export const dbGetTracksByIds = async (ids: string[]): Promise<DbTrack[]> => {
   return invoke('db_get_tracks_by_ids', { ids });
+};
+
+export const dbGetTrackByPublicId = async (publicId: string): Promise<DbTrack | null> => {
+  return invoke('db_get_track_by_public_id', { publicId });
+};
+
+export const getInitialDeepLinks = async (): Promise<string[]> => {
+  return invoke('get_initial_deep_links');
+};
+
+export interface LaunchFileIntent {
+  id: string;
+  displayName: string;
+  folderName: string;
+}
+
+export interface ResolvedLaunchFileIntent {
+  filePath: string;
+  libraryGrant: LibraryGrantSummary | null;
+  authorityId: string | null;
+}
+
+export type LaunchFileIntentAction = 'playOnce' | 'importFolder' | 'cancel';
+
+export const listLaunchFileIntents = async (): Promise<LaunchFileIntent[]> => {
+  return invoke('list_launch_file_intents');
+};
+
+export const resolveLaunchFileIntent = async (
+  intentId: string,
+  action: LaunchFileIntentAction,
+): Promise<ResolvedLaunchFileIntent | null> => {
+  return invoke('resolve_launch_file_intent', { intentId, action });
+};
+
+export const revokeLaunchFileAuthority = async (authorityId: string): Promise<void> => {
+  return invoke('revoke_launch_file_authority', { authorityId });
 };
 
 export const dbGetTracksByAlbumArtist = async (
@@ -480,6 +894,18 @@ export const dbGetTracksByAlbumArtist = async (
   return invoke('db_get_tracks_by_album_artist', { album, artist });
 };
 
+export const dbGetTracksByArtist = async (artist: string): Promise<DbTrack[]> => {
+  return invoke('db_get_tracks_by_artist', { artist });
+};
+
+export const dbGetAlbumAggregates = async (): Promise<DbAlbumAggregate[]> => {
+  return invoke('db_get_album_aggregates');
+};
+
+export const dbGetArtistAggregates = async (): Promise<DbArtistAggregate[]> => {
+  return invoke('db_get_artist_aggregates');
+};
+
 export const dbGetTracksPaginated = async (
   offset: number,
   limit: number,
@@ -487,6 +913,15 @@ export const dbGetTracksPaginated = async (
   sortOrder: string = 'desc',
 ): Promise<DbTrack[]> => {
   return invoke('db_get_tracks_paginated', { offset, limit, sortBy, sortOrder });
+};
+
+export const dbGetTracksCursorPage = async (
+  cursor: DbTrackPageCursor | null,
+  limit: number,
+  sortBy: string = 'dateAdded',
+  sortOrder: string = 'desc',
+): Promise<DbTrackCursorPage> => {
+  return invoke('db_get_tracks_cursor_page', { cursor, limit, sortBy, sortOrder });
 };
 
 export const dbSearchTracks = async (
@@ -510,6 +945,13 @@ export const searchLyrics = async (
 
 export const dbUpsertTracks = async (tracks: DbTrack[]): Promise<number> => {
   return invoke('db_upsert_tracks', { tracks });
+};
+
+export const dbReconcileFolderScan = async (
+  request: ScanReconcileRequest,
+  scanId: string,
+): Promise<ScanReconcileResult> => {
+  return invoke('db_reconcile_folder_scan', { request, scanId });
 };
 
 export const dbGetTrackCount = async (): Promise<number> => {
@@ -648,6 +1090,22 @@ export const desktopFocusMainWindow = async (): Promise<void> => {
 
 export const desktopQuitApplication = async (): Promise<void> => {
   return invoke('desktop_quit_application');
+};
+
+export const desktopMarkRendererReady = async (): Promise<void> => {
+  return invoke('desktop_mark_renderer_ready');
+};
+
+export const desktopMiniControl = async (action: DesktopMiniControlAction): Promise<void> => {
+  return invoke('desktop_mini_control', { action });
+};
+
+export const desktopMiniSeek = async (payload: DesktopMiniSeekPayload): Promise<void> => {
+  return invoke('desktop_mini_seek', { payload });
+};
+
+export const desktopMiniRequestSnapshot = async (): Promise<void> => {
+  return invoke('desktop_mini_request_snapshot');
 };
 
 export const desktopSetNativeUiState = async (payload: DesktopNativeUiState): Promise<void> => {

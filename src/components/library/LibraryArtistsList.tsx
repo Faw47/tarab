@@ -1,6 +1,7 @@
 import { Info, Play } from 'lucide-react';
 import { memo } from 'react';
 import { cn } from '@/lib/utils';
+import { getArtistKey } from '../../lib/album-key';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { VirtualizedList } from '../shared/VirtualizedList';
@@ -41,8 +42,8 @@ const ArtistRow = memo(function ArtistRow({
       <div
         className={cn(
           isNeo
-            ? 'group -mt-[2px] grid cursor-pointer grid-cols-[58px_4.1fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none focus-visible:border-l-black'
-            : 'library-list-row group grid grid-cols-[58px_4.1fr_1fr_132px] cursor-pointer',
+            ? 'library-list-row--artists group -mt-[2px] grid cursor-pointer grid-cols-[58px_4.1fr_1fr_132px] border-y-2 border-r-2 border-black outline-none transition-none focus-visible:border-l-black'
+            : 'library-list-row library-list-row--artists group grid grid-cols-[58px_4.1fr_1fr_132px] cursor-pointer',
           isNeo &&
             isPlayingArtist &&
             'relative z-10 border-l-4 border-l-black bg-[var(--signal-play)]',
@@ -50,9 +51,17 @@ const ArtistRow = memo(function ArtistRow({
             !isPlayingArtist &&
             'border-l-4 border-l-transparent bg-white hover:z-10 hover:bg-[var(--neo-panel)]',
         )}
-        role="button"
+        role="group"
         tabIndex={0}
+        data-virtual-list-focus-target
         onClick={() => onOpen(artist.artist)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpen(artist.artist);
+          }
+        }}
       >
         <div className="flex items-center justify-center">
           <span
@@ -80,7 +89,7 @@ const ArtistRow = memo(function ArtistRow({
           ) : artist.coverArt ? (
             <div
               className={cn(
-                'neo-artist-avatar h-12 w-12 shrink-0 overflow-hidden bg-[#D1D1D1]',
+                'neo-artist-avatar h-12 w-12 shrink-0 overflow-hidden bg-[var(--neo-placeholder)]',
                 !isNeo && 'rounded-lg',
               )}
             >
@@ -96,7 +105,7 @@ const ArtistRow = memo(function ArtistRow({
               className={cn(
                 'flex shrink-0 items-center justify-center',
                 isNeo
-                  ? 'neo-artist-avatar h-12 w-12 bg-[#D1D1D1] text-black'
+                  ? 'neo-artist-avatar h-12 w-12 bg-[var(--neo-placeholder)] text-black'
                   : 'h-12 w-12 rounded-lg bg-secondary/50 text-text-muted',
               )}
             >
@@ -114,19 +123,27 @@ const ArtistRow = memo(function ArtistRow({
             >
               {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
             </div>
+            <span
+              className={cn(
+                'library-list-mobile-meta',
+                isNeo ? 'font-bold uppercase tracking-[0.08em] text-black/60' : 'text-text-muted',
+              )}
+            >
+              {artist.count} {artist.count === 1 ? 'track' : 'tracks'}
+            </span>
           </div>
         </div>
 
         <div className="min-w-0 py-2 flex flex-col justify-center">
           <div
             className={cn(
-              'uppercase tracking-tight inline-flex self-start',
+              'uppercase tracking-normal inline-flex self-start',
               isNeo
-                ? 'border-2 border-black bg-[var(--neo-muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000]'
-                : 'px-2 py-0.5 rounded-md text-[9px] font-bold border border-border/70 text-text-secondary',
+                ? 'border-2 border-[var(--neo-ink)] bg-[var(--neo-muted)] px-2 py-0.5 text-[12px] font-black uppercase tracking-[0.08em] shadow-[var(--neo-shadow-md)]'
+                : 'px-2 py-0.5 rounded-md text-[12px] font-bold border border-border/70 text-text-secondary',
             )}
           >
-            {artist.tracks.length} {artist.tracks.length === 1 ? 'Track' : 'Tracks'}
+            {artist.count} {artist.count === 1 ? 'Track' : 'Tracks'}
           </div>
         </div>
 
@@ -174,7 +191,7 @@ export interface LibraryArtistsListProps {
   searchQuery: string;
   onOpen: (artist: string) => void;
   onPlay: (track: Track) => void;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
   isNeo?: boolean;
   currentTrack?: Track | null;
   isPlaying?: boolean;
@@ -194,9 +211,9 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
     <div className={cn(!isNeo && 'library-list-shell', isNeo && 'h-full flex flex-col')}>
       <div
         className={cn(
-          'library-list-head grid-cols-[58px_4.1fr_1fr_132px]',
+          'library-list-head library-list-head--artists grid-cols-[58px_4.1fr_1fr_132px]',
           isNeo &&
-            'sticky top-0 z-20 mx-0 border-b-2 border-black bg-[var(--neo-muted)] px-2 py-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-black shadow-none',
+            'sticky top-0 z-20 mx-0 border-b-2 border-[var(--neo-ink)] bg-[var(--neo-muted)] px-2 py-2.5 text-[12px] font-black uppercase tracking-[0.1em] text-[var(--neo-ink)] shadow-none',
         )}
       >
         <span className="text-center">#</span>
@@ -210,11 +227,16 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
         itemHeight={ARTIST_ROW_HEIGHT}
         overscan={8}
         className="relative h-full overflow-y-auto overflow-x-hidden custom-scrollbar pt-2"
-        getItemKey={(artist) => artist.artist}
+        containerProps={{
+          role: 'list',
+          'aria-label': 'Library artists',
+        }}
+        keyboardNavigation
+        getItemKey={(artist) => getArtistKey(artist.artist)}
         onScrollNearEnd={onLoadMore}
         renderItem={(artist, idx) => (
           <ArtistRow
-            key={artist.artist}
+            key={getArtistKey(artist.artist)}
             artist={artist}
             idx={idx}
             searchQuery={searchQuery}
@@ -222,7 +244,9 @@ export const LibraryArtistsList = memo(function LibraryArtistsList({
             onPlay={onPlay}
             isNeo={isNeo}
             isPlayingArtist={Boolean(
-              isPlaying && currentTrack && currentTrack.artist === artist.artist,
+              isPlaying &&
+                currentTrack &&
+                getArtistKey(currentTrack.artist) === getArtistKey(artist.artist),
             )}
           />
         )}
