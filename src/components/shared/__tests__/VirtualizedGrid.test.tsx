@@ -56,4 +56,3 @@ describe('VirtualizedGrid', () => {
     expect(template).toMatch(/^repeat\(\d+, minmax\(0(px)?, 1fr\)\)$/);
   });
 });
-
