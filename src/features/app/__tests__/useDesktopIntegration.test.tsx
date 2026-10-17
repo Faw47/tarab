@@ -219,7 +219,7 @@ describe('useDesktopIntegration', () => {
     expect(payloads[1]).toMatchObject({ metadataUnchanged: false, title: 'Song' });
   });
 
-  it('closes a disabled mini window once instead of on every native sync', async () => {
+  it('leaves closing a disabled mini window to the native UI state sync', async () => {
     useSettingsStore.setState({ desktopMiniWindowEnabled: false });
 
     render(<Harness />);
@@ -229,14 +229,75 @@ describe('useDesktopIntegration', () => {
     await act(async () => {
       usePlayerStore.setState({ isPlaying: true });
     });
-    await act(async () => {
-      usePlayerStore.setState({ isPlaying: false });
-    });
     await waitFor(() => {
-      expect(desktopSetNativeUiStateMock).toHaveBeenCalledTimes(3);
+      expect(desktopSetNativeUiStateMock).toHaveBeenCalledTimes(2);
     });
 
-    expect(desktopCloseMiniWindowMock).toHaveBeenCalledTimes(1);
+    expect(desktopSetNativeUiStateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ miniWindowEnabled: false }),
+    );
+    expect(desktopCloseMiniWindowMock).not.toHaveBeenCalled();
+  });
+
+  it('sends artwork again when a track gains cover art without a hash', async () => {
+    vi.useFakeTimers();
+    getCoverArtDataMock.mockResolvedValue(['image/jpeg', 'NEW-ART'] as never);
+    usePlayerStore.setState({ isPlaying: true });
+
+    render(<Harness />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    const track = usePlayerStore.getState().currentTrack;
+    await act(async () => {
+      usePlayerStore.setState({
+        currentTrack: track ? { ...track, hasCoverArt: true, coverArtHash: null } : null,
+      });
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+
+    const payloads = desktopSyncMediaSessionMock.mock.calls.map(
+      (call) => (call as unknown as [Record<string, unknown>])[0],
+    );
+    expect(payloads).toContainEqual(
+      expect.objectContaining({ artworkDataBase64: 'NEW-ART', metadataUnchanged: false }),
+    );
+  });
+
+  it('drops a media sync whose artwork arrives after a newer track was synced', async () => {
+    vi.useFakeTimers();
+    let resolveSlowArt: (value: [string, string]) => void = () => undefined;
+    getCoverArtDataMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSlowArt = resolve;
+        }) as never,
+    );
+    const track = usePlayerStore.getState().currentTrack;
+    if (!track) throw new Error('missing track');
+    usePlayerStore.setState({
+      currentTrack: { ...track, hasCoverArt: true, coverArtHash: 'hash-1' },
+    });
+
+    render(<Harness />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    await act(async () => {
+      usePlayerStore.setState({
+        currentTrack: { ...track, id: 'track-2', title: 'Second', filePath: '/music/two.mp3' },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    await act(async () => {
+      resolveSlowArt(['image/jpeg', 'OLD-ART']);
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    const titles = desktopSyncMediaSessionMock.mock.calls.map(
+      (call) => (call as unknown as [Record<string, unknown>])[0].title,
+    );
+    expect(titles).toEqual(['Second']);
   });
 
   it('routes desktop control actions to playback handlers', async () => {

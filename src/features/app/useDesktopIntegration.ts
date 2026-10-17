@@ -10,7 +10,6 @@ import {
 } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import {
-  desktopCloseMiniWindow,
   desktopFocusMainWindow,
   desktopQuitApplication,
   desktopSetNativeUiState,
@@ -63,7 +62,7 @@ export function useDesktopIntegration() {
   // Metadata (title, artist, album, artwork) last applied to the OS media session. Periodic syncs
   // only update playback state, so artwork is not re-sent and re-decoded every two seconds.
   const lastMediaMetadataKeyRef = useRef<string | null>(null);
-  const miniWindowClosedRef = useRef(false);
+  const mediaSyncSequenceRef = useRef(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setStartupReady(true), 800);
@@ -141,16 +140,11 @@ export function useDesktopIntegration() {
       });
     }
 
-    // Close the mini window once when the feature is turned off, not on every native sync.
-    if (!miniWindowEnabled && !miniWindowClosedRef.current) {
-      miniWindowClosedRef.current = true;
-      void desktopCloseMiniWindow().catch(() => undefined);
-    } else if (miniWindowEnabled) {
-      miniWindowClosedRef.current = false;
-    }
+    // desktop_set_native_ui_state closes the mini window itself when the feature is off.
   }, [hideToStatusIconOnClose, mediaKeysEnabled, miniWindowEnabled, statusIconEnabled]);
 
   const syncDesktopMediaSessionNow = useCallback(async () => {
+    const sequence = ++mediaSyncSequenceRef.current;
     const player = usePlayerStore.getState();
     const track = player.currentTrack;
 
@@ -158,10 +152,12 @@ export function useDesktopIntegration() {
       mediaKeysEnabled && track
         ? [
             track.id,
+            track.filePath,
             track.title,
             track.artist,
             track.album,
             track.duration,
+            track.hasCoverArt,
             track.coverArtHash ?? '',
           ]
             .map(String)
@@ -199,11 +195,15 @@ export function useDesktopIntegration() {
         upsertMediaArtworkCacheEntry(artworkKey, artwork);
       }
       payload.artworkDataBase64 = artwork;
+      // A newer sync started while artwork loaded; sending this one could overwrite its metadata.
+      if (sequence !== mediaSyncSequenceRef.current) return;
     }
 
     try {
       const metadataApplied = await desktopSyncMediaSession(payload);
-      lastMediaMetadataKeyRef.current = metadataApplied ? metadataKey : null;
+      if (sequence === mediaSyncSequenceRef.current) {
+        lastMediaMetadataKeyRef.current = metadataApplied ? metadataKey : null;
+      }
     } catch (error) {
       lastMediaMetadataKeyRef.current = null;
       reportError('Failed to sync desktop media session', {

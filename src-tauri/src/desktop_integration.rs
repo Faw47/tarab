@@ -333,7 +333,7 @@ pub fn desktop_sync_media_session(
         return Ok(false);
     }
 
-    // On Windows this depends on a live system media session, so it can change between syncs.
+    // On Windows this reports whether any system media session exists, so it can change.
     if !app.media().is_enabled().map_err(|e| e.to_string())? {
         return Ok(false);
     }
@@ -671,19 +671,24 @@ fn setup_media_session_handler(app: &AppHandle<Wry>) {
             }
         }
 
-        let action = match event.event_type {
-            MediaControlEventType::PlayPause => Some(DesktopControlAction::TogglePlay),
-            MediaControlEventType::Next => Some(DesktopControlAction::Next),
-            MediaControlEventType::Previous => Some(DesktopControlAction::Previous),
-            MediaControlEventType::Play => Some(DesktopControlAction::Play),
-            MediaControlEventType::Pause => Some(DesktopControlAction::Pause),
-            _ => None,
-        };
-
-        if let Some(action) = action {
+        if let Some(action) = desktop_action_for_media_event(&event.event_type) {
             emit_desktop_control_action(&app_handle, action);
         }
     });
+}
+
+fn desktop_action_for_media_event(event: &MediaControlEventType) -> Option<DesktopControlAction> {
+    match event {
+        MediaControlEventType::PlayPause => Some(DesktopControlAction::TogglePlay),
+        MediaControlEventType::Next => Some(DesktopControlAction::Next),
+        MediaControlEventType::Previous => Some(DesktopControlAction::Previous),
+        MediaControlEventType::Play => Some(DesktopControlAction::Play),
+        // The OS Stop button (enabled on Windows SMTC) pauses, keeping the queue and position.
+        MediaControlEventType::Pause | MediaControlEventType::Stop => {
+            Some(DesktopControlAction::Pause)
+        }
+        _ => None,
+    }
 }
 
 fn emit_desktop_control_action<R: Runtime>(app: &AppHandle<R>, action: DesktopControlAction) {
@@ -721,6 +726,16 @@ fn focus_main_window(app: &AppHandle<Wry>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn os_stop_button_pauses_playback() {
+        // Regression for AR-12: after souvlaki was removed, SMTC Stop mapped to nothing.
+        assert!(matches!(
+            desktop_action_for_media_event(&MediaControlEventType::Stop),
+            Some(DesktopControlAction::Pause)
+        ));
+        assert!(desktop_action_for_media_event(&MediaControlEventType::Rewind).is_none());
+    }
 
     #[test]
     fn media_session_payload_rejects_a_non_numeric_position() {
