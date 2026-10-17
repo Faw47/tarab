@@ -129,7 +129,7 @@ async function advanceQueueAutomatically(
 
   const epoch = getPlaybackInterventionEpoch();
   try {
-    await playAdjacentTrack('next');
+    await playAdjacentTrack('next', { automatic: true });
     autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
   } catch (error) {
     autoAdvanceRef.current = null;

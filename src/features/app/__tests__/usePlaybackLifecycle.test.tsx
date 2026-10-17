@@ -200,7 +200,7 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await waitFor(() => {
-      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next');
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next', { automatic: true });
     });
   });
 
@@ -241,7 +241,7 @@ describe('usePlaybackLifecycle', () => {
       payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
     });
     await waitFor(() => {
-      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next');
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next', { automatic: true });
     });
   });
 

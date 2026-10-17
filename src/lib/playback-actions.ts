@@ -120,7 +120,14 @@ export const startEditorPreview = async (filePath: string): Promise<void> => {
   state.setHasActivePlayback(true);
 };
 
-export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise<Track | null> => {
+/**
+ * Plays the previous or next queue entry. A user-initiated Next moves on under Repeat One;
+ * `automatic` (the queue advancing after a track ended) repeats the track instead.
+ */
+export const playAdjacentTrack = async (
+  direction: 'next' | 'previous',
+  options?: { automatic?: boolean },
+): Promise<Track | null> => {
   const state = usePlayerStore.getState();
 
   if (direction === 'previous') {
@@ -147,7 +154,7 @@ export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise
     return previous.track;
   }
 
-  const next = state.previewNext();
+  const next = state.previewNext({ ignoreRepeatOne: !options?.automatic });
   if (!next) return null;
 
   notePlaybackIntervention();

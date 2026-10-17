@@ -25,6 +25,10 @@ interface PlayerState {
   shuffleEnabled: boolean;
   shuffleHistory: string[];
   shuffleHistorySize: number;
+  /** Queue entries (by `_queueId`) played in the current shuffle pass, in play order. */
+  shufflePass: string[];
+  /** Queue entries added with Play Next while shuffling; they play before random picks. */
+  shufflePriority: string[];
   loopMode: LoopMode;
   stopAfterCurrent: boolean;
   hasActivePlayback: boolean;
@@ -55,7 +59,8 @@ interface PlayerState {
   toggleLoop: () => void;
   cycleLoopMode: () => void;
   setLoopMode: (mode: LoopMode) => void;
-  previewNext: () => { track: Track; index: number } | null;
+  /** `ignoreRepeatOne` is for a user-initiated Next, which moves on from a repeated track. */
+  previewNext: (options?: { ignoreRepeatOne?: boolean }) => { track: Track; index: number } | null;
   previewPrevious: () => { track: Track; index: number; restartCurrent: boolean } | null;
   activateTrackAtIndex: (index: number) => Track | null;
   playNext: () => Track | null;
@@ -103,6 +108,43 @@ export const resolveActiveQueueIndex = (
   return indexedTrack ? queueIndex : -1;
 };
 
+const queueEntryKey = (track: Track): string => track._queueId ?? track.id;
+
+/** Keeps shuffle bookkeeping limited to entries that are still in the queue. */
+const pruneShuffleKeys = (keys: string[], queue: Track[]): string[] => {
+  if (keys.length === 0) return keys;
+  const present = new Set(queue.map(queueEntryKey));
+  return keys.filter((key) => present.has(key));
+};
+
+/**
+ * Records that `index` started playing. Revisiting an entry from the pass (Previous) keeps the
+ * pass; playing an entry again after the whole queue was played starts a new pass.
+ */
+const recordShufflePlay = (
+  state: Pick<PlayerState, 'queue' | 'shufflePass' | 'shufflePriority'>,
+  index: number,
+): Pick<PlayerState, 'shufflePass' | 'shufflePriority'> => {
+  const entry = state.queue[index];
+  if (!entry) return { shufflePass: state.shufflePass, shufflePriority: state.shufflePriority };
+  const key = queueEntryKey(entry);
+  const shufflePriority = state.shufflePriority.filter((item) => item !== key);
+  if (!state.shufflePass.includes(key)) {
+    return { shufflePass: [...state.shufflePass, key], shufflePriority };
+  }
+  const played = new Set(state.shufflePass);
+  const passComplete = state.queue.every((track) => played.has(queueEntryKey(track)));
+  return { shufflePass: passComplete ? [key] : state.shufflePass, shufflePriority };
+};
+
+const startShufflePass = (
+  state: Pick<PlayerState, 'queue' | 'queueIndex' | 'currentTrack'>,
+): string[] => {
+  const index = resolveActiveQueueIndex(state.queue, state.queueIndex, state.currentTrack);
+  const entry = index >= 0 ? state.queue[index] : null;
+  return entry ? [queueEntryKey(entry)] : [];
+};
+
 export const usePlayerStore = create<PlayerState>()(
   devtools(
     (set, get) => ({
@@ -120,6 +162,8 @@ export const usePlayerStore = create<PlayerState>()(
       shuffleEnabled: false,
       shuffleHistory: [],
       shuffleHistorySize: 50,
+      shufflePass: [],
+      shufflePriority: [],
       loopMode: 'all',
       stopAfterCurrent: false,
       hasActivePlayback: false,
@@ -136,8 +180,12 @@ export const usePlayerStore = create<PlayerState>()(
               filtered.push(track.id);
               const max = state.shuffleHistorySize;
               updates.shuffleHistory = filtered.slice(Math.max(0, filtered.length - max));
+              const index = resolveActiveQueueIndex(state.queue, state.queueIndex, track);
+              if (index >= 0) Object.assign(updates, recordShufflePlay(state, index));
             } else if (!track) {
               updates.shuffleHistory = [];
+              updates.shufflePass = [];
+              updates.shufflePriority = [];
               updates.hasActivePlayback = false;
             }
             return updates;
@@ -162,6 +210,8 @@ export const usePlayerStore = create<PlayerState>()(
               queue: queueWithIds,
               queueIndex: nextQueueIndex,
               queueVersion: state.queueVersion + 1,
+              shufflePass: pruneShuffleKeys(state.shufflePass, queueWithIds),
+              shufflePriority: pruneShuffleKeys(state.shufflePriority, queueWithIds),
             };
           },
           false,
@@ -195,7 +245,14 @@ export const usePlayerStore = create<PlayerState>()(
           const insertIndex = queueIndex + 1;
           newQueue.splice(insertIndex, 0, trackWithId);
           set(
-            (state) => ({ queue: newQueue, queueVersion: state.queueVersion + 1 }),
+            (state) => ({
+              queue: newQueue,
+              queueVersion: state.queueVersion + 1,
+              // Play Next under shuffle: play it next, then the others in insertion order.
+              shufflePriority: state.shuffleEnabled
+                ? [...state.shufflePriority, queueEntryKey(trackWithId)]
+                : state.shufflePriority,
+            }),
             false,
             'player/addToQueue',
           );
@@ -323,6 +380,8 @@ export const usePlayerStore = create<PlayerState>()(
               : state.currentTrack
                 ? [state.currentTrack.id]
                 : [],
+            shufflePass: state.shuffleEnabled ? [] : startShufflePass(state),
+            shufflePriority: [],
           }),
           false,
           'player/toggleShuffle',
@@ -332,6 +391,8 @@ export const usePlayerStore = create<PlayerState>()(
           (state) => ({
             shuffleEnabled: value,
             shuffleHistory: value && state.currentTrack ? [state.currentTrack.id] : [],
+            shufflePass: value ? startShufflePass(state) : [],
+            shufflePriority: [],
           }),
           false,
           'player/setShuffleEnabled',
@@ -340,6 +401,7 @@ export const usePlayerStore = create<PlayerState>()(
         set(
           (state) => ({
             shuffleHistory: state.currentTrack ? [state.currentTrack.id] : [],
+            shufflePass: startShufflePass(state),
           }),
           false,
           'player/resetShuffleHistory',
@@ -369,33 +431,51 @@ export const usePlayerStore = create<PlayerState>()(
       toggleLoop: () => get().cycleLoopMode(),
       setLoopMode: (mode) => set({ loopMode: mode }, false, 'player/setLoopMode'),
 
-      previewNext: () => {
-        const { queue, queueIndex, currentTrack, shuffleEnabled, loopMode, shuffleHistory } = get();
+      previewNext: (options) => {
+        const {
+          queue,
+          queueIndex,
+          currentTrack,
+          shuffleEnabled,
+          shuffleHistory,
+          shufflePass,
+          shufflePriority,
+        } = get();
         if (queue.length === 0) return null;
 
         const baseIndex = resolveActiveQueueIndex(queue, queueIndex, currentTrack);
+        const repeatOneSkipped = get().loopMode === 'one' && options?.ignoreRepeatOne;
+        const loopMode = repeatOneSkipped ? 'all' : get().loopMode;
 
         let nextIndex: number;
 
         if (loopMode === 'one') {
           nextIndex = baseIndex >= 0 ? baseIndex : 0;
         } else if (shuffleEnabled) {
-          const historySet = new Set(shuffleHistory);
+          const priorityIndex = shufflePriority
+            .map((key) => queue.findIndex((track) => queueEntryKey(track) === key))
+            .find((index) => index >= 0 && index !== baseIndex);
           const pool = queue
             .map((track, idx) => ({ track, idx }))
             .filter(({ idx }) => idx !== baseIndex);
-          const unseen = pool.filter(({ track }) => !historySet.has(track.id));
-          const source = unseen.length > 0 ? unseen : pool;
+          const played = new Set(shufflePass);
+          const unplayed = pool.filter(({ track }) => !played.has(queueEntryKey(track)));
 
-          if (source.length === 0) {
-            if (loopMode === 'all') {
-              nextIndex = baseIndex >= 0 ? baseIndex : 0;
-            } else {
-              return null;
-            }
+          if (priorityIndex !== undefined) {
+            nextIndex = priorityIndex;
+          } else if (unplayed.length > 0) {
+            nextIndex = unplayed[Math.floor(Math.random() * unplayed.length)].idx;
+          } else if (loopMode !== 'all') {
+            // Every queue entry played in this pass: shuffle ends like the end of the list.
+            return null;
+          } else if (pool.length === 0) {
+            nextIndex = baseIndex >= 0 ? baseIndex : 0;
           } else {
-            const choice = source[Math.floor(Math.random() * source.length)];
-            nextIndex = choice.idx;
+            // New pass: prefer tracks that were not played recently.
+            const recent = new Set(shuffleHistory);
+            const fresh = pool.filter(({ track }) => !recent.has(track.id));
+            const source = fresh.length > 0 ? fresh : pool;
+            nextIndex = source[Math.floor(Math.random() * source.length)].idx;
           }
         } else {
           nextIndex = baseIndex + 1;
@@ -414,7 +494,7 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       previewPrevious: () => {
-        const { queue, queueIndex, currentTrack, currentTime, loopMode } = get();
+        const { queue, queueIndex, currentTrack, currentTime, loopMode, shuffleEnabled } = get();
         if (queue.length === 0) return null;
 
         const baseIndex = resolveActiveQueueIndex(queue, queueIndex, currentTrack);
@@ -423,6 +503,18 @@ export const usePlayerStore = create<PlayerState>()(
         if (currentTime > 3) {
           const track = queue[safeIndex];
           return track ? { track, index: safeIndex, restartCurrent: true } : null;
+        }
+
+        if (shuffleEnabled) {
+          // Go back through the tracks played in this shuffle pass, not the list order.
+          const { shufflePass } = get();
+          const current = queue[safeIndex];
+          const position = current ? shufflePass.lastIndexOf(queueEntryKey(current)) : -1;
+          for (let i = position - 1; i >= 0; i -= 1) {
+            const index = queue.findIndex((track) => queueEntryKey(track) === shufflePass[i]);
+            if (index >= 0) return { track: queue[index], index, restartCurrent: false };
+          }
+          return current ? { track: current, index: safeIndex, restartCurrent: true } : null;
         }
 
         let prevIndex = safeIndex - 1;
@@ -456,6 +548,7 @@ export const usePlayerStore = create<PlayerState>()(
               updates.shuffleHistory = filtered.slice(
                 Math.max(0, filtered.length - state.shuffleHistorySize),
               );
+              Object.assign(updates, recordShufflePlay(state, index));
             }
             return updates;
           },
