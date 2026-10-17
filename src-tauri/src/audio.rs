@@ -824,6 +824,7 @@ impl AudioManager {
                                         generation: outgoing_generation,
                                         seamless: true,
                                         next_generation: Some(next_generation),
+                                        next_path: Some(next_clone.clone()),
                                     };
                                     let _ = app_emit.emit("playback-ended", payload);
                                     emit_playback_transition(
@@ -1022,6 +1023,7 @@ impl AudioManager {
                                     generation: ended_generation,
                                     seamless: false,
                                     next_generation: None,
+                                    next_path: None,
                                 };
                                 let _ = app_for_audio.emit("playback-ended", payload);
                                 let (_, ended_file) = playback_identity(&state_clone);

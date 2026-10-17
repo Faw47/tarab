@@ -301,6 +301,90 @@ describe('usePlaybackLifecycle', () => {
     expect(usePlayerStore.getState().hasActivePlayback).toBe(true);
   });
 
+  it('activates the preloaded track at a seamless gapless handoff under shuffle', async () => {
+    const shuffleQueue = Array.from({ length: 5 }, (_, index) => ({
+      ...queue[0],
+      id: `shuffle-${index}`,
+      title: `Shuffle ${index}`,
+      filePath: `/music/shuffle-${index}.mp3`,
+      _queueId: `queue-${index}`,
+    }));
+    usePlayerStore.setState({
+      currentTrack: shuffleQueue[0],
+      queue: shuffleQueue,
+      queueIndex: 0,
+      shuffleEnabled: true,
+      shuffleHistory: ['shuffle-0'],
+      loopMode: 'all',
+    });
+    useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
+    preloadNextTrackMock.mockResolvedValueOnce(9 as never);
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+      expect(listeners.has('playback-ended')).toBe(true);
+    });
+
+    await listeners.get('playback-near-end')?.({ payload: { generation: 1, remaining: 0.2 } });
+    await waitFor(() => {
+      expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/shuffle-4.mp3');
+    });
+
+    // A second random pick at handoff time would now choose shuffle-1.
+    random.mockReturnValue(0);
+    await listeners.get('playback-ended')?.({
+      payload: {
+        generation: 1,
+        path: '/music/shuffle-0.mp3',
+        seamless: true,
+        nextGeneration: 9,
+        nextPath: '/music/shuffle-4.mp3',
+      },
+    });
+
+    await waitFor(() => {
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('shuffle-4');
+    });
+    expect(usePlayerStore.getState().queueIndex).toBe(4);
+    random.mockRestore();
+  });
+
+  it('follows the preloaded entry after the queue is reordered before the handoff', async () => {
+    useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
+    const tracks = queue.map((track, index) => ({ ...track, _queueId: `queue-${index}` }));
+    usePlayerStore.setState({ queue: tracks, currentTrack: tracks[0], queueIndex: 0 });
+    preloadNextTrackMock.mockResolvedValueOnce(5 as never);
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+    });
+    await listeners.get('playback-near-end')?.({ payload: { generation: 1, remaining: 0.2 } });
+    await waitFor(() => {
+      expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    });
+
+    // The user inserts another track ahead of the preloaded one.
+    const inserted = {
+      ...tracks[0],
+      id: 'inserted',
+      filePath: '/music/inserted.mp3',
+      _queueId: 'x',
+    };
+    usePlayerStore.setState({ queue: [tracks[0], inserted, tracks[1]] });
+
+    await listeners.get('playback-ended')?.({
+      payload: { generation: 1, path: '/music/track-1.mp3', seamless: true, nextGeneration: 5 },
+    });
+
+    await waitFor(() => {
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('track-2');
+    });
+    expect(usePlayerStore.getState().queueIndex).toBe(2);
+  });
+
   it('ignores delayed position and ended events from an old generation', async () => {
     render(<Harness />);
 

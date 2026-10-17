@@ -9,6 +9,8 @@ pub struct PlaybackEndedPayload {
     #[serde(default)]
     pub seamless: bool,
     pub next_generation: Option<u64>,
+    /// File that started playing at a seamless gapless handoff.
+    pub next_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
