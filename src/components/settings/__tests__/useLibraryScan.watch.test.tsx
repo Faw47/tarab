@@ -85,7 +85,7 @@ describe('useLibraryScan watcher', () => {
     listeners.clear();
     scanLibraryMock.mockReset();
     reconcileMock.mockReset();
-    scanLibraryMock.mockResolvedValue([]);
+    scanLibraryMock.mockResolvedValue({ paths: [], traversalErrors: [], skippedErrorCount: 0 });
     reconcileMock.mockImplementation(async (request: { folderPath: string }) =>
       reconcileResult(request.folderPath),
     );
@@ -128,5 +128,30 @@ describe('useLibraryScan watcher', () => {
     });
 
     expect(scanLibraryMock.mock.calls.map((call) => call[0])).toEqual(['/music/Gone', '/music']);
+  });
+
+  it('keeps rows it could not see when the walk skipped unreadable entries', async () => {
+    scanLibraryMock.mockResolvedValue({
+      paths: [],
+      traversalErrors: [{ path: '/music/System Volume Information', message: 'Access is denied' }],
+      skippedErrorCount: 0,
+    });
+    renderHook(() => useLibraryScan(), { wrapper });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    await act(async () => {
+      listeners.get('library-files-changed')?.({ payload: '/music/song.mp3' });
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(reconcileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderPath: '/music',
+        traversalComplete: false,
+        errors: [expect.objectContaining({ code: 'traversalIncomplete' })],
+      }),
+    );
   });
 });

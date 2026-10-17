@@ -39,6 +39,8 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
 - **Library scans**: the renderer sends one `ScanReconcileRequest` after traversal. Rust applies it
   in one transaction and deletes rows only after complete traversal proves they are missing.
+  Unreadable entries below the scan root are skipped and reported (`traversalErrors`); the
+  renderer then sends `traversalComplete: false`.
   Native traversal sends paths to the main window in bounded 500-path events. Do not restore one
   unbounded path-array IPC response.
 - **Mini player window**: declared in `tauri.conf.json` (`mini-player.html`, 320×92, transparent, undecorated). `desktop_open_mini_window` shows it and moves it with `tauri-plugin-positioner` (`Position::BottomRight`). The Vite build includes a second entry (`mini-player.html` → `src/mini-player.tsx`).

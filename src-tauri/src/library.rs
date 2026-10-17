@@ -25,11 +25,46 @@ struct LibraryScanPathChunk {
     paths: Vec<String>,
 }
 
+/// Most per-entry traversal errors reported for one scan; the rest are counted only.
+const MAX_REPORTED_TRAVERSAL_ERRORS: usize = 50;
+
+/// An entry the walk could not read (for example `System Volume Information`). The scan
+/// continues, and the renderer marks the traversal incomplete so reconcile keeps missing rows.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanTraversalError {
+    path: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Default)]
+struct CollectedAudioFiles {
+    paths: Vec<String>,
+    traversal_errors: Vec<ScanTraversalError>,
+    skipped_errors: usize,
+}
+
+impl CollectedAudioFiles {
+    fn record_error(&mut self, path: Option<&Path>, message: String) {
+        if self.traversal_errors.len() < MAX_REPORTED_TRAVERSAL_ERRORS {
+            self.traversal_errors.push(ScanTraversalError {
+                path: path.map(normalize_library_path),
+                message,
+            });
+        } else {
+            self.skipped_errors += 1;
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryScanStreamSummary {
     scan_id: String,
     path_count: usize,
+    traversal_errors: Vec<ScanTraversalError>,
+    /// Traversal errors beyond the reported ones.
+    skipped_error_count: usize,
 }
 
 pub type SharedLibraryScanControl = Arc<AtomicBool>;
@@ -86,10 +121,11 @@ fn collect_audio_files(
     roots: &[PathBuf],
     force_parallel: bool,
     cancelled: &AtomicBool,
-) -> Result<Vec<String>, String> {
+) -> Result<CollectedAudioFiles, String> {
     ensure_scan_folder_allowed(folder_path, roots)?;
     let path = Path::new(folder_path);
 
+    let mut collected = CollectedAudioFiles::default();
     let mut entries = Vec::new();
     let mut visited_entries = 0_usize;
     let mut audio_bytes = 0_u64;
@@ -101,7 +137,17 @@ fn collect_audio_files(
         if cancelled.load(Ordering::Relaxed) {
             return Err("Library scan cancelled before traversal completed".to_string());
         }
-        let entry = entry.map_err(|error| format!("Library traversal is incomplete: {}", error))?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            // The scan root itself must be readable; anything below it is skipped and reported.
+            Err(error) if error.depth() == 0 => {
+                return Err(format!("Library traversal is incomplete: {}", error));
+            }
+            Err(error) => {
+                collected.record_error(error.path(), error.to_string());
+                continue;
+            }
+        };
         visited_entries += 1;
         if visited_entries > MAX_SCAN_ENTRIES {
             return Err(format!(
@@ -119,10 +165,16 @@ fn collect_audio_files(
             continue;
         }
         if is_supported_audio_path(entry.path()) {
-            let bytes = entry
-                .metadata()
-                .map_err(|error| format!("Failed to inspect audio file: {}", error))?
-                .len();
+            let bytes = match entry.metadata() {
+                Ok(metadata) => metadata.len(),
+                Err(error) => {
+                    collected.record_error(
+                        Some(entry.path()),
+                        format!("Failed to inspect audio file: {}", error),
+                    );
+                    continue;
+                }
+            };
             audio_bytes = audio_bytes.saturating_add(bytes);
             if audio_bytes > MAX_SCAN_AUDIO_BYTES {
                 return Err("Library scan exceeded the total audio byte limit".to_string());
@@ -135,7 +187,7 @@ fn collect_audio_files(
         is_supported_audio_path(entry.path()) && is_allowed_scan_file(entry.path(), roots)
     };
 
-    let files = if force_parallel || entries.len() >= 1_500 {
+    collected.paths = if force_parallel || entries.len() >= 1_500 {
         entries
             .par_iter()
             .filter(|entry| include_entry(entry))
@@ -149,7 +201,7 @@ fn collect_audio_files(
             .collect()
     };
 
-    Ok(files)
+    Ok(collected)
 }
 
 fn validate_scan_id(scan_id: &str) -> Result<(), String> {
@@ -167,8 +219,13 @@ fn validate_scan_id(scan_id: &str) -> Result<(), String> {
 fn emit_scan_paths(
     app: &AppHandle,
     scan_id: String,
-    paths: Vec<String>,
+    collected: CollectedAudioFiles,
 ) -> Result<LibraryScanStreamSummary, String> {
+    let CollectedAudioFiles {
+        paths,
+        traversal_errors,
+        skipped_errors,
+    } = collected;
     let path_count = paths.len();
     let main = app
         .get_webview_window("main")
@@ -186,6 +243,8 @@ fn emit_scan_paths(
     Ok(LibraryScanStreamSummary {
         scan_id,
         path_count,
+        traversal_errors,
+        skipped_error_count: skipped_errors,
     })
 }
 
@@ -287,6 +346,36 @@ mod tests {
         let _ = fs::remove_dir_all(outside_root);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_entry_is_reported_and_the_scan_continues() {
+        // Regression for QA-08: the first walk error failed the whole scan.
+        let root = temp_dir("unreadable");
+        fs::write(root.join("a.mp3"), b"not audio").expect("write a");
+        fs::create_dir_all(root.join("sub")).expect("create sub");
+        fs::write(root.join("sub").join("b.mp3"), b"not audio").expect("write b");
+        std::os::unix::fs::symlink(root.join("missing-target"), root.join("broken"))
+            .expect("create dangling link");
+        let roots = vec![fs::canonicalize(&root).expect("canonical root")];
+
+        let collected = collect_audio_files(
+            &root.to_string_lossy(),
+            true,
+            &roots,
+            false,
+            &AtomicBool::new(false),
+        )
+        .expect("scan continues past the unreadable entry");
+
+        assert_eq!(collected.paths.len(), 2);
+        assert_eq!(collected.traversal_errors.len(), 1);
+        assert!(collected.traversal_errors[0]
+            .path
+            .as_deref()
+            .is_some_and(|path| path.ends_with("broken")));
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn scan_stream_ids_reject_event_name_injection() {
         assert!(validate_scan_id("scan-0123_abcd").is_ok());
@@ -313,7 +402,8 @@ mod tests {
             false,
             &AtomicBool::new(false),
         )
-        .expect("scan allowed root");
+        .expect("scan allowed root")
+        .paths;
 
         assert_eq!(files, vec![track.to_string_lossy().replace('\\', "/")]);
 
