@@ -37,18 +37,35 @@ fn is_audio_path(path: &Path) -> bool {
         .is_some_and(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
 
+/// True when the last segment ends in a short alphanumeric extension (`.jpg`, `.tmp`), as files do.
+/// Album folders such as "Vol. 2" or "R.E.M. - Automatic" have a dot but no such extension.
+fn has_file_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            (1..=5).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+}
+
 /// Maps a notify event to the library paths it affects. Audio files are reported for content
-/// changes; folders (paths without an audio extension) for creation, removal and renames, which
+/// changes; folders (including names with dots, like "Vol. 2") for creation, removal and renames, which
 /// the renderer rescans as folders.
 fn classify_event(event: &Event) -> Vec<(PathBuf, WatchChange)> {
-    let folder_level = matches!(
+    let folder_kind = matches!(
         event.kind,
-        EventKind::Create(CreateKind::Folder | CreateKind::Any)
-            | EventKind::Remove(RemoveKind::Folder | RemoveKind::Any)
+        EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder)
+    );
+    let maybe_folder = matches!(
+        event.kind,
+        EventKind::Create(CreateKind::Any)
+            | EventKind::Remove(RemoveKind::Any)
             | EventKind::Modify(ModifyKind::Name(_))
     );
-    let relevant =
-        |path: &Path| is_audio_path(path) || (folder_level && path.extension().is_none());
+    let relevant = |path: &Path| {
+        is_audio_path(path)
+            || folder_kind
+            || (maybe_folder && (path.is_dir() || !has_file_extension(path)))
+    };
 
     let changes: Vec<(PathBuf, WatchChange)> = match event.kind {
         EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => vec![
@@ -317,9 +334,24 @@ mod tests {
         );
 
         let temp = classify_event(&event(
-            EventKind::Create(CreateKind::File),
+            EventKind::Create(CreateKind::Any),
             &["/music/a/.song.flac.0123.tarab.tmp"],
         ));
         assert!(temp.is_empty());
+
+        // Dots in album folder names do not make them files.
+        let moved_in = classify_event(&event(
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            &["/music/Vol. 2", "/music/R.E.M. - Automatic for the People"],
+        ));
+        assert_eq!(moved_in.len(), 2);
+        let removed = classify_event(&event(
+            EventKind::Remove(RemoveKind::Folder),
+            &["/music/St. Vincent"],
+        ));
+        assert_eq!(
+            removed,
+            vec![(PathBuf::from("/music/St. Vincent"), WatchChange::Removed)]
+        );
     }
 }

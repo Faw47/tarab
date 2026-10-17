@@ -133,6 +133,18 @@ impl OutputWatch {
         true
     }
 
+    /// Restarts the stall clock after the audio thread was busy handling a command.
+    pub(super) fn note_activity(&mut self, now: Instant) {
+        self.progress_at = now;
+    }
+
+    /// A stream was just opened on the current default: the next poll records the baseline
+    /// instead of reporting a change.
+    pub(super) fn rebaseline_default(&mut self, now: Instant) {
+        self.default_name = None;
+        self.default_polled_at = now.checked_sub(DEFAULT_DEVICE_POLL_INTERVAL).unwrap_or(now);
+    }
+
     /// Polls the system default device at most every few seconds; true when it changed since the
     /// previous poll.
     pub(super) fn default_device_changed(
@@ -181,6 +193,30 @@ mod output_watch_tests {
         assert!(watch.observe_samples(5, true, start + Duration::from_secs(6)));
         assert!(!watch.observe_samples(9, true, start + Duration::from_secs(7)));
         assert!(watch.observe_samples(9, true, start + Duration::from_secs(9)));
+    }
+
+    #[test]
+    fn a_reopened_stream_takes_the_current_default_as_its_baseline() {
+        let start = Instant::now();
+        let mut watch = OutputWatch::new(start);
+        let poll = |seconds| start + Duration::from_secs(seconds);
+        assert!(!watch.default_device_changed(poll(3), || Some("Speakers".to_string())));
+
+        // The stream was reopened on new headphones: that is the baseline, not a change.
+        watch.rebaseline_default(poll(4));
+        assert!(!watch.default_device_changed(poll(4), || Some("Headphones".to_string())));
+        assert!(!watch.default_device_changed(poll(7), || Some("Headphones".to_string())));
+    }
+
+    #[test]
+    fn a_long_command_is_not_a_stall() {
+        let start = Instant::now();
+        let mut watch = OutputWatch::new(start);
+        assert!(!watch.observe_samples(0, false, start));
+        // A three-second decode before the first sample.
+        watch.note_activity(start + Duration::from_secs(3));
+        assert!(!watch.observe_samples(0, true, start + Duration::from_secs(3)));
+        assert!(watch.observe_samples(0, true, start + Duration::from_secs(5)));
     }
 
     #[test]

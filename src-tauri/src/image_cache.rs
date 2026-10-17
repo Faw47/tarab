@@ -193,7 +193,7 @@ impl ImageCache {
 
         let mut buffer = Cursor::new(Vec::new());
         JpegEncoder::new_with_quality(&mut buffer, THUMBNAIL_JPEG_QUALITY)
-            .encode_image(&img.to_rgb8())
+            .encode_image(&flatten_alpha(img))
             .map_err(|e| format!("Failed to encode JPEG: {}", e))?;
 
         // Write to file
@@ -428,6 +428,28 @@ impl ImageCache {
     }
 }
 
+/// JPEG has no alpha channel. Transparent covers are composited onto a dark neutral instead of
+/// exposing whatever colour the transparent pixels carry.
+fn flatten_alpha(img: &DynamicImage) -> image::RgbImage {
+    if !img.color().has_alpha() {
+        return img.to_rgb8();
+    }
+    const BACKGROUND: [f32; 3] = [24.0, 24.0, 24.0];
+    let rgba = img.to_rgba8();
+    image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [r, g, b, a] = rgba.get_pixel(x, y).0;
+        let alpha = f32::from(a) / 255.0;
+        let blend = |channel: u8, background: f32| {
+            (f32::from(channel) * alpha + background * (1.0 - alpha)).round() as u8
+        };
+        image::Rgb([
+            blend(r, BACKGROUND[0]),
+            blend(g, BACKGROUND[1]),
+            blend(b, BACKGROUND[2]),
+        ])
+    })
+}
+
 /// Deletes thumbnails written by older builds in the previous format; they are regenerated as
 /// JPEG on demand, and would otherwise fill the size limit until evicted.
 fn remove_legacy_thumbnails(cache_dir: &Path) -> u64 {
@@ -565,6 +587,18 @@ mod tests {
             large.len()
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn transparent_pixels_become_the_background_not_their_hidden_colour() {
+        let mut img = image::RgbaImage::new(2, 1);
+        img.put_pixel(0, 0, image::Rgba([255, 0, 0, 0]));
+        img.put_pixel(1, 0, image::Rgba([255, 0, 0, 255]));
+
+        let flat = flatten_alpha(&DynamicImage::ImageRgba8(img));
+
+        assert_eq!(flat.get_pixel(0, 0).0, [24, 24, 24]);
+        assert_eq!(flat.get_pixel(1, 0).0, [255, 0, 0]);
     }
 
     #[test]

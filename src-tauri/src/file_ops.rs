@@ -184,16 +184,12 @@ pub(crate) fn replace_file_atomically(
     let parent = target
         .parent()
         .ok_or_else(|| "File has no parent directory".to_string())?;
-    let name = target
-        .file_name()
-        .ok_or_else(|| "File has no name".to_string())?
-        .to_string_lossy();
-    // Hidden and with a .tmp extension, so the library watcher and scans ignore it.
-    let temp_path = parent.join(format!(
-        ".{}.{:016x}.tarab.tmp",
-        name,
-        rand::random::<u64>()
-    ));
+    if target.file_name().is_none() {
+        return Err("File has no name".to_string());
+    }
+    // Hidden and with a .tmp extension, so the library watcher and scans ignore it. The name does
+    // not repeat the original, which could push a long file name past the file system's limit.
+    let temp_path = parent.join(format!(".tarab-{:016x}.tmp", rand::random::<u64>()));
 
     let result = (|| {
         if copy_original {

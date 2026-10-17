@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { setVolumeRamp } from '../tauri-commands';
+import { setVolumeRamp, watchLibraryPaths } from '../tauri-commands';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async () => undefined),
@@ -29,5 +29,27 @@ describe('tauri command wrappers', () => {
       to: 0.8,
       durationMs: 125,
     });
+  });
+
+  it('sends watch requests one at a time in call order', async () => {
+    let finishFirst: () => void = () => undefined;
+    invokeMock.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finishFirst = () => resolve(undefined);
+        }),
+    );
+
+    const cleanup = watchLibraryPaths([]);
+    const next = watchLibraryPaths(['/music']);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Regression for AR-19: the second request must not reach the native side first.
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenLastCalledWith('watch_library_paths', { paths: [] });
+    finishFirst();
+    await Promise.all([cleanup, next]);
+    expect(invokeMock).toHaveBeenLastCalledWith('watch_library_paths', { paths: ['/music'] });
   });
 });

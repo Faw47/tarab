@@ -215,8 +215,17 @@ export const revokeLibraryGrant = async (grantId: string): Promise<void> => {
   return invoke('revoke_library_grant', { grantId });
 };
 
-export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
-  return invoke('watch_library_paths', { paths });
+let watchRequests: Promise<unknown> = Promise.resolve();
+
+/**
+ * Replaces the native watch set. Calls run one at a time in call order: the native command is
+ * async, so a cleanup `[]` and the next folder list sent back to back could otherwise apply in
+ * either order and leave watching off.
+ */
+export const watchLibraryPaths = (paths: string[]): Promise<void> => {
+  const request = watchRequests.then(() => invoke<void>('watch_library_paths', { paths }));
+  watchRequests = request.catch(() => undefined);
+  return request;
 };
 
 // Library commands
