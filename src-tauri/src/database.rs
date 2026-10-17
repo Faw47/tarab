@@ -1273,6 +1273,42 @@ mod tests {
     }
 
     #[test]
+    fn reconcile_folder_scan_rescan_of_large_folder_is_not_quadratic() {
+        // Regression for PB-04: a rescan sends every track again, and counting preserved rows
+        // used to scan the incoming list once per discovered path (O(n^2)) under the DB lock.
+        let db = test_db();
+        let tracks: Vec<DbTrack> = (0..20_000)
+            .map(|index| {
+                let mut track = sample_track(&format!("t{index}"));
+                track.id = format!("/tmp/big/{index}.mp3");
+                track.file_path = track.id.clone();
+                track
+            })
+            .collect();
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+        let discovered: Vec<String> = tracks.iter().map(|track| track.file_path.clone()).collect();
+
+        let started = std::time::Instant::now();
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp/big".to_string(),
+                discovered_paths: discovered,
+                tracks,
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile scan");
+        let elapsed = started.elapsed();
+
+        assert_eq!(result.unchanged_count, 20_000);
+        assert_eq!(result.preserved_count, 0);
+        assert!(
+            elapsed < std::time::Duration::from_secs(8),
+            "reconcile of 20k tracks took {elapsed:?}"
+        );
+    }
+
+    #[test]
     fn reconcile_folder_scan_does_not_delete_rows_after_incomplete_traversal() {
         let db = test_db();
         let mut existing = sample_track("kept-after-failure");

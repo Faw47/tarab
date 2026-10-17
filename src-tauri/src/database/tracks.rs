@@ -140,6 +140,7 @@ impl Database {
         let mut added_count = 0;
         let mut updated_count = 0;
         let mut unchanged_count = 0;
+        let mut incoming_paths: HashSet<String> = HashSet::with_capacity(request.tracks.len());
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -171,6 +172,7 @@ impl Database {
             for track in &request.tracks {
                 let normalized_id = Self::normalize_path(&track.id);
                 let normalized_file_path = Self::normalize_path(&track.file_path);
+                incoming_paths.insert(normalized_file_path.clone());
                 match existing_by_path.get(&normalized_file_path) {
                     Some(existing) if Self::metadata_matches(existing, track) => {
                         unchanged_count += 1;
@@ -221,13 +223,7 @@ impl Database {
 
         let preserved_count = discovered
             .iter()
-            .filter(|path| {
-                existing_by_path.contains_key(*path)
-                    && !request
-                        .tracks
-                        .iter()
-                        .any(|track| Self::normalize_path(&track.file_path) == **path)
-            })
+            .filter(|path| existing_by_path.contains_key(*path) && !incoming_paths.contains(*path))
             .count();
         tx.commit()?;
 
