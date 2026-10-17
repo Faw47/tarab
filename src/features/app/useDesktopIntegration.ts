@@ -60,6 +60,9 @@ export function useDesktopIntegration() {
 
   const lastActionRef = useRef<{ action: DesktopControlAction; at: number } | null>(null);
   const mediaArtworkCacheRef = useRef<Map<string, string | null>>(new Map());
+  // Metadata (title, artist, album, artwork) last applied to the OS media session. Periodic syncs
+  // only update playback state, so artwork is not re-sent and re-decoded every two seconds.
+  const lastMediaMetadataKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setStartupReady(true), 800);
@@ -146,8 +149,25 @@ export function useDesktopIntegration() {
     const player = usePlayerStore.getState();
     const track = player.currentTrack;
 
+    const metadataKey =
+      mediaKeysEnabled && track
+        ? [
+            track.id,
+            track.title,
+            track.artist,
+            track.album,
+            track.duration,
+            track.coverArtHash ?? '',
+          ]
+            .map(String)
+            .join('\u0000')
+        : null;
+    const metadataUnchanged =
+      metadataKey !== null && metadataKey === lastMediaMetadataKeyRef.current;
+
     const payload: DesktopMediaSessionSyncPayload = {
       enabled: mediaKeysEnabled,
+      metadataUnchanged,
       title: track?.title ?? null,
       artist: track?.artist ?? null,
       album: track?.album ?? null,
@@ -161,7 +181,7 @@ export function useDesktopIntegration() {
       playbackRate: player.playbackSpeed,
     };
 
-    if (mediaKeysEnabled && track?.hasCoverArt && track.filePath) {
+    if (!metadataUnchanged && mediaKeysEnabled && track?.hasCoverArt && track.filePath) {
       const artworkKey = `${track.id}:${track.coverArtHash ?? 'nohash'}`;
       let artwork = getMediaArtworkCacheEntry(artworkKey);
       if (artwork === undefined) {
@@ -177,8 +197,10 @@ export function useDesktopIntegration() {
     }
 
     try {
-      await desktopSyncMediaSession(payload);
+      const metadataApplied = await desktopSyncMediaSession(payload);
+      lastMediaMetadataKeyRef.current = metadataApplied ? metadataKey : null;
     } catch (error) {
+      lastMediaMetadataKeyRef.current = null;
       reportError('Failed to sync desktop media session', {
         source: 'desktop-bridge',
         error,

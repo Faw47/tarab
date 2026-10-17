@@ -100,6 +100,9 @@ fn default_playback_rate() -> f64 {
 pub struct DesktopMediaSessionSyncPayload {
     #[serde(default)]
     pub enabled: bool,
+    /// The renderer already applied this track's metadata and artwork; update playback only.
+    #[serde(default)]
+    pub metadata_unchanged: bool,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -314,25 +317,30 @@ pub fn desktop_set_native_ui_state(
 /// Largest base64 artwork payload accepted for the OS media session (about 6 MiB decoded).
 const MAX_MEDIA_ARTWORK_BASE64_LEN: usize = 8 * 1024 * 1024;
 
+/// Returns whether the OS media session now holds this payload's metadata. The renderer only
+/// sends `metadata_unchanged` after a sync that returned true.
 #[tauri::command]
 pub fn desktop_sync_media_session(
     payload: DesktopMediaSessionSyncPayload,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Typed parameter: a malformed payload is rejected to the caller by the IPC layer instead of
     // being logged verbatim (titles, artwork) and reported as success.
 
     if !payload.enabled {
         let _ = app.media().set_playback_status(PlaybackStatus::Stopped);
         let _ = app.media().clear_metadata();
-        return Ok(());
+        return Ok(false);
     }
 
+    // On Windows this depends on a live system media session, so it can change between syncs.
     if !app.media().is_enabled().map_err(|e| e.to_string())? {
-        return Ok(());
+        return Ok(false);
     }
 
-    if let Some(title) = payload.title.as_ref() {
+    if payload.metadata_unchanged {
+        // Keep the metadata and artwork already set on the OS media session.
+    } else if let Some(title) = payload.title.as_ref() {
         let artwork_data = decode_optional_artwork(payload.artwork_data_base64.as_ref());
 
         app.media()
@@ -378,7 +386,7 @@ pub fn desktop_sync_media_session(
         })
         .map_err(|e| e.to_string())?;
 
-    Ok(())
+    Ok(true)
 }
 
 fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {

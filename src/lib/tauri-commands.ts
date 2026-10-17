@@ -914,8 +914,9 @@ export const desktopSetNativeUiState = async (payload: DesktopNativeUiState): Pr
   return invoke('desktop_set_native_ui_state', { payload });
 };
 
+/** Resolves true when the OS media session holds this payload's metadata. */
 export const desktopSyncMediaSession = async (
   payload: DesktopMediaSessionSyncPayload,
-): Promise<void> => {
+): Promise<boolean> => {
   return invoke('desktop_sync_media_session', { payload });
 };
