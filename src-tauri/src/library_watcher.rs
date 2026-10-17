@@ -1,11 +1,107 @@
+use crate::desktop_integration::MAIN_WINDOW_LABEL;
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use crate::library::SUPPORTED_EXTENSIONS;
+use notify::event::{CreateKind, ModifyKind, RemoveKind, RenameMode};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+/// A path is reported once it has been quiet this long, so the final write of a copy or tag
+/// edit is the one the renderer sees.
+const QUIET_PERIOD: Duration = Duration::from_millis(1500);
+/// Pending paths are flushed early above this count (bulk copies), keeping the map bounded.
+const MAX_PENDING_PATHS: usize = 2_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WatchChange {
+    Changed,
+    Removed,
+}
+
+impl WatchChange {
+    fn event_name(self) -> &'static str {
+        match self {
+            WatchChange::Changed => "library-files-changed",
+            WatchChange::Removed => "library-file-removed",
+        }
+    }
+}
+
+fn is_audio_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+}
+
+/// Maps a notify event to the library paths it affects. Audio files are reported for content
+/// changes; folders (paths without an audio extension) for creation, removal and renames, which
+/// the renderer rescans as folders.
+fn classify_event(event: &Event) -> Vec<(PathBuf, WatchChange)> {
+    let folder_level = matches!(
+        event.kind,
+        EventKind::Create(CreateKind::Folder | CreateKind::Any)
+            | EventKind::Remove(RemoveKind::Folder | RemoveKind::Any)
+            | EventKind::Modify(ModifyKind::Name(_))
+    );
+    let relevant =
+        |path: &Path| is_audio_path(path) || (folder_level && path.extension().is_none());
+
+    let changes: Vec<(PathBuf, WatchChange)> = match event.kind {
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => vec![
+            (event.paths[0].clone(), WatchChange::Removed),
+            (event.paths[1].clone(), WatchChange::Changed),
+        ],
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) | EventKind::Remove(_) => event
+            .paths
+            .iter()
+            .map(|path| (path.clone(), WatchChange::Removed))
+            .collect(),
+        EventKind::Create(_) | EventKind::Modify(_) => event
+            .paths
+            .iter()
+            .map(|path| (path.clone(), WatchChange::Changed))
+            .collect(),
+        _ => Vec::new(),
+    };
+    changes
+        .into_iter()
+        .filter(|(path, _)| relevant(path))
+        .collect()
+}
+
+/// Trailing-edge debouncer: each path is reported once, after it stops changing, with its latest
+/// change. Reported paths leave the map.
+#[derive(Default)]
+struct TrailingDebouncer {
+    pending: HashMap<PathBuf, (WatchChange, Instant)>,
+}
+
+impl TrailingDebouncer {
+    fn record(&mut self, path: PathBuf, change: WatchChange, now: Instant) {
+        self.pending.insert(path, (change, now));
+    }
+
+    fn drain_ready(&mut self, now: Instant) -> Vec<(PathBuf, WatchChange)> {
+        let flush_all = self.pending.len() > MAX_PENDING_PATHS;
+        let ready: Vec<PathBuf> = self
+            .pending
+            .iter()
+            .filter(|(_, (_, at))| flush_all || now.duration_since(*at) >= QUIET_PERIOD)
+            .map(|(path, _)| path.clone())
+            .collect();
+        ready
+            .into_iter()
+            .filter_map(|path| {
+                let (change, _) = self.pending.remove(&path)?;
+                Some((path, change))
+            })
+            .collect()
+    }
+}
 
 pub struct WatcherTask {
     stop_tx: mpsc::Sender<()>,
@@ -26,27 +122,36 @@ pub fn start_watcher<R: Runtime>(
     let (event_tx, event_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
 
-    // The user requested a debounce duration of 2 seconds.
-    // notify v6 RecommendedWatcher is immediate; we'll implement simple debouncing in the handler thread.
     let mut watcher =
         RecommendedWatcher::new(event_tx, Config::default()).map_err(|e| e.to_string())?;
 
-    for path in paths {
-        let p = Path::new(&path);
-        if p.exists() {
-            watcher
-                .watch(p, RecursiveMode::Recursive)
-                .map_err(|e| e.to_string())?;
+    // One folder that cannot be watched (for example the Linux inotify watch limit) must not
+    // stop watching the others.
+    let mut watched = 0;
+    let mut first_error = None;
+    for path in &paths {
+        let p = Path::new(path);
+        if !p.exists() {
+            continue;
+        }
+        match watcher.watch(p, RecursiveMode::Recursive) {
+            Ok(()) => watched += 1,
+            Err(error) => {
+                eprintln!("library watcher could not watch {}: {}", path, error);
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+    }
+    if watched == 0 {
+        if let Some(error) = first_error {
+            return Err(error);
         }
     }
 
     let handle = thread::spawn(move || {
         // Keep watcher alive in this thread
         let _watcher = watcher;
-
-        let extensions = ["mp3", "flac", "aiff", "wav", "ogg", "m4a", "aac"];
-        let mut debounce_map: HashMap<String, Instant> = HashMap::new();
-        let debounce_duration = Duration::from_secs(2);
+        let mut debouncer = TrailingDebouncer::default();
 
         loop {
             if stop_rx.try_recv().is_ok() {
@@ -55,41 +160,22 @@ pub fn start_watcher<R: Runtime>(
 
             match event_rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Ok(event)) => {
-                    for path in event.paths {
-                        if let Some(ext) = path
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .map(|s| s.to_lowercase())
-                        {
-                            if extensions.contains(&ext.as_str()) {
-                                let path_str = path.to_string_lossy().to_string();
-                                let now = Instant::now();
-
-                                // Check debounce
-                                if let Some(last_event) = debounce_map.get(&path_str) {
-                                    if now.duration_since(*last_event) < debounce_duration {
-                                        continue;
-                                    }
-                                }
-                                debounce_map.insert(path_str.clone(), now);
-
-                                use notify::EventKind;
-                                match event.kind {
-                                    EventKind::Create(_) | EventKind::Modify(_) => {
-                                        let _ = app_handle.emit("library-files-changed", path_str);
-                                    }
-                                    EventKind::Remove(_) => {
-                                        let _ = app_handle.emit("library-file-removed", path_str);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
+                    let now = Instant::now();
+                    for (path, change) in classify_event(&event) {
+                        debouncer.record(path, change, now);
                     }
                 }
                 Ok(Err(e)) => eprintln!("library watcher error: {:?}", e),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+
+            for (path, change) in debouncer.drain_ready(Instant::now()) {
+                let _ = app_handle.emit_to(
+                    MAIN_WINDOW_LABEL,
+                    change.event_name(),
+                    path.to_string_lossy().to_string(),
+                );
             }
         }
     });
@@ -107,33 +193,37 @@ fn validate_watch_paths(paths: Vec<String>, roots: &[PathBuf]) -> Result<Vec<Str
     Ok(allowed_paths)
 }
 
+/// Async so stopping the previous watcher (a thread join of up to 250 ms) and the recursive
+/// watch setup run off the main thread.
 #[tauri::command]
-pub fn watch_library_paths(
+pub async fn watch_library_paths(
     app: AppHandle,
     paths: Vec<String>,
-    state: tauri::State<'_, Mutex<Option<WatcherTask>>>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
-    let mut watcher_handle = state.lock().map_err(|e| e.to_string())?;
-
-    if let Some(existing) = watcher_handle.take() {
-        existing.stop();
-    }
-
-    if paths.is_empty() {
-        return Ok(());
-    }
-
     let roots = roots_state.read().roots.clone();
-    let allowed_paths = validate_watch_paths(paths, &roots)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Mutex<Option<WatcherTask>>>();
+        let mut watcher_handle = state.lock().map_err(|e| e.to_string())?;
 
-    *watcher_handle = Some(start_watcher(app, allowed_paths)?);
+        if let Some(existing) = watcher_handle.take() {
+            existing.stop();
+        }
 
-    Ok(())
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        let allowed_paths = validate_watch_paths(paths, &roots)?;
+        *watcher_handle = Some(start_watcher(app.clone(), allowed_paths)?);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[cfg(test)]
 mod tests {
-    use super::validate_watch_paths;
+    use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -164,5 +254,72 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);
+    }
+
+    fn event(kind: EventKind, paths: &[&str]) -> Event {
+        let mut event = Event::new(kind);
+        for path in paths {
+            event = event.add_path(PathBuf::from(path));
+        }
+        event
+    }
+
+    #[test]
+    fn reports_the_last_change_after_writes_stop() {
+        // Regression for AR-19: the first event was emitted and later ones in the next two
+        // seconds were dropped, so the final write of a file could be missed.
+        let start = Instant::now();
+        let mut debouncer = TrailingDebouncer::default();
+        let song = PathBuf::from("/music/a/song.flac");
+
+        debouncer.record(song.clone(), WatchChange::Changed, start);
+        assert!(debouncer.drain_ready(start).is_empty());
+        debouncer.record(
+            song.clone(),
+            WatchChange::Changed,
+            start + Duration::from_secs(1),
+        );
+        assert!(debouncer
+            .drain_ready(start + Duration::from_millis(2000))
+            .is_empty());
+        debouncer.record(
+            song.clone(),
+            WatchChange::Removed,
+            start + Duration::from_secs(2),
+        );
+
+        let ready = debouncer.drain_ready(start + Duration::from_secs(4));
+        assert_eq!(ready, vec![(song, WatchChange::Removed)]);
+        assert!(debouncer.pending.is_empty());
+    }
+
+    #[test]
+    fn classifies_audio_files_and_folder_level_events() {
+        let renamed = classify_event(&event(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            &["/music/Old Album", "/music/New Album"],
+        ));
+        assert_eq!(
+            renamed,
+            vec![
+                (PathBuf::from("/music/Old Album"), WatchChange::Removed),
+                (PathBuf::from("/music/New Album"), WatchChange::Changed),
+            ]
+        );
+
+        let written = classify_event(&event(
+            EventKind::Modify(ModifyKind::Any),
+            &["/music/a/song.FLAC", "/music/a/cover.jpg", "/music/a"],
+        ));
+        assert_eq!(
+            written,
+            vec![(PathBuf::from("/music/a/song.FLAC"), WatchChange::Changed)]
+        );
+
+        let temp = classify_event(&event(
+            EventKind::Create(CreateKind::File),
+            &["/music/a/.song.flac.0123.tarab.tmp"],
+        ));
+        assert!(temp.is_empty());
     }
 }
