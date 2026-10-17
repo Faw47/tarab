@@ -21,6 +21,7 @@ import {
   fetchAlbumTracks,
   fetchArtistTracks,
   fetchLibraryTracksPage,
+  sortOrderFor,
 } from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
@@ -30,7 +31,7 @@ import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
-import type { LibrarySearchScope } from '../../store/library-store';
+import { type LibrarySearchScope, useLibraryStore } from '../../store/library-store';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { ContextMenuPosition, SortBy, Track } from '../../types';
@@ -913,6 +914,7 @@ export const LibraryView = memo(function LibraryView({
     try {
       const offset = loadedCount;
       const limit = 300;
+      const requestedSort = sortBy;
 
       if (offset >= trackCount) {
         setHasMore(false);
@@ -922,9 +924,11 @@ export const LibraryView = memo(function LibraryView({
       const nextTracks = await fetchLibraryTracksPage({
         offset,
         limit,
-        sortBy: 'dateAdded',
-        sortOrder: 'desc',
+        sortBy: requestedSort,
+        sortOrder: sortOrderFor(requestedSort),
       });
+      // A page fetched for a sort the user has since changed belongs to another list.
+      if (useLibraryStore.getState().sortBy !== requestedSort) return;
 
       appendTracks(nextTracks);
       prefetchCoverArt(nextTracks);
@@ -940,7 +944,7 @@ export const LibraryView = memo(function LibraryView({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, trackCount]);
+  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, sortBy, trackCount]);
 
   const triggerLoadMoreThrottled = useCallback(() => {
     if (loadMoreThrottleRef.current) {

@@ -413,10 +413,12 @@ impl Database {
     ) -> SqliteResult<Vec<DbTrack>> {
         let conn = self.conn.lock();
 
+        // Text columns sort case-insensitively, and `id` breaks ties so OFFSET pages never
+        // repeat or skip rows that share a sort key.
         let order_clause = match sort_by {
-            "title" => "title",
-            "artist" => "artist",
-            "album" => "album",
+            "title" => "title COLLATE NOCASE",
+            "artist" => "artist COLLATE NOCASE",
+            "album" => "album COLLATE NOCASE",
             "dateAdded" => "date_added",
             "playCount" => "play_count",
             "duration" => "duration",
@@ -429,8 +431,8 @@ impl Database {
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
                     track_number, disc_number, file_format, bitrate, sample_rate, file_size
-             FROM tracks ORDER BY {} {} LIMIT ?1 OFFSET ?2",
-            order_clause, order_dir
+             FROM tracks ORDER BY {} {}, id {} LIMIT ?1 OFFSET ?2",
+            order_clause, order_dir, order_dir
         );
 
         let mut stmt = conn.prepare(&query)?;

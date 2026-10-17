@@ -14,11 +14,13 @@ import {
   fetchMostPlayedTracks,
   fetchRecentlyAddedTracks,
   mapSearchResultToTrack,
+  sortOrderFor,
 } from './api';
 import { mergeTrackPages } from './mergeTrackPages';
 import { libraryKeys } from './queryKeys';
 
 const SEARCH_DEBOUNCE_MS = 160;
+const EMPTY_TRACKS: Track[] = [];
 
 const sortTracks = (tracks: Track[], sortBy: SortBy): Track[] => {
   return [...tracks].sort((a, b) => {
@@ -93,14 +95,17 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
     return () => clearTimeout(timeout);
   }, [searchQuery]);
 
+  // The database sorts and pages the library. Sorting only the loaded pages on the client gave a
+  // wrong order for libraries larger than one page.
+  const tracksKey = useMemo(() => libraryKeys.tracks(sortBy), [sortBy]);
   const tracksQuery = useQuery({
-    queryKey: libraryKeys.tracks(),
+    queryKey: tracksKey,
     queryFn: () =>
       fetchLibraryTracksPage({
         offset: 0,
         limit: 400,
-        sortBy: 'dateAdded',
-        sortOrder: 'desc',
+        sortBy,
+        sortOrder: sortOrderFor(sortBy),
       }),
     staleTime: 60_000,
   });
@@ -143,7 +148,7 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
     staleTime: 60_000,
   });
 
-  const tracks = tracksQuery.data ?? [];
+  const tracks = tracksQuery.data ?? EMPTY_TRACKS;
   const libraryStats = statsQuery.data ?? null;
   const albumAggregates = albumAggregatesQuery.data ?? [];
   const artistAggregates = artistAggregatesQuery.data ?? [];
@@ -250,23 +255,23 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
       return sortTracks(localFilterTracks(tracks, trimmedSearch, searchScope), sortBy);
     }
 
-    return sortTracks(tracks, sortBy);
+    return tracks;
   }, [searchQueryResult.data, searchResultTracks, searchScope, sortBy, tracks, trimmedSearch]);
 
   const setTracks = useCallback(
     (nextTracks: Track[]) => {
-      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
+      queryClient.setQueryData(tracksKey, nextTracks);
     },
-    [queryClient],
+    [queryClient, tracksKey],
   );
 
   const appendTracks = useCallback(
     (newTracks: Track[]) => {
-      queryClient.setQueryData<Track[]>(libraryKeys.tracks(), (previous = []) =>
+      queryClient.setQueryData<Track[]>(tracksKey, (previous = []) =>
         mergeTrackPages(previous, newTracks),
       );
     },
-    [queryClient],
+    [queryClient, tracksKey],
   );
 
   const setTrackCount = useCallback(
@@ -280,7 +285,7 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
     (entries: [string, string | null][]) => {
       if (entries.length === 0) return;
       const lookup = new Map(entries);
-      queryClient.setQueryData<Track[]>(libraryKeys.tracks(), (previous = []) =>
+      queryClient.setQueryData<Track[]>(tracksKey, (previous = []) =>
         previous.map((track) => {
           if (!lookup.has(track.filePath)) return track;
           const hash = lookup.get(track.filePath) ?? null;
@@ -292,7 +297,7 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
         }),
       );
     },
-    [queryClient],
+    [queryClient, tracksKey],
   );
 
   const performSearch = useCallback(async (_query: string) => {

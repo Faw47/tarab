@@ -116,6 +116,10 @@ export async function fetchLibraryStats() {
   return LibraryStatsSchema.parse(raw);
 }
 
+/** Sort direction the library uses for each sort key: newest first, otherwise A to Z. */
+export const sortOrderFor = (sortBy: SortBy): 'asc' | 'desc' =>
+  sortBy === 'dateAdded' ? 'desc' : 'asc';
+
 export async function fetchLibraryTracksPage(params: {
   offset: number;
   limit: number;
@@ -126,7 +130,7 @@ export async function fetchLibraryTracksPage(params: {
     params.offset,
     params.limit,
     params.sortBy ?? 'dateAdded',
-    params.sortOrder ?? 'desc',
+    params.sortOrder ?? sortOrderFor(params.sortBy ?? 'dateAdded'),
   );
   const parsed = DbTrackArraySchema.parse(raw);
   return parsed.map(mapDbTrackToTrack);
