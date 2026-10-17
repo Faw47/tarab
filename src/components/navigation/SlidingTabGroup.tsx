@@ -33,12 +33,10 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
   const hoveringRef = useRef(false);
   const pressingRef = useRef(false);
 
+  // -1 when the current view (for example Settings) has no tab here; the pill is then hidden
+  // instead of sitting on the first tab.
   const activeIndex = useMemo(
-    () =>
-      Math.max(
-        0,
-        tabs.findIndex((t) => t.view === currentView),
-      ),
+    () => tabs.findIndex((t) => t.view === currentView),
     [tabs, currentView],
   );
 
@@ -65,6 +63,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     onCommitIndex,
     syncDependencies: [currentView, tabs],
+    enabled: activeIndex >= 0,
   });
 
   const listPropsWrapped = useMemo(
@@ -97,17 +96,13 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     if (el && g) applyHorizontalPillDom(el, g.left, g.width);
   }, [pillLayoutFromDom, dragPreviewIndex, isDragging, pillGeometryRef]);
 
-  /*
-   * Always keep a visible DOM pill: the GPU composite runs on AppShellLiquidWebGL’s canvas (z-0),
-   * while TopBar stacks above (z-10+), so the GL pill sits under the header and is not seen through
-   * opaque chrome. CSS provides the actual selection chrome until header/stacking is refactored for
-   * see-through glass over the shell.
-   */
+  // The DOM pill is the selection chrome. It is hidden when no tab matches the current view.
   const domPillStyle = useMemo((): CSSProperties => {
     return {
       ...(pillLayoutFromDom
         ? {}
         : { left: pillStyle.left, width: pillStyle.width, opacity: pillStyle.opacity }),
+      ...(activeIndex < 0 ? { opacity: 0 } : {}),
       background: [
         'linear-gradient(180deg,',
         `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 60%, rgba(255,255,255,0.13)) 0%,`,
@@ -122,7 +117,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
         '0 2px 8px -4px rgba(0,0,0,0.25)',
       ].join(', '),
     };
-  }, [pillLayoutFromDom, pillStyle.left, pillStyle.width, pillStyle.opacity]);
+  }, [activeIndex, pillLayoutFromDom, pillStyle.left, pillStyle.width, pillStyle.opacity]);
 
   return (
     <nav

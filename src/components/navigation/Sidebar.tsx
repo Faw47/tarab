@@ -201,7 +201,8 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
       if (t.segment === 'libraryBrowse') return onLib && !searchUiOpen;
       return currentView === t.view;
     });
-    return idx >= 0 ? idx : 0;
+    // -1 when no item matches the current view; the pill is then hidden.
+    return idx;
   }, [items, currentView, searchUiOpen]);
 
   const onCommitIndex = useCallback(
@@ -234,7 +235,7 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     onCommitIndex,
     syncDependencies: [currentView, items, searchUiOpen],
-    enabled: !isNeobrutalism,
+    enabled: !isNeobrutalism && activeIndex >= 0,
   });
 
   useLayoutEffect(() => {
