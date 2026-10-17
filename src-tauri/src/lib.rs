@@ -431,11 +431,6 @@ pub fn run() {
                 let _ = window.set_decorations(false);
             }
 
-            #[cfg(target_os = "macos")]
-            if let Err(err) = macos_menu::build_menu(app) {
-                eprintln!("macOS menu setup failed: {}", err);
-            }
-
             eprintln!(
                 "[startup] setup_total_ms={:.1}",
                 setup_start.elapsed().as_secs_f64() * 1000.0

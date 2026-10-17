@@ -136,10 +136,10 @@ pub enum DesktopRepeatMode {
     All,
 }
 
-struct DesktopMenuHandles {
-    play_pause: MenuItem<Wry>,
-    previous: MenuItem<Wry>,
-    next: MenuItem<Wry>,
+pub(crate) struct DesktopMenuHandles {
+    pub(crate) play_pause: MenuItem<Wry>,
+    pub(crate) previous: MenuItem<Wry>,
+    pub(crate) next: MenuItem<Wry>,
 }
 
 struct DesktopTrayHandles {
@@ -159,16 +159,13 @@ pub struct DesktopIntegrationState {
 pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
 
-    let menu_handles = if cfg!(target_os = "windows") {
-        None
-    } else {
-        build_app_menu(&app_handle)
-            .map_err(|e| {
-                eprintln!("Failed to initialize app menu: {}", e);
-                e
-            })
-            .ok()
-    };
+    let menu_handles = build_platform_menu(app)
+        .map_err(|e| {
+            eprintln!("Failed to initialize app menu: {}", e);
+            e
+        })
+        .ok()
+        .flatten();
     let tray_handles = build_tray_menu(&app_handle)
         .map_err(|e| {
             eprintln!("Failed to initialize tray menu: {}", e);
@@ -409,6 +406,27 @@ fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
     }
 }
 
+/// One menu per platform. macOS uses the `macos_menu` bar, whose playback items follow the native
+/// UI state. Linux attaches this menu to the main window only, because an app-wide menu is added
+/// to every window there, including the 320x92 mini player. Windows has no app menu.
+fn build_platform_menu(app: &tauri::App<Wry>) -> tauri::Result<Option<DesktopMenuHandles>> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos_menu::build_menu(app).map(Some)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = app;
+        Ok(None)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        build_app_menu(app.handle()).map(Some)
+    }
+}
+
+// Compiled on every platform so its builders and menu IDs stay checked; only Linux installs it.
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 fn build_app_menu(app: &AppHandle<Wry>) -> tauri::Result<DesktopMenuHandles> {
     let show_main_file = MenuItemBuilder::with_id(MENU_SHOW_MAIN_ID, "Show Main Window")
         .accelerator("CmdOrCtrl+0")
@@ -501,7 +519,12 @@ fn build_app_menu(app: &AppHandle<Wry>) -> tauri::Result<DesktopMenuHandles> {
         .item(&help_submenu)
         .build()?;
 
-    app.set_menu(menu)?;
+    match app.get_webview_window(MAIN_WINDOW_LABEL) {
+        Some(main) => {
+            main.set_menu(menu)?;
+        }
+        None => eprintln!("Main window not found; the app menu was not attached"),
+    }
 
     Ok(DesktopMenuHandles {
         play_pause,
