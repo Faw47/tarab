@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use tauri::async_runtime::spawn_blocking;
 use tauri::State;
 
-use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
+use crate::file_ops::{ensure_existing_path_allowed, replace_file_atomically, SharedLibraryRoots};
 
 fn is_standard_key(key: &ItemKey) -> bool {
     matches!(
@@ -339,12 +339,12 @@ fn write_tags_checked(
         tag.push_picture(picture);
     }
 
-    // Write changes to file
-    tagged_file
-        .save_to_path(&target_path, WriteOptions::default())
-        .map_err(|e| format!("Failed to save tags: {}", e))?;
-
-    Ok(())
+    // Write the tags into a copy and swap it in, so a crash or full disk cannot corrupt the file.
+    replace_file_atomically(&target_path, true, |staged| {
+        tagged_file
+            .save_to_path(staged, WriteOptions::default())
+            .map_err(|e| format!("Failed to save tags: {}", e))
+    })
 }
 
 #[tauri::command]
@@ -425,11 +425,11 @@ fn remove_cover_art_checked(file_path: &str, roots: &[PathBuf]) -> Result<(), St
         }
     }
 
-    tagged_file
-        .save_to_path(&target_path, WriteOptions::default())
-        .map_err(|e| format!("Failed to save: {}", e))?;
-
-    Ok(())
+    replace_file_atomically(&target_path, true, |staged| {
+        tagged_file
+            .save_to_path(staged, WriteOptions::default())
+            .map_err(|e| format!("Failed to save: {}", e))
+    })
 }
 
 fn base64_decode(encoded: &str) -> Result<Vec<u8>, base64::DecodeError> {

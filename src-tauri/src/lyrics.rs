@@ -240,7 +240,9 @@ fn write_lyrics_for_track_checked(
     } else {
         crate::file_ops::ensure_target_path_allowed(&lrc_path, roots, "write lyrics sidecar")?;
     }
-    std::fs::write(&lrc_path, content).map_err(|e| format!("Failed to write lyrics: {}", e))
+    crate::file_ops::replace_file_atomically(&lrc_path, false, |staged| {
+        std::fs::write(staged, content).map_err(|e| format!("Failed to write lyrics: {}", e))
+    })
 }
 
 /// Normalize path separators for the current platform

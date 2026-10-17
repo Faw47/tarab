@@ -173,6 +173,51 @@ fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(),
     Ok(())
 }
 
+/// Replaces `target` without ever leaving it half-written. `write` fills a temporary sibling (a
+/// copy of `target` when `copy_original` is set), which is synced and renamed over `target`. A
+/// failure at any step leaves `target` unchanged and removes the temporary file.
+pub(crate) fn replace_file_atomically(
+    target: &Path,
+    copy_original: bool,
+    write: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| "File has no parent directory".to_string())?;
+    let name = target
+        .file_name()
+        .ok_or_else(|| "File has no name".to_string())?
+        .to_string_lossy();
+    // Hidden and with a .tmp extension, so the library watcher and scans ignore it.
+    let temp_path = parent.join(format!(
+        ".{}.{:016x}.tarab.tmp",
+        name,
+        rand::random::<u64>()
+    ));
+
+    let result = (|| {
+        if copy_original {
+            fs::copy(target, &temp_path)
+                .map_err(|e| format!("Failed to stage a copy of the file: {}", e))?;
+        }
+        write(&temp_path)?;
+        fs::File::open(&temp_path)
+            .and_then(|file| file.sync_all())
+            .map_err(|e| format!("Failed to sync the updated file: {}", e))?;
+        fs::rename(&temp_path, target).map_err(|e| format!("Failed to replace the file: {}", e))
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+        return result;
+    }
+    #[cfg(unix)]
+    if let Ok(dir) = fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
 fn active_roots(grants: &[LibraryGrantRecord]) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for grant in grants {
@@ -1159,6 +1204,52 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-file-ops-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    fn directory_entries(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_original_file_intact() {
+        // Regression for QA-09: tags were written in place, so an interrupted write corrupted
+        // the audio file.
+        let dir = temp_dir("atomic-fail");
+        let track = dir.join("song.flac");
+        fs::write(&track, b"original audio").expect("write track");
+
+        let result = replace_file_atomically(&track, true, |staged| {
+            fs::write(staged, b"half-wri").expect("partial write");
+            Err("disk full".to_string())
+        });
+
+        assert_eq!(result, Err("disk full".to_string()));
+        assert_eq!(fs::read(&track).expect("read track"), b"original audio");
+        assert_eq!(directory_entries(&dir), vec!["song.flac".to_string()]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_successful_write_replaces_the_file_from_a_staged_copy() {
+        let dir = temp_dir("atomic-ok");
+        let track = dir.join("song.flac");
+        fs::write(&track, b"original audio").expect("write track");
+
+        replace_file_atomically(&track, true, |staged| {
+            assert_eq!(fs::read(staged).expect("staged copy"), b"original audio");
+            fs::write(staged, b"tagged audio").map_err(|e| e.to_string())
+        })
+        .expect("replace");
+
+        assert_eq!(fs::read(&track).expect("read track"), b"tagged audio");
+        assert_eq!(directory_entries(&dir), vec!["song.flac".to_string()]);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
