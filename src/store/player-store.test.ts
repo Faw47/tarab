@@ -126,6 +126,19 @@ describe('player-store shuffle passes', () => {
     expect(usePlayerStore.getState().previewNext()).toBeNull();
   });
 
+  it('keeps the pass when Repeat One replays a track reached with Previous', () => {
+    startShuffled(['a', 'b', 'c'], 'off');
+    const played = ['a', ...playAll(5)];
+    usePlayerStore.getState().playPrevious();
+    usePlayerStore.getState().setLoopMode('one');
+
+    // The automatic Repeat One advance activates the same entry again.
+    usePlayerStore.getState().playNext();
+
+    expect(usePlayerStore.getState().currentTrack?.id).toBe(played[1]);
+    expect(usePlayerStore.getState().previewPrevious()?.track.id).toBe('a');
+  });
+
   it('plays several Play Next tracks in list order while shuffling', () => {
     startShuffled(['a', 'b', 'c', 'd', 'e'], 'off');
     // The context menu inserts a selection in reverse, each right after the current track.
