@@ -32,7 +32,7 @@ use crossfade::{
     apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
     CrossfadeState,
 };
-use device::open_output_stream;
+use device::{ensure_output_stream, open_output_stream};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
 use events::{
@@ -231,9 +231,9 @@ impl AudioManager {
                     }
                 };
 
-            if stream_bundle.is_none() {
-                return;
-            }
+            // Keep the command loop alive without a device: Play, crossfade and seek reopen
+            // the stream on demand, and SetOutputDevice installs a new one.
+            let mut preferred_device: Option<String> = None;
 
             let mut current_sink: Option<Sink> = None;
             let mut crossfade_state: Option<CrossfadeState> = None;
@@ -256,6 +256,11 @@ impl AudioManager {
                                 true,
                             );
                             *pending_gapless_path_thread.lock() = None;
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
@@ -355,6 +360,11 @@ impl AudioManager {
                                 true,
                             );
                             *pending_gapless_path_thread.lock() = None;
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
@@ -491,6 +501,11 @@ impl AudioManager {
                         AudioCommand::Seek(position_secs) => {
                             let generation = state_clone.lock().generation;
                             *pending_gapless_path_thread.lock() = None;
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
@@ -841,6 +856,7 @@ impl AudioManager {
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
+                            preferred_device = device_id.clone();
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {
                                 Ok(new_stream_bundle) => {

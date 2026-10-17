@@ -62,3 +62,48 @@ pub(super) fn open_output_stream(
         }
     }
 }
+
+/// Opens the output stream on demand when none is available yet.
+///
+/// The audio thread starts even when no output device exists (for example a docked laptop or a
+/// Bluetooth headset that connects later). Play, crossfade and seek call this before using the
+/// stream, so a device that appears after launch is picked up without restarting Tarab.
+pub(super) fn ensure_output_stream<T>(
+    slot: &mut Option<T>,
+    open: impl FnOnce() -> Result<T, String>,
+) -> Result<(), String> {
+    if slot.is_none() {
+        *slot = Some(open()?);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod ensure_output_stream_tests {
+    use super::ensure_output_stream;
+
+    #[test]
+    fn opens_a_missing_stream_on_demand() {
+        let mut slot: Option<u8> = None;
+        assert!(ensure_output_stream(&mut slot, || Ok(1)).is_ok());
+        assert_eq!(slot, Some(1));
+    }
+
+    #[test]
+    fn keeps_an_existing_stream_without_reopening() {
+        let mut slot = Some(1u8);
+        let result = ensure_output_stream(&mut slot, || panic!("must not reopen"));
+        assert!(result.is_ok());
+        assert_eq!(slot, Some(1));
+    }
+
+    #[test]
+    fn reports_failure_and_retries_on_the_next_call() {
+        let mut slot: Option<u8> = None;
+        let error = ensure_output_stream(&mut slot, || Err("no device".to_string()));
+        assert_eq!(error, Err("no device".to_string()));
+        assert_eq!(slot, None);
+        assert!(ensure_output_stream(&mut slot, || Ok(2)).is_ok());
+        assert_eq!(slot, Some(2));
+    }
+}
