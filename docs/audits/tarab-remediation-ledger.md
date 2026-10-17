@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 6 |
+| FIXED_VERIFIED | 7 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 0 |
 | NATIVE_VALIDATION_REQUIRED | 2 |
 | DECISION_REQUIRED | 0 |
 | BLOCKED | 0 |
-| PENDING | 152 |
+| PENDING | 151 |
 | **Total** | **160** |
 
 ## Findings
@@ -77,7 +77,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-10 | P2 | Shuffle with Repeat Off never ends | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-11 | P2 | Shuffle Previous follows list order; "Play Next" is ignored under shuffle; manual Next with Repeat One restarts the song | PENDING | - | Audit confidence SUBJECTIVE. | - | - |
 | PB-05 | P2 | One failed session write disables all later saves and makes tray/menu Quit fail | FIXED_VERIFIED | PASS / PASS / PASS | player-state-store test: a failed write rejects only its caller, the next save persists, flush resolves; both quit paths call desktopQuitApplication in finally. Reviewer confirmed the only caller awaits inside try/catch. | 59c95c2 | PR 1 |
-| PB-15 | P2 | A failed track lookup during restore still enables saving, so an empty queue overwrites the stored one | PENDING | PASS / PASS / - | First review objected: duplicated current track restored to its first occurrence. Fixed in 37394f1 (restoredQueueIndex shifts the saved index past dropped entries; 2 new tests). Awaiting re-review. | 3356937, 37394f1 | PR 1 |
+| PB-15 | P2 | A failed track lookup during restore still enables saving, so an empty queue overwrites the stored one | FIXED_VERIFIED | PASS / PASS / PASS | Lookup failure leaves the store unhydrated so an empty queue cannot overwrite the saved one; restoredQueueIndex() shifts the saved index past dropped entries, keeps duplicates at their saved position, and the fallback current track uses the same index. Two review rounds raised objections (duplicate entries; index/track disagreement); both fixed with tests that failed before. Final review approved. | 3356937, 37394f1, 8d56484 | PR 1 |
 | AR-11 | P2 | Lyrics index sync re-sorts the whole table for every page: 41 s at 100k tracks, after every scan | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-08 | P2 | Scans decode full-resolution embedded artwork two or three times per track | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-09 | P2 | Thumbnails are lossless WebP, so the default 200 MB cache holds roughly 1,000 albums | PENDING | - | Audit confidence CONFIRMED. | - | - |
@@ -85,7 +85,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | QA-09 | P2 | Tag and lyrics writes are in place, not atomic | PENDING | - | Audit confidence LIKELY. | - | - |
 | AR-19 | P2 | Watcher uses leading-edge throttling, has an unbounded debounce map, broadcasts to all windows and sets up recursively on the main thread | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-12 | P2 | Windows runs two media-control (SMTC) integrations; one bypasses the renderer and emits events nobody listens to | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-07 | P2 | Audio thread exits permanently if no output device exists at startup | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | Audio loop stays alive without a device and opens the stream on demand (ensure_output_stream tests: open, reuse, retry). Review follow-up (37394f1): Seek opens the device only when a sink exists; a preferred device is remembered only after it opened. Native check: launch with no output device, connect one, press Play; expect audio and no restart. | c2731a2, 37394f1 | PR 1 |
+| AR-07 | P2 | Audio thread exits permanently if no output device exists at startup | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | Audio loop stays alive without a device and opens the stream on demand (ensure_output_stream tests). Seek opens the device only when a sink exists. The requested device is remembered; on-demand reopen falls back to the system default if it fails. Review approved. Native check: launch with no output device, connect one, press Play; expect audio without restart. | c2731a2, 37394f1, 8d56484 | PR 1 |
 | LD-06 | P2 | Database initialization failure exits silently with no user-visible message | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | QA-05 | P2 | Cover art over the `cover-art://` custom protocol likely fails on Windows, falling back to slower IPC | PENDING | - | Audit confidence LIKELY. | - | - |
 | QA-06 | P2 | Windows canonical paths keep the `\\?\` prefix | PENDING | - | Audit confidence POSSIBLE. | - | - |
