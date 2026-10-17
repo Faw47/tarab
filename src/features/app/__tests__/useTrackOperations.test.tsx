@@ -70,7 +70,8 @@ describe('useTrackOperations', () => {
     const otherTrack = makeTrack('/music/album/two.mp3', { title: 'Two' });
     const tracks = [oldTrack, otherTrack];
 
-    queryClient.setQueryData(libraryKeys.tracks(), tracks);
+    queryClient.setQueryData(libraryKeys.tracks('dateAdded'), tracks);
+    queryClient.setQueryData(libraryKeys.tracks('title'), [...tracks].reverse());
 
     let albumDetails: AlbumDetailsState | null = {
       album: 'Album',
@@ -85,9 +86,6 @@ describe('useTrackOperations', () => {
 
     const setAlbumDetails = vi.fn((details: AlbumDetailsState | null) => {
       albumDetails = details;
-    });
-    const setTracks = vi.fn((nextTracks: Track[]) => {
-      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
     });
     const setSelectedTracks = vi.fn((value: SetStateAction<Track[]>) => {
       selectedTracks = typeof value === 'function' ? value(selectedTracks) : value;
@@ -112,10 +110,8 @@ describe('useTrackOperations', () => {
     const { result } = renderHook(() =>
       useTrackOperations({
         queryClient,
-        libraryTracks: tracks,
         albumDetails,
         setAlbumDetails,
-        setTracks,
         setTrackCount: vi.fn(),
         setSelectedTracks,
         setTagEditorTracks,
@@ -130,7 +126,11 @@ describe('useTrackOperations', () => {
       result.current.applyTrackPathUpdates({ [oldPath]: newPath });
     });
 
-    expect(queryClient.getQueryData<Track[]>(libraryKeys.tracks())?.[0]).toMatchObject({
+    expect(queryClient.getQueryData<Track[]>(libraryKeys.tracks('dateAdded'))?.[0]).toMatchObject({
+      id: newPath,
+      filePath: newPath,
+    });
+    expect(queryClient.getQueryData<Track[]>(libraryKeys.tracks('title'))?.[1]).toMatchObject({
       id: newPath,
       filePath: newPath,
     });
@@ -154,11 +154,8 @@ describe('useTrackOperations', () => {
       makeTrack('/music/album/four.mp3', { title: 'Four' }),
     ];
 
-    queryClient.setQueryData(libraryKeys.tracks(), tracks);
-
-    const setTracks = vi.fn((nextTracks: Track[]) => {
-      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
-    });
+    queryClient.setQueryData(libraryKeys.tracks('dateAdded'), tracks);
+    queryClient.setQueryData(libraryKeys.tracks('title'), [...tracks].reverse());
 
     const player = usePlayerStore.getState();
     player.setQueue(tracks);
@@ -169,10 +166,8 @@ describe('useTrackOperations', () => {
     const { result } = renderHook(() =>
       useTrackOperations({
         queryClient,
-        libraryTracks: tracks,
         albumDetails: null,
         setAlbumDetails: vi.fn(),
-        setTracks,
         setTrackCount: vi.fn(),
         setSelectedTracks: vi.fn(),
         setTagEditorTracks: vi.fn(),
@@ -187,6 +182,11 @@ describe('useTrackOperations', () => {
       await result.current.pruneTracks([tracks[0]]);
     });
 
+    for (const sortBy of ['dateAdded', 'title'] as const) {
+      expect(
+        queryClient.getQueryData<Track[]>(libraryKeys.tracks(sortBy))?.map((track) => track.id),
+      ).not.toContain(tracks[0].id);
+    }
     const state = usePlayerStore.getState();
     expect(state.queue.map((track) => track.id)).toEqual([
       tracks[1].id,
@@ -201,10 +201,7 @@ describe('useTrackOperations', () => {
   it('preserves active playback state when the current source is renamed and moved', async () => {
     const queryClient = new QueryClient();
     const original = makeTrack('/music/album/one.mp3', { title: 'One' });
-    queryClient.setQueryData(libraryKeys.tracks(), [original]);
-    const setTracks = vi.fn((nextTracks: Track[]) => {
-      queryClient.setQueryData(libraryKeys.tracks(), nextTracks);
-    });
+    queryClient.setQueryData(libraryKeys.tracks('dateAdded'), [original]);
     usePlayerStore.setState({
       currentTrack: original,
       queue: [original],
@@ -218,10 +215,8 @@ describe('useTrackOperations', () => {
     const { result } = renderHook(() =>
       useTrackOperations({
         queryClient,
-        libraryTracks: [original],
         albumDetails: null,
         setAlbumDetails: vi.fn(),
-        setTracks,
         setTrackCount: vi.fn(),
         setSelectedTracks: vi.fn(),
         setTagEditorTracks: vi.fn(),

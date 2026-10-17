@@ -413,10 +413,8 @@ const App = () => {
     applyTrackRatings,
   } = useTrackOperations({
     queryClient,
-    libraryTracks,
     albumDetails,
     setAlbumDetails,
-    setTracks,
     setTrackCount,
     setSelectedTracks,
     setTagEditorTracks,

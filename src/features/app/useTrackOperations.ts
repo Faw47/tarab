@@ -20,7 +20,7 @@ import { useMetadataClipboardStore } from '../../store/metadata-clipboard-store'
 import { resolveActiveQueueIndex, usePlayerStore } from '../../store/player-store';
 import type { ContextMenuPosition, TagUpdate, Track } from '../../types';
 import { invalidateLibraryForMutation } from '../library/mutations';
-import { libraryKeys } from '../library/queryKeys';
+import { updateCachedLibraryTracks } from '../library/trackCache';
 import { playlistKeys } from '../playlists/queryKeys';
 import type { AlbumDetailsState } from './app-state-types';
 
@@ -28,10 +28,8 @@ type SetConfirmDialog = Dispatch<SetStateAction<Omit<ConfirmDialogProps, 'onCanc
 
 interface UseTrackOperationsParams {
   queryClient: QueryClient;
-  libraryTracks: Track[];
   albumDetails: AlbumDetailsState | null;
   setAlbumDetails: (details: AlbumDetailsState | null) => void;
-  setTracks: (tracks: Track[]) => void;
   setTrackCount: (count: number) => void;
   setSelectedTracks: Dispatch<SetStateAction<Track[]>>;
   setTagEditorTracks: Dispatch<SetStateAction<Track[] | null>>;
@@ -43,10 +41,8 @@ interface UseTrackOperationsParams {
 
 export function useTrackOperations({
   queryClient,
-  libraryTracks,
   albumDetails,
   setAlbumDetails,
-  setTracks,
   setTrackCount,
   setSelectedTracks,
   setTagEditorTracks,
@@ -117,10 +113,7 @@ export function useTrackOperations({
         return newPath ? { ...track, id: newPath, filePath: newPath } : track;
       };
 
-      const currentTracks =
-        queryClient.getQueryData<Track[]>(libraryKeys.tracks()) ?? libraryTracks;
-      const updatedTracks = currentTracks.map(updateTrackPath);
-      setTracks(updatedTracks);
+      updateCachedLibraryTracks(queryClient, (tracks) => tracks.map(updateTrackPath));
 
       setSelectedTracks((previous) => previous.map(updateTrackPath));
 
@@ -151,13 +144,11 @@ export function useTrackOperations({
     },
     [
       albumDetails,
-      libraryTracks,
       queryClient,
       setAlbumDetails,
       setContextMenuTrack,
       setSelectedTracks,
       setTagEditorTracks,
-      setTracks,
     ],
   );
 
@@ -165,11 +156,8 @@ export function useTrackOperations({
     (trackIds: string[], rating: number | null) => {
       if (trackIds.length === 0) return;
       const targetIds = new Set(trackIds);
-      const currentTracks =
-        queryClient.getQueryData<Track[]>(libraryKeys.tracks()) ?? libraryTracks;
-
-      setTracks(
-        currentTracks.map((track) => (targetIds.has(track.id) ? { ...track, rating } : track)),
+      updateCachedLibraryTracks(queryClient, (tracks) =>
+        tracks.map((track) => (targetIds.has(track.id) ? { ...track, rating } : track)),
       );
 
       setSelectedTracks((previous) =>
@@ -178,14 +166,16 @@ export function useTrackOperations({
       setContextMenuTrack((previous) => (previous && targetIds.has(previous.id) ? null : previous));
       usePlayerStore.getState().applyTrackRatings(trackIds, rating);
     },
-    [libraryTracks, queryClient, setContextMenuTrack, setSelectedTracks, setTracks],
+    [queryClient, setContextMenuTrack, setSelectedTracks],
   );
 
   const pruneTracks = useCallback(
     async (tracksToRemove: Track[]) => {
       if (!tracksToRemove || tracksToRemove.length === 0) return;
       const ids = new Set(tracksToRemove.map((track) => track.id));
-      setTracks(libraryTracks.filter((track) => !ids.has(track.id)));
+      updateCachedLibraryTracks(queryClient, (tracks) =>
+        tracks.filter((track) => !ids.has(track.id)),
+      );
 
       const player = usePlayerStore.getState();
       const filteredQueue = player.queue.filter((track) => !ids.has(track.id));
@@ -216,14 +206,7 @@ export function useTrackOperations({
       setContextMenuPosition(null);
       void queryClient.invalidateQueries({ queryKey: playlistKeys.all });
     },
-    [
-      libraryTracks,
-      queryClient,
-      setContextMenuPosition,
-      setContextMenuTrack,
-      setSelectedTracks,
-      setTracks,
-    ],
+    [queryClient, setContextMenuPosition, setContextMenuTrack, setSelectedTracks],
   );
 
   const handleRemoveTracks = useCallback(
