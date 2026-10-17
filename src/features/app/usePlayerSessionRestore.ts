@@ -50,6 +50,7 @@ export function usePlayerSessionRestore({
     sessionRestored.current = true;
 
     let cancelled = false;
+    let finished = false;
 
     const restoreSession = async () => {
       const session = await loadPlayerStateFromStore();
@@ -62,13 +63,11 @@ export function usePlayerSessionRestore({
 
       const trackLookup = new Map<string, Track>();
       if (allNeededIds.size > 0) {
-        try {
-          const fetched = await dbGetTracksByIds(Array.from(allNeededIds));
-          if (cancelled) return;
-          fetched.forEach((track) => trackLookup.set(track.id, toTrack(track)));
-        } catch (err) {
-          console.error('Failed to load session tracks from DB:', err);
-        }
+        // A failed lookup must propagate: it triggers the retry, and if the retry also fails the
+        // store stays unhydrated so an empty queue cannot overwrite the saved session.
+        const fetched = await dbGetTracksByIds(Array.from(allNeededIds));
+        if (cancelled) return;
+        fetched.forEach((track) => trackLookup.set(track.id, toTrack(track)));
       }
 
       let restoredQueue: Track[] = [];
@@ -78,7 +77,12 @@ export function usePlayerSessionRestore({
           .filter((track): track is Track => Boolean(track));
         if (restoredQueue.length > 0) {
           player.setQueue(restoredQueue);
-          if (typeof session.queueIndex === 'number') {
+          const currentIndex = session.currentTrackId
+            ? restoredQueue.findIndex((track) => track.id === session.currentTrackId)
+            : -1;
+          if (currentIndex >= 0) {
+            player.setQueueIndex(currentIndex);
+          } else if (typeof session.queueIndex === 'number') {
             player.setQueueIndex(
               Math.min(restoredQueue.length - 1, Math.max(0, session.queueIndex)),
             );
@@ -183,29 +187,33 @@ export function usePlayerSessionRestore({
     };
 
     const restoreSessionWithRetry = async () => {
-      try {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            await restoreSession();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await restoreSession();
+          if (!cancelled) markPlayerStateHydrated();
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          if (attempt === 1) {
+            // Leave persistence disabled for this run rather than overwrite the stored session
+            // with a partially restored one.
+            console.error('Failed to restore session; session saving stays disabled:', err);
             return;
-          } catch (err) {
-            if (cancelled) return;
-            if (attempt === 1) {
-              console.error('Failed to restore session:', err);
-              return;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 120));
           }
+          await new Promise((resolve) => setTimeout(resolve, 120));
         }
-      } finally {
-        if (!cancelled) markPlayerStateHydrated();
       }
     };
 
-    void restoreSessionWithRetry();
+    void restoreSessionWithRetry().finally(() => {
+      finished = true;
+    });
 
     return () => {
       cancelled = true;
+      // React StrictMode runs effects twice in development; an unfinished restore was cancelled
+      // here, so allow the next run to restore. A finished restore must never run again.
+      if (!finished) sessionRestored.current = false;
     };
   }, [replaceView]);
 }
