@@ -473,9 +473,21 @@ fn resolve_folder_tracks(all_tracks: &[DbTrack], folder_path: &str) -> Vec<DbTra
         .collect()
 }
 
+/// Loads the whole tracks table once per call site; smart and folder playlists share it.
+fn cached_all_tracks<'a>(
+    db: &SharedDatabase,
+    cache: &'a mut Option<Vec<DbTrack>>,
+) -> Result<&'a [DbTrack], String> {
+    if cache.is_none() {
+        *cache = Some(db.get_all_tracks().map_err(|e| e.to_string())?);
+    }
+    Ok(cache.as_deref().unwrap_or_default())
+}
+
 fn build_detail_from_record(
     db: &SharedDatabase,
     record: &DbPlaylist,
+    all_tracks: &mut Option<Vec<DbTrack>>,
 ) -> Result<PlaylistDetail, String> {
     let playlist_type = PlaylistType::from_db_value(&record.playlist_type);
     let smart_rules = deserialize_rules(&record.smart_rules);
@@ -539,9 +551,9 @@ fn build_detail_from_record(
             (track_ids, entries, None)
         }
         PlaylistType::Smart => {
-            let tracks = db.get_all_tracks().map_err(|e| e.to_string())?;
+            let tracks = cached_all_tracks(db, all_tracks)?;
             let rules = smart_rules.clone().unwrap_or_default();
-            let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
+            let (resolved, sync_error) = resolve_smart_tracks(tracks, &rules);
             let entries = resolved
                 .iter()
                 .enumerate()
@@ -562,8 +574,8 @@ fn build_detail_from_record(
                     Some("Folder path is missing.".to_string()),
                 )
             } else {
-                let tracks = db.get_all_tracks().map_err(|e| e.to_string())?;
-                let resolved = resolve_folder_tracks(&tracks, &folder_path);
+                let tracks = cached_all_tracks(db, all_tracks)?;
+                let resolved = resolve_folder_tracks(tracks, &folder_path);
                 let sync_error = if Path::new(&folder_path).is_dir() {
                     None
                 } else {
@@ -615,7 +627,7 @@ fn get_playlist_detail_internal(
         .get_playlist_by_id(playlist_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Playlist not found".to_string())?;
-    build_detail_from_record(db, &record)
+    build_detail_from_record(db, &record, &mut None)
 }
 
 pub fn bootstrap_playlist_storage(app: tauri::AppHandle, db: SharedDatabase) -> Result<(), String> {
@@ -695,29 +707,76 @@ pub fn bootstrap_playlist_storage(app: tauri::AppHandle, db: SharedDatabase) -> 
 }
 
 #[tauri::command]
-pub fn get_playlists(db: tauri::State<'_, SharedDatabase>) -> Result<Vec<PlaylistSummary>, String> {
+pub async fn get_playlists(
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<PlaylistSummary>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || get_playlists_blocking(db))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn get_playlists_blocking(db: SharedDatabase) -> Result<Vec<PlaylistSummary>, String> {
     let records = db.get_all_playlists().map_err(|e| e.to_string())?;
     let mut summaries = Vec::with_capacity(records.len());
+    let mut all_tracks = None;
     for record in records {
-        let detail = build_detail_from_record(db.inner(), &record)?;
+        let detail = build_detail_from_record(&db, &record, &mut all_tracks)?;
         summaries.push(to_summary_from_detail(&detail));
     }
     Ok(summaries)
 }
 
 #[tauri::command]
-pub fn get_playlist_detail(
+pub async fn get_playlist_detail(
     playlist_id: String,
     db: tauri::State<'_, SharedDatabase>,
 ) -> Result<PlaylistDetail, String> {
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || get_playlist_detail_blocking(playlist_id, db))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn get_playlist_detail_blocking(
+    playlist_id: String,
+    db: SharedDatabase,
+) -> Result<PlaylistDetail, String> {
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn create_playlist(
+pub async fn create_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+    name: String,
+    playlist_type: PlaylistType,
+    smart_rules: Option<Vec<SmartPlaylistRule>>,
+    folder_path: Option<String>,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        create_playlist_blocking(
+            guard,
+            db,
+            roots_state,
+            name,
+            playlist_type,
+            smart_rules,
+            folder_path,
+        )
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn create_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
+    roots_state: SharedLibraryRoots,
     name: String,
     playlist_type: PlaylistType,
     smart_rules: Option<Vec<SmartPlaylistRule>>,
@@ -755,14 +814,30 @@ pub fn create_playlist(
     };
 
     db.create_playlist(&db_row).map_err(|e| e.to_string())?;
-    get_playlist_detail_internal(db.inner(), &db_row.id)
+    get_playlist_detail_internal(&db, &db_row.id)
 }
 
 #[tauri::command]
-pub fn update_playlist(
+pub async fn update_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+    request: UpdatePlaylistRequest,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        update_playlist_blocking(guard, db, roots_state, request)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn update_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
+    roots_state: SharedLibraryRoots,
     request: UpdatePlaylistRequest,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
@@ -831,7 +906,7 @@ pub fn update_playlist(
             .map_err(|e| e.to_string())?;
     }
 
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -846,9 +921,21 @@ pub struct UpdatePlaylistRequest {
 }
 
 #[tauri::command]
-pub fn delete_playlist(
+pub async fn delete_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+) -> Result<(), String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || delete_playlist_blocking(guard, db, playlist_id))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn delete_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
 ) -> Result<(), String> {
     let _lock = guard.lock.lock();
@@ -856,9 +943,24 @@ pub fn delete_playlist(
 }
 
 #[tauri::command]
-pub fn set_playlist_pinned(
+pub async fn set_playlist_pinned(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    is_pinned: bool,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        set_playlist_pinned_blocking(guard, db, playlist_id, is_pinned)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn set_playlist_pinned_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
     is_pinned: bool,
 ) -> Result<PlaylistDetail, String> {
@@ -879,13 +981,29 @@ pub fn set_playlist_pinned(
     db.set_playlist_pinned(&playlist_id, is_pinned, pinned_at, now)
         .map_err(|e| e.to_string())?;
 
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn add_tracks_to_playlist(
+pub async fn add_tracks_to_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    track_ids: Vec<String>,
+    mutation_id: String,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        add_tracks_to_playlist_blocking(guard, db, playlist_id, track_ids, mutation_id)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn add_tracks_to_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
     track_ids: Vec<String>,
     mutation_id: String,
@@ -908,15 +1026,30 @@ pub fn add_tracks_to_playlist(
     db.add_tracks_to_playlist(&playlist_id, &track_ids)
         .map_err(|e| e.to_string())?;
 
-    let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
+    let detail = get_playlist_detail_internal(&db, &playlist_id)?;
     guard.store_mutation_result(key, detail.clone());
     Ok(detail)
 }
 
 #[tauri::command]
-pub fn remove_tracks_from_playlist(
+pub async fn remove_tracks_from_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    track_ids: Vec<String>,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_tracks_from_playlist_blocking(guard, db, playlist_id, track_ids)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn remove_tracks_from_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
     track_ids: Vec<String>,
 ) -> Result<PlaylistDetail, String> {
@@ -925,13 +1058,29 @@ pub fn remove_tracks_from_playlist(
     db.remove_tracks_from_playlist(&playlist_id, &track_ids)
         .map_err(|e| e.to_string())?;
 
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn relink_playlist_track(
+pub async fn relink_playlist_track(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    old_track_id: String,
+    new_track_id: String,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        relink_playlist_track_blocking(guard, db, playlist_id, old_track_id, new_track_id)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn relink_playlist_track_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
     old_track_id: String,
     new_track_id: String,
@@ -944,13 +1093,29 @@ pub fn relink_playlist_track(
         to_i64(now_millis_u64()?),
     )
     .map_err(|e| e.to_string())?;
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn reorder_playlist_tracks(
+pub async fn reorder_playlist_tracks(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+    playlist_id: String,
+    track_ids: Vec<String>,
+    mutation_id: String,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        reorder_playlist_tracks_blocking(guard, db, playlist_id, track_ids, mutation_id)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn reorder_playlist_tracks_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
     playlist_id: String,
     track_ids: Vec<String>,
     mutation_id: String,
@@ -965,16 +1130,32 @@ pub fn reorder_playlist_tracks(
     db.set_playlist_tracks(&playlist_id, &track_ids, now)
         .map_err(|e| e.to_string())?;
 
-    let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
+    let detail = get_playlist_detail_internal(&db, &playlist_id)?;
     guard.store_mutation_result(key, detail.clone());
     Ok(detail)
 }
 
 #[tauri::command]
-pub fn sync_playlist(
+pub async fn sync_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+    playlist_id: String,
+) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sync_playlist_blocking(guard, db, roots_state, playlist_id)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn sync_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
+    roots_state: SharedLibraryRoots,
     playlist_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
@@ -1049,18 +1230,32 @@ pub fn sync_playlist(
     db.set_playlist_sync_state(&playlist_id, Some(now), sync_error.as_deref(), now)
         .map_err(|e| e.to_string())?;
 
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn remove_missing_from_playlist(
+pub async fn remove_missing_from_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
 ) -> Result<PlaylistDetail, String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_missing_from_playlist_blocking(guard, db, playlist_id)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn remove_missing_from_playlist_blocking(
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
+    playlist_id: String,
+) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
 
-    let detail = get_playlist_detail_internal(db.inner(), &playlist_id)?;
+    let detail = get_playlist_detail_internal(&db, &playlist_id)?;
     let unavailable_ids = detail
         .entries
         .iter()
@@ -1073,14 +1268,26 @@ pub fn remove_missing_from_playlist(
             .map_err(|e| e.to_string())?;
     }
 
-    get_playlist_detail_internal(db.inner(), &playlist_id)
+    get_playlist_detail_internal(&db, &playlist_id)
 }
 
 #[tauri::command]
-pub fn reset_playlists_data(
+pub async fn reset_playlists_data(
     app: tauri::AppHandle,
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
+) -> Result<(), String> {
+    let guard = guard.inner().clone();
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || reset_playlists_data_blocking(app, guard, db))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn reset_playlists_data_blocking(
+    app: tauri::AppHandle,
+    guard: SharedPlaylistGuard,
+    db: SharedDatabase,
 ) -> Result<(), String> {
     let _lock = guard.lock.lock();
     db.clear_playlists().map_err(|e| e.to_string())?;
@@ -1095,13 +1302,94 @@ pub fn reset_playlists_data(
 }
 
 #[tauri::command]
-pub fn get_playlists_data_path(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn get_playlists_data_path(app: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || get_playlists_data_path_blocking(app))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+fn get_playlists_data_path_blocking(app: tauri::AppHandle) -> Result<String, String> {
     Ok(get_playlists_path(&app).to_string_lossy().to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listing_playlists_resolves_smart_and_folder_playlists_from_one_track_load() {
+        // Regression for AR-04: get_playlists used to reload the whole tracks table for every
+        // smart or folder playlist, synchronously on the main thread.
+        let db: SharedDatabase =
+            Arc::new(crate::database::Database::in_memory_for_tests().expect("in-memory database"));
+        let mut tracks = Vec::new();
+        for index in 0..30 {
+            let mut track = sample_track(
+                &format!("/music/a/{index}.mp3"),
+                if index % 2 == 0 { "Even" } else { "Odd" },
+                "Album",
+                Some(2000),
+                120.0,
+                index,
+                None,
+            );
+            track.file_path = track.id.clone();
+            tracks.push(track);
+        }
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+        let rules = |rule: SmartPlaylistRule| serialize_rules(&Some(vec![rule]));
+        let playlist =
+            |id: &str, kind: PlaylistType, smart: Option<String>, folder: Option<&str>| {
+                DbPlaylist {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    playlist_type: kind.as_db_value().to_string(),
+                    folder_path: folder.map(str::to_string),
+                    smart_rules: smart,
+                    created_at: 1,
+                    updated_at: 1,
+                    is_pinned: false,
+                    pinned_at: None,
+                    last_synced_at: None,
+                    sync_error: None,
+                }
+            };
+        db.create_playlist(&playlist(
+            "even",
+            PlaylistType::Smart,
+            rules(SmartPlaylistRule::ByArtist {
+                artist: "even".to_string(),
+            }),
+            None,
+        ))
+        .expect("smart playlist");
+        db.create_playlist(&playlist(
+            "busy",
+            PlaylistType::Smart,
+            rules(SmartPlaylistRule::MostPlayed { min_plays: 20 }),
+            None,
+        ))
+        .expect("smart playlist");
+        db.create_playlist(&playlist(
+            "folder",
+            PlaylistType::FolderSync,
+            None,
+            Some("/music/a"),
+        ))
+        .expect("folder playlist");
+
+        let summaries = get_playlists_blocking(Arc::clone(&db)).expect("list playlists");
+        let count = |id: &str| {
+            summaries
+                .iter()
+                .find(|summary| summary.id == id)
+                .map(|summary| summary.track_count)
+        };
+
+        assert_eq!(count("even"), Some(15));
+        assert_eq!(count("busy"), Some(10));
+        assert_eq!(count("folder"), Some(30));
+    }
 
     fn sample_detail(id: &str) -> PlaylistDetail {
         PlaylistDetail {
