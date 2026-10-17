@@ -86,7 +86,7 @@ pub(super) fn prepare_source(
     let source = SymphoniaSource::new(
         decoder,
         format,
-        state.clone(),
+        state.lock().booster.clone(),
         emitted_samples.clone(),
         file_path.to_string(),
     )
@@ -157,10 +157,12 @@ pub(super) fn play_with_source(
 pub(super) struct SymphoniaSource {
     decoder: Box<dyn SymphoniaDecoder>,
     format: Box<dyn FormatReader>,
-    state: Arc<Mutex<PlaybackState>>,
+    booster: BoosterGain,
     emitted_samples: Arc<AtomicU64>,
     file_path: String,
     buffer: Vec<f32>,
+    // Reused for every packet so decoding does not allocate on the mixer thread.
+    scratch: Option<SampleBuffer<f32>>,
     buf_pos: usize,
     channels: u16,
     sample_rate: u32,
@@ -170,7 +172,7 @@ impl SymphoniaSource {
     pub(super) fn new(
         decoder: Box<dyn SymphoniaDecoder>,
         format: Box<dyn FormatReader>,
-        state: Arc<Mutex<PlaybackState>>,
+        booster: BoosterGain,
         emitted_samples: Arc<AtomicU64>,
         file_path: String,
     ) -> Option<Self> {
@@ -180,10 +182,11 @@ impl SymphoniaSource {
         Some(Self {
             decoder,
             format,
-            state,
+            booster,
             emitted_samples,
             file_path,
             buffer: Vec::new(),
+            scratch: None,
             buf_pos: 0,
             channels,
             sample_rate,
@@ -208,10 +211,11 @@ impl SymphoniaSource {
 
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
-                    if let Some((out, chans, rate)) = convert_to_f32(decoded) {
+                    if let Some((chans, rate)) =
+                        convert_to_f32(decoded, &mut self.scratch, &mut self.buffer)
+                    {
                         self.channels = chans;
                         self.sample_rate = rate;
-                        self.buffer = out;
                         self.buf_pos = 0;
                         return Some(());
                     }
@@ -242,11 +246,7 @@ impl Iterator for SymphoniaSource {
 
         let mut sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
-        let gain = {
-            let state = self.state.lock();
-            state.booster
-        };
-        sample = (sample * gain).clamp(-1.0, 1.0);
+        sample = (sample * self.booster.get()).clamp(-1.0, 1.0);
         self.emitted_samples.fetch_add(1, Ordering::Relaxed);
         Some(sample)
     }
@@ -323,21 +323,29 @@ impl Source for GaplessHandoffSource {
     }
 }
 
-fn convert_to_f32(buf: AudioBufferRef) -> Option<(Vec<f32>, u16, u32)> {
-    let chans = buf.spec().channels.count() as u16;
-    let rate = buf.spec().rate;
+/// Interleaves a decoded packet into `out`, reusing `scratch` and `out` across packets.
+fn convert_to_f32(
+    buf: AudioBufferRef,
+    scratch: &mut Option<SampleBuffer<f32>>,
+    out: &mut Vec<f32>,
+) -> Option<(u16, u32)> {
+    let spec = *buf.spec();
+    let chans = spec.channels.count() as u16;
+    let rate = spec.rate;
     let frames = buf.frames();
     let sample_count = validate_decoded_packet(chans, frames, rate)?;
 
-    let mut converted = buf.make_equivalent::<f32>();
-    buf.convert(&mut converted);
-    let mut out = Vec::with_capacity(sample_count);
-    for frame_idx in 0..frames {
-        for chan_idx in 0..chans as usize {
-            out.push(*converted.chan(chan_idx).get(frame_idx)?);
-        }
+    let fits = scratch
+        .as_ref()
+        .is_some_and(|existing| existing.capacity() >= sample_count);
+    if !fits {
+        *scratch = Some(SampleBuffer::new(buf.capacity() as u64, spec));
     }
-    Some((out, chans, rate))
+    let samples = scratch.as_mut()?;
+    samples.copy_interleaved_ref(buf);
+    out.clear();
+    out.extend_from_slice(samples.samples());
+    (out.len() == sample_count).then_some((chans, rate))
 }
 
 pub(super) fn validate_decoded_packet(
@@ -351,4 +359,88 @@ pub(super) fn validate_decoded_packet(
         && (MIN_AUDIO_SAMPLE_RATE..=MAX_AUDIO_SAMPLE_RATE).contains(&sample_rate)
         && sample_count <= MAX_DECODED_SAMPLES_PER_PACKET)
         .then_some(sample_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    /// A 16-bit stereo PCM WAV whose left channel counts up and right channel counts down.
+    fn stereo_wav(frames: u16) -> Vec<u8> {
+        let data_len = u32::from(frames) * 4;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&32_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for frame in 0..frames {
+            let value = (frame as i16) * 8;
+            bytes.extend_from_slice(&value.to_le_bytes());
+            bytes.extend_from_slice(&(-value).to_le_bytes());
+        }
+        bytes
+    }
+
+    fn write_temp_wav(name: &str, frames: u16) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!("tarab-source-{name}-{nonce}.wav"));
+        std::fs::write(&path, stereo_wav(frames)).expect("write wav");
+        path
+    }
+
+    #[test]
+    fn decoded_samples_stay_interleaved_across_packets() {
+        let path = write_temp_wav("interleave", 3000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let samples: Vec<f32> = source.collect();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(samples.len(), 6000);
+        for (frame, pair) in samples.chunks(2).enumerate() {
+            let expected = (frame as f32 * 8.0) / 32768.0;
+            assert!((pair[0] - expected).abs() < 1e-6, "left sample {frame}");
+            assert!((pair[1] + expected).abs() < 1e-6, "right sample {frame}");
+        }
+    }
+
+    #[test]
+    fn source_produces_samples_while_the_playback_lock_is_held() {
+        // Regression for PB-09: the mixer used to take the playback lock for every sample.
+        let path = write_temp_wav("lock", 2000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let guard = state.lock();
+        let (done_tx, done_rx) = mpsc::channel();
+        let mixer = std::thread::spawn(move || {
+            let pulled = (0..1000).filter_map(|_| source.next()).count();
+            let _ = done_tx.send(pulled);
+        });
+        let pulled = done_rx.recv_timeout(Duration::from_secs(2));
+        drop(guard);
+        let _ = mixer.join();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(pulled, Ok(1000));
+    }
 }

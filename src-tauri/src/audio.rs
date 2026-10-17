@@ -7,7 +7,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
@@ -40,8 +40,8 @@ use events::{
     PlaybackTransition,
 };
 use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
-use state::playback_identity;
 pub use state::PlaybackState;
+use state::{playback_identity, BoosterGain};
 
 enum AudioCommand {
     Play {
@@ -73,6 +73,13 @@ enum AudioCommand {
     SourceRenamed {
         old_path: String,
         new_path: String,
+    },
+    /// Sent by the mixer thread when a gapless follow-on track plays its first sample, so the
+    /// IPC emits happen on the audio thread instead of the real-time mixer.
+    GaplessHandoffStarted {
+        ended: PlaybackEndedPayload,
+        next_generation: u64,
+        next_path: String,
     },
 }
 
@@ -213,6 +220,7 @@ impl AudioManager {
         let pending_gapless_path = Arc::new(Mutex::new(None::<String>));
         let pending_gapless_path_thread = Arc::clone(&pending_gapless_path);
         let audio_is_running = Arc::clone(&is_running);
+        let handoff_sender = sender.clone();
         thread::spawn(move || {
             let mut stream_bundle: Option<(OutputStream, OutputStreamHandle)> =
                 match open_output_stream(None) {
@@ -629,18 +637,25 @@ impl AudioManager {
                         }
                         AudioCommand::Pause => {
                             if let Some(ref sink) = current_sink {
-                                let mut state = state_clone.lock();
-                                if !state.is_paused {
+                                // Emit after releasing the lock; the mixer and position threads
+                                // must not wait on IPC.
+                                let paused = {
+                                    let mut state = state_clone.lock();
+                                    (!state.is_paused).then(|| {
+                                        state.is_paused = true;
+                                        (state.generation, state.current_file.clone())
+                                    })
+                                };
+                                if let Some((generation, current_file)) = paused {
                                     sink.pause();
                                     if let Some(ref active) = crossfade_state {
                                         active.outgoing_sink.pause();
                                     }
-                                    state.is_paused = true;
                                     emit_playback_transition(
                                         &app_for_audio,
-                                        state.generation,
+                                        generation,
                                         PlaybackTransition::Paused,
-                                        state.current_file.clone(),
+                                        current_file,
                                         None,
                                         true,
                                     );
@@ -649,18 +664,23 @@ impl AudioManager {
                         }
                         AudioCommand::Resume => {
                             if let Some(ref sink) = current_sink {
-                                let mut state = state_clone.lock();
-                                if state.is_paused {
+                                let resumed = {
+                                    let mut state = state_clone.lock();
+                                    state.is_paused.then(|| {
+                                        state.is_paused = false;
+                                        (state.generation, state.current_file.clone())
+                                    })
+                                };
+                                if let Some((generation, current_file)) = resumed {
                                     sink.play();
                                     if let Some(ref active) = crossfade_state {
                                         active.outgoing_sink.play();
                                     }
-                                    state.is_paused = false;
                                     emit_playback_transition(
                                         &app_for_audio,
-                                        state.generation,
+                                        generation,
                                         PlaybackTransition::Playing,
-                                        state.current_file.clone(),
+                                        current_file,
                                         None,
                                         true,
                                     );
@@ -760,8 +780,7 @@ impl AudioManager {
                             state.crossfade_secs = seconds.clamp(0.0, 12.0);
                         }
                         AudioCommand::SetBooster(level) => {
-                            let mut state = state_clone.lock();
-                            state.booster = level.clamp(1.0, 2.0);
+                            state_clone.lock().booster.set(level.clamp(1.0, 2.0));
                         }
                         AudioCommand::PreloadNext(maybe_source) => match maybe_source {
                             None => {
@@ -803,10 +822,9 @@ impl AudioManager {
 
                                 let ch2 = source2.channels();
                                 let sr2 = source2.sample_rate();
-                                let app_emit = app_for_audio.clone();
+                                let handoff_sender = handoff_sender.clone();
                                 let state_emit = state_clone.clone();
                                 let active_slot = active_emitted_for_audio.clone();
-                                let pending_slot = pending_gapless_path_thread.clone();
                                 let out_clone = out_path.clone();
                                 let next_clone = path.clone();
                                 let cnt_next = Arc::clone(&emitted_for_next);
@@ -823,23 +841,20 @@ impl AudioManager {
                                         s.position_channels = ch2;
                                         s.warned_near_end = false;
                                     }
-                                    let payload = PlaybackEndedPayload {
+                                    let ended = PlaybackEndedPayload {
                                         path: Some(out_clone),
                                         generation: outgoing_generation,
                                         seamless: true,
                                         next_generation: Some(next_generation),
                                         next_path: Some(next_clone.clone()),
                                     };
-                                    let _ = app_emit.emit("playback-ended", payload);
-                                    emit_playback_transition(
-                                        &app_emit,
-                                        next_generation,
-                                        PlaybackTransition::Playing,
-                                        Some(next_clone.clone()),
-                                        None,
-                                        true,
-                                    );
-                                    *pending_slot.lock() = None;
+                                    // The audio thread emits; it wakes at least every 20 ms.
+                                    let _ =
+                                        handoff_sender.send(AudioCommand::GaplessHandoffStarted {
+                                            ended,
+                                            next_generation,
+                                            next_path: next_clone,
+                                        });
                                 });
 
                                 sink.append(handoff);
@@ -847,17 +862,43 @@ impl AudioManager {
                             }
                         },
                         AudioCommand::SourceRenamed { old_path, new_path } => {
-                            let mut state = state_clone.lock();
-                            if state.current_file.as_deref() == Some(old_path.as_str()) {
-                                state.current_file = Some(new_path.clone());
+                            let renamed_generation = {
+                                let mut state = state_clone.lock();
+                                (state.current_file.as_deref() == Some(old_path.as_str())).then(
+                                    || {
+                                        state.current_file = Some(new_path.clone());
+                                        state.generation
+                                    },
+                                )
+                            };
+                            if let Some(generation) = renamed_generation {
                                 emit_playback_transition(
                                     &app_for_audio,
-                                    state.generation,
+                                    generation,
                                     PlaybackTransition::SourceRenamed,
                                     Some(new_path),
                                     None,
                                     true,
                                 );
+                            }
+                        }
+                        AudioCommand::GaplessHandoffStarted {
+                            ended,
+                            next_generation,
+                            next_path,
+                        } => {
+                            let _ = app_for_audio.emit("playback-ended", ended);
+                            emit_playback_transition(
+                                &app_for_audio,
+                                next_generation,
+                                PlaybackTransition::Playing,
+                                Some(next_path.clone()),
+                                None,
+                                true,
+                            );
+                            let mut pending = pending_gapless_path_thread.lock();
+                            if pending.as_deref() == Some(next_path.as_str()) {
+                                *pending = None;
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
