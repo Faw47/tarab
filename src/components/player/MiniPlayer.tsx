@@ -102,22 +102,30 @@ export const MiniPlayer = memo(
       );
 
     const handleTogglePlay = useCallback(() => {
-      toggleCurrentPlayback().catch(reportError);
+      toggleCurrentPlayback().catch((error) =>
+        reportError('Failed to toggle playback', { source: 'mini-player', error }),
+      );
     }, []);
 
     const handleNext = useCallback(() => {
-      playAdjacentTrack('next').catch(reportError);
+      playAdjacentTrack('next').catch((error) =>
+        reportError('Failed to play the next track', { source: 'mini-player', error }),
+      );
     }, []);
 
     const handlePrevious = useCallback(() => {
-      playAdjacentTrack('previous').catch(reportError);
+      playAdjacentTrack('previous').catch((error) =>
+        reportError('Failed to play the previous track', { source: 'mini-player', error }),
+      );
     }, []);
 
     const handleVolumeChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = parseFloat(e.target.value);
         setVolume(val);
-        setAudioVolume(val).catch(reportError);
+        setAudioVolume(val).catch((error) =>
+          reportError('Failed to set the volume', { source: 'mini-player', error }),
+        );
       },
       [setVolume],
     );
