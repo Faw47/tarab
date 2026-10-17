@@ -453,14 +453,24 @@ fn grant_resolved_path(grant: &LibraryGrantRecord) -> PathBuf {
     fs::canonicalize(&stored).unwrap_or(stored)
 }
 
-/// The existing grant that already covers `canonical` (the same folder or a parent), if any.
+/// Same test as `active_roots`: the stored folder exists and its last component is not a symlink.
+/// An inactive grant (shown as missing) must not block or absorb a new selection.
+fn grant_is_active(grant: &LibraryGrantRecord) -> bool {
+    let path = PathBuf::from(&grant.path);
+    let is_symlink = fs::symlink_metadata(&path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(true);
+    path.is_dir() && !is_symlink
+}
+
+/// The active grant that already covers `canonical` (the same folder or a parent), if any.
 fn covering_grant<'a>(
     grants: &'a [LibraryGrantRecord],
     canonical: &Path,
 ) -> Option<&'a LibraryGrantRecord> {
     grants
         .iter()
-        .find(|grant| canonical.starts_with(grant_resolved_path(grant)))
+        .find(|grant| grant_is_active(grant) && canonical.starts_with(grant_resolved_path(grant)))
 }
 
 pub(crate) fn grant_library_path(
@@ -481,7 +491,9 @@ pub(crate) fn grant_library_path(
     }
 
     let mut next = current;
-    next.retain(|grant| !grant_resolved_path(grant).starts_with(&canonical));
+    next.retain(|grant| {
+        !(grant_is_active(grant) && grant_resolved_path(grant).starts_with(&canonical))
+    });
     let grant = LibraryGrantRecord {
         id: format!("{:032x}", rand::random::<u128>()),
         path: canonical_string,
@@ -1265,24 +1277,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_grant_stored_through_a_symlink_still_covers_its_subfolders() {
+    fn a_grant_stored_through_a_symlinked_parent_still_covers_its_subfolders() {
         // Regression for QA-06: the overlap check compared the canonical selection with the raw
         // stored string, so equivalent spellings created duplicate, overlapping grants.
         let dir = temp_dir("grant-overlap");
-        let real = dir.join("real");
-        fs::create_dir_all(real.join("Album")).expect("create folders");
-        let link = dir.join("link");
-        std::os::unix::fs::symlink(&real, &link).expect("create link");
+        fs::create_dir_all(dir.join("real").join("Music").join("Album")).expect("create folders");
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("link")).expect("create link");
         let grants = vec![LibraryGrantRecord {
             id: "grant-1".to_string(),
-            path: link.to_string_lossy().into_owned(),
+            path: dir
+                .join("link")
+                .join("Music")
+                .to_string_lossy()
+                .into_owned(),
         }];
-        let selection = fs::canonicalize(real.join("Album")).expect("canonical selection");
+        let selection =
+            fs::canonicalize(dir.join("real").join("Music").join("Album")).expect("selection");
 
         assert_eq!(
             covering_grant(&grants, &selection).map(|grant| grant.id.as_str()),
             Some("grant-1")
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_inactive_symlink_grant_does_not_block_its_real_folder() {
+        let dir = temp_dir("grant-inactive");
+        fs::create_dir_all(dir.join("real")).expect("create folder");
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("link")).expect("create link");
+        let grants = vec![LibraryGrantRecord {
+            id: "grant-1".to_string(),
+            path: dir.join("link").to_string_lossy().into_owned(),
+        }];
+        let selection = fs::canonicalize(dir.join("real")).expect("selection");
+
+        assert!(covering_grant(&grants, &selection).is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

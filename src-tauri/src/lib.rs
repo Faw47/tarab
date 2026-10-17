@@ -110,8 +110,9 @@ fn read_image_as_base64_checked(
 fn parse_cover_art_request(uri: &http::Uri) -> Option<(&str, &str)> {
     let host = uri.host().unwrap_or_default();
     let mut parts = uri.path().split('/').filter(|part| !part.is_empty());
-    // macOS and Linux request cover-art://localhost/{hash}/{size}; Windows (WebView2) requests
-    // http://cover-art.localhost/{hash}/{size}. Older URLs carried the hash as the host.
+    // Handlers receive cover-art://localhost/{hash}/{size} (wry maps WebView2's
+    // http://cover-art.localhost form back to it). The cover-art.localhost host is accepted too, in
+    // case a runtime passes it through. Older URLs carried the hash as the host.
     let serving_host = host.is_empty() || host == "localhost" || host == "cover-art.localhost";
     if !serving_host {
         return Some((host, parts.next().unwrap_or("medium")));
@@ -160,6 +161,21 @@ fn cover_art_response(cache: &image_cache::ImageCache, uri: &http::Uri) -> http:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Open the library before Tauri starts: a setup error panics inside the event loop (and
+    // aborts in release builds), so a failure there could never be shown to the user.
+    let db_start = Instant::now();
+    let database = match create_database() {
+        Ok(database) => database,
+        Err(err) => {
+            startup_failure::report_database_failure(&format!(
+                "Failed to initialize library database: {}",
+                err
+            ));
+            return;
+        }
+    };
+    let db_init_ms = db_start.elapsed().as_secs_f64() * 1000.0;
+
     let shared_image_cache: SharedImageCache = create_image_cache();
 
     let builder = tauri::Builder::default()
@@ -349,23 +365,9 @@ pub fn run() {
             let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
             app.manage(audio_manager);
 
-            // Create database
-            let db_start = Instant::now();
-            let database = match create_database() {
-                Ok(database) => database,
-                Err(err) => {
-                    let message = format!("Failed to initialize library database: {}", err);
-                    eprintln!("{}", message);
-                    startup_failure::record_database_failure(&message);
-                    return Err(message.into());
-                }
-            };
             let playlist_bootstrap_db = database.clone();
             app.manage(database);
-            eprintln!(
-                "[startup] db_init_ms={:.1}",
-                db_start.elapsed().as_secs_f64() * 1000.0
-            );
+            eprintln!("[startup] db_init_ms={:.1}", db_init_ms);
 
             // Create image cache
             app.manage(shared_image_cache.clone());
@@ -546,8 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn cover_art_protocol_parses_the_windows_webview_form() {
-        // Regression for QA-05: WebView2 serves custom schemes as http://<scheme>.localhost.
+    fn cover_art_protocol_accepts_the_windows_webview_host() {
         let hash = "b".repeat(64);
         let uri: http::Uri = format!("http://cover-art.localhost/{}/medium", hash)
             .parse()

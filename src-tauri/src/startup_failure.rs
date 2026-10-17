@@ -3,17 +3,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-/// The database error from setup, so the failure dialog can offer a fresh library.
-static DATABASE_FAILURE: OnceLock<String> = OnceLock::new();
-
-pub fn record_database_failure(message: &str) {
-    let _ = DATABASE_FAILURE.set(message.to_string());
-}
 
 /// Renames the database and its WAL/SHM side files to `*.unusable-<stamp>`, keeping them for
-/// recovery, and returns the new database file name.
+/// recovery, and returns the new database file name. Side files move first and every rename is
+/// rolled back on failure: a WAL left next to a new, empty database would be replayed into it.
 fn move_database_aside(database: &Path, stamp: u64) -> Result<PathBuf, String> {
     let file_name = database
         .file_name()
@@ -21,19 +14,39 @@ fn move_database_aside(database: &Path, stamp: u64) -> Result<PathBuf, String> {
         .to_string_lossy()
         .into_owned();
     let moved = database.with_file_name(format!("{file_name}.unusable-{stamp}"));
-    if database.exists() {
-        fs::rename(database, &moved)
-            .map_err(|error| format!("Could not rename {}: {error}", database.display()))?;
-    }
+    let mut renames = Vec::new();
     for suffix in ["-wal", "-shm"] {
-        let side = database.with_file_name(format!("{file_name}{suffix}"));
-        if side.exists() {
-            let target = database.with_file_name(format!("{file_name}.unusable-{stamp}{suffix}"));
-            fs::rename(&side, &target)
-                .map_err(|error| format!("Could not rename {}: {error}", side.display()))?;
+        renames.push((
+            database.with_file_name(format!("{file_name}{suffix}")),
+            database.with_file_name(format!("{file_name}.unusable-{stamp}{suffix}")),
+        ));
+    }
+    renames.push((database.to_path_buf(), moved.clone()));
+
+    let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (from, to) in renames {
+        if !from.exists() {
+            continue;
         }
+        if to.exists() {
+            return roll_back(done, format!("{} already exists", to.display()));
+        }
+        if let Err(error) = fs::rename(&from, &to) {
+            return roll_back(
+                done,
+                format!("Could not rename {}: {error}", from.display()),
+            );
+        }
+        done.push((from, to));
     }
     Ok(moved)
+}
+
+fn roll_back(done: Vec<(PathBuf, PathBuf)>, error: String) -> Result<PathBuf, String> {
+    for (from, to) in done.into_iter().rev() {
+        let _ = fs::rename(&to, &from);
+    }
+    Err(error)
 }
 
 fn write_error_log(message: &str) -> Option<PathBuf> {
@@ -44,33 +57,44 @@ fn write_error_log(message: &str) -> Option<PathBuf> {
     Some(log)
 }
 
+/// Starts Tarab again. This runs before Tauri started, so this process holds no single-instance
+/// lock that would make the new one hand over and exit. The user just chose to continue, so an
+/// autostart `--minimized` flag is not passed on.
 fn relaunch() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     std::process::Command::new(exe)
-        .args(std::env::args_os().skip(1))
+        .args(
+            std::env::args_os()
+                .skip(1)
+                .filter(|arg| arg != "--minimized"),
+        )
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
 
-/// Shows why Tarab could not start. For a database failure it offers to move the database aside
-/// (renamed, not deleted) and start again with an empty library.
+fn log_note(message: &str) -> String {
+    write_error_log(message)
+        .map(|path| format!("\n\nDetails were saved to {}.", path.display()))
+        .unwrap_or_default()
+}
+
+/// Shows why the Tauri application could not be built.
 pub fn report_build_failure(error: &str) {
     eprintln!("error while building Tauri application: {error}");
-    let log = write_error_log(error);
-    let log_note = log
-        .map(|path| format!("\n\nDetails were saved to {}.", path.display()))
-        .unwrap_or_default();
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Tarab could not start")
+        .set_description(format!("{error}{}", log_note(error)))
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
 
-    let Some(database_error) = DATABASE_FAILURE.get() else {
-        let _ = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Error)
-            .set_title("Tarab could not start")
-            .set_description(format!("{error}{log_note}"))
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
-        return;
-    };
+/// Shows that the library database could not be opened (before Tauri starts) and offers to move
+/// it aside (renamed, not deleted) and start again with an empty library.
+pub fn report_database_failure(database_error: &str) {
+    eprintln!("{database_error}");
+    let log_note = log_note(database_error);
 
     let start_fresh = "Start with an empty library";
     let choice = rfd::MessageDialog::new()
@@ -111,6 +135,29 @@ pub fn report_build_failure(error: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_move_restores_the_files_already_moved() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!("tarab-startup-rollback-{nonce}"));
+        fs::create_dir_all(&dir).expect("create dir");
+        let database = dir.join("library.db");
+        fs::write(&database, b"db").expect("write db");
+        fs::write(dir.join("library.db-wal"), b"wal").expect("write wal");
+        // The target name for the database is taken, so its rename must not happen.
+        fs::write(dir.join("library.db.unusable-7"), b"older").expect("write older");
+
+        assert!(move_database_aside(&database, 7).is_err());
+        assert_eq!(fs::read(&database).expect("db kept"), b"db");
+        assert_eq!(
+            fs::read(dir.join("library.db-wal")).expect("wal kept"),
+            b"wal"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn moving_the_database_aside_keeps_every_file() {
