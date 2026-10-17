@@ -130,4 +130,38 @@ describe('usePlayerSessionRestore', () => {
     expect(loadPlayerStateMock).toHaveBeenCalledTimes(1);
     expect(usePlayerStore.getState().queue).toHaveLength(0);
   });
+
+  it('restores the saved position of a duplicated current track', async () => {
+    loadPlayerStateMock.mockResolvedValue({
+      ...session,
+      currentTrackId: 'a',
+      queueIds: ['a', 'b', 'a'],
+      queueIndex: 2,
+    });
+    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b'].map(dbTrack));
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+    expect(usePlayerStore.getState().queueIndex).toBe(2);
+  });
+
+  it('shifts the saved position when earlier queue entries no longer resolve', async () => {
+    loadPlayerStateMock.mockResolvedValue({
+      ...session,
+      currentTrackId: 'a',
+      queueIds: ['x', 'a', 'b', 'a'],
+      queueIndex: 3,
+    });
+    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b'].map(dbTrack));
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+    expect(usePlayerStore.getState().queueIndex).toBe(2);
+  });
 });

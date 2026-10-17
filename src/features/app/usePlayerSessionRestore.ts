@@ -38,6 +38,28 @@ const toTrack = (track: {
   dateAdded: track.dateAdded ?? 0,
 });
 
+/**
+ * Maps the saved queue index onto the restored queue. Entries that no longer resolve are dropped,
+ * so the saved index shifts left by the number of dropped entries before it. The shifted index is
+ * kept when it still points at the saved current track (duplicates in the queue are legal);
+ * otherwise the first entry of the current track is used, then the clamped index.
+ */
+export function restoredQueueIndex(
+  queueIds: string[],
+  lookup: Map<string, Track>,
+  restoredQueue: Track[],
+  savedIndex: unknown,
+  currentTrackId: string | null | undefined,
+): number {
+  const last = restoredQueue.length - 1;
+  const index = typeof savedIndex === 'number' && Number.isInteger(savedIndex) ? savedIndex : 0;
+  const dropped = queueIds.slice(0, Math.max(0, index)).filter((id) => !lookup.has(id)).length;
+  const shifted = Math.min(last, Math.max(0, index - dropped));
+  if (!currentTrackId || restoredQueue[shifted]?.id === currentTrackId) return shifted;
+  const first = restoredQueue.findIndex((track) => track.id === currentTrackId);
+  return first >= 0 ? first : shifted;
+}
+
 export function usePlayerSessionRestore({
   replaceView,
 }: {
@@ -77,16 +99,15 @@ export function usePlayerSessionRestore({
           .filter((track): track is Track => Boolean(track));
         if (restoredQueue.length > 0) {
           player.setQueue(restoredQueue);
-          const currentIndex = session.currentTrackId
-            ? restoredQueue.findIndex((track) => track.id === session.currentTrackId)
-            : -1;
-          if (currentIndex >= 0) {
-            player.setQueueIndex(currentIndex);
-          } else if (typeof session.queueIndex === 'number') {
-            player.setQueueIndex(
-              Math.min(restoredQueue.length - 1, Math.max(0, session.queueIndex)),
-            );
-          }
+          player.setQueueIndex(
+            restoredQueueIndex(
+              queueIds,
+              trackLookup,
+              restoredQueue,
+              session.queueIndex,
+              session.currentTrackId,
+            ),
+          );
         }
       }
 

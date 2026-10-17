@@ -501,22 +501,6 @@ impl AudioManager {
                         AudioCommand::Seek(position_secs) => {
                             let generation = state_clone.lock().generation;
                             *pending_gapless_path_thread.lock() = None;
-                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
-                                open_output_stream(preferred_device.as_deref())
-                            }) {
-                                eprintln!("Audio output is not available: {}", error);
-                            }
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
                             if let Some(active) = crossfade_state.take() {
                                 active.outgoing_sink.stop();
                             }
@@ -557,6 +541,23 @@ impl AudioManager {
                                 );
                                 continue;
                             }
+
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
+                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                emit_playback_error(
+                                    &app_for_audio,
+                                    "",
+                                    generation,
+                                    "stream",
+                                    "Audio output is not available",
+                                    false,
+                                );
+                                continue;
+                            };
 
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
@@ -857,10 +858,12 @@ impl AudioManager {
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
-                            preferred_device = device_id.clone();
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {
                                 Ok(new_stream_bundle) => {
+                                    // Remember the device only once it opened, so on-demand
+                                    // reopening never retries a device that cannot be opened.
+                                    preferred_device = device_id.clone();
                                     let (active_path, position, was_paused, had_playback) = {
                                         let state = state_clone.lock();
                                         let emitted = {

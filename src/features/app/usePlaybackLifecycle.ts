@@ -160,27 +160,17 @@ export function usePlaybackLifecycle() {
             const playerState = usePlayerStore.getState();
             const next = playerState.previewNext();
             if (next) {
-              const entry: PreloadedGaplessEntry = {
-                track: next.track,
-                index: next.index,
-                generation: null,
-              };
+              const entry: PreloadedGaplessEntry = { track: next.track, index: next.index };
               preloadedGaplessRef.current = entry;
-              void preloadGaplessSource(next.track.filePath)
-                .then((generation) => {
-                  if (preloadedGaplessRef.current === entry) {
-                    entry.generation = generation;
-                  }
-                })
-                .catch((error) => {
-                  if (preloadedGaplessRef.current === entry) {
-                    preloadedGaplessRef.current = null;
-                  }
-                  reportError('Failed to preload next track for gapless playback', {
-                    source: 'app',
-                    error,
-                  });
+              void preloadGaplessSource(next.track.filePath).catch((error) => {
+                if (preloadedGaplessRef.current === entry) {
+                  preloadedGaplessRef.current = null;
+                }
+                reportError('Failed to preload next track for gapless playback', {
+                  source: 'app',
+                  error,
                 });
+              });
             }
           }
           return;
