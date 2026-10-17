@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 12 |
+| FIXED_VERIFIED | 13 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
-| DUPLICATE | 0 |
-| NATIVE_VALIDATION_REQUIRED | 2 |
+| DUPLICATE | 1 |
+| NATIVE_VALIDATION_REQUIRED | 3 |
 | DECISION_REQUIRED | 0 |
 | BLOCKED | 0 |
-| PENDING | 146 |
+| PENDING | 143 |
 | **Total** | **160** |
 
 ## Findings
@@ -84,13 +84,13 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | QA-08 | P2 | One unreadable directory entry fails the whole scan | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | QA-09 | P2 | Tag and lyrics writes are in place, not atomic | PENDING | - | Audit confidence LIKELY. | - | - |
 | AR-19 | P2 | Watcher uses leading-edge throttling, has an unbounded debounce map, broadcasts to all windows and sets up recursively on the main thread | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-12 | P2 | Windows runs two media-control (SMTC) integrations; one bypasses the renderer and emits events nobody listens to | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-12 | P2 | Windows runs two media-control (SMTC) integrations; one bypasses the renderer and emits events nobody listens to | NATIVE_VALIDATION_REQUIRED | G1 pass / G2 pass (Windows CI compiles) / G3 approve | Removed the duplicate souvlaki SMTC integration (media_controls.rs, update_media_metadata, unused tray-* broadcasts); Windows SMTC now goes only through tauri-plugin-media and desktop-control-action. Review found the SMTC Stop button mapped to nothing; Stop now pauses (test os_stop_button_pauses_playback). Needs a manual Windows check: the media flyout shows metadata and its buttons work with the plugin as sole SMTC owner (the plugin calls CommandManager.SetIsEnabled(true)). | fa5b788, 767880e | pending (batch 3) |
 | AR-07 | P2 | Audio thread exits permanently if no output device exists at startup | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | Audio loop stays alive without a device and opens the stream on demand (ensure_output_stream tests). Seek opens the device only when a sink exists. The requested device is remembered; on-demand reopen falls back to the system default if it fails. Review approved. Native check: launch with no output device, connect one, press Play; expect audio without restart. | c2731a2, 37394f1, 8d56484 | #2 |
 | LD-06 | P2 | Database initialization failure exits silently with no user-visible message | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | QA-05 | P2 | Cover art over the `cover-art://` custom protocol likely fails on Windows, falling back to slower IPC | PENDING | - | Audit confidence LIKELY. | - | - |
 | QA-06 | P2 | Windows canonical paths keep the `\\?\` prefix | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | AR-10 | P2 | `cover-art://` handler reads disk synchronously on the webview thread | PENDING | - | Audit confidence LIKELY. | - | - |
-| AR-05 | P2 | Media-session sync re-sends full-resolution base64 artwork every two seconds to a main-thread command | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-05 | P2 | Media-session sync re-sends full-resolution base64 artwork every two seconds to a main-thread command | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve (after 3 objection rounds) | Repeat syncs send metadataUnchanged and skip the artwork fetch; the command returns whether the OS session holds the metadata. Review rounds added: key includes filePath and hasCoverArt; per-sync sequence drops stale artwork syncs; the key is cleared while a full sync is pending (A-B-A track change); the redundant renderer mini-window close was removed. Tests in useDesktopIntegration.test.tsx fail before each fix. Limitations: the command is still synchronous on the main thread; artwork is still full resolution, not a 512 px thumbnail; albumArtist is null and hasPrevious is true for any non-empty queue; Linux MPRIS serves no metadata (plugin bug, pre-existing). | 8a7e351, 09fb788, 767880e, 09e5b5f | pending (batch 3) |
 | AR-13 | P2 | Linux applies the full app menu to every window, including the 320x92 mini player | PENDING | - | Audit confidence LIKELY. | - | - |
 | FE-24 | P2 | Native menu items do less than their labels say | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-01 | P2 | The liquid WebGL shell renders continuously but is always covered by an opaque layer | PENDING | - | Audit confidence CONFIRMED. | - | - |
@@ -149,7 +149,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-30 | P3 | In development builds, session restore never completes and saving never starts | FIXED_VERIFIED | PASS / PASS / PASS | StrictMode test hydrates after the fix (failed before); a completed restore never re-runs (test). | 3356937 | #2 |
 | PB-16 | P3 | Playlist reorder resets every entry's added date and rewrites the whole list from client state | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-17 | P3 | Playlist mutation IDs never protect an actual retry | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | DUPLICATE | - | Merged into AR-05 by the audit; see AR-05. The mini progress bar still jumps every 2 s (no interpolation), not addressed. | - | - |
 | PB-27 | P3 | LRC parser edge cases | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-33 | P3 | Folder reconcile prefix match is case-insensitive | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | PENDING | - | Audit confidence POSSIBLE. | - | - |
