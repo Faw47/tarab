@@ -50,12 +50,14 @@ export function savePlayerStateToStore(session: PlaybackSessionPayload): Promise
 
   const revision = ++latestRevision;
   const next = { ...session, version: CURRENT_VERSION, revision };
-  saveQueue = saveQueue.then(async () => {
+  const write = saveQueue.then(async () => {
     const persisted = await fixedStoreGet<PlaybackSessionPayload>('player', KEY);
     if ((persisted?.revision ?? -1) >= revision) return;
     await fixedStoreSet('player', KEY, next);
   });
-  return saveQueue;
+  // A failed write rejects for its caller only; later saves and flushes must still run.
+  saveQueue = write.catch(() => undefined);
+  return write;
 }
 
 export async function flushPlayerStateWrites(): Promise<void> {
