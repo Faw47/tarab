@@ -258,6 +258,7 @@ impl AudioManager {
                             *pending_gapless_path_thread.lock() = None;
                             if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                 open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
                             }) {
                                 eprintln!("Audio output is not available: {}", error);
                             }
@@ -362,6 +363,7 @@ impl AudioManager {
                             *pending_gapless_path_thread.lock() = None;
                             if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                 open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
                             }) {
                                 eprintln!("Audio output is not available: {}", error);
                             }
@@ -501,22 +503,6 @@ impl AudioManager {
                         AudioCommand::Seek(position_secs) => {
                             let generation = state_clone.lock().generation;
                             *pending_gapless_path_thread.lock() = None;
-                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
-                                open_output_stream(preferred_device.as_deref())
-                            }) {
-                                eprintln!("Audio output is not available: {}", error);
-                            }
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
                             if let Some(active) = crossfade_state.take() {
                                 active.outgoing_sink.stop();
                             }
@@ -557,6 +543,24 @@ impl AudioManager {
                                 );
                                 continue;
                             }
+
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
+                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                emit_playback_error(
+                                    &app_for_audio,
+                                    "",
+                                    generation,
+                                    "stream",
+                                    "Audio output is not available",
+                                    false,
+                                );
+                                continue;
+                            };
 
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
@@ -857,6 +861,8 @@ impl AudioManager {
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
+                            // Remember the choice even if it cannot open now; on-demand reopening
+                            // falls back to the system default when it still fails.
                             preferred_device = device_id.clone();
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {

@@ -22,6 +22,11 @@ The current 1.0.0 proof matrix is in `docs/release-evidence-1.0.0.md`.
 | `window-state` | `main` | Persist main window state. | Main only with filename/restore/save permissions. Mini window placement is controlled by desktop integration. |
 | `log` | `main`, `mini-player` | Diagnostics. | Shared `allow-log` only. |
 
+The `main` window sets `backgroundThrottling: "disabled"`. Its renderer advances the queue, handles
+media keys and routes tray Quit while the window is hidden to the status icon, so it must keep
+running. Tauri applies the setting on macOS 14+ only. `scripts/check-release-config.mjs` fails if
+it is removed.
+
 ## Command inventory summary
 
 The current invoke handler exposes these groups from `src-tauri/src/lib.rs`:

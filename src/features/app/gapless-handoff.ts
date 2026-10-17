@@ -4,7 +4,6 @@ import type { Track } from '../../types';
 export interface PreloadedGaplessEntry {
   track: Track;
   index: number;
-  generation: number | null;
 }
 
 /**
