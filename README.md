@@ -263,6 +263,7 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * next-track preloading
 * crossfade from 0 to 12 seconds
 * queue management
+* automatic skip of missing or unplayable tracks (up to five in a row) when the queue advances on its own
 * smart shuffle
 * shuffle history
 * repeat modes

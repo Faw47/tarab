@@ -92,6 +92,68 @@ function parsePlaybackEndedPayload(raw: unknown): ParsedPlaybackEnded {
   return EMPTY_ENDED;
 }
 
+/** Most tracks skipped in a row when automatic queue advance hits unplayable files. */
+const MAX_AUTO_SKIPS = 5;
+
+/** The track the queue advanced to on its own, and how many unplayable tracks preceded it. */
+interface AutoAdvance {
+  generation: number;
+  skipped: number;
+}
+
+const canAutoSkip = (skipped: number, queueLength: number): boolean =>
+  skipped < Math.min(MAX_AUTO_SKIPS, Math.max(0, queueLength - 1));
+
+const stopQueuePlayback = (): void => {
+  const state = usePlayerStore.getState();
+  state.setIsPlaying(false);
+  state.setCurrentTime(0);
+  state.setHasActivePlayback(false);
+};
+
+/**
+ * Plays the next queue entry after a track ended. A track that cannot start (missing, corrupt or
+ * unsupported) is skipped with a notice, up to MAX_AUTO_SKIPS in a row, unless the user changed
+ * playback meanwhile.
+ */
+async function advanceQueueAutomatically(
+  autoAdvanceRef: { current: AutoAdvance | null },
+  skipped: number,
+): Promise<void> {
+  const next = usePlayerStore.getState().previewNext();
+  if (!next) {
+    autoAdvanceRef.current = null;
+    stopQueuePlayback();
+    return;
+  }
+
+  const epoch = getPlaybackInterventionEpoch();
+  try {
+    await playAdjacentTrack('next');
+    autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
+  } catch (error) {
+    autoAdvanceRef.current = null;
+    // playAdjacentTrack marks one intervention itself; any other means the user acted.
+    const userActed = getPlaybackInterventionEpoch() !== epoch + 1;
+    const state = usePlayerStore.getState();
+    if (!userActed && canAutoSkip(skipped, state.queue.length)) {
+      reportError(`Skipped "${next.track.title}" because it could not be played`, {
+        source: 'app',
+        error,
+      });
+      // Move past the failed entry so the next preview picks the track after it.
+      state.activateTrackAtIndex(next.index);
+      await advanceQueueAutomatically(autoAdvanceRef, skipped + 1);
+      return;
+    }
+    reportError('Failed to play next track', { source: 'app', error });
+    if (!userActed) {
+      state.setIsPlaying(false);
+      state.setHasActivePlayback(false);
+    }
+  }
+}
+
 export function usePlaybackLifecycle() {
   const isCrossfadingRef = useRef(false);
   const pendingCrossfadeRef = useRef<{
@@ -103,6 +165,7 @@ export function usePlaybackLifecycle() {
   } | null>(null);
   const halfPlayRecordedForTrackIdRef = useRef<string | null>(null);
   const preloadedGaplessRef = useRef<PreloadedGaplessEntry | null>(null);
+  const autoAdvanceRef = useRef<AutoAdvance | null>(null);
 
   // A crossfade the renderer requested is pending until the backend reports it started. User
   // play, seek, stop and device commands cancel it in the backend without a transition event.
@@ -332,24 +395,14 @@ export function usePlaybackLifecycle() {
           return;
         }
 
-        const nextTrack = playerState.previewNext()?.track ?? null;
-        if (nextTrack) {
-          try {
-            if (!useSettingsStore.getState().gapless) {
-              await new Promise((res) => setTimeout(res, 200));
-            }
-            await playAdjacentTrack('next');
-          } catch (error) {
-            reportError('Failed to play next track', { source: 'app', error });
-            const state = usePlayerStore.getState();
-            state.setIsPlaying(false);
-            state.setHasActivePlayback(false);
+        if (playerState.previewNext()) {
+          if (!useSettingsStore.getState().gapless) {
+            await new Promise((res) => setTimeout(res, 200));
           }
+          await advanceQueueAutomatically(autoAdvanceRef, 0);
         } else {
-          const state = usePlayerStore.getState();
-          state.setIsPlaying(false);
-          state.setCurrentTime(0);
-          state.setHasActivePlayback(false);
+          autoAdvanceRef.current = null;
+          stopQueuePlayback();
         }
       })();
     },
@@ -402,6 +455,17 @@ export function usePlaybackLifecycle() {
         });
         state.setIsPlaying(false);
         state.setHasActivePlayback(false);
+
+        // A file the queue reached on its own that fails to decode is skipped; device and
+        // stream failures are not, since every following track would fail the same way.
+        const autoAdvance = autoAdvanceRef.current;
+        if (
+          payload.stage === 'decode' &&
+          autoAdvance?.generation === payload.generation &&
+          canAutoSkip(autoAdvance.skipped, state.queue.length)
+        ) {
+          await advanceQueueAutomatically(autoAdvanceRef, autoAdvance.skipped + 1);
+        }
       })();
     },
     [],

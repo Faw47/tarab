@@ -245,6 +245,105 @@ describe('usePlaybackLifecycle', () => {
     });
   });
 
+  describe('unplayable tracks during automatic advance', () => {
+    beforeEach(() => {
+      playAdjacentTrackMock.mockReset();
+    });
+
+    const endTrackOne = async () => {
+      render(<Harness />);
+      await waitFor(() => {
+        expect(listeners.has('playback-ended')).toBe(true);
+      });
+      await listeners.get('playback-ended')?.({
+        payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
+      });
+    };
+
+    it('skips a track that cannot start and plays the one after it', async () => {
+      playAdjacentTrackMock
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          throw new Error('File not found');
+        })
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          setActivePlaybackGeneration(3);
+        });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining('Skipped "Track 2"'),
+        expect.anything(),
+      );
+    });
+
+    it('skips an automatically reached track that fails to decode', async () => {
+      playAdjacentTrackMock.mockImplementation(async () => {
+        notePlaybackIntervention();
+        const state = usePlayerStore.getState();
+        const next = state.previewNext();
+        if (next) state.activateTrackAtIndex(next.index);
+        setActivePlaybackGeneration(getActivePlaybackGeneration() + 1);
+      });
+
+      await endTrackOne();
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+      });
+      await listeners.get('playback-error')?.({
+        payload: {
+          generation: 2,
+          filePath: '/music/track-2.mp3',
+          stage: 'decode',
+          message: 'Unsupported format',
+          recoverable: false,
+        },
+      });
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+    });
+
+    it('stops instead of cycling when every remaining track fails', async () => {
+      playAdjacentTrackMock.mockImplementation(async () => {
+        notePlaybackIntervention();
+        throw new Error('File not found');
+      });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(usePlayerStore.getState().isPlaying).toBe(false);
+      });
+      expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not skip when the user started other playback meanwhile', async () => {
+      playAdjacentTrackMock.mockImplementationOnce(async () => {
+        notePlaybackIntervention();
+        notePlaybackIntervention();
+        throw new Error('Superseded');
+      });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(reportErrorMock).toHaveBeenCalledWith(
+          'Failed to play next track',
+          expect.anything(),
+        );
+      });
+      expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('preloads the next track for gapless when crossfade is disabled', async () => {
     useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
     render(<Harness />);
