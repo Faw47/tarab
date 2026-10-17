@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import {
   crossfadeToSource,
@@ -15,6 +15,7 @@ import { type PreloadedGaplessEntry, resolveGaplessHandoffIndex } from './gaples
 import { parsePlaybackPositionPayload } from './playback-events';
 import {
   getActivePlaybackGeneration,
+  getPlaybackInterventionEpoch,
   isCurrentPlaybackGeneration,
   setActivePlaybackGeneration,
 } from './playback-generation';
@@ -94,6 +95,7 @@ function parsePlaybackEndedPayload(raw: unknown): ParsedPlaybackEnded {
 export function usePlaybackLifecycle() {
   const isCrossfadingRef = useRef(false);
   const pendingCrossfadeRef = useRef<{
+    epoch: number;
     generation: number | null;
     outgoingPath: string;
     incomingPath: string;
@@ -101,6 +103,17 @@ export function usePlaybackLifecycle() {
   } | null>(null);
   const halfPlayRecordedForTrackIdRef = useRef<string | null>(null);
   const preloadedGaplessRef = useRef<PreloadedGaplessEntry | null>(null);
+
+  // A crossfade the renderer requested is pending until the backend reports it started. User
+  // play, seek, stop and device commands cancel it in the backend without a transition event.
+  const takeLivePendingCrossfade = useCallback(() => {
+    const pending = pendingCrossfadeRef.current;
+    if (pending && pending.epoch !== getPlaybackInterventionEpoch()) {
+      pendingCrossfadeRef.current = null;
+      return null;
+    }
+    return pending;
+  }, []);
 
   useEffect(() => {
     return usePlayerStore.subscribe((state, prev) => {
@@ -185,6 +198,7 @@ export function usePlaybackLifecycle() {
 
         isCrossfadingRef.current = true;
         pendingCrossfadeRef.current = {
+          epoch: getPlaybackInterventionEpoch(),
           generation: null,
           outgoingPath: outgoingTrack.filePath,
           incomingPath: next.track.filePath,
@@ -212,7 +226,7 @@ export function usePlaybackLifecycle() {
     'playback-transition',
     (event) => {
       const payload = event.payload;
-      const pending = pendingCrossfadeRef.current;
+      const pending = takeLivePendingCrossfade();
 
       if (
         pending &&
@@ -220,12 +234,11 @@ export function usePlaybackLifecycle() {
           (pending.generation === null && payload.filePath === pending.incomingPath)) &&
         (payload.state === 'crossfadeStarted' || payload.state === 'playing')
       ) {
+        // The backend owns the crossfade from here; later events carry its generation.
+        pendingCrossfadeRef.current = null;
         const player = usePlayerStore.getState();
         const incoming = player.queue[pending.incomingIndex];
-        if (!incoming) {
-          pendingCrossfadeRef.current = null;
-          return;
-        }
+        if (!incoming) return;
         setActivePlaybackGeneration(payload.generation);
         player.activateTrackAtIndex(pending.incomingIndex);
         player.setDuration(incoming.duration);
@@ -269,7 +282,7 @@ export function usePlaybackLifecycle() {
           nextGeneration,
           nextPath,
         } = parsePlaybackEndedPayload(event.payload);
-        const pending = pendingCrossfadeRef.current;
+        const pending = takeLivePendingCrossfade();
         if (endedPath && pending && endedPath === pending.outgoingPath) {
           return;
         }
@@ -349,7 +362,7 @@ export function usePlaybackLifecycle() {
     (event) => {
       void (async () => {
         const payload = event.payload;
-        const pendingCrossfade = pendingCrossfadeRef.current;
+        const pendingCrossfade = takeLivePendingCrossfade();
         const isPendingCrossfadeError =
           pendingCrossfade?.generation === payload.generation ||
           (pendingCrossfade?.generation === null &&

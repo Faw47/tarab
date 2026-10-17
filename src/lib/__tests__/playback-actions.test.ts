@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getPlaybackInterventionEpoch } from '../../features/app/playback-generation';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
-import { startPlayback } from '../playback-actions';
+import {
+  crossfadeToSource,
+  seekToPosition,
+  startPlayback,
+  stopCurrentPlayback,
+  switchAudioOutputDevice,
+} from '../playback-actions';
 
 const { playTrackMock } = vi.hoisted(() => ({
   playTrackMock: vi.fn(async () => undefined),
@@ -12,6 +19,9 @@ vi.mock('../tauri-commands', () => ({
   playTrack: playTrackMock,
   resumePlayback: vi.fn(async () => undefined),
   seekPlayback: vi.fn(async () => undefined),
+  stopPlayback: vi.fn(async () => undefined),
+  setAudioOutputDevice: vi.fn(async () => undefined),
+  crossfadeToTrack: vi.fn(async () => 2),
 }));
 
 const initialPlayerState = usePlayerStore.getState();
@@ -52,5 +62,19 @@ describe('startPlayback', () => {
     expect(state.queue.map((item) => item.id)).toEqual(['first', 'second', 'third']);
     expect(state.queueIndex).toBe(0);
     expect(state.shuffleEnabled).toBe(false);
+  });
+});
+
+describe('playback interventions', () => {
+  it('marks user play, seek, stop and device commands, but not crossfades', async () => {
+    const before = getPlaybackInterventionEpoch();
+    await startPlayback(track('first'));
+    await seekToPosition(30);
+    await stopCurrentPlayback();
+    await switchAudioOutputDevice('Speakers');
+    expect(getPlaybackInterventionEpoch()).toBe(before + 4);
+
+    await crossfadeToSource('/music/next.mp3', 4);
+    expect(getPlaybackInterventionEpoch()).toBe(before + 4);
   });
 });

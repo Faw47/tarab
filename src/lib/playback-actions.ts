@@ -1,5 +1,8 @@
 import { match } from 'ts-pattern';
-import { setActivePlaybackGeneration } from '../features/app/playback-generation';
+import {
+  notePlaybackIntervention,
+  setActivePlaybackGeneration,
+} from '../features/app/playback-generation';
 import { usePlayerStore } from '../store/player-store';
 import type { Track } from '../types';
 import {
@@ -25,6 +28,7 @@ export const startPlayback = async (
   options?: StartPlaybackOptions,
 ): Promise<void> => {
   const startPos = options?.startPos;
+  notePlaybackIntervention();
   const generation = await playTrack(track.filePath, startPos);
   setActivePlaybackGeneration(generation);
 
@@ -79,11 +83,13 @@ export const toggleCurrentPlayback = async (): Promise<void> => {
 
 export const seekToPosition = async (positionSecs: number): Promise<void> => {
   const clamped = Math.max(0, positionSecs);
+  notePlaybackIntervention();
   await seekPlayback(clamped);
   usePlayerStore.getState().setCurrentTime(clamped);
 };
 
 export const stopCurrentPlayback = async (): Promise<void> => {
+  notePlaybackIntervention();
   await stopPlayback();
   const state = usePlayerStore.getState();
   state.setIsPlaying(false);
@@ -99,10 +105,13 @@ export const crossfadeToSource = (
 export const preloadGaplessSource = (filePath: string | null): Promise<number | null> =>
   preloadNextTrack(filePath);
 
-export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
-  setAudioOutputDevice(deviceId);
+export const switchAudioOutputDevice = (deviceId: string): Promise<void> => {
+  notePlaybackIntervention();
+  return setAudioOutputDevice(deviceId);
+};
 
 export const startEditorPreview = async (filePath: string): Promise<void> => {
+  notePlaybackIntervention();
   const generation = await playTrack(filePath);
   setActivePlaybackGeneration(generation);
   const state = usePlayerStore.getState();
@@ -127,6 +136,7 @@ export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise
       return previous.track;
     }
 
+    notePlaybackIntervention();
     const generation = await playTrack(previous.track.filePath);
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
@@ -140,6 +150,7 @@ export const playAdjacentTrack = async (direction: 'next' | 'previous'): Promise
   const next = state.previewNext();
   if (!next) return null;
 
+  notePlaybackIntervention();
   const generation = await playTrack(next.track.filePath);
   setActivePlaybackGeneration(generation);
   const freshState = usePlayerStore.getState();

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
 import {
+  getActivePlaybackGeneration,
+  notePlaybackIntervention,
   resetPlaybackGenerationForTests,
   setActivePlaybackGeneration,
 } from '../playback-generation';
@@ -170,6 +172,77 @@ describe('usePlaybackLifecycle', () => {
 
     expect(playAdjacentTrackMock).not.toHaveBeenCalled();
     expect(dbUpdatePlayStatsMock).not.toHaveBeenCalled();
+  });
+
+  it('advances after a Repeat One crossfade that never reported completion', async () => {
+    // The backend drops the crossfade without crossfadeCompleted when the outgoing sink empties
+    // first; the incoming copy of the same file must still advance when it ends.
+    usePlayerStore.setState({ loopMode: 'one' });
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-transition')).toBe(true);
+    });
+
+    await listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-1.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+    expect(getActivePlaybackGeneration()).toBe(2);
+
+    await listeners.get('playback-ended')?.({
+      payload: { path: '/music/track-1.mp3', seamless: false, generation: 2 },
+    });
+
+    await waitFor(() => {
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next');
+    });
+  });
+
+  it('ignores a crossfade start after the user changed playback', async () => {
+    let resolveCrossfade: (generation: number) => void = () => undefined;
+    crossfadeToTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveCrossfade = resolve;
+        }),
+    );
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-transition')).toBe(true);
+    });
+
+    void listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalled();
+    });
+    // The user seeks; the backend cancels the crossfade it was about to start.
+    notePlaybackIntervention();
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-2.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+    resolveCrossfade(2);
+
+    expect(usePlayerStore.getState().queueIndex).toBe(0);
+    expect(getActivePlaybackGeneration()).toBe(1);
+
+    await listeners.get('playback-ended')?.({
+      payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
+    });
+    await waitFor(() => {
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next');
+    });
   });
 
   it('preloads the next track for gapless when crossfade is disabled', async () => {
