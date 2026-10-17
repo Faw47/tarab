@@ -258,6 +258,7 @@ impl AudioManager {
                             *pending_gapless_path_thread.lock() = None;
                             if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                 open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
                             }) {
                                 eprintln!("Audio output is not available: {}", error);
                             }
@@ -362,6 +363,7 @@ impl AudioManager {
                             *pending_gapless_path_thread.lock() = None;
                             if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                 open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
                             }) {
                                 eprintln!("Audio output is not available: {}", error);
                             }
@@ -544,6 +546,7 @@ impl AudioManager {
 
                             if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                 open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
                             }) {
                                 eprintln!("Audio output is not available: {}", error);
                             }
@@ -858,12 +861,12 @@ impl AudioManager {
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
+                            // Remember the choice even if it cannot open now; on-demand reopening
+                            // falls back to the system default when it still fails.
+                            preferred_device = device_id.clone();
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {
                                 Ok(new_stream_bundle) => {
-                                    // Remember the device only once it opened, so on-demand
-                                    // reopening never retries a device that cannot be opened.
-                                    preferred_device = device_id.clone();
                                     let (active_path, position, was_paused, had_playback) = {
                                         let state = state_clone.lock();
                                         let emitted = {

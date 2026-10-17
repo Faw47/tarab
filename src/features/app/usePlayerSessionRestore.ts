@@ -93,30 +93,30 @@ export function usePlayerSessionRestore({
       }
 
       let restoredQueue: Track[] = [];
+      let restoredIndex = -1;
       if (queueIds.length > 0) {
         restoredQueue = queueIds
           .map((id) => trackLookup.get(id))
           .filter((track): track is Track => Boolean(track));
         if (restoredQueue.length > 0) {
-          player.setQueue(restoredQueue);
-          player.setQueueIndex(
-            restoredQueueIndex(
-              queueIds,
-              trackLookup,
-              restoredQueue,
-              session.queueIndex,
-              session.currentTrackId,
-            ),
+          restoredIndex = restoredQueueIndex(
+            queueIds,
+            trackLookup,
+            restoredQueue,
+            session.queueIndex,
+            session.currentTrackId,
           );
+          player.setQueue(restoredQueue);
+          player.setQueueIndex(restoredIndex);
         }
       }
 
       let resolvedTrack = session.currentTrackId
         ? trackLookup.get(session.currentTrackId)
         : undefined;
-      if (!resolvedTrack && typeof session.queueIndex === 'number' && restoredQueue.length > 0) {
-        resolvedTrack =
-          restoredQueue[Math.min(restoredQueue.length - 1, Math.max(0, session.queueIndex))];
+      if (!resolvedTrack && restoredIndex >= 0) {
+        // The saved current track no longer resolves: use the same entry the queue index points at.
+        resolvedTrack = restoredQueue[restoredIndex];
       }
 
       if (resolvedTrack && restoredQueue.length === 0) {

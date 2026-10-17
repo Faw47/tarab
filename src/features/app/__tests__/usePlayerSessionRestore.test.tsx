@@ -164,4 +164,22 @@ describe('usePlayerSessionRestore', () => {
     });
     expect(usePlayerStore.getState().queueIndex).toBe(2);
   });
+
+  it('keeps the current track and queue index in agreement when the current track is gone', async () => {
+    loadPlayerStateMock.mockResolvedValue({
+      ...session,
+      currentTrackId: 'c',
+      queueIds: ['x', 'y', 'a', 'c', 'b', 'd'],
+      queueIndex: 3,
+    });
+    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'd'].map(dbTrack));
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+    const state = usePlayerStore.getState();
+    expect(state.currentTrack?.id).toBe(state.queue[state.queueIndex]?.id);
+  });
 });
