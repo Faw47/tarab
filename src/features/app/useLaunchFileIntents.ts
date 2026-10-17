@@ -14,7 +14,7 @@ import {
 import type { Track } from '../../types';
 
 interface UseLaunchFileIntentsOptions {
-  scanFolder: (folderPath: string) => Promise<void>;
+  scanFolder: (folderPath: string) => Promise<unknown>;
   setLibraryFolders: (folders: string[]) => void;
 }
 
