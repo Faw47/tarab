@@ -19,7 +19,6 @@ tauri-plugin-dialog = "2"
 tauri-plugin-liquid-glass = { git = "https://github.com/hkandala/tauri-plugin-liquid-glass", rev = "cc549cbc04fe9339266f6b740cf4437ff5e9fb9b" }
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-media = "0.1.1"
-souvlaki = "0.7"
 notify = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -71,7 +70,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rand = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-raw-window-handle = "0.6"
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_System_Com",

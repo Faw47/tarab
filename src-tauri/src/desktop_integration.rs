@@ -680,19 +680,6 @@ fn setup_media_session_handler(app: &AppHandle<Wry>) {
 
 fn emit_desktop_control_action<R: Runtime>(app: &AppHandle<R>, action: DesktopControlAction) {
     let _ = app.emit_to(MAIN_WINDOW_LABEL, EVENT_DESKTOP_CONTROL_ACTION, action);
-
-    // Also emit specific tray events for backward compatibility or direct frontend handling if requested
-    match action {
-        DesktopControlAction::TogglePlay
-        | DesktopControlAction::Play
-        | DesktopControlAction::Pause => {
-            let _ = app.emit("tray-toggle-playback", ());
-        }
-        DesktopControlAction::Next => {
-            let _ = app.emit("tray-next-track", ());
-        }
-        _ => {}
-    }
 }
 
 fn desktop_action_for_menu_id(id: &str) -> Option<DesktopControlAction> {

@@ -10,7 +10,6 @@ mod library_watcher;
 mod lyrics;
 #[cfg(target_os = "macos")]
 mod macos_menu;
-mod media_controls;
 mod metadata;
 mod playlist;
 mod session;
@@ -319,7 +318,6 @@ pub fn run() {
         desktop_integration::desktop_quit_application,
         desktop_integration::desktop_set_native_ui_state,
         desktop_integration::desktop_sync_media_session,
-        media_controls::update_media_metadata,
         library_watcher::watch_library_paths,
         #[cfg(target_os = "windows")]
         taskbar::update_progress,
@@ -406,17 +404,6 @@ pub fn run() {
                 "[startup] desktop_integration_ms={:.1}",
                 desktop_start.elapsed().as_secs_f64() * 1000.0
             );
-
-            {
-                let media_start = Instant::now();
-                if let Ok(smtc_state) = media_controls::init_souvlaki(app.handle()) {
-                    app.manage(smtc_state);
-                }
-                eprintln!(
-                    "[startup] media_controls_init_ms={:.1}",
-                    media_start.elapsed().as_secs_f64() * 1000.0
-                );
-            }
 
             // Watcher state
             app.manage(std::sync::Mutex::new(None::<library_watcher::WatcherTask>));
