@@ -1,5 +1,6 @@
+use image::codecs::jpeg::JpegEncoder;
 use image::image_dimensions;
-use image::{imageops::FilterType, DynamicImage, ImageFormat};
+use image::{imageops::FilterType, DynamicImage};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,6 +20,12 @@ const THUMBNAIL_SIZES: [(u32, &str); 3] = [
 ];
 
 const MAX_CACHE_SIZE_MB: u64 = 500;
+/// Lossy JPEG keeps thumbnails near 20 KB per album; lossless WebP (the only WebP mode of the
+/// `image` crate) used about 200 KB, so the default cache held roughly 1,000 albums.
+const THUMBNAIL_JPEG_QUALITY: u8 = 85;
+const THUMBNAIL_EXTENSION: &str = "jpg";
+pub(crate) const THUMBNAIL_CONTENT_TYPE: &str = "image/jpeg";
+const LEGACY_THUMBNAIL_EXTENSION: &str = "webp";
 const MAX_SOURCE_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const MAX_SOURCE_IMAGE_PIXELS: u64 = 50_000_000;
 const MAX_SOURCE_IMAGE_DIMENSION: u32 = 16_384;
@@ -85,6 +92,10 @@ impl ImageCache {
     pub fn new() -> Self {
         let cache_dir = get_cache_dir().join("covers");
         fs::create_dir_all(&cache_dir).ok();
+        let legacy_dir = cache_dir.clone();
+        std::thread::spawn(move || {
+            remove_legacy_thumbnails(&legacy_dir);
+        });
 
         Self {
             cache_dir,
@@ -144,22 +155,20 @@ impl ImageCache {
             return Err("Cover image exceeds the decoded pixel limit".to_string());
         }
 
-        // Generate each size
-        for (size, name) in THUMBNAIL_SIZES {
-            let thumbnail = self.resize_image(&img, size);
-            self.save_thumbnail(&hash, name, &thumbnail)?;
+        // Crop to a square once at the largest size, then derive the smaller sizes from it instead
+        // of resampling the full-resolution source three times.
+        let mut previous = img.resize_to_fill(512, 512, FilterType::Lanczos3);
+        for (size, name) in THUMBNAIL_SIZES.iter().rev() {
+            if previous.width() != *size {
+                previous = previous.resize_exact(*size, *size, FilterType::CatmullRom);
+            }
+            self.save_thumbnail(&hash, name, &previous)?;
         }
 
         Ok(hash)
     }
 
-    /// Resize image maintaining aspect ratio
-    fn resize_image(&self, img: &DynamicImage, size: u32) -> DynamicImage {
-        // Fill a square by cropping the longer side so cover art is always 1:1
-        img.resize_to_fill(size, size, FilterType::Lanczos3)
-    }
-
-    /// Save thumbnail as WebP
+    /// Save thumbnail as JPEG
     fn save_thumbnail(
         &self,
         hash: &str,
@@ -173,10 +182,10 @@ impl ImageCache {
             fs::create_dir_all(parent).ok();
         }
 
-        // Encode as WebP
         let mut buffer = Cursor::new(Vec::new());
-        img.write_to(&mut buffer, ImageFormat::WebP)
-            .map_err(|e| format!("Failed to encode WebP: {}", e))?;
+        JpegEncoder::new_with_quality(&mut buffer, THUMBNAIL_JPEG_QUALITY)
+            .encode_image(&img.to_rgb8())
+            .map_err(|e| format!("Failed to encode JPEG: {}", e))?;
 
         // Write to file
         fs::write(&path, buffer.into_inner())
@@ -191,7 +200,7 @@ impl ImageCache {
         let subdir = &hash[..2.min(hash.len())];
         self.cache_dir
             .join(subdir)
-            .join(format!("{}_{}.webp", hash, size_name))
+            .join(format!("{}_{}.{}", hash, size_name, THUMBNAIL_EXTENSION))
     }
 
     /// Get thumbnail as base64
@@ -410,6 +419,33 @@ impl ImageCache {
     }
 }
 
+/// Deletes thumbnails written by older builds in the previous format; they are regenerated as
+/// JPEG on demand, and would otherwise fill the size limit until evicted.
+fn remove_legacy_thumbnails(cache_dir: &Path) -> u64 {
+    let mut removed = 0;
+    let Ok(entries) = fs::read_dir(cache_dir) else {
+        return 0;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(sub_entries) = fs::read_dir(entry.path()) else {
+            continue;
+        };
+        for sub_entry in sub_entries.filter_map(Result::ok) {
+            let path = sub_entry.path();
+            let legacy = path
+                .extension()
+                .is_some_and(|ext| ext == LEGACY_THUMBNAIL_EXTENSION);
+            if legacy
+                && sub_entry.file_type().is_ok_and(|t| t.is_file())
+                && fs::remove_file(&path).is_ok()
+            {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 pub type SharedImageCache = Arc<ImageCache>;
 
 pub fn create_image_cache() -> SharedImageCache {
@@ -419,6 +455,7 @@ pub fn create_image_cache() -> SharedImageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::ImageFormat;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -474,6 +511,67 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
     }
+    /// A noisy gradient, closer to photographic cover art than a flat colour.
+    fn photo_like_png(size: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(size, size, |x, y| {
+            let noise = ((x * 7919 + y * 104_729) % 37) as u8;
+            image::Rgb([
+                (x * 255 / size) as u8 ^ noise,
+                (y * 255 / size) as u8,
+                ((x + y) * 127 / size) as u8 ^ (noise / 2),
+            ])
+        });
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(img)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .expect("encode source");
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn thumbnails_are_lossy_jpeg_at_each_size() {
+        // Regression for AR-09: lossless WebP thumbnails were about ten times larger.
+        let root = temp_dir("jpeg");
+        let cache = test_cache(root.join("covers"));
+        let hash = cache
+            .generate_thumbnails(&photo_like_png(1200))
+            .expect("generate thumbnails");
+
+        for (size, name) in THUMBNAIL_SIZES {
+            let bytes = cache
+                .get_thumbnail_bytes(&hash, name)
+                .expect("read")
+                .expect("thumbnail exists");
+            assert_eq!(image::guess_format(&bytes).ok(), Some(ImageFormat::Jpeg));
+            let decoded = image::load_from_memory(&bytes).expect("decode");
+            assert_eq!((decoded.width(), decoded.height()), (size, size));
+        }
+        let large = cache
+            .get_thumbnail_bytes(&hash, "large")
+            .expect("read")
+            .expect("large");
+        assert!(
+            large.len() < 150_000,
+            "large thumbnail is {} bytes",
+            large.len()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_thumbnails_are_removed() {
+        let root = temp_dir("legacy");
+        let shard = root.join("ab");
+        fs::create_dir_all(&shard).expect("create shard");
+        fs::write(shard.join("old_small.webp"), b"old").expect("write legacy");
+        fs::write(shard.join("new_small.jpg"), b"new").expect("write current");
+
+        assert_eq!(remove_legacy_thumbnails(&root), 1);
+        assert!(!shard.join("old_small.webp").exists());
+        assert!(shard.join("new_small.jpg").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn thumbnail_lookup_rejects_traversal_size() {
         let root = temp_dir("traversal");
@@ -562,7 +660,7 @@ mod tests {
         let image = DynamicImage::new_rgb8(16, 16);
         let mut encoded = Cursor::new(Vec::new());
         image
-            .write_to(&mut encoded, ImageFormat::WebP)
+            .write_to(&mut encoded, ImageFormat::Png)
             .expect("encode test image");
         let hash = ImageCache::hash_image_data(encoded.get_ref());
         cache
