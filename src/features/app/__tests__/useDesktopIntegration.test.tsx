@@ -219,6 +219,26 @@ describe('useDesktopIntegration', () => {
     expect(payloads[1]).toMatchObject({ metadataUnchanged: false, title: 'Song' });
   });
 
+  it('closes a disabled mini window once instead of on every native sync', async () => {
+    useSettingsStore.setState({ desktopMiniWindowEnabled: false });
+
+    render(<Harness />);
+    await waitFor(() => {
+      expect(desktopSetNativeUiStateMock).toHaveBeenCalled();
+    });
+    await act(async () => {
+      usePlayerStore.setState({ isPlaying: true });
+    });
+    await act(async () => {
+      usePlayerStore.setState({ isPlaying: false });
+    });
+    await waitFor(() => {
+      expect(desktopSetNativeUiStateMock).toHaveBeenCalledTimes(3);
+    });
+
+    expect(desktopCloseMiniWindowMock).toHaveBeenCalledTimes(1);
+  });
+
   it('routes desktop control actions to playback handlers', async () => {
     render(<Harness />);
 

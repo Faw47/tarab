@@ -63,6 +63,7 @@ export function useDesktopIntegration() {
   // Metadata (title, artist, album, artwork) last applied to the OS media session. Periodic syncs
   // only update playback state, so artwork is not re-sent and re-decoded every two seconds.
   const lastMediaMetadataKeyRef = useRef<string | null>(null);
+  const miniWindowClosedRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setStartupReady(true), 800);
@@ -140,8 +141,12 @@ export function useDesktopIntegration() {
       });
     }
 
-    if (!miniWindowEnabled) {
+    // Close the mini window once when the feature is turned off, not on every native sync.
+    if (!miniWindowEnabled && !miniWindowClosedRef.current) {
+      miniWindowClosedRef.current = true;
       void desktopCloseMiniWindow().catch(() => undefined);
+    } else if (miniWindowEnabled) {
+      miniWindowClosedRef.current = false;
     }
   }, [hideToStatusIconOnClose, mediaKeysEnabled, miniWindowEnabled, statusIconEnabled]);
 
