@@ -83,6 +83,12 @@ Release rule: main-window code may call these as needed; mini-player code should
 - Release QA must verify that an existing library, artwork cache, and waveform cache remain available after this migration.
 - Packaged-app QA must cold-launch the `.app`, open the full player, verify embedded art, restart,
   disconnect the source grant, and verify that the validated app-owned thumbnail remains visible.
+- Artwork thumbnails are JPEG. Thumbnails from older builds (`.webp`) are deleted in the background
+  at startup and regenerated on demand.
+- If the library database cannot be opened at launch, Tarab writes `startup-error.log` to the app
+  data directory and shows a native dialog (`rfd`) that can rename the database to
+  `library.db.unusable-<seconds>` (with its WAL and SHM files) and relaunch with an empty library.
+  Release QA should launch once with a locked or corrupt `library.db` on each platform.
 
 ## Privacy and outbound network policy
 

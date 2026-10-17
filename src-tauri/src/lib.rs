@@ -13,6 +13,7 @@ mod macos_menu;
 mod metadata;
 mod playlist;
 mod session;
+mod startup_failure;
 mod tageditor;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -342,6 +343,7 @@ pub fn run() {
                 Err(err) => {
                     let message = format!("Failed to initialize library database: {}", err);
                     eprintln!("{}", message);
+                    startup_failure::record_database_failure(&message);
                     return Err(message.into());
                 }
             };
@@ -473,7 +475,7 @@ pub fn run() {
                 }
             }
         }),
-        Err(error) => eprintln!("error while building Tauri application: {}", error),
+        Err(error) => startup_failure::report_build_failure(&error.to_string()),
     }
 }
 
