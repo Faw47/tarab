@@ -35,7 +35,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   legacy **`session.json`** using the Rust command `load_playback_session`.
 - Player-state writes use a monotonic revision and one serialized latest-wins queue. Do not save
   before hydration completes. Flush queued writes before a native quit.
-- **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend.
+- **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend. The audio thread reopens output the same way when the sample counter stops for 2 s while playing (device removed; retries back off to 30 s) and, while following the system default, when the default device name changes.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
 - **Library scans**: the renderer sends one `ScanReconcileRequest` after traversal. Rust applies it
   in one transaction and deletes rows only after complete traversal proves they are missing.

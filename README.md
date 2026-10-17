@@ -270,7 +270,7 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * playback speed control
 * volume control
 * volume boost
-* audio output selection
+* audio output selection, with recovery when the device disappears or the system default changes
 
 ### Desktop integration
 

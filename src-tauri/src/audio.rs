@@ -33,7 +33,7 @@ use crossfade::{
     apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
     CrossfadeState,
 };
-use device::{ensure_output_stream, open_output_stream};
+use device::{default_output_device_name, ensure_output_stream, open_output_stream, OutputWatch};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
 use events::{
@@ -221,7 +221,8 @@ impl AudioManager {
         let pending_gapless_path = Arc::new(Mutex::new(None::<String>));
         let pending_gapless_path_thread = Arc::clone(&pending_gapless_path);
         let audio_is_running = Arc::clone(&is_running);
-        let handoff_sender = sender.clone();
+        // The mixer's gapless handoff and the output watch post commands back to this loop.
+        let loop_sender = sender.clone();
         thread::spawn(move || {
             let mut stream_bundle: Option<(OutputStream, OutputStreamHandle)> =
                 match open_output_stream(None) {
@@ -247,6 +248,7 @@ impl AudioManager {
             let mut current_sink: Option<Sink> = None;
             let mut crossfade_state: Option<CrossfadeState> = None;
             let mut volume_ramp: Option<VolumeRampState> = None;
+            let mut output_watch = OutputWatch::new(Instant::now());
 
             loop {
                 match receiver.recv_timeout(Duration::from_millis(20)) {
@@ -823,7 +825,7 @@ impl AudioManager {
 
                                 let ch2 = source2.channels();
                                 let sr2 = source2.sample_rate();
-                                let handoff_sender = handoff_sender.clone();
+                                let handoff_sender = loop_sender.clone();
                                 let state_emit = state_clone.clone();
                                 let active_slot = active_emitted_for_audio.clone();
                                 let out_clone = out_path.clone();
@@ -1084,6 +1086,40 @@ impl AudioManager {
                                     true,
                                 );
                             }
+                        }
+
+                        // A removed device stops pulling samples, and an open stream does not
+                        // follow a new system default. Reopen output like a device switch,
+                        // which resumes the current track at its position.
+                        let now = Instant::now();
+                        let expecting_progress = current_sink
+                            .as_ref()
+                            .is_some_and(|sink| !sink.is_paused() && !sink.empty())
+                            && {
+                                let state = state_clone.lock();
+                                state.is_playing && !state.is_paused
+                            };
+                        let emitted = active_emitted_for_audio.lock().load(Ordering::Relaxed);
+                        let stalled =
+                            output_watch.observe_samples(emitted, expecting_progress, now);
+                        let follows_default = matches!(
+                            preferred_device.as_deref(),
+                            None | Some("") | Some("system")
+                        );
+                        let default_changed = follows_default
+                            && current_sink.is_some()
+                            && output_watch.default_device_changed(now, default_output_device_name);
+                        if stalled || default_changed {
+                            eprintln!(
+                                "Audio output {}; reopening the output stream",
+                                if stalled {
+                                    "stopped advancing"
+                                } else {
+                                    "default device changed"
+                                }
+                            );
+                            let _ = loop_sender
+                                .send(AudioCommand::SetOutputDevice(preferred_device.clone()));
                         }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
