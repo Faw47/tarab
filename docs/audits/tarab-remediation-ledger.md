@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 13 |
+| FIXED_VERIFIED | 17 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 3 |
 | DECISION_REQUIRED | 0 |
 | BLOCKED | 0 |
-| PENDING | 143 |
+| PENDING | 139 |
 | **Total** | **160** |
 
 ## Findings
@@ -70,12 +70,12 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | AR-04 | P1 | Playlist commands are synchronous (run on the main thread) and load the whole tracks table per smart or folder playlist | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | All 14 playlist commands are async and run their work via spawn_blocking; the mutation guard and mutation-ID cache are unchanged. Smart/folder playlist listing loads the tracks table once per call. Test listing_playlists_resolves_smart_and_folder_playlists_from_one_track_load. Limitation (reviewer note): back-to-back reorders from a stale detail can now apply out of order; that lost update pre-exists in PlaylistsView.moveEntry. | 3ee10cc | #3 |
 | PB-07 | P2 | Seek reports the requested time, not the decoder's actual position; MP3 coarse seek is inaccurate for VBR | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-08 | P2 | A failed seek restarts the track at 0:00; files without a known frame count get no gapless or crossfade | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-09 | P2 | Real-time mixer path locks shared state per sample while other threads hold that lock across IPC emits | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-12 | P2 | Interrupted crossfade leaves stale pending state; a later end of that file is ignored and playback halts | PENDING | - | Audit confidence LIKELY. | - | - |
+| PB-09 | P2 | Real-time mixer path locks shared state per sample while other threads hold that lock across IPC emits | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Booster gain is an atomic; Pause/Resume/SourceRenamed release the lock before emit; the gapless handoff callback posts its IPC emits to the audio thread; packet conversion reuses buffers. Test source_produces_samples_while_the_playback_lock_is_held times out before the fix. Limitations: decoding and file I/O still run inside the source's next() on the mixer thread; a Seek or Pause queued between a handoff and its message emits events the renderer drops; the loop holds its own sender, so dropping AudioManager no longer stops its threads. | 2495a61 | pending (batch 3) |
+| PB-12 | P2 | Interrupted crossfade leaves stale pending state; a later end of that file is ignored and playback halts | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve (after 1 objection) | Pending crossfade ends when the backend reports it started; generations then filter the outgoing source. Commands that replace or stop the source mark an intervention epoch; a crossfade requested earlier is discarded. Review objection: seek and device switch must not mark it (they apply to the incoming source); fixed in 9bd2c1f. Tests in usePlaybackLifecycle.test.tsx and playback-actions.test.ts fail before. | 5241ca6, 9bd2c1f | pending (batch 3) |
 | PB-13 | P2 | No handling of output-device loss or system default-device changes | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-14 | P2 | Missing, corrupt or unsupported tracks stop the queue instead of being skipped | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-14 | P2 | Missing, corrupt or unsupported tracks stop the queue instead of being skipped | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve (after 1 objection) | Automatic advance skips a track that cannot start or fails to decode, with a toast, up to 5 in a row and never more than the rest of the queue; stream/device failures and user commands stop the chain. Review fixes (9bd2c1f): the attempted entry is the previewed one (shuffle), activating an entry clears the error banner, Repeat One does not retry a failed file. Limitations: a queue edit during the playTrack await can activate the wrong entry (pre-existing); a decode error event that arrives before the play_track reply is dropped as stale; the skip banner remains only in the full player (FE-10). | 2e526b2, 9bd2c1f | pending (batch 3) |
 | PB-10 | P2 | Shuffle with Repeat Off never ends | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-11 | P2 | Shuffle Previous follows list order; "Play Next" is ignored under shuffle; manual Next with Repeat One restarts the song | PENDING | - | Audit confidence SUBJECTIVE. | - | - |
+| PB-11 | P2 | Shuffle Previous follows list order; "Play Next" is ignored under shuffle; manual Next with Repeat One restarts the song | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve (after 1 objection) | Previous under shuffle walks back through the shuffle pass; Play Next under shuffle gets priority (newest first, matching the list order of a multi-track Play Next); a user-initiated Next leaves a Repeat One track while the automatic advance repeats it. Tests in player-store.test.ts fail before. Limitation: Next after Previous picks a random unplayed entry instead of moving forward through the pass. | 55341a8, 9bd2c1f | pending (batch 3) |
 | PB-05 | P2 | One failed session write disables all later saves and makes tray/menu Quit fail | FIXED_VERIFIED | PASS / PASS / PASS | player-state-store test: a failed write rejects only its caller, the next save persists, flush resolves; both quit paths call desktopQuitApplication in finally. Reviewer confirmed the only caller awaits inside try/catch. | 59c95c2 | #2 |
 | PB-15 | P2 | A failed track lookup during restore still enables saving, so an empty queue overwrites the stored one | FIXED_VERIFIED | PASS / PASS / PASS | Lookup failure leaves the store unhydrated so an empty queue cannot overwrite the saved one; restoredQueueIndex() shifts the saved index past dropped entries, keeps duplicates at their saved position, and the fallback current track uses the same index. Two review rounds raised objections (duplicate entries; index/track disagreement); both fixed with tests that failed before. Final review approved. | 3356937, 37394f1, 8d56484 | #2 |
 | AR-11 | P2 | Lyrics index sync re-sorts the whole table for every page: 41 s at 100k tracks, after every scan | PENDING | - | Audit confidence CONFIRMED. | - | - |
