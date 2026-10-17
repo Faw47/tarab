@@ -123,7 +123,7 @@ pub fn build_menu(app: &App<Wry>) -> tauri::Result<DesktopMenuHandles> {
 
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&MenuItemBuilder::with_id("help.help", "Tarab Help").build(app)?)
-        .item(&MenuItemBuilder::with_id("help.diagnostics", "Diagnostics").build(app)?)
+        .item(&MenuItemBuilder::with_id("help.diagnostics", "Library Health").build(app)?)
         .build()?;
 
     let menu = MenuBuilder::new(app)

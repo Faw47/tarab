@@ -33,6 +33,7 @@ import { reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
 import { type LibrarySearchScope, useLibraryStore } from '../../store/library-store';
+import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { ContextMenuPosition, SortBy, Track } from '../../types';
@@ -643,6 +644,12 @@ export const LibraryView = memo(function LibraryView({
 
   const [viewMode, setViewMode] = useState<LibraryViewDensity>(getPersistedViewMode);
   const [activeFacet, setActiveFacet] = useState<LibraryFacet>('albums');
+  const requestedFacet = useNavigationIntentStore((s) => s.libraryFacet);
+  useEffect(() => {
+    if (!requestedFacet) return;
+    const facet = useNavigationIntentStore.getState().consumeLibraryFacet();
+    if (facet) setActiveFacet(facet);
+  }, [requestedFacet]);
   const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
   const [databaseDetailTracks, setDatabaseDetailTracks] = useState<{
     key: string;

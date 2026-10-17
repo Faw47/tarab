@@ -21,6 +21,7 @@ import {
   selectLibraryFolder,
 } from '../../lib/tauri-commands';
 import { cn } from '../../lib/utils';
+import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { SettingsPage } from '../../types';
 import { IconButton } from '../ui';
@@ -92,6 +93,12 @@ export const UnifiedSettingsView = memo(
     const queryClient = useQueryClient();
 
     const [page, setPage] = useState<SettingsPage>('library');
+    const requestedPage = useNavigationIntentStore((s) => s.settingsPage);
+    useEffect(() => {
+      if (!requestedPage) return;
+      const next = useNavigationIntentStore.getState().consumeSettingsPage();
+      if (next) setPage(next);
+    }, [requestedPage]);
     const theme = useSettingsStore((s) => s.theme);
     const isNeobrutalism = theme === 'neobrutalism';
 
