@@ -123,7 +123,10 @@ const pruneShuffleKeys = (keys: string[], queue: Track[]): string[] => {
  * pass starts a new pass; Previous, Repeat One and restarting the current entry keep it.
  */
 const recordShufflePlay = (
-  state: Pick<PlayerState, 'queue' | 'shufflePass' | 'shufflePriority'>,
+  state: Pick<
+    PlayerState,
+    'queue' | 'queueIndex' | 'currentTrack' | 'shufflePass' | 'shufflePriority'
+  >,
   index: number,
   forward: boolean,
 ): Pick<PlayerState, 'shufflePass' | 'shufflePriority'> => {
@@ -136,7 +139,9 @@ const recordShufflePlay = (
   }
   const played = new Set(state.shufflePass);
   const passComplete = state.queue.every((track) => played.has(queueEntryKey(track)));
-  const replaysCurrent = state.shufflePass[state.shufflePass.length - 1] === key;
+  const currentIndex = resolveActiveQueueIndex(state.queue, state.queueIndex, state.currentTrack);
+  const currentEntry = currentIndex >= 0 ? state.queue[currentIndex] : null;
+  const replaysCurrent = currentEntry !== null && queueEntryKey(currentEntry) === key;
   const newPass = forward && passComplete && !replaysCurrent;
   return { shufflePass: newPass ? [key] : state.shufflePass, shufflePriority };
 };

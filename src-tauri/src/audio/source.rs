@@ -133,15 +133,40 @@ struct SeekStart {
     skip_frames: u64,
 }
 
-fn default_track_time_base(format: &dyn FormatReader) -> Result<(u32, TimeBase), String> {
+struct TrackTiming {
+    track_id: u32,
+    time_base: TimeBase,
+    sample_rate: Option<u32>,
+}
+
+fn default_track_timing(format: &dyn FormatReader) -> Result<TrackTiming, String> {
     let track = format
         .default_track()
         .ok_or_else(|| "no default track".to_string())?;
-    let tb = track
+    let time_base = track
         .codec_params
         .time_base
         .ok_or_else(|| "no time base".to_string())?;
-    Ok((track.id, tb))
+    Ok(TrackTiming {
+        track_id: track.id,
+        time_base,
+        sample_rate: track.codec_params.sample_rate,
+    })
+}
+
+/// Converts a timestamp difference to audio frames. Most containers count timestamps in frames
+/// (time base 1/sample rate), but Matroska uses milliseconds and MP4 its own timescale.
+fn ts_delta_to_frames(delta: u64, timing: &TrackTiming) -> u64 {
+    let Some(sample_rate) = timing.sample_rate else {
+        return delta;
+    };
+    let tb = timing.time_base;
+    if tb.denom == 0 {
+        return delta;
+    }
+    let frames =
+        u128::from(delta) * u128::from(tb.numer) * u128::from(sample_rate) / u128::from(tb.denom);
+    u64::try_from(frames).unwrap_or(u64::MAX)
 }
 
 /// Seeks accurately and returns the frames to drop between the seeked packet and the target, so
@@ -151,6 +176,7 @@ fn seek_decoder(
     format: &mut dyn FormatReader,
     position_secs: f64,
 ) -> Result<u64, String> {
+    let timing = default_track_timing(format)?;
     let seeked = format
         .seek(
             SeekMode::Accurate,
@@ -161,22 +187,27 @@ fn seek_decoder(
         )
         .map_err(|e| format!("seek error: {}", e))?;
     decoder.reset();
-    Ok(seeked.required_ts.saturating_sub(seeked.actual_ts))
+    Ok(ts_delta_to_frames(
+        seeked.required_ts.saturating_sub(seeked.actual_ts),
+        &timing,
+    ))
 }
 
-/// Reads packets without decoding until the one containing `position_secs`.
+/// Reads packets without decoding until the one containing `position_secs`. A target past the
+/// real end (the estimated duration can be too long) leaves the reader at the end, so the track
+/// ends and the queue advances normally.
 fn skip_packets_to(format: &mut dyn FormatReader, position_secs: f64) -> Result<SeekStart, String> {
-    let (track_id, tb) = default_track_time_base(format)?;
-    let target = tb.calc_timestamp(Time::from(position_secs));
+    let timing = default_track_timing(format)?;
+    let target = timing.time_base.calc_timestamp(Time::from(position_secs));
     loop {
-        let packet = format
-            .next_packet()
-            .map_err(|e| format!("seek target is past the end of the stream ({})", e))?;
-        if packet.track_id() != track_id {
+        let Ok(packet) = format.next_packet() else {
+            return Ok(SeekStart::default());
+        };
+        if packet.track_id() != timing.track_id {
             continue;
         }
         if packet.ts().saturating_add(packet.dur()) > target {
-            let skip_frames = target.saturating_sub(packet.ts());
+            let skip_frames = ts_delta_to_frames(target.saturating_sub(packet.ts()), &timing);
             return Ok(SeekStart {
                 packet: Some(packet),
                 skip_frames,
@@ -553,17 +584,46 @@ mod tests {
     }
 
     #[test]
-    fn a_seek_past_the_end_is_an_error() {
+    fn a_seek_past_the_real_end_ends_the_track() {
+        // A too-long duration estimate let the seek target pass the end; that stopped playback
+        // with an error instead of ending the track so the queue could advance.
+        fn unseekable(
+            _: &mut dyn SymphoniaDecoder,
+            _: &mut dyn FormatReader,
+            _: f64,
+        ) -> Result<u64, String> {
+            Err("seek error: out of range".to_string())
+        }
         let path = write_temp_wav("past-end", 800);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
-        let mut format = open_decoder_for_file(path.to_str().expect("utf-8 path"))
-            .expect("open")
-            .0;
-        let result = skip_packets_to(format.as_mut(), 5.0);
-        let _ = (std::fs::remove_file(&path), state, counter);
+        let prepared = prepare_source_with_seek(
+            path.to_str().expect("utf-8 path"),
+            5.0,
+            &state,
+            &counter,
+            unseekable,
+        );
+        let _ = std::fs::remove_file(&path);
 
-        assert!(result.is_err());
+        let (source, _, _) = prepared.expect("an exhausted source, not an error");
+        assert_eq!(source.count(), 0);
+    }
+
+    #[test]
+    fn timestamp_deltas_convert_to_frames_for_millisecond_time_bases() {
+        let millis = TrackTiming {
+            track_id: 1,
+            time_base: TimeBase::new(1, 1000),
+            sample_rate: Some(44_100),
+        };
+        assert_eq!(ts_delta_to_frames(500, &millis), 22_050);
+        let frames = TrackTiming {
+            track_id: 1,
+            time_base: TimeBase::new(1, 44_100),
+            sample_rate: Some(44_100),
+        };
+        assert_eq!(ts_delta_to_frames(500, &frames), 500);
     }
 
     #[test]

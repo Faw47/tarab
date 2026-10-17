@@ -851,7 +851,7 @@ impl AudioManager {
                                         next_generation: Some(next_generation),
                                         next_path: Some(next_clone.clone()),
                                     };
-                                    // The audio thread emits; it wakes at least every 20 ms.
+                                    // The audio thread emits after the commands already queued.
                                     let _ =
                                         handoff_sender.send(AudioCommand::GaplessHandoffStarted {
                                             ended,
