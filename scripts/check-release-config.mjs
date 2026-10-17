@@ -60,9 +60,16 @@ if (tauriConfig.bundle?.createUpdaterArtifacts !== false) {
   );
 }
 
+// WebView2 serves Tauri's custom schemes as http://<scheme>.localhost, so those exact local hosts
+// are allowed; any other HTTP or HTTPS source is not.
+const localSchemeHosts = new Set(['http://asset.localhost', 'http://cover-art.localhost']);
+const cspSources = (tauriConfig.app?.security?.csp ?? '')
+  .split(';')
+  .flatMap((directive) => directive.trim().split(/\s+/).slice(1));
 if (
-  tauriConfig.app?.security?.csp?.includes('http:') ||
-  tauriConfig.app?.security?.csp?.includes('https:')
+  cspSources.some(
+    (source) => /^https?:/i.test(source) && !localSchemeHosts.has(source.toLowerCase()),
+  )
 ) {
   failures.push('The production CSP must not permit arbitrary HTTP or HTTPS connections.');
 }

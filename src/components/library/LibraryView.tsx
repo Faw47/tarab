@@ -26,6 +26,7 @@ import {
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
 import { getAlbumArtist } from '../../lib/album-key';
+import { coverArtUrl } from '../../lib/cover-art-url';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
@@ -636,7 +637,7 @@ export const LibraryView = memo(function LibraryView({
 
   const coverUrlFromHash = useCallback(
     (hash?: string | null, size: 'small' | 'medium' | 'large' = 'medium') =>
-      hash ? `cover-art://localhost/${hash}/${size}` : undefined,
+      hash ? coverArtUrl(hash, size) : undefined,
     [],
   );
 
@@ -1060,7 +1061,7 @@ export const LibraryView = memo(function LibraryView({
         const albumTracks = await fetchAlbumTracks(track.album, albumArtist);
         const coverArt =
           track.coverArt ??
-          (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
+          (track.coverArtHash ? coverArtUrl(track.coverArtHash, 'large') : undefined);
 
         if (onOpenAlbumDetails) {
           onOpenAlbumDetails({

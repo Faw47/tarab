@@ -110,7 +110,10 @@ fn read_image_as_base64_checked(
 fn parse_cover_art_request(uri: &http::Uri) -> Option<(&str, &str)> {
     let host = uri.host().unwrap_or_default();
     let mut parts = uri.path().split('/').filter(|part| !part.is_empty());
-    if !host.is_empty() && host != "localhost" {
+    // macOS and Linux request cover-art://localhost/{hash}/{size}; Windows (WebView2) requests
+    // http://cover-art.localhost/{hash}/{size}. Older URLs carried the hash as the host.
+    let serving_host = host.is_empty() || host == "localhost" || host == "cover-art.localhost";
+    if !serving_host {
         return Some((host, parts.next().unwrap_or("medium")));
     }
     Some((parts.next()?, parts.next().unwrap_or("medium")))
@@ -512,6 +515,20 @@ mod tests {
         assert_eq!(
             parse_cover_art_request(&path_uri),
             Some((hash.as_str(), "small"))
+        );
+    }
+
+    #[test]
+    fn cover_art_protocol_parses_the_windows_webview_form() {
+        // Regression for QA-05: WebView2 serves custom schemes as http://<scheme>.localhost.
+        let hash = "b".repeat(64);
+        let uri: http::Uri = format!("http://cover-art.localhost/{}/medium", hash)
+            .parse()
+            .expect("windows URI");
+
+        assert_eq!(
+            parse_cover_art_request(&uri),
+            Some((hash.as_str(), "medium"))
         );
     }
 

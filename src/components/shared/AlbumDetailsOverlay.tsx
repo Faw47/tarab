@@ -27,6 +27,7 @@ import {
 import { useColorExtraction } from '../../hooks/use-color-extraction';
 import { getCoverArtBlobFallback, useCoverArt } from '../../hooks/useCoverArt';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
+import { isCoverArtProtocolUrl } from '../../lib/cover-art-url';
 import { formatTime } from '../../lib/format-time';
 import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
@@ -203,7 +204,7 @@ const useResolvedCoverArt = (src: string | undefined, track: Track | null) => {
   }, [src]);
 
   const handleError = useCallback(async () => {
-    if (resolvedSrcRef.current?.startsWith('cover-art://') && track?.coverArtHash) {
+    if (isCoverArtProtocolUrl(resolvedSrcRef.current) && track?.coverArtHash) {
       try {
         const blobUrl = await getCoverArtBlobFallback(track.coverArtHash, 'large');
         if (blobUrl) {
