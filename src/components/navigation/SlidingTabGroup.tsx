@@ -9,13 +9,11 @@ import {
   useRef,
 } from 'react';
 
-import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
 import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
-import { useSettingsStore } from '@/store/settings-store';
 
 import type { NavView } from './FloatingDock';
 
@@ -34,8 +32,6 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
   const pillRef = useRef<HTMLDivElement>(null);
   const hoveringRef = useRef(false);
   const pressingRef = useRef(false);
-
-  const useGpuLiquidPill = useSettingsStore((s) => s.theme === 'liquid-glass' && !s.reducedEffects);
 
   const activeIndex = useMemo(
     () =>
@@ -93,18 +89,6 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     }),
     [listProps],
   );
-
-  useLiquidControlMotionHorizontal({
-    enabled: useGpuLiquidPill,
-    rootRef: navRef,
-    pillStyle,
-    pillLayoutFromDom,
-    pillGeometryRef,
-    isDragging,
-    hoveringRef,
-    pressingRef,
-    activeIndex: activeIndex >= 0 ? activeIndex : 0,
-  });
 
   useLayoutEffect(() => {
     if (!pillLayoutFromDom) return;

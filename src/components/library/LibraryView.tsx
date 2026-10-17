@@ -11,7 +11,6 @@ import type {
 } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
 import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
@@ -352,18 +351,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     const g = vmPillGeometryRef.current;
     if (el && g) applyHorizontalPillDom(el, g.left, g.width);
   }, [vmPillLayoutFromDom, vmIsDragging, vmPillGeometryRef]);
-
-  useLiquidControlMotionHorizontal({
-    enabled: true,
-    rootRef: viewModeListRef,
-    pillStyle: vmPillStyle,
-    pillLayoutFromDom: vmPillLayoutFromDom,
-    pillGeometryRef: vmPillGeometryRef,
-    isDragging: vmIsDragging,
-    hoveringRef: viewModeHoveringRef,
-    pressingRef: viewModePressingRef,
-    activeIndex: viewMode === 'grid' ? 0 : 1,
-  });
 
   return (
     <section className={cn('library-v2-command-deck', isScrolled && 'is-scrolled')}>

@@ -47,7 +47,6 @@ export const SettingsSchema = z
     globalShortcutsEnabled: z.boolean(),
     shortcuts: GlobalShortcutsSchema,
     autostartEnabled: z.boolean(),
-    debugLiquidControlGlass: z.boolean(),
   })
   .partial();
 
