@@ -40,6 +40,7 @@ use events::{
     PlaybackTransition,
 };
 use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
+use state::playback_identity;
 pub use state::PlaybackState;
 
 enum AudioCommand {
@@ -870,17 +871,19 @@ impl AudioManager {
                                                 ) {
                                                     Ok(prepared) => prepared,
                                                     Err(error) => {
+                                                        let (generation, _) =
+                                                            playback_identity(&state_clone);
                                                         emit_playback_error(
                                                             &app_for_audio,
                                                             path,
-                                                            state_clone.lock().generation,
+                                                            generation,
                                                             "deviceSwitch",
                                                             error.clone(),
                                                             true,
                                                         );
                                                         emit_playback_transition(
                                                             &app_for_audio,
-                                                            state_clone.lock().generation,
+                                                            generation,
                                                             PlaybackTransition::DeviceSwitchFailed,
                                                             Some(path.clone()),
                                                             Some(error),
@@ -938,19 +941,21 @@ impl AudioManager {
                                     stream_bundle = Some(new_stream_bundle);
                                 }
                                 Err(e) => {
+                                    let (generation, current_file) =
+                                        playback_identity(&state_clone);
                                     emit_playback_error(
                                         &app_for_audio,
                                         "",
-                                        state_clone.lock().generation,
+                                        generation,
                                         "deviceSwitch",
                                         e.clone(),
                                         true,
                                     );
                                     emit_playback_transition(
                                         &app_for_audio,
-                                        state_clone.lock().generation,
+                                        generation,
                                         PlaybackTransition::DeviceSwitchFailed,
-                                        state_clone.lock().current_file.clone(),
+                                        current_file,
                                         Some(e),
                                         true,
                                     );
@@ -1003,11 +1008,12 @@ impl AudioManager {
                                     next_generation: None,
                                 };
                                 let _ = app_for_audio.emit("playback-ended", payload);
+                                let (_, ended_file) = playback_identity(&state_clone);
                                 emit_playback_transition(
                                     &app_for_audio,
                                     ended_generation,
                                     PlaybackTransition::Ended,
-                                    state_clone.lock().current_file.clone(),
+                                    ended_file,
                                     None,
                                     true,
                                 );
