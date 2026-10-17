@@ -264,9 +264,9 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * crossfade from 0 to 12 seconds
 * queue management
 * automatic skip of missing or unplayable tracks (up to five in a row) when the queue advances on its own
-* smart shuffle
+* smart shuffle: each queue entry plays once per pass, Previous follows the shuffle order, and Play Next tracks play first
 * shuffle history
-* repeat modes
+* repeat modes (with Repeat Off, shuffle stops after one pass; a manual Next leaves a Repeat One track)
 * playback speed control
 * volume control
 * volume boost
