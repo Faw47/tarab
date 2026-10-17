@@ -1,6 +1,20 @@
 import { type MutableRefObject, useRef } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { usePlayerStore } from '../../store/player-store';
+import { type ParsedPlaybackPosition, parsePlaybackPositionPayload } from './playback-events';
+import { isCurrentPlaybackGeneration } from './playback-generation';
+
+function acceptPosition(raw: unknown): ParsedPlaybackPosition | null {
+  const parsed = parsePlaybackPositionPayload(raw);
+  if (!parsed) return null;
+  if (
+    parsed.generation !== null &&
+    !isCurrentPlaybackGeneration({ generation: parsed.generation })
+  ) {
+    return null;
+  }
+  return parsed;
+}
 
 export function usePlaybackPositionEvents({
   scheduleSessionSave,
@@ -13,10 +27,12 @@ export function usePlaybackPositionEvents({
 }) {
   const lastUiPositionRef = useRef<{ time: number; pos: number }>({ time: 0, pos: 0 });
 
-  useTauriEvent<number>(
+  useTauriEvent<unknown>(
     'playback-position',
     (event) => {
-      const pos = event.payload;
+      const parsed = acceptPosition(event.payload);
+      if (!parsed) return;
+      const pos = parsed.position;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const last = lastUiPositionRef.current;
       const { setCurrentTime } = usePlayerStore.getState();
@@ -36,10 +52,12 @@ export function usePlaybackPositionEvents({
     (error) => console.error('Failed to setup playback position listener:', error),
   );
 
-  useTauriEvent<number>(
+  useTauriEvent<unknown>(
     'playback-seeked',
     (event) => {
-      const pos = Math.max(0, event.payload);
+      const parsed = acceptPosition(event.payload);
+      if (!parsed) return;
+      const pos = Math.max(0, parsed.position);
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       usePlayerStore.getState().setCurrentTime(pos);
       lastUiPositionRef.current = { time: now, pos };

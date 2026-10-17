@@ -192,14 +192,20 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-position')).toBe(true);
     });
 
-    await listeners.get('playback-position')?.({ payload: 40 });
+    await listeners.get('playback-position')?.({
+      payload: { generation: 1, position: 40 },
+    });
     expect(dbUpdatePlayStatsMock).not.toHaveBeenCalled();
 
-    await listeners.get('playback-position')?.({ payload: 95 });
+    await listeners.get('playback-position')?.({
+      payload: { generation: 1, position: 95 },
+    });
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledTimes(1);
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledWith('track-1');
 
-    await listeners.get('playback-position')?.({ payload: 120 });
+    await listeners.get('playback-position')?.({
+      payload: { generation: 1, position: 120 },
+    });
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledTimes(1);
   });
   it('reports play stats update failures after crossing 50%', async () => {
@@ -211,7 +217,9 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-position')).toBe(true);
     });
 
-    await listeners.get('playback-position')?.({ payload: 95 });
+    await listeners.get('playback-position')?.({
+      payload: { generation: 1, position: 95 },
+    });
 
     await waitFor(() => {
       expect(reportErrorMock).toHaveBeenCalledWith('Failed to update play stats', {

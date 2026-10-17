@@ -11,6 +11,7 @@ import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { invalidateLibraryForMutation } from '../library/mutations';
 import { getLibraryQueryClient } from '../library/queryClientBridge';
+import { parsePlaybackPositionPayload } from './playback-events';
 import {
   getActivePlaybackGeneration,
   isCurrentPlaybackGeneration,
@@ -40,11 +41,6 @@ interface PlaybackTransitionEventPayload {
   filePath: string | null;
   message: string | null;
   recoverable: boolean;
-}
-
-interface PlaybackPositionEventPayload {
-  generation: number;
-  position: number;
 }
 
 interface PlaybackNearEndEventPayload {
@@ -99,12 +95,18 @@ export function usePlaybackLifecycle() {
     });
   }, []);
 
-  useTauriEvent<PlaybackPositionEventPayload | number>(
+  useTauriEvent<unknown>(
     'playback-position',
     (event) => {
-      const payload = event.payload;
-      const pos = typeof payload === 'number' ? payload : payload.position;
-      if (typeof payload !== 'number' && !isCurrentPlaybackGeneration(payload)) return;
+      const parsed = parsePlaybackPositionPayload(event.payload);
+      if (!parsed) return;
+      if (
+        parsed.generation !== null &&
+        !isCurrentPlaybackGeneration({ generation: parsed.generation })
+      ) {
+        return;
+      }
+      const pos = parsed.position;
       const { currentTrack, duration } = usePlayerStore.getState();
       if (!currentTrack || duration <= 0) {
         return;

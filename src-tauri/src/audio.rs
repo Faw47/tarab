@@ -532,7 +532,13 @@ impl AudioManager {
                                     state.warned_near_end = false;
                                 }
                                 reset_active_counter(&active_emitted_for_audio);
-                                let _ = app_for_audio.emit("playback-seeked", normalized_position);
+                                let _ = app_for_audio.emit(
+                                    "playback-seeked",
+                                    PlaybackPositionEvent {
+                                        generation,
+                                        position: normalized_position,
+                                    },
+                                );
                                 continue;
                             }
 
@@ -571,7 +577,13 @@ impl AudioManager {
                                             &active_emitted_for_audio,
                                             Arc::clone(&emitted_for_seek),
                                         );
-                                        let _ = app_for_audio.emit("playback-seeked", actual_start);
+                                        let _ = app_for_audio.emit(
+                                            "playback-seeked",
+                                            PlaybackPositionEvent {
+                                                generation,
+                                                position: actual_start,
+                                            },
+                                        );
                                     } else {
                                         emit_playback_error(
                                             &app_for_audio,
