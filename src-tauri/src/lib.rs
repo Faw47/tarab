@@ -161,20 +161,28 @@ fn cover_art_response(cache: &image_cache::ImageCache, uri: &http::Uri) -> http:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Open the library before Tauri starts: a setup error panics inside the event loop (and
-    // aborts in release builds), so a failure there could never be shown to the user.
+    // The first running copy opens the library before Tauri starts: a setup error panics inside
+    // the event loop (and aborts in release builds), so a failure there could never be shown. A
+    // second copy skips this; the single-instance plugin hands it off during build.
+    let instance = startup_failure::acquire_instance_lock();
     let db_start = Instant::now();
-    let database = match create_database() {
-        Ok(database) => database,
-        Err(err) => {
-            startup_failure::report_database_failure(&format!(
-                "Failed to initialize library database: {}",
-                err
-            ));
-            return;
+    let preopened_database = if instance.is_primary() {
+        match create_database() {
+            Ok(database) => Some(database),
+            Err(err) => {
+                startup_failure::report_database_failure(
+                    &format!("Failed to initialize library database: {}", err),
+                    instance,
+                );
+                return;
+            }
         }
+    } else {
+        None
     };
     let db_init_ms = db_start.elapsed().as_secs_f64() * 1000.0;
+    // Held until the app exits.
+    let _instance = instance;
 
     let shared_image_cache: SharedImageCache = create_image_cache();
 
@@ -365,6 +373,11 @@ pub fn run() {
             let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
             app.manage(audio_manager);
 
+            let database = match preopened_database {
+                Some(database) => database,
+                None => create_database()
+                    .map_err(|err| format!("Failed to initialize library database: {}", err))?,
+            };
             let playlist_bootstrap_db = database.clone();
             app.manage(database);
             eprintln!("[startup] db_init_ms={:.1}", db_init_ms);

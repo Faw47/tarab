@@ -4,6 +4,45 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Whether this process is the first running copy of Tarab. Taken before the library is opened,
+/// so a second launch (which the single-instance plugin hands off) never runs migrations or the
+/// database-failure dialog against a library the first copy is using.
+pub enum InstanceLock {
+    /// Holds the locked file; the OS lock lasts as long as the handle.
+    Primary(#[allow(dead_code)] Option<fs::File>),
+    Secondary,
+}
+
+impl InstanceLock {
+    pub fn is_primary(&self) -> bool {
+        matches!(self, InstanceLock::Primary(_))
+    }
+}
+
+pub fn acquire_instance_lock() -> InstanceLock {
+    let Ok(dir) = crate::database::get_app_data_dir() else {
+        return InstanceLock::Primary(None);
+    };
+    acquire_lock_file(&dir.join("instance.lock"))
+}
+
+fn acquire_lock_file(path: &Path) -> InstanceLock {
+    let Ok(file) = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+    else {
+        // Without a lock file, behave as before rather than refuse to start.
+        return InstanceLock::Primary(None);
+    };
+    match file.try_lock() {
+        Ok(()) => InstanceLock::Primary(Some(file)),
+        Err(fs::TryLockError::WouldBlock) => InstanceLock::Secondary,
+        Err(fs::TryLockError::Error(_)) => InstanceLock::Primary(None),
+    }
+}
+
 /// Renames the database and its WAL/SHM side files to `*.unusable-<stamp>`, keeping them for
 /// recovery, and returns the new database file name. Side files move first and every rename is
 /// rolled back on failure: a WAL left next to a new, empty database would be replayed into it.
@@ -92,7 +131,7 @@ pub fn report_build_failure(error: &str) {
 
 /// Shows that the library database could not be opened (before Tauri starts) and offers to move
 /// it aside (renamed, not deleted) and start again with an empty library.
-pub fn report_database_failure(database_error: &str) {
+pub fn report_database_failure(database_error: &str, instance: InstanceLock) {
     eprintln!("{database_error}");
     let log_note = log_note(database_error);
 
@@ -119,14 +158,23 @@ pub fn report_database_failure(database_error: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
-    let outcome = crate::database::get_database_path()
+    let failure = match crate::database::get_database_path()
         .and_then(|database| move_database_aside(&database, stamp))
-        .and_then(|_| relaunch());
-    if let Err(error) = outcome {
+    {
+        Err(error) => Some(format!("Tarab could not move the database aside: {error}")),
+        Ok(_) => {
+            // The new process must be able to take the instance lock.
+            drop(instance);
+            relaunch()
+                .err()
+                .map(|error| format!("The database was moved aside, but Tarab could not restart: {error}. Open Tarab again."))
+        }
+    };
+    if let Some(message) = failure {
         let _ = rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Error)
             .set_title("Tarab could not start")
-            .set_description(format!("Tarab could not move the database aside: {error}"))
+            .set_description(message)
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }
@@ -135,6 +183,24 @@ pub fn report_database_failure(database_error: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_copy_sees_the_instance_lock_held() {
+        // Review regression for LD-06: a second launch must not open or offer to move the
+        // library the first copy is using.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!("tarab-instance-{nonce}.lock"));
+
+        let first = acquire_lock_file(&path);
+        assert!(first.is_primary());
+        assert!(!acquire_lock_file(&path).is_primary());
+        drop(first);
+        assert!(acquire_lock_file(&path).is_primary());
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn a_failed_move_restores_the_files_already_moved() {

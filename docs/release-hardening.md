@@ -88,7 +88,10 @@ Release rule: main-window code may call these as needed; mini-player code should
 - If the library database cannot be opened at launch, Tarab writes `startup-error.log` to the app
   data directory and shows a native dialog (`rfd`) that can rename the database to
   `library.db.unusable-<seconds>` (with its WAL and SHM files) and relaunch with an empty library.
-  Release QA should launch once with a locked or corrupt `library.db` on each platform.
+  The early open and the dialog run only in the first running copy (an OS lock on
+  `instance.lock` in the app data directory); a second launch is handed off by the single-instance
+  plugin without touching the database. Release QA should launch once with a locked or corrupt
+  `library.db` on each platform, and launch a second copy while the first is running.
 
 ## Privacy and outbound network policy
 

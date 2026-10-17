@@ -11,6 +11,7 @@ import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { dialog } from '../../platform/dialog';
 import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { usePlayerStore } from '../../store/player-store';
+import { useSettingsStore } from '../../store/settings-store';
 import { invalidateLibraryForMutation } from '../library/mutations';
 
 interface UseNativeMenuActionsOptions {
@@ -36,7 +37,9 @@ export function useNativeMenuActions({
     selectLibraryFolder()
       .then(async (grant) => {
         if (!grant) return;
-        const folders = Array.from(new Set([...libraryFolders, grant.path]));
+        // Read the folders now: this also runs from a toast action, possibly long after render.
+        const current = useSettingsStore.getState().libraryFolders;
+        const folders = Array.from(new Set([...current, grant.path]));
         setLibraryFolders(folders);
         await scanFolder(grant.path);
       })
