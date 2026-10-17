@@ -57,6 +57,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   - `desktopMiniWindowEnabled`
   - `hideToStatusIconOnClose`
 - Media keys/global shortcut registration is best-effort; do not crash app on registration failure.
+- The main window sets `backgroundThrottling: "disabled"` because its renderer owns queue advance, media-key handling and tray quit while hidden to the status icon. Keep it; `scripts/check-release-config.mjs` enforces it (effective on macOS 14+, unsupported by Tauri on Windows and Linux).
 - Vendored media plugin exists at `src-tauri/vendor/tauri-plugin-media/` and contains local safety patches.
 
 ## When Editing Rust Desktop Shell Code
