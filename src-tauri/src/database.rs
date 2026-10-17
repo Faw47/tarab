@@ -1558,11 +1558,38 @@ mod tests {
         db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
             .expect("seed tracks");
 
-        let page = db.get_track_paths_page(1, 1).expect("track path page");
+        let first = db.get_track_paths_after(None, 1).expect("first page");
+        let page = db
+            .get_track_paths_after(Some(&first[0].id), 1)
+            .expect("track path page");
 
+        assert_eq!(first[0].id, "a");
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].id, "b");
         assert_eq!(page[0].file_path, "/tmp/b.mp3");
+    }
+
+    #[test]
+    fn track_path_pages_walk_the_primary_key_without_sorting() {
+        // Regression for AR-11: ORDER BY id COLLATE NOCASE with OFFSET sorted the whole table in
+        // a temporary B-tree for every page (41 s for 100 pages at 100k tracks).
+        let db = test_db();
+        let conn = db.conn.lock();
+        let plan_of = |sql: &str, args: &[&dyn rusqlite::ToSql]| -> String {
+            conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .expect("plan")
+                .query_map(args, |row| row.get::<_, String>(3))
+                .expect("query plan")
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let first = plan_of(tracks::TRACK_PATHS_FIRST_SQL, &[&1]);
+        let after = plan_of(tracks::TRACK_PATHS_AFTER_SQL, &[&"x", &1]);
+
+        assert!(!first.contains("TEMP B-TREE"), "{first}");
+        assert!(!after.contains("TEMP B-TREE"), "{after}");
+        assert!(after.contains("SEARCH"), "{after}");
     }
 
     #[test]
