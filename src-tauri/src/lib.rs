@@ -119,50 +119,60 @@ fn parse_cover_art_request(uri: &http::Uri) -> Option<(&str, &str)> {
     Some((parts.next()?, parts.next().unwrap_or("medium")))
 }
 
+fn cover_art_response(cache: &image_cache::ImageCache, uri: &http::Uri) -> http::Response<Vec<u8>> {
+    let (hash, size) = parse_cover_art_request(uri).unwrap_or_default();
+
+    let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
+        http::Response::builder()
+            .status(status)
+            .header(http::header::CONTENT_LENGTH, "0")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Vec::new())
+            .unwrap_or_else(|_| http::Response::new(Vec::new()))
+    };
+
+    if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
+        return empty_response(http::StatusCode::BAD_REQUEST);
+    }
+
+    match cache.get_thumbnail_bytes(hash, size) {
+        Ok(Some(bytes)) => {
+            let content_length = bytes.len().to_string();
+            http::Response::builder()
+                .header(
+                    http::header::CONTENT_TYPE,
+                    image_cache::THUMBNAIL_CONTENT_TYPE,
+                )
+                .header(http::header::CONTENT_LENGTH, content_length)
+                .header("Access-Control-Allow-Origin", "*")
+                .header(
+                    http::header::CACHE_CONTROL,
+                    "public, max-age=31536000, immutable",
+                )
+                .header(http::header::ETAG, format!("\"{}\"", hash))
+                .body(bytes)
+                .unwrap_or_else(|_| http::Response::new(Vec::new()))
+        }
+        Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
+        Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared_image_cache: SharedImageCache = create_image_cache();
 
     let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol("cover-art", {
+        // Asynchronous so a cold-cache disk read never runs on the webview thread while a grid
+        // of covers scrolls.
+        .register_asynchronous_uri_scheme_protocol("cover-art", {
             let cache = shared_image_cache.clone();
-            move |_ctx, request| {
-                let (hash, size) = parse_cover_art_request(request.uri()).unwrap_or_default();
-
-                let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
-                    http::Response::builder()
-                        .status(status)
-                        .header(http::header::CONTENT_LENGTH, "0")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Vec::new())
-                        .unwrap_or_else(|_| http::Response::new(Vec::new()))
-                };
-
-                if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
-                    return empty_response(http::StatusCode::BAD_REQUEST);
-                }
-
-                match cache.get_thumbnail_bytes(hash, size) {
-                    Ok(Some(bytes)) => {
-                        let content_length = bytes.len().to_string();
-                        http::Response::builder()
-                            .header(
-                                http::header::CONTENT_TYPE,
-                                image_cache::THUMBNAIL_CONTENT_TYPE,
-                            )
-                            .header(http::header::CONTENT_LENGTH, content_length)
-                            .header("Access-Control-Allow-Origin", "*")
-                            .header(
-                                http::header::CACHE_CONTROL,
-                                "public, max-age=31536000, immutable",
-                            )
-                            .header(http::header::ETAG, format!("\"{}\"", hash))
-                            .body(bytes)
-                            .unwrap_or_else(|_| http::Response::new(Vec::new()))
-                    }
-                    Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
-                    Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
-                }
+            move |_ctx, request, responder| {
+                let cache = cache.clone();
+                let uri = request.uri().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(cover_art_response(&cache, &uri));
+                });
             }
         })
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -516,6 +526,28 @@ mod tests {
             parse_cover_art_request(&path_uri),
             Some((hash.as_str(), "small"))
         );
+    }
+
+    #[test]
+    fn cover_art_response_reports_bad_and_missing_requests() {
+        let dir = std::env::temp_dir().join(format!("tarab-cover-response-{}", std::process::id()));
+        let cache = image_cache::ImageCache::with_dir(dir.clone());
+        let bad: http::Uri = "cover-art://localhost/not-a-hash/large"
+            .parse()
+            .expect("uri");
+        let missing: http::Uri = format!("cover-art://localhost/{}/large", "c".repeat(64))
+            .parse()
+            .expect("uri");
+
+        assert_eq!(
+            cover_art_response(&cache, &bad).status(),
+            http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            cover_art_response(&cache, &missing).status(),
+            http::StatusCode::NOT_FOUND
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

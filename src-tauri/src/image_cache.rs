@@ -104,6 +104,15 @@ impl ImageCache {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_dir(cache_dir: PathBuf) -> Self {
+        Self {
+            cache_dir,
+            memory_cache: RwLock::new(HashMap::new()),
+            max_memory_bytes: 32 * 1024 * 1024,
+        }
+    }
+
     /// Generate hash from image data for cache key
     pub fn hash_image_data(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
