@@ -41,4 +41,19 @@ describe('VirtualizedGrid', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Three' })).toHaveFocus());
     expect(scrollToIndex).toHaveBeenLastCalledWith(2, { align: 'auto' });
   });
+
+  it('keeps columns equal when an item is wider than its share', () => {
+    // Regression for LD-08: repeat(N, 1fr) let a long album title widen its column.
+    render(
+      <VirtualizedGrid
+        items={['One', 'Two']}
+        minColumnWidth={100}
+        renderItem={(item) => <span>{item}</span>}
+      />,
+    );
+
+    const template = screen.getAllByRole('row')[0].style.gridTemplateColumns;
+    expect(template).toMatch(/^repeat\(\d+, minmax\(0(px)?, 1fr\)\)$/);
+  });
 });
+

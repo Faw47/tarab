@@ -222,7 +222,8 @@ export function VirtualizedGrid<T>({
                 height: `${virtualRow.size}px`,
                 transform: `translateY(${virtualRow.start}px)`,
                 display: 'grid',
-                gridTemplateColumns: `repeat(${columns}, 1fr)`,
+                // minmax(0, …): a plain 1fr track grows to fit long unbreakable titles.
+                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
               }}
             >
               {rowItems.map(({ item, index }) => (
