@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 7 |
+| FIXED_VERIFIED | 10 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 0 |
 | NATIVE_VALIDATION_REQUIRED | 2 |
 | DECISION_REQUIRED | 0 |
 | BLOCKED | 0 |
-| PENDING | 151 |
+| PENDING | 148 |
 | **Total** | **160** |
 
 ## Findings
@@ -65,9 +65,9 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-03 | P1 | Hidden or tray window may have its renderer suspended, and the renderer owns queue advance | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | backgroundThrottling disabled on main; release-config check fails without it. Documented in AGENTS.md and docs/release-hardening.md. Native check (macOS 14+): hide to tray for 10 min with a 2-track queue; track 2 must start and media keys must work. Tauri does not support this setting on Windows/Linux. | e8cb826, 37394f1 | #2 |
 | PB-06 | P1 | Gapless handoff re-picks the next track, so the UI can show a different track than the one playing | FIXED_VERIFIED | PASS / PASS / PASS | Two lifecycle tests (shuffle re-pick; queue edit before handoff) failed before, pass after. Rust sends nextPath. Limitation: a source already appended to the rodio sink cannot be withdrawn, so a queue edit inside the 0.25 s preload window still plays the preloaded track; the UI now follows it. Residual (review note): the seamless branch's early return on a path mismatch can leave the old generation active; narrow. | 25993e7, 37394f1 | #2 |
 | LD-02 | P1 | Library sort by title, artist or album only sorts the tracks already loaded | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-04 | P1 | Scan reconcile is quadratic while holding the database lock and an open write transaction | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-18 | P1 | Any watched file change triggers a full rescan of the whole library root, including Tarab's own tag writes | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-04 | P1 | Playlist commands are synchronous (run on the main thread) and load the whole tracks table per smart or folder playlist | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-04 | P1 | Scan reconcile is quadratic while holding the database lock and an open write transaction | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Reproduced: 20k-track rescan reconcile took 16 s (quadratic preserved count). Fix: HashSet of incoming paths. Test reconcile_folder_scan_rescan_of_large_folder_is_not_quadratic (fails before: 16 s > 8 s bound; passes after). Limitation: wall-clock bound may be slow-CI sensitive. | c6f5e14 | pending (batch 2) |
+| PB-18 | P1 | Any watched file change triggers a full rescan of the whole library root, including Tarab's own tag writes | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Watcher events now rescan the changed folder (file -> parent), collapsed per root, root fallback when >16 folders or the subfolder scan fails. Tests in useLibraryScan.watch.test.tsx (fail before: whole root scanned). Limitations: Tarab's own tag writes still trigger a rescan, now of one album folder only; directory renames still emit no event (pre-existing); each subfolder scan still runs a full lyrics index sync. | e09ac79 | pending (batch 2) |
+| AR-04 | P1 | Playlist commands are synchronous (run on the main thread) and load the whole tracks table per smart or folder playlist | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | All 14 playlist commands are async and run their work via spawn_blocking; the mutation guard and mutation-ID cache are unchanged. Smart/folder playlist listing loads the tracks table once per call. Test listing_playlists_resolves_smart_and_folder_playlists_from_one_track_load. Limitation (reviewer note): back-to-back reorders from a stale detail can now apply out of order; that lost update pre-exists in PlaylistsView.moveEntry. | 3ee10cc | pending (batch 2) |
 | PB-07 | P2 | Seek reports the requested time, not the decoder's actual position; MP3 coarse seek is inaccurate for VBR | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-08 | P2 | A failed seek restarts the track at 0:00; files without a known frame count get no gapless or crossfade | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-09 | P2 | Real-time mixer path locks shared state per sample while other threads hold that lock across IPC emits | PENDING | - | Audit confidence CONFIRMED. | - | - |
@@ -204,7 +204,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | SEC-14 | P3 | `db_rename_track_path` and `db_delete_tracks*` perform no library-root check | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-15 | P3 | `tarab://open/play` starts playback without confirmation and IDs are unsalted path hashes | PENDING | - | Audit confidence SUBJECTIVE. | - | - |
 | SEC-16 | P3 | Full file paths reach persisted logs unredacted | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| SEC-17 | P3 | Bundled SQLite (rusqlite 0.31 / libsqlite3-sys 0.28) and glib 0.18 are behind upstream advisories | PENDING | - | Audit confidence LIKELY. | - | - |
+| SEC-17 | P3 | Bundled SQLite (rusqlite 0.31 / libsqlite3-sys 0.28) and glib 0.18 are behind upstream advisories | PENDING | - | Audit confidence LIKELY. Related: new RustSec advisories for quinn-proto and rustls fixed by lockfile update ae1783a (PR #2); rusqlite/libsqlite3-sys and glib not yet evaluated. | - | - |
 | SEC-18 | P3 | CI workflow uses mutable action tags and default token permissions | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-19 | P3 | No navigation guard on the webviews | PENDING | - | Audit confidence SUBJECTIVE. | - | - |
 | QA-12 | P3 | Tag editor cover picker only accepts images inside a library root, and writes WebP covers with a JPEG MIME type | PENDING | - | Audit confidence CONFIRMED. | - | - |
