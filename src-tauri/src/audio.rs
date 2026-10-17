@@ -10,10 +10,11 @@ use std::time::{Duration, Instant};
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;
 use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, Packet, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::{Time, TimeBase};
 use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 

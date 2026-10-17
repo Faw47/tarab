@@ -120,6 +120,21 @@ fn run_with_pool<T: Send>(pool: Option<&ThreadPool>, job: impl FnOnce() -> T + S
     }
 }
 
+/// Estimated duration from the file's audio properties (for example the bitrate of an MP3 with no
+/// frame count). Used by playback when the decoder cannot report the length.
+pub fn probe_duration_secs(file_path: &str) -> Option<f64> {
+    let options = lofty::config::ParseOptions::new()
+        .read_tags(false)
+        .read_cover_art(false);
+    let tagged_file = Probe::open(Path::new(file_path))
+        .ok()?
+        .options(options)
+        .read()
+        .ok()?;
+    let secs = tagged_file.properties().duration().as_secs_f64();
+    (secs.is_finite() && secs > 0.0).then_some(secs)
+}
+
 // Fast metadata extraction - no cover art loading
 fn first_picture(file: &TaggedFile) -> Option<&Picture> {
     // Prefer primary tag pictures, else any picture from any tag
