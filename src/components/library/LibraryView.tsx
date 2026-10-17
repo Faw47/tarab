@@ -644,13 +644,16 @@ export const LibraryView = memo(function LibraryView({
 
   const [viewMode, setViewMode] = useState<LibraryViewDensity>(getPersistedViewMode);
   const [activeFacet, setActiveFacet] = useState<LibraryFacet>('albums');
+  const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
   const requestedFacet = useNavigationIntentStore((s) => s.libraryFacet);
   useEffect(() => {
     if (!requestedFacet) return;
     const facet = useNavigationIntentStore.getState().consumeLibraryFacet();
-    if (facet) setActiveFacet(facet);
+    if (!facet) return;
+    // An open album or artist detail would keep the requested facet out of view.
+    setDetailScopeState(null);
+    setActiveFacet(facet);
   }, [requestedFacet]);
-  const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
   const [databaseDetailTracks, setDatabaseDetailTracks] = useState<{
     key: string;
     tracks: Track[];
