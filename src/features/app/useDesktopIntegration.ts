@@ -199,6 +199,8 @@ export function useDesktopIntegration() {
       if (sequence !== mediaSyncSequenceRef.current) return;
     }
 
+    // Until this full sync is confirmed, the OS metadata is unknown; later syncs must send it too.
+    if (!metadataUnchanged) lastMediaMetadataKeyRef.current = null;
     try {
       const metadataApplied = await desktopSyncMediaSession(payload);
       if (sequence === mediaSyncSequenceRef.current) {

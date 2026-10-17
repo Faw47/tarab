@@ -300,6 +300,43 @@ describe('useDesktopIntegration', () => {
     expect(titles).toEqual(['Second']);
   });
 
+  it('resends metadata after a quick track change back while a full sync is pending', async () => {
+    vi.useFakeTimers();
+    const track = usePlayerStore.getState().currentTrack;
+    if (!track) throw new Error('missing track');
+    render(<Harness />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+
+    let replySecond: (applied: boolean) => void = () => undefined;
+    desktopSyncMediaSessionMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          replySecond = resolve;
+        }),
+    );
+    await act(async () => {
+      usePlayerStore.setState({
+        currentTrack: { ...track, id: 'track-2', title: 'Second', filePath: '/music/two.mp3' },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    await act(async () => {
+      usePlayerStore.setState({ currentTrack: track });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    await act(async () => {
+      replySecond(true);
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    const payloads = desktopSyncMediaSessionMock.mock.calls.map(
+      (call) => (call as unknown as [Record<string, unknown>])[0],
+    );
+    expect(payloads.at(-1)).toMatchObject({ title: 'Song', metadataUnchanged: false });
+  });
+
   it('routes desktop control actions to playback handlers', async () => {
     render(<Harness />);
 
