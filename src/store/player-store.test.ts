@@ -114,6 +114,41 @@ describe('player-store shuffle passes', () => {
     expect(usePlayerStore.getState().previewPrevious()?.track.id).toBe('a');
   });
 
+  it('keeps the pass when going back from the last track of a complete pass', () => {
+    startShuffled(['a', 'b', 'c'], 'off');
+    const played = ['a', ...playAll(5)];
+    expect(played).toHaveLength(3);
+
+    usePlayerStore.getState().playPrevious();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe(played[1]);
+    expect(usePlayerStore.getState().previewPrevious()?.track.id).toBe('a');
+    usePlayerStore.getState().playNext();
+    expect(usePlayerStore.getState().previewNext()).toBeNull();
+  });
+
+  it('plays several Play Next tracks in list order while shuffling', () => {
+    startShuffled(['a', 'b', 'c', 'd', 'e'], 'off');
+    // The context menu inserts a selection in reverse, each right after the current track.
+    for (const id of ['z', 'y', 'x']) usePlayerStore.getState().addToQueue(track(id), 'next');
+
+    expect(playAll(3)).toEqual(['x', 'y', 'z']);
+  });
+
+  it('clears a playback error when another entry is activated', () => {
+    startShuffled(['a', 'b'], 'all');
+    usePlayerStore.getState().setPlaybackError({
+      generation: 1,
+      filePath: '/music/a.mp3',
+      stage: 'decode',
+      message: 'bad',
+      recoverable: false,
+    });
+
+    usePlayerStore.getState().activateTrackAtIndex(1);
+
+    expect(usePlayerStore.getState().playbackError).toBeNull();
+  });
+
   it('plays a Play Next track next while shuffling', () => {
     startShuffled(['a', 'b', 'c', 'd', 'e'], 'off');
     usePlayerStore.getState().addToQueue(track('urgent'), 'next');

@@ -66,15 +66,16 @@ describe('startPlayback', () => {
 });
 
 describe('playback interventions', () => {
-  it('marks user play, seek, stop and device commands, but not crossfades', async () => {
+  it('marks commands that replace or stop the source, not seeks, device switches or crossfades', async () => {
     const before = getPlaybackInterventionEpoch();
     await startPlayback(track('first'));
-    await seekToPosition(30);
     await stopCurrentPlayback();
-    await switchAudioOutputDevice('Speakers');
-    expect(getPlaybackInterventionEpoch()).toBe(before + 4);
+    expect(getPlaybackInterventionEpoch()).toBe(before + 2);
 
+    // These apply to the incoming source of a crossfade the backend already started.
+    await seekToPosition(30);
+    await switchAudioOutputDevice('Speakers');
     await crossfadeToSource('/music/next.mp3', 4);
-    expect(getPlaybackInterventionEpoch()).toBe(before + 4);
+    expect(getPlaybackInterventionEpoch()).toBe(before + 2);
   });
 });

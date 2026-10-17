@@ -20,9 +20,9 @@ export function isCurrentPlaybackGeneration(payload: GenerationEvent): boolean {
 }
 
 /**
- * Called by the coordinator before user-driven play, seek, stop and device commands. The backend
- * cancels an active crossfade on each of them without emitting a transition, so a crossfade the
- * renderer started before the latest intervention is stale.
+ * Called by the coordinator before commands that replace or stop the current source (play, stop,
+ * adjacent track, editor preview). The backend handles them after any crossfade the renderer
+ * already requested, so that crossfade's events are stale.
  */
 export function notePlaybackIntervention(): void {
   interventionEpoch += 1;

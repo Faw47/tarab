@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
+import type { Track } from '../../../types';
 import {
   getActivePlaybackGeneration,
   notePlaybackIntervention,
@@ -200,7 +201,10 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await waitFor(() => {
-      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next', { automatic: true });
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith(
+        'next',
+        expect.objectContaining({ automatic: true }),
+      );
     });
   });
 
@@ -221,8 +225,9 @@ describe('usePlaybackLifecycle', () => {
     await waitFor(() => {
       expect(crossfadeToTrackMock).toHaveBeenCalled();
     });
-    // The user seeks; the backend cancels the crossfade it was about to start.
+    // The user starts another track; the backend replaces the crossfade it was about to start.
     notePlaybackIntervention();
+    setActivePlaybackGeneration(3);
     await listeners.get('playback-transition')?.({
       payload: {
         generation: 2,
@@ -235,14 +240,7 @@ describe('usePlaybackLifecycle', () => {
     resolveCrossfade(2);
 
     expect(usePlayerStore.getState().queueIndex).toBe(0);
-    expect(getActivePlaybackGeneration()).toBe(1);
-
-    await listeners.get('playback-ended')?.({
-      payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
-    });
-    await waitFor(() => {
-      expect(playAdjacentTrackMock).toHaveBeenCalledWith('next', { automatic: true });
-    });
+    expect(getActivePlaybackGeneration()).toBe(3);
   });
 
   describe('unplayable tracks during automatic advance', () => {
@@ -280,6 +278,32 @@ describe('usePlaybackLifecycle', () => {
         expect.stringContaining('Skipped "Track 2"'),
         expect.anything(),
       );
+    });
+
+    it('skips the entry it attempted under shuffle', async () => {
+      usePlayerStore.setState({ shuffleEnabled: true, shufflePass: [], shufflePriority: [] });
+      playAdjacentTrackMock
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          throw new Error('File not found');
+        })
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+        });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      const attempted = (
+        playAdjacentTrackMock.mock.calls[0] as unknown as [string, { entry: { track: Track } }]
+      )[1].entry.track;
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        `Skipped "${attempted.title}" because it could not be played`,
+        expect.anything(),
+      );
+      expect(usePlayerStore.getState().currentTrack?.id).toBe(attempted.id);
     });
 
     it('skips an automatically reached track that fails to decode', async () => {

@@ -23,7 +23,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 3. Desktop-originated actions (tray/app menu/media keys) should route through `desktop-control-action` to main window.
 4. Keep IPC payloads typed on both sides (avoid ad-hoc JSON blobs).
 5. All custom Rust commands are main-window-only at the invoke-handler boundary. Mini-player behavior must use typed snapshot/control events, not direct custom command calls.
-6. Frontend playback actions route through `PlaybackCoordinator` in `src/lib/playback-actions.ts`. Source-changing native commands return a monotonic generation. Renderer event handlers must reject events from older generations. User play, seek, stop and device commands call `notePlaybackIntervention()`; a crossfade the renderer requested before the latest intervention is stale, because the backend cancels it without a transition event.
+6. Frontend playback actions route through `PlaybackCoordinator` in `src/lib/playback-actions.ts`. Source-changing native commands return a monotonic generation. Renderer event handlers must reject events from older generations. Commands that replace or stop the source (play, stop, adjacent track, editor preview) call `notePlaybackIntervention()`; a crossfade the renderer requested before the latest intervention is stale. Seek and device switches do not, because the backend applies them to the incoming crossfade source.
 
 ## Persistence
 

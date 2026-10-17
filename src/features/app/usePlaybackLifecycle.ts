@@ -120,7 +120,8 @@ async function advanceQueueAutomatically(
   autoAdvanceRef: { current: AutoAdvance | null },
   skipped: number,
 ): Promise<void> {
-  const next = usePlayerStore.getState().previewNext();
+  // After a skip, Repeat One must not retry the file that just failed.
+  const next = usePlayerStore.getState().previewNext({ ignoreRepeatOne: skipped > 0 });
   if (!next) {
     autoAdvanceRef.current = null;
     stopQueuePlayback();
@@ -129,7 +130,7 @@ async function advanceQueueAutomatically(
 
   const epoch = getPlaybackInterventionEpoch();
   try {
-    await playAdjacentTrack('next', { automatic: true });
+    await playAdjacentTrack('next', { automatic: true, entry: next });
     autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
   } catch (error) {
     autoAdvanceRef.current = null;

@@ -83,7 +83,6 @@ export const toggleCurrentPlayback = async (): Promise<void> => {
 
 export const seekToPosition = async (positionSecs: number): Promise<void> => {
   const clamped = Math.max(0, positionSecs);
-  notePlaybackIntervention();
   await seekPlayback(clamped);
   usePlayerStore.getState().setCurrentTime(clamped);
 };
@@ -105,10 +104,10 @@ export const crossfadeToSource = (
 export const preloadGaplessSource = (filePath: string | null): Promise<number | null> =>
   preloadNextTrack(filePath);
 
-export const switchAudioOutputDevice = (deviceId: string): Promise<void> => {
-  notePlaybackIntervention();
-  return setAudioOutputDevice(deviceId);
-};
+// Seek and device switches apply to whichever source is current, including one a crossfade
+// just started, so they do not invalidate a pending crossfade.
+export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
+  setAudioOutputDevice(deviceId);
 
 export const startEditorPreview = async (filePath: string): Promise<void> => {
   notePlaybackIntervention();
@@ -122,11 +121,12 @@ export const startEditorPreview = async (filePath: string): Promise<void> => {
 
 /**
  * Plays the previous or next queue entry. A user-initiated Next moves on under Repeat One;
- * `automatic` (the queue advancing after a track ended) repeats the track instead.
+ * `automatic` (the queue advancing after a track ended) repeats the track instead. `entry` plays
+ * that already previewed next entry, since a second shuffle preview picks a different one.
  */
 export const playAdjacentTrack = async (
   direction: 'next' | 'previous',
-  options?: { automatic?: boolean },
+  options?: { automatic?: boolean; entry?: { track: Track; index: number } },
 ): Promise<Track | null> => {
   const state = usePlayerStore.getState();
 
@@ -147,14 +147,14 @@ export const playAdjacentTrack = async (
     const generation = await playTrack(previous.track.filePath);
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
-    freshState.activateTrackAtIndex(previous.index);
+    freshState.activateTrackAtIndex(previous.index, { backward: true });
     freshState.setDuration(previous.track.duration);
     freshState.setIsPlaying(true);
     freshState.setHasActivePlayback(true);
     return previous.track;
   }
 
-  const next = state.previewNext({ ignoreRepeatOne: !options?.automatic });
+  const next = options?.entry ?? state.previewNext({ ignoreRepeatOne: !options?.automatic });
   if (!next) return null;
 
   notePlaybackIntervention();
