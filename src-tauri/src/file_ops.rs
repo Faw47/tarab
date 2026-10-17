@@ -449,6 +449,24 @@ pub async fn reauthorize_library_grant(
     Ok(Some(grant_summary(&updated)))
 }
 
+/// A stored grant path resolved the way new selections are, so overlap checks compare like with
+/// like. Stored strings can differ from `fs::canonicalize` output: a path through a symlink, or on
+/// Windows the forward-slash form of a verbatim (`\\?\`) path.
+fn grant_resolved_path(grant: &LibraryGrantRecord) -> PathBuf {
+    let stored = PathBuf::from(&grant.path);
+    fs::canonicalize(&stored).unwrap_or(stored)
+}
+
+/// The existing grant that already covers `canonical` (the same folder or a parent), if any.
+fn covering_grant<'a>(
+    grants: &'a [LibraryGrantRecord],
+    canonical: &Path,
+) -> Option<&'a LibraryGrantRecord> {
+    grants
+        .iter()
+        .find(|grant| canonical.starts_with(grant_resolved_path(grant)))
+}
+
 pub(crate) fn grant_library_path(
     app: &AppHandle,
     roots_state: &SharedLibraryRoots,
@@ -462,15 +480,12 @@ pub(crate) fn grant_library_path(
     #[cfg(not(windows))]
     let canonical_string = canonical.to_string_lossy().into_owned();
     let current = roots_state.read().grants.clone();
-    if let Some(existing) = current.iter().find(|grant| {
-        let existing_path = PathBuf::from(&grant.path);
-        canonical == existing_path || canonical.starts_with(existing_path)
-    }) {
+    if let Some(existing) = covering_grant(&current, &canonical) {
         return Ok(grant_summary(existing));
     }
 
     let mut next = current;
-    next.retain(|grant| !PathBuf::from(&grant.path).starts_with(&canonical));
+    next.retain(|grant| !grant_resolved_path(grant).starts_with(&canonical));
     let grant = LibraryGrantRecord {
         id: format!("{:032x}", rand::random::<u128>()),
         path: canonical_string,
@@ -1249,6 +1264,29 @@ mod tests {
 
         assert_eq!(fs::read(&track).expect("read track"), b"tagged audio");
         assert_eq!(directory_entries(&dir), vec!["song.flac".to_string()]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_grant_stored_through_a_symlink_still_covers_its_subfolders() {
+        // Regression for QA-06: the overlap check compared the canonical selection with the raw
+        // stored string, so equivalent spellings created duplicate, overlapping grants.
+        let dir = temp_dir("grant-overlap");
+        let real = dir.join("real");
+        fs::create_dir_all(real.join("Album")).expect("create folders");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("create link");
+        let grants = vec![LibraryGrantRecord {
+            id: "grant-1".to_string(),
+            path: link.to_string_lossy().into_owned(),
+        }];
+        let selection = fs::canonicalize(real.join("Album")).expect("canonical selection");
+
+        assert_eq!(
+            covering_grant(&grants, &selection).map(|grant| grant.id.as_str()),
+            Some("grant-1")
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
