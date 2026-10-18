@@ -17,7 +17,9 @@ const backendCommands = new Set(
   ),
 );
 const frontendCommands = new Set(
-  [...frontendSource.matchAll(/\binvoke(?:<[^>()]*>)?\(\s*['"]([a-z_][\w]*)['"]/g)].map((match) => match[1]),
+  [...frontendSource.matchAll(/\binvoke(?:<[^>()]*>)?\(\s*['"]([a-z_][\w]*)['"]/g)].map(
+    (match) => match[1],
+  ),
 );
 
 const backendOnlyCommands = new Set([
