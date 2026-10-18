@@ -7,11 +7,13 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
       '[00:10.5]Tenth\n[00:11.50]Hundredth\n[00:12.123]Millisecond\n[00:13.1234]Long fraction\n[00:14:25]Colon',
     );
 
-    expect(lyrics.lines.map((line) => line.startTime)).toEqual([
-      10500, 11500, 12123, 13123, 14250,
-    ]);
+    expect(lyrics.lines.map((line) => line.startTime)).toEqual([10500, 11500, 12123, 13123, 14250]);
     expect(lyrics.lines.map((line) => line.text)).toEqual([
-      'Tenth', 'Hundredth', 'Millisecond', 'Long fraction', 'Colon',
+      'Tenth',
+      'Hundredth',
+      'Millisecond',
+      'Long fraction',
+      'Colon',
     ]);
   });
 
@@ -22,9 +24,7 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
   });
 
   it('applies the same offset to enhanced word timestamps', () => {
-    const lyrics = parseLyrics(
-      '[offset:+250]\n[00:10.00]<00:10.10>One <00:10:40>two',
-    );
+    const lyrics = parseLyrics('[offset:+250]\n[00:10.00]<00:10.10>One <00:10:40>two');
 
     expect(lyrics.isEnhanced).toBe(true);
     expect(lyrics.lines[0].startTime).toBe(9750);
