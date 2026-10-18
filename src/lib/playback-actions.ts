@@ -24,6 +24,22 @@ interface StartPlaybackOptions {
   shuffleEnabled?: boolean;
 }
 
+/** Settle IPC without throwing before its caller can check for a newer intervention. */
+async function settlePlaybackCommand<T>(command: Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: 'fulfilled', value: await command };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
+}
+
+/** Check at the UI commit boundary, for both successful and failed native commands. */
+function currentPlaybackResult<T>(result: PromiseSettledResult<T>, intervention: number): T | null {
+  if (getPlaybackInterventionEpoch() !== intervention) return null;
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
+
 export const startPlayback = async (
   track: Track,
   options?: StartPlaybackOptions,
@@ -31,9 +47,12 @@ export const startPlayback = async (
   const startPos = options?.startPos;
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
-  const generation = await playTrack(track.filePath, startPos);
+  const generation = currentPlaybackResult(
+    await settlePlaybackCommand(playTrack(track.filePath, startPos)),
+    intervention,
+  );
   // A newer source change may finish first. Never restore an obsolete track into the UI.
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  if (generation === null) return;
   setActivePlaybackGeneration(generation);
 
   const state = usePlayerStore.getState();
@@ -55,8 +74,8 @@ export const startPlayback = async (
 
 export const pauseCurrentPlayback = async (): Promise<void> => {
   const intervention = getPlaybackInterventionEpoch();
-  await pausePlayback();
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  if (currentPlaybackResult(await settlePlaybackCommand(pausePlayback()), intervention) === null)
+    return;
   usePlayerStore.getState().setIsPlaying(false);
 };
 
@@ -72,8 +91,8 @@ export const resumeCurrentPlayback = async (): Promise<void> => {
   }
 
   const intervention = getPlaybackInterventionEpoch();
-  await resumePlayback();
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  if (currentPlaybackResult(await settlePlaybackCommand(resumePlayback()), intervention) === null)
+    return;
   usePlayerStore.getState().setIsPlaying(true);
 };
 
@@ -92,16 +111,18 @@ export const toggleCurrentPlayback = async (): Promise<void> => {
 export const seekToPosition = async (positionSecs: number): Promise<void> => {
   const clamped = Math.max(0, positionSecs);
   const intervention = getPlaybackInterventionEpoch();
-  await seekPlayback(clamped);
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  if (
+    currentPlaybackResult(await settlePlaybackCommand(seekPlayback(clamped)), intervention) === null
+  )
+    return;
   usePlayerStore.getState().setCurrentTime(clamped);
 };
 
 export const stopCurrentPlayback = async (): Promise<void> => {
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
-  await stopPlayback();
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  if (currentPlaybackResult(await settlePlaybackCommand(stopPlayback()), intervention) === null)
+    return;
   const state = usePlayerStore.getState();
   state.setIsPlaying(false);
   state.setHasActivePlayback(false);
@@ -124,8 +145,11 @@ export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
 export const startEditorPreview = async (filePath: string): Promise<void> => {
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
-  const generation = await playTrack(filePath);
-  if (getPlaybackInterventionEpoch() !== intervention) return;
+  const generation = currentPlaybackResult(
+    await settlePlaybackCommand(playTrack(filePath)),
+    intervention,
+  );
+  if (generation === null) return;
   setActivePlaybackGeneration(generation);
   const state = usePlayerStore.getState();
   state.setCurrentTime(0);
@@ -159,8 +183,11 @@ const playAdjacentTrackOnce = async (
 
     notePlaybackIntervention();
     const intervention = getPlaybackInterventionEpoch();
-    const generation = await playTrack(previous.track.filePath);
-    if (getPlaybackInterventionEpoch() !== intervention) return null;
+    const generation = currentPlaybackResult(
+      await settlePlaybackCommand(playTrack(previous.track.filePath)),
+      intervention,
+    );
+    if (generation === null) return null;
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
     freshState.activateTrackAtIndex(previous.index, { backward: true });
@@ -175,8 +202,11 @@ const playAdjacentTrackOnce = async (
 
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
-  const generation = await playTrack(next.track.filePath);
-  if (getPlaybackInterventionEpoch() !== intervention) return null;
+  const generation = currentPlaybackResult(
+    await settlePlaybackCommand(playTrack(next.track.filePath)),
+    intervention,
+  );
+  if (generation === null) return null;
   setActivePlaybackGeneration(generation);
   const freshState = usePlayerStore.getState();
   freshState.activateTrackAtIndex(next.index);
@@ -189,12 +219,26 @@ const playAdjacentTrackOnce = async (
 // Read the next queue entry only after the previous adjacent transition has committed.
 // Two quick Next/Previous requests must not preview and play the same entry.
 let adjacentTransition: Promise<void> = Promise.resolve();
+let adjacentBatch: { epoch: number } | null = null;
 
 export const playAdjacentTrack = (
   direction: 'next' | 'previous',
   options?: { automatic?: boolean; entry?: { track: Track; index: number } },
 ): Promise<Track | null> => {
-  const result = adjacentTransition.then(() => playAdjacentTrackOnce(direction, options));
+  const epoch = getPlaybackInterventionEpoch();
+  if (!adjacentBatch || adjacentBatch.epoch !== epoch) {
+    adjacentBatch = { epoch };
+  }
+  const batch = adjacentBatch;
+  const result = adjacentTransition.then(() => {
+    // A later Play, Stop or preview cancels the older queued transport intents too.
+    if (getPlaybackInterventionEpoch() !== batch.epoch) return null;
+    const transition = playAdjacentTrackOnce(direction, options);
+    // The adjacent command marks its intervention synchronously, before awaiting native IPC.
+    // Carry only that change into this batch; unrelated interventions invalidate it.
+    batch.epoch = getPlaybackInterventionEpoch();
+    return transition;
+  });
   // A failed load must not prevent later transport actions from running.
   adjacentTransition = result.then(
     () => undefined,

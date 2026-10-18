@@ -6,6 +6,7 @@ import {
   crossfadeToSource,
   pauseCurrentPlayback,
   playAdjacentTrack,
+  resumeCurrentPlayback,
   seekToPosition,
   startEditorPreview,
   startPlayback,
@@ -13,17 +14,19 @@ import {
   switchAudioOutputDevice,
 } from '../playback-actions';
 
-const { playTrackMock, stopPlaybackMock, pausePlaybackMock, seekPlaybackMock } = vi.hoisted(() => ({
-  playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
-  stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
-  pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
-  seekPlaybackMock: vi.fn(async (_position: number): Promise<void> => undefined),
-}));
+const { playTrackMock, stopPlaybackMock, pausePlaybackMock, seekPlaybackMock, resumePlaybackMock } =
+  vi.hoisted(() => ({
+    playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
+    stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
+    pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
+    seekPlaybackMock: vi.fn(async (_position: number): Promise<void> => undefined),
+    resumePlaybackMock: vi.fn(async (): Promise<void> => undefined),
+  }));
 
 vi.mock('../tauri-commands', () => ({
   pausePlayback: pausePlaybackMock,
   playTrack: playTrackMock,
-  resumePlayback: vi.fn(async () => undefined),
+  resumePlayback: resumePlaybackMock,
   seekPlayback: seekPlaybackMock,
   stopPlayback: stopPlaybackMock,
   setAudioOutputDevice: vi.fn(async () => undefined),
@@ -90,6 +93,8 @@ describe('overlapping source requests', () => {
     pausePlaybackMock.mockResolvedValue(undefined);
     seekPlaybackMock.mockReset();
     seekPlaybackMock.mockResolvedValue(undefined);
+    resumePlaybackMock.mockReset();
+    resumePlaybackMock.mockResolvedValue(undefined);
     usePlayerStore.setState(initialPlayerState, true);
   });
 
@@ -110,6 +115,54 @@ describe('overlapping source requests', () => {
 
     expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
     expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
+  it('rechecks an intervention between command settlement and the UI commit', async () => {
+    let finishOlder: (generation: number) => void = () => undefined;
+    let finishNewer: (generation: number) => void = () => undefined;
+    playTrackMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            finishOlder = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            finishNewer = resolve;
+          }),
+      );
+
+    const older = startPlayback(track('older'));
+    finishOlder(90);
+    await Promise.resolve();
+    const newer = startPlayback(track('newer'));
+    await older;
+    const committedTrack = usePlayerStore.getState().currentTrack;
+    finishNewer(91);
+    await newer;
+
+    expect(committedTrack).toBeNull();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
+  });
+
+  it('rechecks an intervention before reporting a settled command failure', async () => {
+    let failOlder: (error: Error) => void = () => undefined;
+    playTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((_resolve, reject) => {
+          failOlder = reject;
+        }),
+    );
+
+    const older = startPlayback(track('older'));
+    failOlder(new Error('Obsolete failure'));
+    await Promise.resolve();
+    await startPlayback(track('newer'));
+
+    await expect(older).resolves.toBeUndefined();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
   });
 
   it('does not overwrite a newer selected track when a Next request completes late', async () => {
@@ -137,6 +190,56 @@ describe('overlapping source requests', () => {
     expect(usePlayerStore.getState().queueIndex).toBe(0);
   });
 
+  it.each([
+    'stop',
+    'play',
+  ] as const)('cancels queued Next requests after a newer %s intervention', async (intervention) => {
+    const queue = [track('first'), track('second'), track('third')];
+    usePlayerStore.getState().setQueue(queue);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+
+    let finishNext: (generation: number) => void = () => undefined;
+    playTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          finishNext = resolve;
+        }),
+    );
+
+    const first = playAdjacentTrack('next');
+    const second = playAdjacentTrack('next');
+    await Promise.resolve();
+    if (intervention === 'stop') {
+      await stopCurrentPlayback();
+    } else {
+      await startPlayback(track('new-selection'));
+    }
+    finishNext(92);
+
+    await expect(first).resolves.toBeNull();
+    await expect(second).resolves.toBeNull();
+    expect(playTrackMock).toHaveBeenCalledTimes(intervention === 'stop' ? 1 : 2);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe(
+      intervention === 'stop' ? 'first' : 'new-selection',
+    );
+    expect(usePlayerStore.getState().isPlaying).toBe(intervention === 'play');
+    expect(usePlayerStore.getState().hasActivePlayback).toBe(intervention === 'play');
+  });
+
+  it('cancels an adjacent request superseded before its queued callback starts', async () => {
+    usePlayerStore.getState().setQueue([track('first'), track('second')]);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+
+    const next = playAdjacentTrack('next');
+    await stopCurrentPlayback();
+
+    await expect(next).resolves.toBeNull();
+    expect(playTrackMock).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isPlaying).toBe(false);
+  });
+
   it('does not reset a newer track when an editor preview finishes late', async () => {
     let finishPreview: (generation: number) => void = () => undefined;
     playTrackMock.mockImplementationOnce(
@@ -153,6 +256,57 @@ describe('overlapping source requests', () => {
 
     expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
     expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
+  it.each([
+    'start',
+    'next',
+    'preview',
+    'pause',
+    'resume',
+    'seek',
+    'stop',
+  ] as const)('ignores a late %s failure after newer playback succeeds', async (action) => {
+    usePlayerStore.getState().setQueue([track('first'), track('second')]);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+    usePlayerStore.getState().setHasActivePlayback(true);
+
+    let failOlder: (error: Error) => void = () => undefined;
+    const pending = new Promise<never>((_resolve, reject) => {
+      failOlder = reject;
+    });
+    const operations = {
+      start: () => startPlayback(track('older')),
+      next: () => playAdjacentTrack('next'),
+      preview: () => startEditorPreview('/music/preview.mp3'),
+      pause: pauseCurrentPlayback,
+      resume: resumeCurrentPlayback,
+      seek: () => seekToPosition(75),
+      stop: stopCurrentPlayback,
+    };
+    if (action === 'pause') pausePlaybackMock.mockReturnValueOnce(pending);
+    else if (action === 'resume') resumePlaybackMock.mockReturnValueOnce(pending);
+    else if (action === 'seek') seekPlaybackMock.mockReturnValueOnce(pending);
+    else if (action === 'stop') stopPlaybackMock.mockReturnValueOnce(pending);
+    else playTrackMock.mockReturnValueOnce(pending);
+
+    const older = operations[action]();
+    await Promise.resolve();
+    await startPlayback(track('newer'));
+    failOlder(new Error('Superseded decoder/device failure'));
+
+    await expect(older).resolves.not.toThrow();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+    expect(usePlayerStore.getState().currentTime).toBe(0);
+  });
+
+  it('still reports a current playback failure to its caller', async () => {
+    playTrackMock.mockRejectedValueOnce(new Error('File not found'));
+
+    await expect(startPlayback(track('missing'))).rejects.toThrow('File not found');
+    expect(usePlayerStore.getState().isPlaying).toBe(false);
   });
 
   it('does not commit a stale seek position after selecting another track', async () => {
@@ -281,5 +435,29 @@ describe('adjacent track transitions (PB-28)', () => {
     await expect(second).resolves.toMatchObject({ id: 'second' });
     expect(playTrackMock).toHaveBeenCalledTimes(2);
     expect(usePlayerStore.getState().queueIndex).toBe(1);
+  });
+
+  it('accepts a new Next after Stop while canceling older queued requests', async () => {
+    let finishFirst: (generation: number) => void = () => undefined;
+    playTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+
+    const first = playAdjacentTrack('next');
+    const staleQueued = playAdjacentTrack('next');
+    await Promise.resolve();
+    await stopCurrentPlayback();
+    const freshNext = playAdjacentTrack('next');
+    finishFirst(2);
+
+    await expect(first).resolves.toBeNull();
+    await expect(staleQueued).resolves.toBeNull();
+    await expect(freshNext).resolves.toMatchObject({ id: 'second' });
+    expect(playTrackMock).toHaveBeenCalledTimes(2);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('second');
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
   });
 });
