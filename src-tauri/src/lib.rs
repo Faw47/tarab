@@ -334,6 +334,8 @@ pub fn run() {
         file_ops::move_file,
         file_ops::trash_files,
         file_ops::restore_trashed_files,
+        file_ops::list_trashed_files,
+        file_ops::purge_trashed_files,
         file_ops::delete_files,
         file_ops::reveal_in_file_manager,
         file_ops::list_library_grants,

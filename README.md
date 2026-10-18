@@ -86,8 +86,10 @@ Scan paths cross the desktop boundary in bounded 500-path chunks. Rust applies t
 reconciliation in one database transaction.
 
 File removal uses Tarab Trash by default. Tarab stores a bounded recovery record and returns one
-undo token per successful file. Permanent deletion is a separate action with a second
-confirmation.
+undo token per successful file. Removed files stay in Tarab Trash until you restore or delete them
+from **Settings > Storage > Removed Files**, which shows each file and the space it uses. Removal
+also works for libraries on another drive: the file is copied into Tarab Trash and then removed.
+Permanent deletion is a separate action with a second confirmation.
 
 ### A modern interface for a serious library
 

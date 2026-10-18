@@ -1,12 +1,19 @@
-import { HardDrive, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArchiveRestore, HardDrive, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
+import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { reportError } from '../../lib/report-error';
 import {
   type CacheStats,
   cacheClear,
   cacheEnforceLimit,
   cacheGetStats,
+  type FileMutationResult,
+  listTrashedFiles,
+  purgeTrashedFiles,
+  restoreTrashedFiles,
+  type TrashedFileSummary,
 } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 import { ConfirmDialog, type ConfirmDialogProps } from '../ui/ConfirmDialog';
@@ -176,3 +183,167 @@ export const CacheSettings = memo(() => {
 });
 
 CacheSettings.displayName = 'CacheSettings';
+
+const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
+
+const reportFailures = (action: string, results: FileMutationResult[]) => {
+  const failed = results.filter((result) => result.status !== 'success');
+  if (failed.length === 0) return;
+  reportError(`${failed.length} ${failed.length === 1 ? 'file' : 'files'} could not be ${action}`, {
+    source: 'removed-files',
+    detail: failed.map((result) => result.errorMessage ?? result.path).join('\n'),
+  });
+};
+
+/**
+ * Files removed with Remove from disk sit in Tarab's recoverable Trash until restored or deleted
+ * here. Before this list, they could only be restored from the one-time undo dialog.
+ */
+export const RemovedFilesSettings = memo(() => {
+  const queryClient = useQueryClient();
+  const [items, setItems] = useState<TrashedFileSummary[] | null>(null);
+  const [busyToken, setBusyToken] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<Omit<ConfirmDialogProps, 'onCancel'> | null>(
+    null,
+  );
+
+  const load = useCallback(async () => {
+    try {
+      setItems(await listTrashedFiles());
+    } catch (e) {
+      reportError('Failed to load removed files', { source: 'removed-files', error: e });
+      setItems([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const restore = useCallback(
+    async (tokens: string[]) => {
+      setBusyToken(tokens.length === 1 ? tokens[0] : 'all');
+      try {
+        reportFailures('restored', await restoreTrashedFiles(tokens));
+        await invalidateLibraryForMutation(queryClient, 'upsert');
+      } catch (e) {
+        reportError('Failed to restore files', { source: 'removed-files', error: e });
+      } finally {
+        setBusyToken(null);
+        await load();
+      }
+    },
+    [load, queryClient],
+  );
+
+  const purge = useCallback(
+    async (tokens: string[]) => {
+      setBusyToken(tokens.length === 1 ? tokens[0] : 'all');
+      try {
+        reportFailures('deleted', await purgeTrashedFiles(tokens));
+      } catch (e) {
+        reportError('Failed to delete files', { source: 'removed-files', error: e });
+      } finally {
+        setBusyToken(null);
+        await load();
+      }
+    },
+    [load],
+  );
+
+  const confirmPurge = useCallback(
+    (targets: TrashedFileSummary[]) => {
+      const single = targets.length === 1 ? targets[0] : null;
+      setConfirmDialog({
+        title: single ? 'Delete file permanently' : 'Empty Tarab Trash',
+        message: single
+          ? `${single.title ?? fileName(single.originalPath)} will be deleted from disk. This cannot be undone.`
+          : `${targets.length} files will be deleted from disk. This cannot be undone.`,
+        variant: 'danger',
+        confirmLabel: single ? 'Delete Permanently' : 'Empty Trash',
+        onConfirm: () => purge(targets.map((item) => item.token)),
+      });
+    },
+    [purge],
+  );
+
+  const totalBytes = items?.reduce((sum, item) => sum + item.sizeBytes, 0) ?? 0;
+
+  return (
+    <>
+      <SettingsSection
+        title="Removed Files"
+        description={
+          items && items.length > 0
+            ? `${items.length} ${items.length === 1 ? 'file' : 'files'} in Tarab Trash, using ${formatBytes(totalBytes)}.`
+            : 'Files removed from disk stay here until you restore or delete them.'
+        }
+        icon={<ArchiveRestore size={16} />}
+        actions={
+          items && items.length > 0 ? (
+            <SettingsActionButton
+              size="sm"
+              tone="danger"
+              onClick={() => confirmPurge(items)}
+              disabled={busyToken !== null}
+            >
+              <Trash2 size={14} /> Empty Trash
+            </SettingsActionButton>
+          ) : null
+        }
+      >
+        {items === null ? (
+          <SettingsRow label="Loading removed files" description="Reading Tarab Trash." />
+        ) : items.length === 0 ? (
+          <SettingsRow label="No removed files" description="Tarab Trash is empty." />
+        ) : (
+          items.map((item) => (
+            <SettingsRow
+              key={item.token}
+              label={item.title ?? fileName(item.originalPath)}
+              description={[
+                item.artist,
+                item.originalPath,
+                formatBytes(item.sizeBytes),
+                item.trashedAtMs ? new Date(item.trashedAtMs).toLocaleDateString() : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              control={
+                <div className="flex gap-2">
+                  <SettingsActionButton
+                    size="sm"
+                    onClick={() => void restore([item.token])}
+                    disabled={busyToken !== null}
+                  >
+                    {busyToken === item.token ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <ArchiveRestore size={14} />
+                    )}
+                    Restore
+                  </SettingsActionButton>
+                  <SettingsActionButton
+                    size="sm"
+                    tone="danger"
+                    onClick={() => confirmPurge([item])}
+                    disabled={busyToken !== null}
+                    aria-label={`Delete ${item.title ?? fileName(item.originalPath)} permanently`}
+                  >
+                    <Trash2 size={14} />
+                  </SettingsActionButton>
+                </div>
+              }
+            />
+          ))
+        )}
+      </SettingsSection>
+
+      {confirmDialog && (
+        <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />
+      )}
+    </>
+  );
+});
+
+RemovedFilesSettings.displayName = 'RemovedFilesSettings';

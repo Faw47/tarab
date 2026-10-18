@@ -170,6 +170,23 @@ export const restoreTrashedFiles = async (undoTokens: string[]): Promise<FileMut
   return invoke('restore_trashed_files', { undoTokens });
 };
 
+export interface TrashedFileSummary {
+  token: string;
+  originalPath: string;
+  title: string | null;
+  artist: string | null;
+  sizeBytes: number;
+  trashedAtMs: number | null;
+}
+
+export const listTrashedFiles = async (): Promise<TrashedFileSummary[]> => {
+  return invoke('list_trashed_files');
+};
+
+export const purgeTrashedFiles = async (undoTokens: string[]): Promise<FileMutationResult[]> => {
+  return invoke('purge_trashed_files', { undoTokens });
+};
+
 export const revealInFileManager = async (path: string): Promise<void> => {
   return invoke('reveal_in_file_manager', { path });
 };

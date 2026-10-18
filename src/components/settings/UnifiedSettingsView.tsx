@@ -27,7 +27,7 @@ import type { SettingsPage } from '../../types';
 import { IconButton } from '../ui';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { LibraryIcon } from '../ui/Icons';
-import { CacheSettings } from './CacheSettings';
+import { CacheSettings, RemovedFilesSettings } from './CacheSettings';
 import {
   SettingsActionButton,
   SettingsControlGroup,
@@ -444,7 +444,12 @@ export const UnifiedSettingsView = memo(
               <MiniPlayerSection />
             </div>
           )}
-          {page === 'storage' && <CacheSettings />}
+          {page === 'storage' && (
+            <>
+              <CacheSettings />
+              <RemovedFilesSettings />
+            </>
+          )}
         </div>
 
         {folderToRemove && (

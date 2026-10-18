@@ -1030,6 +1030,124 @@ pub async fn trash_files(
     .map_err(|e| e.to_string())?
 }
 
+/// A file in Tarab's recoverable Trash, for the Removed files list in Settings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashedFileSummary {
+    pub token: String,
+    pub original_path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub size_bytes: u64,
+    /// When the file was moved to Trash (the entry folder's modification time).
+    pub trashed_at_ms: Option<u64>,
+}
+
+fn list_trash_entries(trash_root: &Path) -> Vec<TrashedFileSummary> {
+    let Ok(entries) = fs::read_dir(trash_root) else {
+        return Vec::new();
+    };
+    let mut items: Vec<TrashedFileSummary> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let token = entry.file_name().to_str()?.to_string();
+            if !valid_undo_token(&token) || !entry.path().is_dir() {
+                return None;
+            }
+            let record = read_trash_record(&entry.path().join(TRASH_RECORD_FILE)).ok()?;
+            if record.token != token {
+                return None;
+            }
+            let size_bytes = fs::metadata(entry.path().join(&record.stored_file_name))
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            let trashed_at_ms = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|elapsed| elapsed.as_millis() as u64);
+            Some(TrashedFileSummary {
+                token,
+                title: record.track.as_ref().map(|track| track.title.clone()),
+                artist: record.track.as_ref().map(|track| track.artist.clone()),
+                original_path: record.original_path,
+                size_bytes,
+                trashed_at_ms,
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| b.trashed_at_ms.cmp(&a.trashed_at_ms));
+    items
+}
+
+fn purge_trash_entries(trash_root: &Path, tokens: Vec<String>) -> Vec<FileMutationResult> {
+    tokens
+        .into_iter()
+        .map(|token| {
+            let entry_dir = trash_root.join(&token);
+            let outcome = if !valid_undo_token(&token) {
+                Err("The Trash item is invalid".to_string())
+            } else {
+                read_trash_record(&entry_dir.join(TRASH_RECORD_FILE))
+                    .and_then(|record| {
+                        if record.token == token {
+                            Ok(record.original_path)
+                        } else {
+                            Err("The Trash item is invalid".to_string())
+                        }
+                    })
+                    .and_then(|original_path| {
+                        fs::remove_dir_all(&entry_dir)
+                            .map(|()| original_path)
+                            .map_err(|e| format!("Failed to delete the Trash item: {e}"))
+                    })
+            };
+            match outcome {
+                Ok(original_path) => FileMutationResult {
+                    path: original_path,
+                    status: "success".to_string(),
+                    operation: "purge".to_string(),
+                    error_code: None,
+                    recoverable: false,
+                    error_message: None,
+                    undo_token: None,
+                },
+                Err(error) => FileMutationResult {
+                    path: String::new(),
+                    status: "failed".to_string(),
+                    operation: "purge".to_string(),
+                    error_code: Some("purgeFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error),
+                    undo_token: Some(token),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Lists files in Tarab's recoverable Trash, newest first.
+#[tauri::command]
+pub async fn list_trashed_files(app: AppHandle) -> Result<Vec<TrashedFileSummary>, String> {
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || list_trash_entries(&trash_root))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Permanently deletes files from Tarab's recoverable Trash.
+#[tauri::command]
+pub async fn purge_trashed_files(
+    app: AppHandle,
+    undo_tokens: Vec<String>,
+) -> Result<Vec<FileMutationResult>, String> {
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || purge_trash_entries(&trash_root, undo_tokens))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn restore_trashed_files(
     app: AppHandle,
@@ -1281,6 +1399,41 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn trashed_files_can_be_listed_and_purged() {
+        // Regression for QA-01: Trash contents could not be listed or removed after the undo
+        // dialog closed.
+        let root = temp_dir("trash-list");
+        let token = "a".repeat(32);
+        let entry = root.join(&token);
+        fs::create_dir_all(&entry).expect("create entry");
+        fs::write(entry.join("song.flac"), b"12345").expect("write file");
+        write_trash_record(
+            &entry.join(TRASH_RECORD_FILE),
+            &TrashRecord {
+                version: 1,
+                token: token.clone(),
+                original_path: "/music/song.flac".to_string(),
+                stored_file_name: "song.flac".to_string(),
+                track: None,
+            },
+        )
+        .expect("write record");
+        fs::create_dir_all(root.join("not-a-token")).expect("create stray dir");
+
+        let listed = list_trash_entries(&root);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].original_path, "/music/song.flac");
+        assert_eq!(listed[0].size_bytes, 5);
+
+        let results = purge_trash_entries(&root, vec![token.clone(), "../escape".to_string()]);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[1].status, "failed");
+        assert!(!entry.exists());
+        assert!(root.join("not-a-token").exists());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
