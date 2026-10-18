@@ -141,7 +141,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-25 | P3 | Decoder does not filter packets by track ID | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | PB-26 | P3 | Scanner accepts formats the decoder cannot play; Opus is not scanned | PENDING | - | Audit confidence LIKELY. | - | - |
 | PB-32 | P3 | Volume booster hard-clips and is not persisted | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| QA-27 | P3 | Track duration underestimated by up to one second | ALREADY_RESOLVED | n/a / PASS (source) / n/a | Earlier PB-08 playback fix replaced the extra time-base division with `t.seconds as f64 + t.frac` in `src-tauri/src/audio/source.rs` (duration calculation). Verified against the current source; not newly tested here. | 8ab471d | #4 |
+| QA-27 | P3 | Track duration underestimated by up to one second | ALREADY_RESOLVED | n/a / n/a / n/a | Earlier PB-08 playback fix replaced the extra time-base division with `t.seconds as f64 + t.frac` in `src-tauri/src/audio/source.rs` (duration calculation). Verified against the current source; not newly tested here. | 8ab471d | #4 |
 | LD-04 | P3 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-28 | P3 | Two quick Next presses advance only one track | PENDING | - | Audit confidence LIKELY. | - | - |
 | PB-29 | P3 | Removing the playing track from the queue makes Next skip a track | PENDING | - | Audit confidence CONFIRMED. | - | - |
