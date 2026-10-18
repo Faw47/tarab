@@ -31,20 +31,21 @@ export const parseLyrics = (content: string): ParsedLyrics => {
   let isEnhanced = false;
   let offsetMs = 0;
 
+  // LRC offset is global metadata: it applies to every timestamp regardless of tag order.
+  for (const rawLine of rawLines) {
+    const offsetMatch = rawLine.trim().match(/^\[offset:([+-]?\d+)\]$/i);
+    if (!offsetMatch) continue;
+    const parsed = Number.parseInt(offsetMatch[1], 10);
+    if (Number.isSafeInteger(parsed)) offsetMs = parsed;
+  }
+
   for (let i = 0; i < rawLines.length; i++) {
     const rawLine = rawLines[i];
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
 
     // Skip metadata lines like [ar:Artist], [ti:Title], etc.
-    if (/^\[[a-zA-Z]+:/.test(trimmed)) {
-      const offsetMatch = trimmed.match(/^\[offset:([+-]?\d+)\]/i);
-      if (offsetMatch) {
-        const parsed = Number.parseInt(offsetMatch[1], 10);
-        offsetMs = Number.isFinite(parsed) ? parsed : 0;
-      }
-      continue;
-    }
+    if (/^\[[a-zA-Z]+:/.test(trimmed)) continue;
 
     const lineTimeMatches = Array.from(rawLine.matchAll(/\[(\d+:\d+(?:[.:]\d+)?)\]/g));
     const wordTimeMatches = Array.from(rawLine.matchAll(/<(\d+:\d+(?:[.:]\d+)?)>/g));
