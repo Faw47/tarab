@@ -276,6 +276,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   if (!currentTrack) return null;
 
+  const isNeo = theme === 'neobrutalism';
   const playbackErrorBanner = <PlaybackRecoveryBanner theme={theme} placement="overlay" />;
 
   // ============================================
@@ -285,8 +286,9 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
     return (
       <>
         {playbackErrorBanner}
-        {/* Animated Cover Art Background */}
-        <div className="absolute inset-0 -z-20 overflow-hidden">
+        {/* Animated Cover Art Background. Neobrutalism prohibits blur and soft gradients, so its
+            skin keeps the flat paper surface instead (FE-17). */}
+        <div className="absolute inset-0 -z-20 overflow-hidden" hidden={isNeo}>
           {coverArt && (
             <div className="absolute inset-0">
               <div
@@ -721,8 +723,8 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   return (
     <>
       {playbackErrorBanner}
-      {/* Ambient Background (Reduced Blur) */}
-      <div className="absolute inset-0 -z-20 overflow-hidden">
+      {/* Ambient Background (Reduced Blur); not rendered in the flat neobrutalism skin. */}
+      <div className="absolute inset-0 -z-20 overflow-hidden" hidden={isNeo}>
         {coverArt && !reduceBlur ? (
           <>
             <div

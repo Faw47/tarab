@@ -149,7 +149,9 @@ export const LyricsLine = memo(
                       className="relative inline cursor-pointer select-none px-[1px] mx-[-1px] rounded-sm box-decoration-clone"
                       style={{
                         pointerEvents: 'auto',
-                        backgroundImage: `linear-gradient(to right, ${glowColors.highlight}, ${glowColors.highlight}), linear-gradient(to right, ${unhighlightedColor}, ${unhighlightedColor})`,
+                        // Themes may override the sung and unsung colors (the neo skin uses ink on
+                        // paper, where white unsung text would vanish).
+                        backgroundImage: `linear-gradient(to right, var(--lyric-sung, ${glowColors.highlight}), var(--lyric-sung, ${glowColors.highlight})), linear-gradient(to right, var(--lyric-unsung, ${unhighlightedColor}), var(--lyric-unsung, ${unhighlightedColor}))`,
                         backgroundSize: '0% 100%, 100% 100%',
                         backgroundRepeat: 'no-repeat, no-repeat',
                         backgroundPosition: `${fillOrigin}, ${fillOrigin}`,
