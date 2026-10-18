@@ -54,7 +54,9 @@ export const startPlayback = async (
 };
 
 export const pauseCurrentPlayback = async (): Promise<void> => {
+  const intervention = getPlaybackInterventionEpoch();
   await pausePlayback();
+  if (getPlaybackInterventionEpoch() !== intervention) return;
   usePlayerStore.getState().setIsPlaying(false);
 };
 
@@ -69,8 +71,10 @@ export const resumeCurrentPlayback = async (): Promise<void> => {
     return;
   }
 
+  const intervention = getPlaybackInterventionEpoch();
   await resumePlayback();
-  state.setIsPlaying(true);
+  if (getPlaybackInterventionEpoch() !== intervention) return;
+  usePlayerStore.getState().setIsPlaying(true);
 };
 
 export const toggleCurrentPlayback = async (): Promise<void> => {
@@ -87,7 +91,9 @@ export const toggleCurrentPlayback = async (): Promise<void> => {
 
 export const seekToPosition = async (positionSecs: number): Promise<void> => {
   const clamped = Math.max(0, positionSecs);
+  const intervention = getPlaybackInterventionEpoch();
   await seekPlayback(clamped);
+  if (getPlaybackInterventionEpoch() !== intervention) return;
   usePlayerStore.getState().setCurrentTime(clamped);
 };
 
