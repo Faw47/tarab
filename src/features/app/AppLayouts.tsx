@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronLeft } from 'lucide-react';
 import { type CSSProperties, lazy, type ReactNode, type RefObject, Suspense } from 'react';
 import { type NavView, Sidebar } from '../../components/navigation';
 import { type ProcessingTask, TopBar } from '../../components/navigation/TopBar';
@@ -7,6 +8,7 @@ import { TopBarNeo } from '../../components/navigation/TopBarNeo';
 import { MiniPlayer } from '../../components/player/MiniPlayer';
 import { PillMiniPlayer } from '../../components/player/PillMiniPlayer';
 import { LiquidHomeAmbientBackdrop } from '../../components/shell/LiquidHomeAmbientBackdrop';
+import { Button } from '../../components/ui/button';
 import type { ReactivePalette } from '../../hooks/useReactivePalette';
 import { cn } from '../../lib/utils';
 import type { AppTheme, NavMode } from '../../store/settings-store';
@@ -233,7 +235,35 @@ export function AppLayouts({
           theme={theme}
         />
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* relative: the album view's overlaid header and title strip span this column, not the rail. */}
+        <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* In icon-rail mode the top bar appears only while searching; this strip keeps a window
+              drag region and Back available the rest of the time (FE-08). */}
+          {navMode !== 'topNav' && !searchUiOpen && (
+            <div
+              data-tauri-drag-region
+              data-testid="rail-title-strip"
+              className={cn(
+                'z-50 flex h-12 w-full shrink-0 items-center pr-3',
+                isAlbumView && 'absolute top-0 left-0 right-0',
+              )}
+              style={{ paddingLeft: Math.max(12, titlebarInsetLeft) }}
+            >
+              {canGoBack ? (
+                <Button
+                  onClick={onBack}
+                  className="h-9 w-9 rounded-full bg-black/20 shadow-md"
+                  contentClassName="flex items-center justify-center p-0"
+                  aria-label="Go back"
+                  title="Back"
+                  reducedEffects={reducedEffects}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+              ) : null}
+            </div>
+          )}
+
           {(navMode === 'topNav' || searchUiOpen) && (
             <TopBar
               navMode={navMode}

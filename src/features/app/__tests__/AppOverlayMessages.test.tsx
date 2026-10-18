@@ -113,3 +113,29 @@ describe('player bar motion (FE-29)', () => {
     expect(Number(bar.style.opacity)).toBeLessThan(1);
   });
 });
+
+describe('icon-rail title strip (FE-08)', () => {
+  it('keeps a drag region and Back in rail mode without the top bar', () => {
+    const onBack = vi.fn();
+    render(
+      <AppLayouts
+        {...layoutProps({
+          theme: 'liquid-glass',
+          navMode: 'iconRail',
+          canGoBack: true,
+          isAlbumView: true,
+          onBack,
+        })}
+      />,
+    );
+    const strip = screen.getByTestId('rail-title-strip');
+    expect(strip).toHaveAttribute('data-tauri-drag-region');
+    screen.getByRole('button', { name: 'Go back' }).click();
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not shown when the top bar is', () => {
+    render(<AppLayouts {...layoutProps({ theme: 'liquid-glass', navMode: 'topNav' })} />);
+    expect(screen.queryByTestId('rail-title-strip')).toBeNull();
+  });
+});
