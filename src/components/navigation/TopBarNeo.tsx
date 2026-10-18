@@ -21,6 +21,7 @@ import {
   useRef,
 } from 'react';
 import { cn } from '@/lib/utils';
+import { QueueIcon } from '../ui/Icons';
 import type { NavView } from './FloatingDock';
 import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
 import { WindowsWindowControls } from './WindowsWindowControls';
@@ -50,9 +51,7 @@ interface TopBarNeoProps {
   focusSearchNonce?: number;
   onBack?: () => void;
   canGoBack?: boolean;
-  // NOTE: Secondary tabs (Tags, Settings) are intentionally absent in
-  // iconRail mode — FloatingDock owns them in that layout. This is a
-  // deliberate design contract, not an oversight.
+  // Secondary tabs (Tags, Settings) are absent in iconRail mode: the icon rail carries them.
 }
 
 interface StatusData {
@@ -79,7 +78,7 @@ const PLATFORM_SHORTCUT = {
 const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
   { view: 'home', label: 'Home', icon: Home },
   { view: 'library', label: 'Library', icon: Library },
-  { view: 'queue', label: 'Queue', icon: ListMusic },
+  { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
   { view: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 

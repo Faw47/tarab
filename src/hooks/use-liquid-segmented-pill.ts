@@ -131,6 +131,8 @@ export function useLiquidSegmentedPillHorizontal(options: {
   useEffect(() => {
     if (!enabled) {
       setPillStyle({ left: 0, width: 0, opacity: 0 });
+      // Clicks navigate on their own while disabled; a flag left by a drag would eat one.
+      suppressNextTabClickRef.current = false;
       return;
     }
     if (sessionRef.current || pillLayoutFromDom) return;
@@ -184,6 +186,8 @@ export function useLiquidSegmentedPillHorizontal(options: {
 
   const listProps = {
     onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
+      // A click this flag was meant to swallow belongs to an earlier gesture.
+      suppressNextTabClickRef.current = false;
       if (!enabled) return;
       if (e.button !== 0) return;
       const root = rootRef.current;
@@ -359,6 +363,8 @@ export function useLiquidSegmentedPillVertical(options: {
   useEffect(() => {
     if (!enabled) {
       setPillStyle({ top: 0, height: 0, opacity: 0 });
+      // Clicks navigate on their own while disabled; a flag left by a drag would eat one.
+      suppressNextTabClickRef.current = false;
       return;
     }
     if (sessionRef.current || pillLayoutFromDom) return;
@@ -412,6 +418,8 @@ export function useLiquidSegmentedPillVertical(options: {
 
   const listProps = {
     onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
+      // A click this flag was meant to swallow belongs to an earlier gesture.
+      suppressNextTabClickRef.current = false;
       if (!enabled) return;
       if (e.button !== 0) return;
       const root = rootRef.current;

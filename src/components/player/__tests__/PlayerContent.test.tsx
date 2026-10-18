@@ -46,7 +46,8 @@ describe('PlayerContent', () => {
 
     expect(screen.getByTitle('Play')).toBeInTheDocument();
     expect(screen.getByTitle('Next track')).toBeInTheDocument();
-    expect(screen.getByTestId('player-progress-without-art')).toBeInTheDocument();
+    // HidingProgressBar reveals its seek bar on hover or focus of a `group` ancestor.
+    expect(screen.getByTestId('player-progress-without-art')).toHaveClass('group');
     expect(screen.queryByAltText('Album cover')).not.toBeInTheDocument();
   });
 });

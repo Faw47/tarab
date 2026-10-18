@@ -46,6 +46,9 @@ describe('useTopBarSearchShortcuts', () => {
     expect(other).toHaveFocus();
 
     search.focus();
+    // A slash typed in search is text, not the shortcut.
+    expect(fireEvent.keyDown(search, { key: '/' })).toBe(true);
+
     fireEvent.keyDown(search, { key: 'Escape' });
     expect(search).toHaveValue('');
     expect(search).toHaveFocus();

@@ -1,13 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import {
-  type CSSProperties,
-  memo,
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import { type CSSProperties, memo, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 import {
   applyHorizontalPillDom,
@@ -30,8 +22,6 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
 }: SlidingTabGroupProps) {
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
-  const hoveringRef = useRef(false);
-  const pressingRef = useRef(false);
 
   // -1 when the current view (for example Settings) has no tab here; the pill is then hidden
   // instead of sitting on the first tab.
@@ -65,29 +55,6 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     syncDependencies: [currentView, tabs],
     enabled: activeIndex >= 0,
   });
-
-  const listPropsWrapped = useMemo(
-    () => ({
-      ...listProps,
-      onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        pressingRef.current = true;
-        listProps.onPointerDownCapture(e);
-      },
-      onPointerUpCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onPointerUpCapture(e);
-        pressingRef.current = false;
-      },
-      onPointerCancelCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onPointerCancelCapture(e);
-        pressingRef.current = false;
-      },
-      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onLostPointerCapture(e);
-        pressingRef.current = false;
-      },
-    }),
-    [listProps],
-  );
 
   useLayoutEffect(() => {
     if (!pillLayoutFromDom) return;
@@ -124,13 +91,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
       ref={navRef}
       aria-label="Primary sections"
       className="relative flex min-w-0 items-center gap-1 rounded-full border border-white/[0.04] bg-white/[0.02] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
-      onPointerEnter={() => {
-        hoveringRef.current = true;
-      }}
-      onPointerLeave={() => {
-        hoveringRef.current = false;
-      }}
-      {...listPropsWrapped}
+      {...listProps}
     >
       <div
         ref={pillRef}

@@ -426,7 +426,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
           <div className="w-full md:w-[45%] flex flex-col justify-center items-center gap-5 md:gap-6 shrink-0">
             {fullscreenHideCoverArt ? (
               <div
-                className="relative w-full max-w-md h-6"
+                className="group relative w-full max-w-md h-6"
                 data-testid="player-progress-without-art"
               >
                 <HidingProgressBar accentColor="var(--hero-accent)" />

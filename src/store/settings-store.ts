@@ -71,7 +71,6 @@ interface SettingsState {
   autoLyrics: boolean;
   compactMode: boolean;
   reducedEffects: boolean;
-  /** Exaggerate liquid tab glass (stretch / refraction / glare); also `?debugLiquidGlass=1`. */
   gapless: boolean;
   crossfadeSeconds: number;
   miniPlayerVolumeVisible: boolean;

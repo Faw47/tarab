@@ -4,7 +4,6 @@ import type {
   ComponentType,
   DragEvent,
   ReactNode,
-  PointerEvent as ReactPointerEvent,
   RefObject,
   UIEvent,
   UIEventHandler,
@@ -222,8 +221,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   const pillRef = useRef<HTMLDivElement>(null);
   const viewModeListRef = useRef<HTMLDivElement>(null);
   const viewModePillRef = useRef<HTMLDivElement>(null);
-  const viewModeHoveringRef = useRef(false);
-  const viewModePressingRef = useRef(false);
 
   const sortDropdownRef = useRef<HTMLDivElement>(null);
   const sortTriggerRef = useRef<HTMLButtonElement>(null);
@@ -314,29 +311,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     onCommitIndex: (idx) => onViewModeChange(idx === 0 ? 'grid' : 'list'),
     syncDependencies: [viewMode],
   });
-
-  const vmListPropsWrapped = useMemo(
-    () => ({
-      ...vmListProps,
-      onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        viewModePressingRef.current = true;
-        vmListProps.onPointerDownCapture(e);
-      },
-      onPointerUpCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onPointerUpCapture(e);
-        viewModePressingRef.current = false;
-      },
-      onPointerCancelCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onPointerCancelCapture(e);
-        viewModePressingRef.current = false;
-      },
-      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onLostPointerCapture(e);
-        viewModePressingRef.current = false;
-      },
-    }),
-    [vmListProps],
-  );
 
   useLayoutEffect(() => {
     if (!pillLayoutFromDom) return;
@@ -516,13 +490,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
             className="library-view-mode-selector"
             role="group"
             aria-label="View mode"
-            onPointerEnter={() => {
-              viewModeHoveringRef.current = true;
-            }}
-            onPointerLeave={() => {
-              viewModeHoveringRef.current = false;
-            }}
-            {...vmListPropsWrapped}
+            {...vmListProps}
           >
             <div
               ref={viewModePillRef}

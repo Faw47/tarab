@@ -26,7 +26,8 @@ export function useTopBarSearchShortcuts({
         !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === '/';
 
       if (isSlash) {
-        if (isTextEntryTarget(target) && !isSearchInput) return;
+        // Inside any text field, including search itself, / is typed ("AC/DC").
+        if (isTextEntryTarget(target) || isSearchInput) return;
         event.preventDefault();
         onFocusSearch();
         return;
