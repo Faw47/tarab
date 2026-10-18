@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
+import playbackEvents from '../../../test/ipc-fixtures/playback-events.json';
 import type { Track } from '../../../types';
 import {
   getActivePlaybackGeneration,
@@ -10,6 +11,12 @@ import {
   setActivePlaybackGeneration,
 } from '../playback-generation';
 import { usePlaybackLifecycle } from '../usePlaybackLifecycle';
+
+/** The near-end payload Rust emits (see the shared fixture), for the active generation. */
+const nearEnd = () => ({
+  ...playbackEvents['playback-near-end'],
+  generation: getActivePlaybackGeneration(),
+});
 
 const {
   listeners,
@@ -130,6 +137,21 @@ describe('usePlaybackLifecycle', () => {
     });
   });
 
+  it('ignores a near-end event from an older playback generation', async () => {
+    // Review regression for QA-18: a bare-number payload skipped the generation check, and the
+    // tests only ever sent bare numbers.
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+    });
+
+    await listeners.get('playback-near-end')?.({
+      payload: { ...nearEnd(), generation: getActivePlaybackGeneration() - 1 },
+    });
+
+    expect(crossfadeToTrackMock).not.toHaveBeenCalled();
+  });
+
   it('crossfades to the next queue track on near-end', async () => {
     render(<Harness />);
 
@@ -139,7 +161,7 @@ describe('usePlaybackLifecycle', () => {
 
     const handler = listeners.get('playback-near-end');
     expect(handler).toBeTruthy();
-    await handler?.({ payload: 0.2 });
+    await handler?.({ payload: nearEnd() });
 
     expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
     expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
@@ -166,7 +188,7 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-ended')).toBe(true);
     });
 
-    await listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
     await listeners.get('playback-ended')?.({
       payload: { path: '/music/track-1.mp3', seamless: false },
     });
@@ -184,7 +206,7 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-transition')).toBe(true);
     });
 
-    await listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
     await listeners.get('playback-transition')?.({
       payload: {
         generation: 2,
@@ -221,7 +243,7 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-transition')).toBe(true);
     });
 
-    void listeners.get('playback-near-end')?.({ payload: 0.3 });
+    void listeners.get('playback-near-end')?.({ payload: nearEnd() });
     await waitFor(() => {
       expect(crossfadeToTrackMock).toHaveBeenCalled();
     });
@@ -376,7 +398,7 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-near-end')).toBe(true);
     });
 
-    await listeners.get('playback-near-end')?.({ payload: 0.2 });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
     expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
     expect(crossfadeToTrackMock).not.toHaveBeenCalled();
   });
@@ -435,7 +457,7 @@ describe('usePlaybackLifecycle', () => {
       expect(listeners.has('playback-near-end')).toBe(true);
     });
 
-    await listeners.get('playback-near-end')?.({ payload: 0.2 });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
 
     await waitFor(() => {
       expect(reportErrorMock).toHaveBeenCalledWith(

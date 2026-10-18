@@ -222,12 +222,10 @@ export function usePlaybackLifecycle() {
     (error) => reportError('Failed to setup playback position listener', { source: 'app', error }),
   );
 
-  useTauriEvent<PlaybackNearEndEventPayload | number>(
+  useTauriEvent<PlaybackNearEndEventPayload>(
     'playback-near-end',
     (event) => {
-      if (typeof event.payload !== 'number' && !isCurrentPlaybackGeneration(event.payload)) {
-        return;
-      }
+      if (!isCurrentPlaybackGeneration(event.payload)) return;
       void (async () => {
         const { crossfadeSeconds, gapless } = useSettingsStore.getState();
         const { stopAfterCurrent } = usePlayerStore.getState();

@@ -98,3 +98,46 @@ pub(super) struct PlaybackNearEndEvent {
     pub generation: u64,
     pub remaining: f64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Shared with the renderer tests, which feed these payloads to the real event handlers. A
+    /// change to an event struct fails here until the fixture, and with it the renderer tests, is
+    /// updated.
+    const FIXTURE: &str = include_str!("../../../src/test/ipc-fixtures/playback-events.json");
+
+    #[test]
+    fn playback_event_payloads_match_the_renderer_fixture() {
+        // Regression for QA-18 and QA-31: renderer tests sent payload shapes Rust never emits.
+        let fixture: serde_json::Value = serde_json::from_str(FIXTURE).expect("fixture");
+        let emitted = serde_json::json!({
+            "playback-position": PlaybackPositionEvent { generation: 3, position: 12.5 },
+            "playback-seeked": PlaybackPositionEvent { generation: 3, position: 30.25 },
+            "playback-near-end": PlaybackNearEndEvent { generation: 3, remaining: 4.5 },
+            "playback-ended": PlaybackEndedPayload {
+                path: Some("/music/a.flac".to_string()),
+                generation: 3,
+                seamless: true,
+                next_generation: Some(4),
+                next_path: Some("/music/b.flac".to_string()),
+            },
+            "playback-transition": PlaybackTransitionEvent {
+                generation: 3,
+                state: PlaybackTransition::CrossfadeStarted,
+                file_path: Some("/music/a.flac".to_string()),
+                message: None,
+                recoverable: true,
+            },
+            "playback-error": PlaybackErrorEvent {
+                file_path: "/music/a.flac".to_string(),
+                generation: 3,
+                stage: "decode",
+                message: "bad packet".to_string(),
+                recoverable: true,
+            },
+        });
+        assert_eq!(emitted, fixture);
+    }
+}

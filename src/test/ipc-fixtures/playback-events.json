@@ -1,0 +1,26 @@
+{
+  "playback-position": { "generation": 3, "position": 12.5 },
+  "playback-seeked": { "generation": 3, "position": 30.25 },
+  "playback-near-end": { "generation": 3, "remaining": 4.5 },
+  "playback-ended": {
+    "path": "/music/a.flac",
+    "generation": 3,
+    "seamless": true,
+    "nextGeneration": 4,
+    "nextPath": "/music/b.flac"
+  },
+  "playback-transition": {
+    "generation": 3,
+    "state": "crossfadeStarted",
+    "filePath": "/music/a.flac",
+    "message": null,
+    "recoverable": true
+  },
+  "playback-error": {
+    "filePath": "/music/a.flac",
+    "generation": 3,
+    "stage": "decode",
+    "message": "bad packet",
+    "recoverable": true
+  }
+}
