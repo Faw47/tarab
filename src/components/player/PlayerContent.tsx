@@ -52,6 +52,7 @@ import { IconButton } from '../ui/IconButton';
 import { QueueIcon as ListMusic, TrackIcon, VinylIcon } from '../ui/Icons';
 import { LyricsDisplay } from './LyricsDisplay';
 import { LyricsSnippet } from './LyricsSnippet';
+import { PlayerTimeReadout } from './PlayerTimeReadout';
 import { PlayerVolume } from './PlayerVolume';
 
 interface PlayerContentProps {
@@ -546,6 +547,12 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 )}
               </div>
             </div>
+
+            {/* Time and volume, which the compact layout already shows. */}
+            <div className="flex w-full max-w-md items-center justify-between gap-4">
+              <PlayerTimeReadout />
+              <PlayerVolume />
+            </div>
           </div>
 
           {/* RIGHT COLUMN: Lyrics */}
@@ -843,7 +850,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       {/* Main Center Layout */}
       <div className="flex-1 w-full h-full flex items-center justify-center p-6 sm:p-12 relative">
         {/* The "Card" Container */}
-        <div className="relative w-full max-w-5xl bg-black/40 backdrop-blur-2xl border border-white/5 rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[500px] md:h-[400px] animate-fade-in-up">
+        <div className="group relative w-full max-w-5xl bg-black/40 backdrop-blur-2xl border border-white/5 rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[500px] md:h-[400px] animate-fade-in-up">
           <HidingProgressBar accentColor="var(--hero-accent)" />
 
           {/* Left: Cover Art */}
