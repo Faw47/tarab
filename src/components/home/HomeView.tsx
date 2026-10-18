@@ -85,6 +85,7 @@ export const HomeView = memo(
     isLibraryLoading = false,
     libraryError = null,
     onRetryLoad,
+    onScrollChange,
   }: HomeViewProps) => {
     useRenderLog('HomeView');
 
@@ -224,7 +225,11 @@ export const HomeView = memo(
     // -------------------------------------------------------------------------
 
     return (
-      <div className="h-full overflow-y-auto pb-32 custom-scrollbar relative">
+      <div
+        className="h-full overflow-y-auto pb-32 custom-scrollbar relative"
+        // The shell uses this for the header's scrolled state, as the neo Home already did.
+        onScroll={(event) => onScrollChange?.(event.currentTarget.scrollTop > 20)}
+      >
         {/* Full-viewport ambient: `LiquidHomeAmbientBackdrop` in App (under TopBar). */}
 
         <div className="max-w-7xl mx-auto px-6 py-8 relative z-10">

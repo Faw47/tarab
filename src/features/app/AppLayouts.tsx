@@ -124,7 +124,8 @@ export function AppLayouts({
         )}
       >
         {navMode === 'iconRail' && (
-          <aside className="w-20 border-r-3 border-black flex flex-col overflow-hidden shrink-0">
+          // Sidebar hides itself below md; the bordered wrapper must too, or it leaves an empty strip.
+          <aside className="hidden w-20 shrink-0 flex-col overflow-hidden border-r-3 border-black md:flex">
             <Sidebar
               navMode={navMode}
               currentView={currentView}
