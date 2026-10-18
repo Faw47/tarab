@@ -6,7 +6,8 @@ let activeGeneration = 0;
 let interventionEpoch = 0;
 
 export function setActivePlaybackGeneration(generation: number): void {
-  if (Number.isSafeInteger(generation) && generation > 0) {
+  if (Number.isSafeInteger(generation) && generation > activeGeneration) {
+    // Native source commands can complete out of order. Never accept a stale generation.
     activeGeneration = generation;
   }
 }
