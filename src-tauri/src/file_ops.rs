@@ -75,6 +75,34 @@ pub struct LibraryRootsState {
     pub roots: Vec<PathBuf>,
     grants: Vec<LibraryGrantRecord>,
     transient_files: Vec<PathBuf>,
+    /// Incremented by every grant change, so a refresh that started before it does not write back
+    /// roots computed from the old grants (for example re-allowing a revoked folder).
+    grants_version: u64,
+}
+
+impl LibraryRootsState {
+    fn set_grants(&mut self, grants: Vec<LibraryGrantRecord>, roots: Vec<PathBuf>) {
+        self.grants = grants;
+        self.roots = roots;
+        self.grants_version += 1;
+    }
+}
+
+/// Grant changes read the grants, persist the new list and then store it. They run on the blocking
+/// pool, so they are serialized here; otherwise two at once could undo each other.
+static GRANT_MUTATION: parking_lot::Mutex<()> = parking_lot::const_mutex(());
+
+fn grants_snapshot(roots_state: &SharedLibraryRoots) -> (Vec<LibraryGrantRecord>, u64) {
+    let state = roots_state.read();
+    (state.grants.clone(), state.grants_version)
+}
+
+/// Stores roots recomputed from a grants snapshot, unless the grants changed meanwhile.
+fn store_roots_if_current(roots_state: &SharedLibraryRoots, version: u64, roots: Vec<PathBuf>) {
+    let mut state = roots_state.write();
+    if state.grants_version == version {
+        state.roots = roots;
+    }
 }
 
 pub type SharedLibraryRoots = Arc<RwLock<LibraryRootsState>>;
@@ -351,6 +379,7 @@ pub fn load_library_roots_state(app: &AppHandle) -> Result<SharedLibraryRoots, S
         roots,
         grants,
         transient_files: Vec::new(),
+        grants_version: 0,
     })))
 }
 
@@ -371,10 +400,10 @@ pub async fn list_library_grants(
 ) -> Result<Vec<LibraryGrantSummary>, String> {
     let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
-        let grants = roots_state.read().grants.clone();
+        let (grants, version) = grants_snapshot(&roots_state);
         let roots = active_roots(&grants);
         let summaries = grants.iter().map(grant_summary).collect();
-        roots_state.write().roots = roots;
+        store_roots_if_current(&roots_state, version, roots);
         summaries
     })
     .await
@@ -399,7 +428,7 @@ fn library_health(
     db: &SharedDatabase,
 ) -> Result<LibraryHealthState, String> {
     // Disk checks and database counts run without holding the roots lock.
-    let grants = roots_state.read().grants.clone();
+    let (grants, version) = grants_snapshot(roots_state);
     let roots = active_roots(&grants);
     let native_grants = grants.iter().map(grant_summary).collect::<Vec<_>>();
     let cached_sources = grants
@@ -431,7 +460,7 @@ fn library_health(
     } else {
         vec!["reauthorize", "addFolder", "viewDetails"]
     };
-    roots_state.write().roots = roots;
+    store_roots_if_current(roots_state, version, roots);
     Ok(LibraryHealthState {
         native_grants,
         cached_sources,
@@ -519,6 +548,7 @@ fn reauthorize_library_grant_blocking(
     #[cfg(not(windows))]
     let canonical_string = canonical.to_string_lossy().into_owned();
 
+    let _mutation = GRANT_MUTATION.lock();
     let current = roots_state.read().grants.clone();
     let grant = current
         .iter()
@@ -556,9 +586,8 @@ fn reauthorize_library_grant_blocking(
         .find(|entry| entry.id == grant_id)
         .cloned()
         .ok_or_else(|| "The reconnected library source was lost".to_string())?;
-    let mut state = roots_state.write();
-    state.grants = next;
-    state.roots = active_roots(&state.grants);
+    let roots = active_roots(&next);
+    roots_state.write().set_grants(next, roots);
     Ok(Some(grant_summary(&updated)))
 }
 
@@ -602,6 +631,7 @@ pub(crate) fn grant_library_path(
     let canonical_string = canonical.to_string_lossy().replace('\\', "/");
     #[cfg(not(windows))]
     let canonical_string = canonical.to_string_lossy().into_owned();
+    let _mutation = GRANT_MUTATION.lock();
     let current = roots_state.read().grants.clone();
     if let Some(existing) = covering_grant(&current, &canonical) {
         return Ok(grant_summary(existing));
@@ -619,9 +649,8 @@ pub(crate) fn grant_library_path(
     next.sort_by(|a, b| a.path.cmp(&b.path));
     persist_grants(app, &next)?;
 
-    let mut state = roots_state.write();
-    state.grants = next;
-    state.roots = active_roots(&state.grants);
+    let roots = active_roots(&next);
+    roots_state.write().set_grants(next, roots);
     Ok(grant_summary(&grant))
 }
 
@@ -680,6 +709,7 @@ fn revoke_grant(
     grant_id: &str,
     roots_state: &SharedLibraryRoots,
 ) -> Result<bool, String> {
+    let _mutation = GRANT_MUTATION.lock();
     let current = roots_state.read().grants.clone();
     let mut next = current.clone();
     next.retain(|grant| grant.id != grant_id);
@@ -687,9 +717,8 @@ fn revoke_grant(
         return Ok(false);
     }
     persist_grants(app, &next)?;
-    let mut state = roots_state.write();
-    state.grants = next;
-    state.roots = active_roots(&state.grants);
+    let roots = active_roots(&next);
+    roots_state.write().set_grants(next, roots);
     Ok(true)
 }
 
@@ -1491,6 +1520,22 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_refresh_does_not_overwrite_roots_after_a_grant_change() {
+        // Review regression for LD-05: a slow health refresh wrote back roots from grants it read
+        // before a revoke, re-allowing the revoked folder.
+        let state: SharedLibraryRoots = Arc::new(RwLock::new(LibraryRootsState::default()));
+        let (_, version) = grants_snapshot(&state);
+        state.write().set_grants(Vec::new(), Vec::new());
+
+        store_roots_if_current(&state, version, vec![PathBuf::from("/revoked")]);
+        assert!(state.read().roots.is_empty());
+
+        let (_, current) = grants_snapshot(&state);
+        store_roots_if_current(&state, current, vec![PathBuf::from("/music")]);
+        assert_eq!(state.read().roots, vec![PathBuf::from("/music")]);
     }
 
     #[test]
