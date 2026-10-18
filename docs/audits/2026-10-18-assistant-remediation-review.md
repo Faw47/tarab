@@ -4,7 +4,7 @@ Review date: 2026-10-18
 Baseline: `main` at `7b6ef3913630f7c7e0a04ae6f2529f03978e76cc` (after PRs #1–#19).  
 Scope: assistant-authored changes in PRs **#11–#19**, especially the additional fixes in #13–#19.  
 Source of finding definitions: [2026-10-17 comprehensive audit](2026-10-17-tarab-comprehensive-audit.md).  
-Status: **follow-up corrections proposed**, not release approval or a claim of independent verification.
+Status: **post-merge review with follow-up corrections**, not release approval or a claim of independent verification. PRs #21 and #22 were merged after all five checks passed; the other corrective PRs require current-head verification and review.
 
 ## Review method and limitations
 
@@ -34,7 +34,7 @@ The audit ledger's disposition counts must not be advanced to `FIXED_VERIFIED` m
 - [#23](https://github.com/Faw47/tarab/pull/23): fail open on stalled persisted-settings hydration, cancel delayed window shows, update startup docs.
 - [#24](https://github.com/Faw47/tarab/pull/24): enable and narrowly scope Help URL opener permissions, report failures, assert real capability in tests, repair release-configuration failure path.
 
-These corrections are independent draft PRs against `main`. They should only be merged after checking latest-head CI, reviewing each change and obtaining applicable native evidence.
+These corrections were created as independent draft PRs against `main`. #21 and #22 have merged; remaining fixes should only be merged after checking latest-head CI, reviewing each change and obtaining applicable native evidence.
 
 ## Mandatory validation before release
 
