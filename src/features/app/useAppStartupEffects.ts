@@ -6,6 +6,8 @@ import { logError, reportError } from '../../lib/report-error';
 import { desktopShouldStartMinimized } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 
+const SETTINGS_HYDRATION_TIMEOUT_MS = 3000;
+
 type PreloadCallback = () => void;
 
 interface UseAppStartupEffectsOptions {
@@ -60,6 +62,7 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
   }, [currentView]);
 
   useEffect(() => {
+    let cancelled = false;
     const showWindow = async () => {
       let startMinimized = false;
       try {
@@ -73,24 +76,41 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
         // If the tray is disabled in persisted settings, keep a visible way to open Tarab.
         if (!useSettingsStore.persist.hasHydrated()) {
           await new Promise<void>((resolve) => {
-            const unsubscribe = useSettingsStore.persist.onFinishHydration(() => {
+            let finished = false;
+            let unsubscribe = () => undefined;
+            const finish = () => {
+              if (finished) return;
+              finished = true;
+              clearTimeout(timeout);
               unsubscribe();
               resolve();
-            });
-            if (useSettingsStore.persist.hasHydrated()) {
-              unsubscribe();
-              resolve();
-            }
+            };
+            const timeout = setTimeout(finish, SETTINGS_HYDRATION_TIMEOUT_MS);
+            unsubscribe = useSettingsStore.persist.onFinishHydration(finish);
+            if (useSettingsStore.persist.hasHydrated()) finish();
           });
         }
-        if (useSettingsStore.getState().desktopStatusIconEnabled) return;
+        // Do not strand the user if persisted settings never load.
+        if (
+          !cancelled &&
+          useSettingsStore.persist.hasHydrated() &&
+          useSettingsStore.getState().desktopStatusIconEnabled
+        ) {
+          return;
+        }
       }
 
+      if (cancelled) return;
       await new Promise((res) => setTimeout(res, 100));
-      await getCurrentWindow().show();
+      if (!cancelled) await getCurrentWindow().show();
     };
     void showWindow().catch((error) => {
-      reportError('Failed to show the main window', { source: 'app-startup', error });
+      if (!cancelled) {
+        reportError('Failed to show the main window', { source: 'app-startup', error });
+      }
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 }
