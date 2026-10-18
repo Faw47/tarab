@@ -5,21 +5,15 @@ import openerCapability from '../../../../src-tauri/capabilities/opener.json';
 import { useNavigationIntentStore } from '../../../store/navigation-intent-store';
 import { useNativeMenuActions } from '../useNativeMenuActions';
 
-const {
-  listeners,
-  openAudioFilesMock,
-  openUrlMock,
-  refreshMock,
-  toastErrorMock,
-  reportErrorMock,
-} = vi.hoisted(() => ({
-  listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
-  openAudioFilesMock: vi.fn(),
-  openUrlMock: vi.fn(async () => undefined),
-  refreshMock: vi.fn(async () => undefined),
-  toastErrorMock: vi.fn(),
-  reportErrorMock: vi.fn(),
-}));
+const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock, reportErrorMock } =
+  vi.hoisted(() => ({
+    listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
+    openAudioFilesMock: vi.fn(),
+    openUrlMock: vi.fn(async () => undefined),
+    refreshMock: vi.fn(async () => undefined),
+    toastErrorMock: vi.fn(),
+    reportErrorMock: vi.fn(),
+  }));
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => unknown) => {
