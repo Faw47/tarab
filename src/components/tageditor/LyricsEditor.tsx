@@ -284,6 +284,9 @@ export const LyricsEditor = memo(
         skipNextSyncRef.current = false;
         return;
       }
+      // Untimed lyrics have no lines the sync view can show; echoing '' would erase them.
+      if (lines.length === 0 && lyricsContent.trim() && parseLRC(lyricsContent).length === 0)
+        return;
       const newContent = linesToLRC(lines);
       if (newContent !== lyricsContent) onChange(newContent);
     }, [lines, view, lyricsContent, onChange]);

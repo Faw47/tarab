@@ -120,6 +120,21 @@ describe('TagEditorModal unsaved changes (FE-25)', () => {
     expect(writeLyricsForTrack).toHaveBeenCalledWith('/music/a.flac', '[00:05.00] World');
   });
 
+  it('keeps untimed lyrics when saving other changes', async () => {
+    // Regression from review: the sync view echoed '' for plain lyrics and Save wrote it.
+    vi.mocked(getLyricsForTrack).mockResolvedValueOnce('[Chorus]\nplain words');
+    vi.mocked(writeTags).mockResolvedValueOnce({ status: 'success' } as never);
+    const { onClose } = renderLyricsTab();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save Changes/ })).toBeEnabled());
+    await waitFor(() => expect(getLyricsForTrack).toHaveBeenCalled());
+    // Nothing edited yet, so closing does not ask.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+    expect(writeLyricsForTrack).not.toHaveBeenCalled();
+  });
+
   it('Escape in a lyric line edit cancels that edit and keeps the editor open', async () => {
     vi.mocked(getLyricsForTrack).mockResolvedValueOnce('[00:01.00] Hello');
     const { onClose } = renderLyricsTab();
