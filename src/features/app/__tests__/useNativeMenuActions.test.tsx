@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNavigationIntentStore } from '../../../store/navigation-intent-store';
 import { useNativeMenuActions } from '../useNativeMenuActions';
 
-const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock } = vi.hoisted(
+const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock, reportErrorMock } =
+  vi.hoisted(
   () => ({
     listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
     openAudioFilesMock: vi.fn(),
     openUrlMock: vi.fn(async () => undefined),
     refreshMock: vi.fn(async () => undefined),
     toastErrorMock: vi.fn(),
+    reportErrorMock: vi.fn(),
   }),
 );
 
@@ -26,7 +28,10 @@ vi.mock('../../../platform/dialog', () => ({ dialog: { openAudioFiles: openAudio
 vi.mock('../../../lib/track-refresh', () => ({ refreshTracksByFilePaths: refreshMock }));
 vi.mock('../../../lib/tauri-commands', () => ({ selectLibraryFolder: vi.fn(async () => null) }));
 vi.mock('../../../lib/playback-actions', () => ({ seekToPosition: vi.fn() }));
-vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn(), logError: vi.fn() }));
+vi.mock('../../../lib/report-error', () => ({
+  reportError: reportErrorMock,
+  logError: vi.fn(),
+}));
 vi.mock('../../../platform/tauri-zustand-storage', () => ({
   createTauriZustandStorage: () => ({
     getItem: async () => null,
@@ -60,6 +65,8 @@ async function menuAction(action: string) {
 describe('native menu actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    openUrlMock.mockReset();
+    openUrlMock.mockResolvedValue(undefined);
     listeners.clear();
     useNavigationIntentStore.setState({
       libraryFacet: null,
@@ -84,6 +91,20 @@ describe('native menu actions', () => {
     await menuAction('help.help');
 
     expect(openUrlMock).toHaveBeenCalledWith('https://github.com/Faw47/tarab#readme');
+  });
+
+  it('reports a denied Help URL instead of silently ignoring the failure', async () => {
+    const error = new Error('URL is not allowed by opener scope');
+    openUrlMock.mockRejectedValueOnce(error);
+    render(<Harness />);
+    await menuAction('help.help');
+
+    await waitFor(() => {
+      expect(reportErrorMock).toHaveBeenCalledWith('Failed to open Tarab Help', {
+        source: 'native-menu',
+        error,
+      });
+    });
   });
 
   it('asks the playlists view to open the create dialog', async () => {
