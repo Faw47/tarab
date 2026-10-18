@@ -6,6 +6,7 @@ import {
   buildFacetCounts,
   buildFacetPayload,
   formatLongDuration,
+  libraryEmptyStateCopy,
 } from '../library-view-model';
 
 const mkTrack = (overrides: Partial<Track>): Track => ({
@@ -126,5 +127,24 @@ describe('library-view-model', () => {
   it('formats duration in long form', () => {
     expect(formatLongDuration(3599)).toBe('59m');
     expect(formatLongDuration(7260)).toBe('2h 1m');
+  });
+});
+
+describe('libraryEmptyStateCopy', () => {
+  it('says the library is empty only when it has no tracks', () => {
+    // Regression for FE-19: an empty Most Played facet said "Your library is empty".
+    expect(
+      libraryEmptyStateCopy({ trackCount: 0, facet: 'albums', smartFilter: null }).message,
+    ).toContain('Your library is empty');
+    const mostPlayed = libraryEmptyStateCopy({
+      trackCount: 120,
+      facet: 'mostPlayed',
+      smartFilter: null,
+    });
+    expect(mostPlayed.title).toBe('Nothing played yet');
+    expect(mostPlayed.message).not.toContain('empty');
+    expect(
+      libraryEmptyStateCopy({ trackCount: 120, facet: 'all', smartFilter: 'missingArt' }).title,
+    ).toBe('All covers present');
   });
 });
