@@ -1,5 +1,6 @@
 import { match } from 'ts-pattern';
 import {
+  getPlaybackInterventionEpoch,
   notePlaybackIntervention,
   setActivePlaybackGeneration,
 } from '../features/app/playback-generation';
@@ -29,7 +30,10 @@ export const startPlayback = async (
 ): Promise<void> => {
   const startPos = options?.startPos;
   notePlaybackIntervention();
+  const intervention = getPlaybackInterventionEpoch();
   const generation = await playTrack(track.filePath, startPos);
+  // A newer source change may finish first. Never restore an obsolete track into the UI.
+  if (getPlaybackInterventionEpoch() !== intervention) return;
   setActivePlaybackGeneration(generation);
 
   const state = usePlayerStore.getState();
@@ -89,7 +93,9 @@ export const seekToPosition = async (positionSecs: number): Promise<void> => {
 
 export const stopCurrentPlayback = async (): Promise<void> => {
   notePlaybackIntervention();
+  const intervention = getPlaybackInterventionEpoch();
   await stopPlayback();
+  if (getPlaybackInterventionEpoch() !== intervention) return;
   const state = usePlayerStore.getState();
   state.setIsPlaying(false);
   state.setHasActivePlayback(false);
@@ -111,7 +117,9 @@ export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
 
 export const startEditorPreview = async (filePath: string): Promise<void> => {
   notePlaybackIntervention();
+  const intervention = getPlaybackInterventionEpoch();
   const generation = await playTrack(filePath);
+  if (getPlaybackInterventionEpoch() !== intervention) return;
   setActivePlaybackGeneration(generation);
   const state = usePlayerStore.getState();
   state.setCurrentTime(0);
@@ -144,7 +152,9 @@ const playAdjacentTrackOnce = async (
     }
 
     notePlaybackIntervention();
+    const intervention = getPlaybackInterventionEpoch();
     const generation = await playTrack(previous.track.filePath);
+    if (getPlaybackInterventionEpoch() !== intervention) return null;
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
     freshState.activateTrackAtIndex(previous.index, { backward: true });
@@ -158,7 +168,9 @@ const playAdjacentTrackOnce = async (
   if (!next) return null;
 
   notePlaybackIntervention();
+  const intervention = getPlaybackInterventionEpoch();
   const generation = await playTrack(next.track.filePath);
+  if (getPlaybackInterventionEpoch() !== intervention) return null;
   setActivePlaybackGeneration(generation);
   const freshState = usePlayerStore.getState();
   freshState.activateTrackAtIndex(next.index);
