@@ -5,22 +5,15 @@ import type { LyricLine, LyricWord, ParsedLyrics } from '../types';
  */
 const parseLrcTime = (timeStr: string): number => {
   // Handle formats: [mm:ss.xx], [mm:ss.xxx], [mm:ss]
-  const match = timeStr.match(/(\d+):(\d+)(?:\.(\d+))?/);
+  const match = timeStr.match(/^(\d+):(\d+)(?:[.:](\d+))?$/);
   if (!match) return 0;
 
   const minutes = parseInt(match[1], 10);
   const seconds = parseInt(match[2], 10);
   const fraction = match[3] || '0';
 
-  // Normalize fraction to milliseconds
-  let ms = 0;
-  if (fraction.length === 2) {
-    ms = parseInt(fraction, 10) * 10; // centiseconds
-  } else if (fraction.length === 3) {
-    ms = parseInt(fraction, 10); // milliseconds
-  } else if (fraction.length === 1) {
-    ms = parseInt(fraction, 10) * 100; // deciseconds
-  }
+  // Support arbitrary precision fractions; only the first three digits fit milliseconds.
+  const ms = Number.parseInt(fraction.slice(0, 3).padEnd(3, '0'), 10);
 
   return (minutes * 60 + seconds) * 1000 + ms;
 };
@@ -53,13 +46,13 @@ export const parseLyrics = (content: string): ParsedLyrics => {
       continue;
     }
 
-    const lineTimeMatches = Array.from(rawLine.matchAll(/\[(\d+:\d+(?:\.\d+)?)\]/g));
-    const wordTimeMatches = Array.from(rawLine.matchAll(/<(\d+:\d+(?:\.\d+)?)>/g));
+    const lineTimeMatches = Array.from(rawLine.matchAll(/\[(\d+:\d+(?:[.:]\d+)?)\]/g));
+    const wordTimeMatches = Array.from(rawLine.matchAll(/<(\d+:\d+(?:[.:]\d+)?)>/g));
 
     if (lineTimeMatches.length === 0 && wordTimeMatches.length === 0) continue;
 
     const contentWithoutLineTags =
-      lineTimeMatches.length > 0 ? rawLine.replace(/\[(\d+:\d+(?:\.\d+)?)\]/g, '') : rawLine;
+      lineTimeMatches.length > 0 ? rawLine.replace(/\[(\d+:\d+(?:[.:]\d+)?)\]/g, '') : rawLine;
 
     if (wordTimeMatches.length > 0) {
       const { words: rawWords, text } = parseEnhancedLine(contentWithoutLineTags);
@@ -74,7 +67,8 @@ export const parseLyrics = (content: string): ParsedLyrics => {
 
       lineTimesRaw.forEach((lineStartRaw) => {
         const isRelative = lineTimeMatches.length > 0 && maxWordRaw < lineStartRaw - 50;
-        const applyOffset = (time: number) => Math.max(0, time + offsetMs);
+        // In LRC, positive offsets advance the display; negative offsets delay it.
+        const applyOffset = (time: number) => Math.max(0, time - offsetMs);
         const words = rawWords.map((word) => ({
           text: word.text,
           startTime: applyOffset(isRelative ? lineStartRaw + word.time : word.time),
@@ -100,21 +94,23 @@ export const parseLyrics = (content: string): ParsedLyrics => {
       });
     } else {
       const text = contentWithoutLineTags.trim();
-      if (!text) continue;
+      // Empty timed lines mark instrumental gaps and must clear the previous lyric.
       lineTimeMatches.forEach((match) => {
-        const startTime = Math.max(0, parseLrcTime(match[1]) + offsetMs);
+        const startTime = Math.max(0, parseLrcTime(match[1]) - offsetMs);
         const endTime = startTime + 5000;
         lines.push({
           startTime,
           endTime,
           text,
-          words: [
-            {
-              text,
-              startTime,
-              endTime,
-            },
-          ],
+          words: text
+            ? [
+                {
+                  text,
+                  startTime,
+                  endTime,
+                },
+              ]
+            : [],
         });
       });
     }
@@ -247,9 +243,9 @@ interface RawLyricWord {
  */
 const parseEnhancedLine = (content: string): { words: RawLyricWord[]; text: string } => {
   const words: RawLyricWord[] = [];
-  const matches = Array.from(content.matchAll(/<(\d+:\d+(?:\.\d+)?)>/g));
+  const matches = Array.from(content.matchAll(/<(\d+:\d+(?:[.:]\d+)?)>/g));
   const text = content
-    .replace(/<(\d+:\d+(?:\.\d+)?)>/g, '')
+    .replace(/<(\d+:\d+(?:[.:]\d+)?)>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
