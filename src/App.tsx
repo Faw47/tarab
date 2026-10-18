@@ -2,6 +2,7 @@ import { MotionConfig } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { NavView } from './components/navigation';
+import { PlaybackRecoveryBanner } from './components/player/PlaybackRecoveryBanner';
 import { ConfirmDialog, type ConfirmDialogProps } from './components/ui/ConfirmDialog';
 
 // Components
@@ -127,6 +128,7 @@ const App = () => {
     setIsPlaying,
     // playPrevious now read via getState() in handlers
     addToQueue,
+    hasPlaybackError,
   } = usePlayerStore(
     useShallow((s) => ({
       currentTrack: s.currentTrack,
@@ -135,6 +137,7 @@ const App = () => {
       // currentTime removed to avoid re-renders
       // playPrevious now read via getState() in handlers
       addToQueue: s.addToQueue,
+      hasPlaybackError: s.playbackError !== null,
       // duration: s.duration, // Removed
     })),
   );
@@ -490,6 +493,11 @@ const App = () => {
     <AppOverlayMessages
       appError={appError}
       playlistRepair={playlistRepair}
+      playbackRecovery={
+        hasPlaybackError && !showFullPlayer ? (
+          <PlaybackRecoveryBanner theme={theme} placement="shell" />
+        ) : null
+      }
       theme={theme}
       onDismissError={() => setAppError(null)}
       onRetryPlaylistLoad={() => void handleRetryPlaylistLoad()}

@@ -433,12 +433,12 @@ export function usePlaybackLifecycle() {
           return;
         }
 
-        const stageLabel = payload.stage ? `${payload.stage}` : 'playback';
         const detail = payload.filePath
           ? `${payload.message} (${payload.filePath})`
           : payload.message;
 
-        reportError(`Playback failed at ${stageLabel}`, {
+        // The recovery banner (full player and main shell) tells the user and offers actions.
+        logError(`Playback failed during ${payload.stage}`, {
           source: 'audio-backend',
           detail,
         });
@@ -462,6 +462,11 @@ export function usePlaybackLifecycle() {
           autoAdvance?.generation === payload.generation &&
           canAutoSkip(autoAdvance.skipped, state.queue.length)
         ) {
+          // Starting the next track clears the banner, so say what was skipped.
+          reportError(
+            `Skipped "${activeTrack?.title ?? 'a track'}" because it could not be played`,
+            { source: 'app', detail },
+          );
           await advanceQueueAutomatically(autoAdvanceRef, autoAdvance.skipped + 1);
         }
       })();

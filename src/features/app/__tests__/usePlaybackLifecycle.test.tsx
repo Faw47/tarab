@@ -358,6 +358,10 @@ describe('usePlaybackLifecycle', () => {
         expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
       });
       expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^Skipped ".*" because it could not be played$/),
+        { source: 'app', detail: 'Unsupported format (/music/track-2.mp3)' },
+      );
     });
 
     it('stops instead of cycling when every remaining track fails', async () => {
@@ -486,7 +490,9 @@ describe('usePlaybackLifecycle', () => {
       },
     });
 
-    expect(reportErrorMock).toHaveBeenCalledWith('Playback failed at stream', {
+    // The recovery banner reports it, so there is no second notification (FE-10, FE-31).
+    expect(reportErrorMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalledWith('Playback failed during stream', {
       source: 'audio-backend',
       detail: 'stream failed (/music/track-1.mp3)',
     });

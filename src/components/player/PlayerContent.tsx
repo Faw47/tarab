@@ -1,6 +1,5 @@
 import { clsx } from 'clsx';
 import {
-  AlertTriangle,
   AlignCenter,
   AlignLeft,
   AlignRight,
@@ -30,11 +29,7 @@ import { useCoverArt } from '../../hooks/useCoverArt';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { lazyWithRetry } from '../../lib/lazy-with-retry';
 import { useRenderLog } from '../../lib/performance';
-import {
-  playAdjacentTrack,
-  startPlayback,
-  toggleCurrentPlayback,
-} from '../../lib/playback-actions';
+import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
 import {
@@ -52,6 +47,7 @@ import { IconButton } from '../ui/IconButton';
 import { QueueIcon as ListMusic, TrackIcon, VinylIcon } from '../ui/Icons';
 import { LyricsDisplay } from './LyricsDisplay';
 import { LyricsSnippet } from './LyricsSnippet';
+import { PlaybackRecoveryBanner } from './PlaybackRecoveryBanner';
 import { PlayerTimeReadout } from './PlayerTimeReadout';
 import { PlayerVolume } from './PlayerVolume';
 
@@ -76,9 +72,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
     toggleShuffle,
     toggleLoop,
     addToQueue: addTrackToQueue,
-    playbackError,
-    setPlaybackError,
-    removeFromQueue,
   } = usePlayerStore(
     useShallow((s) => ({
       currentTrack: s.currentTrack,
@@ -91,9 +84,6 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
       toggleShuffle: s.toggleShuffle,
       toggleLoop: s.toggleLoop,
       addToQueue: s.addToQueue,
-      playbackError: s.playbackError,
-      setPlaybackError: s.setPlaybackError,
-      removeFromQueue: s.removeFromQueue,
     })),
   );
 
@@ -107,6 +97,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const {
     lyricsEnabled,
+    theme,
     fullscreenPlayerLayout,
     fullscreenHideCoverArt,
     fullscreenLyricSize,
@@ -121,6 +112,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   } = useSettingsStore(
     useShallow((s) => ({
       lyricsEnabled: s.lyricsEnabled,
+      theme: s.theme,
       fullscreenPlayerLayout: s.fullscreenPlayerLayout,
       fullscreenHideCoverArt: s.fullscreenHideCoverArt,
       fullscreenLyricSize: s.fullscreenLyricSize,
@@ -284,79 +276,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   if (!currentTrack) return null;
 
-  const handleRetryPlayback = async () => {
-    try {
-      await startPlayback(currentTrack, {
-        startPos: usePlayerStore.getState().currentTime,
-      });
-      setPlaybackError(null);
-    } catch (error) {
-      reportError('Playback retry failed', { source: 'player-content', error });
-    }
-  };
-
-  const handleSkipPlaybackError = async () => {
-    try {
-      await playAdjacentTrack('next');
-      setPlaybackError(null);
-    } catch (error) {
-      reportError('Failed to skip unavailable track', { source: 'player-content', error });
-    }
-  };
-
-  const handleRemoveFailedTrack = async () => {
-    const failedTrack = currentTrack;
-    try {
-      await playAdjacentTrack('next');
-    } catch {
-      // The failed item can still be removed when there is no playable next item.
-    }
-    const state = usePlayerStore.getState();
-    const index = state.queue.findIndex(
-      (track) =>
-        (failedTrack._queueId && track._queueId === failedTrack._queueId) ||
-        track.id === failedTrack.id,
-    );
-    if (index >= 0) removeFromQueue(index);
-    setPlaybackError(null);
-  };
-
-  const playbackErrorBanner = playbackError ? (
-    <div
-      role="alert"
-      className="absolute inset-x-6 top-20 z-[70] mx-auto flex max-w-3xl flex-wrap items-center gap-3 rounded-xl border border-red-300/35 bg-red-950/90 p-4 text-sm text-red-50 shadow-2xl backdrop-blur-xl"
-    >
-      <AlertTriangle className="h-5 w-5 shrink-0 text-red-300" />
-      <div className="min-w-48 flex-1">
-        <p className="font-semibold">Playback could not continue</p>
-        <p className="text-red-100/80">{playbackError.message}</p>
-      </div>
-      <button
-        className="rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20"
-        onClick={handleRetryPlayback}
-      >
-        Retry
-      </button>
-      <button
-        className="rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20"
-        onClick={handleSkipPlaybackError}
-      >
-        Skip
-      </button>
-      <button
-        className="rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20"
-        onClick={handleRevealInFinder}
-      >
-        Reveal in Finder
-      </button>
-      <button
-        className="rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20"
-        onClick={handleRemoveFailedTrack}
-      >
-        Remove from Queue
-      </button>
-    </div>
-  ) : null;
+  const playbackErrorBanner = <PlaybackRecoveryBanner theme={theme} placement="overlay" />;
 
   // ============================================
   // FULLSCREEN LAYOUT (Two-column with animated background)

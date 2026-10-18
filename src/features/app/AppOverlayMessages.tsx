@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
 import { IconButton } from '../../components/ui/IconButton';
 import { cn } from '../../lib/utils';
@@ -9,6 +9,8 @@ import type { PlaylistRepairState } from './app-state-types';
 export interface AppOverlayMessagesProps {
   appError: { message: string; detail?: string } | null;
   playlistRepair: PlaylistRepairState | null;
+  /** Playback recovery actions, rendered first while a playback failure is unresolved. */
+  playbackRecovery?: ReactNode;
   theme: AppTheme;
   onDismissError: () => void;
   onRetryPlaylistLoad: () => void;
@@ -19,13 +21,14 @@ export interface AppOverlayMessagesProps {
 export const AppOverlayMessages = memo(function AppOverlayMessages({
   appError,
   playlistRepair,
+  playbackRecovery,
   theme,
   onDismissError,
   onRetryPlaylistLoad,
   onResetPlaylistData,
   onOpenPlaylistsDataFolder,
 }: AppOverlayMessagesProps) {
-  if (!appError && !playlistRepair) return null;
+  if (!appError && !playlistRepair && !playbackRecovery) return null;
 
   const isNeo = theme === 'neobrutalism';
   const playlistWasRecovered = Boolean(
@@ -34,6 +37,7 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
 
   return (
     <div className="absolute left-8 right-8 top-4 z-40 flex flex-col gap-3">
+      {playbackRecovery}
       {appError ? (
         <div
           role="alert"
