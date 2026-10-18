@@ -12,7 +12,7 @@ import {
 } from '../playback-actions';
 
 const { playTrackMock } = vi.hoisted(() => ({
-  playTrackMock: vi.fn(async () => undefined),
+  playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
 }));
 
 vi.mock('../tauri-commands', () => ({
@@ -96,8 +96,8 @@ describe('adjacent track transitions (PB-28)', () => {
     let finishFirst: () => void = () => undefined;
     playTrackMock.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          finishFirst = () => resolve();
+        new Promise<number>((resolve) => {
+          finishFirst = () => resolve(2);
         }),
     );
 
