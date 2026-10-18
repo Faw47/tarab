@@ -13,7 +13,9 @@ use crate::database::SharedDatabase;
 use crate::file_ops::{
     ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
 };
-use crate::image_cache::{is_valid_thumbnail_size, ImageCache, SharedImageCache};
+use crate::image_cache::{
+    decode_untrusted_image, is_valid_thumbnail_size, ImageCache, SharedImageCache,
+};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TrackMetadata {
@@ -123,6 +125,12 @@ fn run_with_pool<T: Send>(pool: Option<&ThreadPool>, job: impl FnOnce() -> T + S
 /// Estimated duration from the file's audio properties (for example the bitrate of an MP3 with no
 /// frame count). Used by playback when the decoder cannot report the length.
 pub fn probe_duration_secs(file_path: &str) -> Option<f64> {
+    crate::parse_guard::guard(file_path, || probe_duration_secs_unguarded(file_path))
+        .ok()
+        .flatten()
+}
+
+fn probe_duration_secs_unguarded(file_path: &str) -> Option<f64> {
     let options = lofty::config::ParseOptions::new()
         .read_tags(false)
         .read_cover_art(false);
@@ -147,6 +155,13 @@ fn first_picture(file: &TaggedFile) -> Option<&Picture> {
 }
 
 fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
+    crate::parse_guard::guard(file_path, || extract_metadata_fast_unguarded(file_path))
+        .map_err(|error| eprintln!("{}", error))
+        .ok()
+        .flatten()
+}
+
+fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
     let path = Path::new(file_path);
 
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
@@ -244,6 +259,13 @@ fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
 
 // Full metadata extraction with cover art
 fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
+    crate::parse_guard::guard(file_path, || extract_metadata_with_art_unguarded(file_path))
+        .map_err(|error| eprintln!("{}", error))
+        .ok()
+        .flatten()
+}
+
+fn extract_metadata_with_art_unguarded(file_path: &str) -> Option<TrackMetadataWithArt> {
     let path = Path::new(file_path);
 
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
@@ -339,7 +361,7 @@ fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
 }
 
 fn extract_palette_from_bytes(bytes: &[u8]) -> Option<CoverArtPalette> {
-    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let image = decode_untrusted_image(bytes).ok()?.to_rgba8();
     let thumb = image::imageops::thumbnail(&image, 12, 12);
     let (width, height) = thumb.dimensions();
 
@@ -429,7 +451,7 @@ fn cached_blurhash(bytes: &[u8], compute: impl FnOnce(&[u8]) -> Option<String>) 
 
 fn generate_blurhash_from_bytes(bytes: &[u8]) -> Option<String> {
     cached_blurhash(bytes, |bytes| {
-        let img = image::load_from_memory(bytes).ok()?;
+        let img = decode_untrusted_image(bytes).ok()?;
         // Resize for faster processing
         let thumb = img.thumbnail(64, 64).to_rgba8();
         let (tw, th) = thumb.dimensions();
@@ -705,12 +727,16 @@ pub async fn get_batch_cover_art(
             file_paths
                 .par_iter()
                 .map(|path| {
-                    let art = Probe::open(Path::new(path))
-                        .ok()
-                        .and_then(|p| p.read().ok())
-                        .and_then(|file| {
-                            first_picture(&file).map(|pic| STANDARD.encode(pic.data()))
-                        });
+                    let art = crate::parse_guard::guard(path, || {
+                        Probe::open(Path::new(path))
+                            .ok()
+                            .and_then(|p| p.read().ok())
+                            .and_then(|file| {
+                                first_picture(&file).map(|pic| STANDARD.encode(pic.data()))
+                            })
+                    })
+                    .ok()
+                    .flatten();
                     (path.clone(), art)
                 })
                 .collect()
@@ -773,10 +799,14 @@ pub async fn generate_cover_art_hashes(
                         }
                     }
 
-                    let picture = Probe::open(Path::new(path))
-                        .ok()
-                        .and_then(|p| p.read().ok())
-                        .and_then(|file| first_picture(&file).cloned());
+                    let picture = crate::parse_guard::guard(path, || {
+                        Probe::open(Path::new(path))
+                            .ok()
+                            .and_then(|p| p.read().ok())
+                            .and_then(|file| first_picture(&file).cloned())
+                    })
+                    .ok()
+                    .flatten();
 
                     let result = picture.as_ref().and_then(|pic| {
                         let hash = cache.generate_thumbnails(pic.data()).ok()?;

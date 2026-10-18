@@ -173,6 +173,76 @@ fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(),
     Ok(())
 }
 
+/// Moves a file, also across volumes. `fs::rename` cannot move between file systems (a library on
+/// an external drive or NAS mount and the Trash in app data); then the file is copied to a hidden
+/// temporary name in the target folder, synced, checked by length, renamed into place, and only
+/// then removed from its source.
+pub(crate) fn move_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    move_path_with(from, to, |from, to| fs::rename(from, to))
+}
+
+fn move_path_with(
+    from: &Path,
+    to: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match rename(from, to) {
+        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {}
+        result => return result,
+    }
+    let parent = to.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Target has no parent")
+    })?;
+    let staged = parent.join(format!(".tarab-{:016x}.tmp", rand::random::<u64>()));
+    let source_permissions = fs::metadata(from)?.permissions();
+    // The copy is written through a handle created writable, so a read-only source (common for
+    // ripped music) can still be synced and cleaned up; its permissions are applied at the end.
+    let copied = (|| {
+        let mut source = fs::File::open(from)?;
+        let mut staged_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        let length = std::io::copy(&mut source, &mut staged_file)?;
+        staged_file.sync_all()?;
+        if length != source.metadata()?.len() {
+            return Err(std::io::Error::other("The copied file is incomplete"));
+        }
+        fs::rename(&staged, to)
+    })();
+    if let Err(error) = copied {
+        let _ = fs::remove_file(&staged);
+        return Err(error);
+    }
+    if let Err(error) = remove_file_even_if_read_only(from) {
+        // Keep exactly one copy: undo the move rather than leave a duplicate.
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+    let _ = fs::set_permissions(to, source_permissions);
+    Ok(())
+}
+
+/// Windows refuses to delete a file with the read-only attribute; Unix needs only a writable
+/// folder.
+fn remove_file_even_if_read_only(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        // Only Windows: on Unix the file mode does not affect deletion, and clearing it would just
+        // leave the file writable by everyone.
+        Err(error) if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied => {
+            let mut permissions = fs::metadata(path)?.permissions();
+            if !permissions.readonly() {
+                return Err(error);
+            }
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(path, permissions)?;
+            fs::remove_file(path)
+        }
+        result => result,
+    }
+}
+
 /// Replaces `target` without ever leaving it half-written. `write` fills a temporary sibling (a
 /// copy of `target` when `copy_original` is set), which is synced and renamed over `target`. A
 /// failure at any step leaves `target` unchanged and removes the temporary file.
@@ -828,11 +898,11 @@ pub async fn move_file(
         }
         let _target_canonical = ensure_target_path_allowed(&target, &roots, "move destination file")?;
         create_destination_parent_dir(&target)?;
-        fs::rename(&source_canonical, &target).map_err(|e| format!("Failed to move file: {}", e))?;
+        move_path(&source_canonical, &target).map_err(|e| format!("Failed to move file: {}", e))?;
         let target_str = target.to_string_lossy().to_string();
         if let Err(err) = db.rename_track_path(&old_path, &target_str) {
             // Try to restore original file path if DB update fails.
-            let rollback_result = fs::rename(&target, &source_canonical);
+            let rollback_result = move_path(&target, &source_canonical);
             return match rollback_result {
                 Ok(()) => Err(format!(
                     "Failed to update database after move, operation rolled back: {}",
@@ -940,7 +1010,7 @@ pub async fn trash_files(
                 });
                 continue;
             }
-            if let Err(error) = fs::rename(&canonical_path, &stored_path) {
+            if let Err(error) = move_path(&canonical_path, &stored_path) {
                 let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
                 let _ = fs::remove_dir(&entry_dir);
                 results.push(FileMutationResult {
@@ -955,7 +1025,7 @@ pub async fn trash_files(
                 continue;
             }
             if let Err(error) = db.delete_tracks(std::slice::from_ref(&original_path)) {
-                let rollback = fs::rename(&stored_path, &canonical_path);
+                let rollback = move_path(&stored_path, &canonical_path);
                 if rollback.is_ok() {
                     let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
                     let _ = fs::remove_dir(&entry_dir);
@@ -987,6 +1057,131 @@ pub async fn trash_files(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// A file in Tarab's recoverable Trash, for the Removed files list in Settings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashedFileSummary {
+    pub token: String,
+    pub original_path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub size_bytes: u64,
+    /// When the file was moved to Trash (the entry folder's modification time).
+    pub trashed_at_ms: Option<u64>,
+}
+
+fn list_trash_entries(trash_root: &Path) -> Vec<TrashedFileSummary> {
+    let Ok(entries) = fs::read_dir(trash_root) else {
+        return Vec::new();
+    };
+    let mut items: Vec<TrashedFileSummary> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let token = entry.file_name().to_str()?.to_string();
+            if !valid_undo_token(&token) || !entry.path().is_dir() {
+                return None;
+            }
+            let record = read_trash_record(&entry.path().join(TRASH_RECORD_FILE)).ok()?;
+            let plain_name = matches!(
+                Path::new(&record.stored_file_name)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [std::path::Component::Normal(_)]
+            );
+            if record.version != 1 || record.token != token || !plain_name {
+                return None;
+            }
+            let size_bytes = fs::metadata(entry.path().join(&record.stored_file_name))
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            let trashed_at_ms = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|elapsed| elapsed.as_millis() as u64);
+            Some(TrashedFileSummary {
+                token,
+                title: record.track.as_ref().map(|track| track.title.clone()),
+                artist: record.track.as_ref().map(|track| track.artist.clone()),
+                original_path: record.original_path,
+                size_bytes,
+                trashed_at_ms,
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| b.trashed_at_ms.cmp(&a.trashed_at_ms));
+    items
+}
+
+fn purge_trash_entries(trash_root: &Path, tokens: Vec<String>) -> Vec<FileMutationResult> {
+    tokens
+        .into_iter()
+        .map(|token| {
+            let entry_dir = trash_root.join(&token);
+            let outcome = if !valid_undo_token(&token) {
+                Err("The Trash item is invalid".to_string())
+            } else {
+                read_trash_record(&entry_dir.join(TRASH_RECORD_FILE))
+                    .and_then(|record| {
+                        if record.token == token {
+                            Ok(record.original_path)
+                        } else {
+                            Err("The Trash item is invalid".to_string())
+                        }
+                    })
+                    .and_then(|original_path| {
+                        fs::remove_dir_all(&entry_dir)
+                            .map(|()| original_path)
+                            .map_err(|e| format!("Failed to delete the Trash item: {e}"))
+                    })
+            };
+            match outcome {
+                Ok(original_path) => FileMutationResult {
+                    path: original_path,
+                    status: "success".to_string(),
+                    operation: "purge".to_string(),
+                    error_code: None,
+                    recoverable: false,
+                    error_message: None,
+                    undo_token: None,
+                },
+                Err(error) => FileMutationResult {
+                    path: String::new(),
+                    status: "failed".to_string(),
+                    operation: "purge".to_string(),
+                    error_code: Some("purgeFailed".to_string()),
+                    recoverable: true,
+                    error_message: Some(error),
+                    undo_token: Some(token),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Lists files in Tarab's recoverable Trash, newest first.
+#[tauri::command]
+pub async fn list_trashed_files(app: AppHandle) -> Result<Vec<TrashedFileSummary>, String> {
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || list_trash_entries(&trash_root))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Permanently deletes files from Tarab's recoverable Trash.
+#[tauri::command]
+pub async fn purge_trashed_files(
+    app: AppHandle,
+    undo_tokens: Vec<String>,
+) -> Result<Vec<FileMutationResult>, String> {
+    let trash_root = recoverable_trash_path(&app)?;
+    spawn_blocking(move || purge_trash_entries(&trash_root, undo_tokens))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1084,7 +1279,7 @@ pub async fn restore_trashed_files(
                 });
                 continue;
             }
-            if let Err(error) = fs::rename(&stored_path, &original_path) {
+            if let Err(error) = move_path(&stored_path, &original_path) {
                 results.push(FileMutationResult {
                     path: record.original_path,
                     status: "failed".to_string(),
@@ -1098,7 +1293,7 @@ pub async fn restore_trashed_files(
             }
             if let Some(track) = &record.track {
                 if let Err(error) = db.upsert_tracks_batch(std::slice::from_ref(track)) {
-                    let rollback = fs::rename(&original_path, &stored_path);
+                    let rollback = move_path(&original_path, &stored_path);
                     results.push(FileMutationResult {
                         path: record.original_path,
                         status: "failed".to_string(),
@@ -1240,6 +1435,77 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn trashed_files_can_be_listed_and_purged() {
+        // Regression for QA-01: Trash contents could not be listed or removed after the undo
+        // dialog closed.
+        let root = temp_dir("trash-list");
+        let token = "a".repeat(32);
+        let entry = root.join(&token);
+        fs::create_dir_all(&entry).expect("create entry");
+        fs::write(entry.join("song.flac"), b"12345").expect("write file");
+        write_trash_record(
+            &entry.join(TRASH_RECORD_FILE),
+            &TrashRecord {
+                version: 1,
+                token: token.clone(),
+                original_path: "/music/song.flac".to_string(),
+                stored_file_name: "song.flac".to_string(),
+                track: None,
+            },
+        )
+        .expect("write record");
+        fs::create_dir_all(root.join("not-a-token")).expect("create stray dir");
+
+        let listed = list_trash_entries(&root);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].original_path, "/music/song.flac");
+        assert_eq!(listed[0].size_bytes, 5);
+
+        let results = purge_trash_entries(&root, vec![token.clone(), "../escape".to_string()]);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[1].status, "failed");
+        assert!(!entry.exists());
+        assert!(root.join("not-a-token").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_move_across_volumes_copies_then_removes_the_source() {
+        // Regression for QA-02: Trash and Move used fs::rename, which fails across volumes.
+        let dir = temp_dir("cross-device-move");
+        fs::create_dir_all(dir.join("trash")).expect("create trash dir");
+        let source = dir.join("song.flac");
+        let target = dir.join("trash").join("song.flac");
+        fs::write(&source, b"audio bytes").expect("write source");
+
+        let cross_device = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices))
+        };
+        move_path_with(&source, &target, cross_device).expect("move");
+
+        assert!(!source.exists());
+        assert_eq!(fs::read(&target).expect("read target"), b"audio bytes");
+        let leftovers = fs::read_dir(dir.join("trash")).expect("list").count();
+        assert_eq!(leftovers, 1, "no staged copy is left behind");
+
+        // Review regression for QA-02: a read-only source could not be synced or cleaned up.
+        let read_only = dir.join("ripped.flac");
+        fs::write(&read_only, b"ripped").expect("write read-only source");
+        let mut permissions = fs::metadata(&read_only).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&read_only, permissions).expect("set read-only");
+        let moved = dir.join("trash").join("ripped.flac");
+        move_path_with(&read_only, &moved, cross_device).expect("move read-only file");
+        assert!(!read_only.exists());
+        assert_eq!(fs::read(&moved).expect("read moved"), b"ripped");
+        assert!(fs::metadata(&moved)
+            .expect("moved metadata")
+            .permissions()
+            .readonly());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

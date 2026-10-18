@@ -91,6 +91,42 @@ for (const actionReference of remoteActionReferences) {
   }
 }
 
+// Release builds must unwind: parse_guard catches parser panics on malformed media files, which
+// panic = "abort" would turn into a crash on every scan of that folder.
+const releaseProfile =
+  cargoManifest.split(/^\[profile\.release\]\s*(?:#.*)?$/m)[1]?.split(/^\[/m)[0] ?? '';
+if (/^\s*panic\s*=\s*["']abort["']/m.test(releaseProfile)) {
+  failures.push(
+    'The release profile must not set panic = "abort" (see src-tauri/src/parse_guard.rs).',
+  );
+}
+
+// Signing secrets must be scoped to the steps that use them. A job-level (or workflow-level) env
+// exposes them to dependency install and build scripts in every later step.
+let envIndent = null;
+const secretReference = /\$\{\{\s*secrets\./;
+for (const line of releaseWorkflow.split('\n')) {
+  const trimmed = line.trim();
+  if (trimmed === '' || trimmed.startsWith('#')) continue;
+  const indent = line.length - line.trimStart().length;
+  if (envIndent !== null && indent <= envIndent) envIndent = null;
+  if (/^env:\s*\{/.test(trimmed) && indent <= 4 && secretReference.test(line)) {
+    failures.push(`Release secrets must be set in step-level env, not job env: ${trimmed}`);
+    continue;
+  }
+  if (/^env:\s*(#.*)?$/.test(trimmed) && indent <= 4) {
+    envIndent = indent;
+    continue;
+  }
+  if (envIndent !== null && secretReference.test(line)) {
+    failures.push(`Release secrets must be set in step-level env, not job env: ${trimmed}`);
+  }
+  // A secret written to GITHUB_ENV is visible to every later step.
+  if (secretReference.test(line) && /GITHUB_ENV/.test(line)) {
+    failures.push(`Release secrets must not be written to GITHUB_ENV: ${trimmed}`);
+  }
+}
+
 if (failures.length > 0) {
   for (const failure of failures) {
     console.error(`Release configuration error: ${failure}`);

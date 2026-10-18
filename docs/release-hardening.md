@@ -119,12 +119,18 @@ Release rule: main-window code may call these as needed; mini-player code should
 
 The arm64 Linux and Windows labels are standard GitHub-hosted runner labels. Review the current GitHub-hosted runner reference before each release because GitHub can change images, labels, and installed tools.
 
+### Untrusted media parsing
+
+Release builds use `panic = "unwind"` (enforced by `check-release-config`). Per-file metadata, tag, cover-art, waveform and decoder work runs through `parse_guard::guard` or a `spawn_blocking` task, so a parser panic on a malformed file fails that file instead of aborting the app. A panic elsewhere in a long-lived thread (for example the audio thread outside a guarded parse) now ends only that thread instead of the process.
+
 ### Required release secrets
 
 - Apple: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, and `KEYCHAIN_PASSWORD`.
 - Windows: `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`, and the certificate-provider RFC 3161 endpoint in `WINDOWS_TIMESTAMP_URL`.
 
 The workflow fails if required signing material is absent. It does not publish unsigned macOS or Windows packages.
+
+Signing secrets are set only in the `env` of the steps that use them, and `check-release-config` rejects any secret in job-level or workflow-level `env`. Dependency installation and the native Rust tests run before the signing certificate is imported. The macOS job deletes its temporary keychain at the end; the Windows certificate is imported non-exportable. Remaining exposure: `tauri build` itself still runs the frontend build and Rust build scripts while the notarization credentials (macOS) are in its environment, and the macOS Developer ID key sits in an unlocked keychain imported with `-A`, so any process in that step could use it to sign. Moving signing and notarization into a separate job that only receives the built bundle would remove that.
 
 ### Release workflow guarantees
 

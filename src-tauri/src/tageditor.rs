@@ -367,7 +367,10 @@ fn write_tags_batch_checked(
 ) -> Vec<FileMutationResult> {
     let mut results = Vec::with_capacity(file_paths.len());
     for path in file_paths {
-        match write_tags_checked(&path, updates.clone(), roots) {
+        let update = updates.clone();
+        let outcome = crate::parse_guard::guard(&path, || write_tags_checked(&path, update, roots))
+            .and_then(|result| result);
+        match outcome {
             Ok(()) => results.push(FileMutationResult {
                 path,
                 status: "success".to_string(),

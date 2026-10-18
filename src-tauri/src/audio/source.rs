@@ -16,6 +16,10 @@ pub(super) const MAX_DECODED_SAMPLES_PER_PACKET: usize = 16_777_216;
 type OpenedDecoder = (Box<dyn FormatReader>, Box<dyn SymphoniaDecoder>, f64);
 
 fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
+    crate::parse_guard::guard(file_path, || open_decoder_for_file_unguarded(file_path))?
+}
+
+fn open_decoder_for_file_unguarded(file_path: &str) -> Result<OpenedDecoder, String> {
     let file = File::open(file_path).map_err(|e| format!("open error: {}", e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -59,19 +63,24 @@ fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
     Ok((reader, decoder, duration))
 }
 
+/// Runs on the audio command thread. Opening, seeking (container index parsing) and packet
+/// skipping are guarded as one unit: a parser panic here would otherwise end that thread and leave
+/// playback dead for the rest of the session.
 pub(super) fn prepare_source(
     file_path: &str,
     requested_start: f64,
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
 ) -> Result<(SymphoniaSource, f64, f64), String> {
-    prepare_source_with_seek(
-        file_path,
-        requested_start,
-        state,
-        emitted_samples,
-        seek_decoder,
-    )
+    crate::parse_guard::guard(file_path, || {
+        prepare_source_with_seek(
+            file_path,
+            requested_start,
+            state,
+            emitted_samples,
+            seek_decoder,
+        )
+    })?
 }
 
 type SeekFn = fn(&mut dyn SymphoniaDecoder, &mut dyn FormatReader, f64) -> Result<u64, String>;
@@ -197,6 +206,15 @@ fn seek_decoder(
 /// real end (the estimated duration can be too long) leaves the reader at the end, so the track
 /// ends and the queue advances normally.
 fn skip_packets_to(format: &mut dyn FormatReader, position_secs: f64) -> Result<SeekStart, String> {
+    crate::parse_guard::guard("packets", || {
+        skip_packets_to_unguarded(format, position_secs)
+    })?
+}
+
+fn skip_packets_to_unguarded(
+    format: &mut dyn FormatReader,
+    position_secs: f64,
+) -> Result<SeekStart, String> {
     let timing = default_track_timing(format)?;
     let target = timing.time_base.calc_timestamp(Time::from(position_secs));
     loop {
@@ -309,13 +327,29 @@ impl SymphoniaSource {
 
             let packet = match self.pending_packet.take() {
                 Some(packet) => packet,
-                None => match self.format.next_packet() {
-                    Ok(packet) => packet,
-                    Err(_) => return None,
-                },
+                // This runs on the audio device's callback thread, where a panic cannot unwind;
+                // a parser panic ends the track instead.
+                None => {
+                    match crate::parse_guard::guard(&self.file_path, || self.format.next_packet()) {
+                        Ok(Ok(packet)) => packet,
+                        Ok(Err(_)) => return None,
+                        Err(error) => {
+                            eprintln!("{}", error);
+                            return None;
+                        }
+                    }
+                }
             };
 
-            match self.decoder.decode(&packet) {
+            let decoded =
+                match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!("{}", error);
+                        return None;
+                    }
+                };
+            match decoded {
                 Ok(decoded) => {
                     if let Some((chans, rate)) =
                         convert_to_f32(decoded, &mut self.scratch, &mut self.buffer)
