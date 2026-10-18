@@ -130,7 +130,12 @@ async function advanceQueueAutomatically(
 
   const epoch = getPlaybackInterventionEpoch();
   try {
-    await playAdjacentTrack('next', { automatic: true, entry: next });
+    const advanced = await playAdjacentTrack('next', { automatic: true, entry: next });
+    if (advanced === null) {
+      // A newer user action canceled the pending advance; do not register stale auto-play.
+      autoAdvanceRef.current = null;
+      return;
+    }
     autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
   } catch (error) {
     autoAdvanceRef.current = null;
