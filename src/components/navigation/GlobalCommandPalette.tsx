@@ -367,7 +367,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                       {command.shortcut && (
                         <kbd
                           className={cn(
-                            'ml-auto shrink-0 text-[11px] font-semibold',
+                            'ml-auto shrink-0 text-[12px] font-semibold',
                             isNeo
                               ? 'border-2 border-black bg-[var(--neo-panel)] px-1.5 py-0.5 font-bold'
                               : 'rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/50',

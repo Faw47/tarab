@@ -263,12 +263,11 @@ interface StatTileProps {
   label: string;
   iconColor: string;
   glowColor: string;
-  staggerIndex: number;
   reducedEffects: boolean;
 }
 
 export const StatTile = memo(
-  ({ Icon, value, label, iconColor, glowColor, staggerIndex, reducedEffects }: StatTileProps) => (
+  ({ Icon, value, label, iconColor, glowColor, reducedEffects }: StatTileProps) => (
     <div
       className={clsx(
         'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
@@ -277,7 +276,6 @@ export const StatTile = memo(
         'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
         !reducedEffects && 'tarab-fade-up',
       )}
-      style={{ animationDelay: !reducedEffects ? `${staggerIndex * 75 + 50}ms` : undefined }}
     >
       {/* Background glow (appears on hover) */}
       <div
@@ -304,7 +302,7 @@ export const StatTile = memo(
         >
           {value.toLocaleString()}
         </p>
-        <p className="text-[9.5px] font-bold uppercase tracking-[0.24em] text-white/32 mt-[5px]">
+        <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-white/60 mt-[5px]">
           {label}
         </p>
       </div>
@@ -323,7 +321,6 @@ StatTile.displayName = 'StatTile';
 // AlbumSpotlightCard
 // Interactive cursor-tracked radial spotlight overlay.
 // Featured card takes full height of the left column.
-// staggerIndex drives the entrance animation delay.
 // ---------------------------------------------------------------------------
 
 interface AlbumSpotlightCardProps {
@@ -332,7 +329,6 @@ interface AlbumSpotlightCardProps {
   albumTracks: Track[];
   featured: boolean;
   interactiveSpotlight: boolean;
-  staggerIndex: number;
   reducedEffects: boolean;
   onOpenAlbumDetails?: (payload: {
     album: string;
@@ -350,7 +346,6 @@ export const AlbumSpotlightCard = memo(
     albumTracks,
     featured,
     interactiveSpotlight,
-    staggerIndex,
     reducedEffects,
     onOpenAlbumDetails,
     onPlayAlbum,
@@ -410,7 +405,6 @@ export const AlbumSpotlightCard = memo(
           featured ? 'h-full min-h-0 rounded-[22px]' : 'aspect-square rounded-[18px]',
           !reducedEffects && 'tarab-fade-up',
         )}
-        style={{ animationDelay: !reducedEffects ? `${staggerIndex * 50}ms` : undefined }}
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
       >
@@ -453,9 +447,8 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'absolute inset-0 transition-opacity duration-[var(--motion-emphasis)]',
-              featured
-                ? 'opacity-100'
-                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+              // Regular cards keep their title visible too (design language: no hover-only metadata).
+              'opacity-100',
             )}
             style={{
               background:
@@ -482,9 +475,7 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'pointer-events-none absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
-              featured
-                ? 'p-4 opacity-100 translate-y-0'
-                : 'p-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0',
+              featured ? 'p-4' : 'p-3',
             )}
           >
             <div className="min-w-0 flex-1">
@@ -518,7 +509,10 @@ export const AlbumSpotlightCard = memo(
                 'shadow-[0_4px_12px_rgba(0,0,0,0.20)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 'hover:scale-[1.08] active:scale-[0.95]',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',
-                featured ? 'w-11 h-11' : 'w-9 h-9',
+                // The title stays visible; Play on regular cards appears on hover or focus.
+                featured
+                  ? 'w-11 h-11'
+                  : 'w-9 h-9 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
               )}
               aria-label={`Play ${track.album}`}
             >

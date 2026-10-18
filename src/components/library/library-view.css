@@ -528,7 +528,7 @@
   background: var(--library-v2-control-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   color: rgba(255, 255, 255, 0.78);
-  font-size: 0.74rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-weight: 600;
   letter-spacing: 0.02em;
   display: inline-flex;
@@ -594,7 +594,7 @@
 
 .library-v2-detail-kicker {
   margin-top: 0.2rem;
-  font-size: 0.64rem;
+  font-size: 0.75rem; /* 12 px floor */
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: color-mix(in oklch, var(--type-secondary) 72%, transparent);
@@ -691,7 +691,7 @@
 }
 
 .library-v2-section-label-text {
-  font-size: 0.62rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -699,7 +699,7 @@
 }
 
 .library-v2-section-label-count {
-  font-size: 0.62rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-variant-numeric: tabular-nums;
   color: color-mix(in oklch, var(--type-secondary) 42%, transparent);
 }
@@ -722,7 +722,7 @@
 }
 
 .library-v2-selection-copy span {
-  font-size: 0.7rem;
+  font-size: 0.75rem; /* 12 px floor */
   color: color-mix(in oklch, var(--type-secondary) 78%, transparent);
 }
 
@@ -740,7 +740,7 @@
 .library-v2-selection-actions button {
   min-height: 1.88rem;
   border-radius: 9999px;
-  font-size: 0.71rem;
+  font-size: 0.75rem; /* 12 px floor */
 }
 
 /* ─── Grid layouts ───────────────────────────────────────────────────────── */
@@ -805,7 +805,7 @@
 
 .library-v2-albums-archive-heading span {
   color: color-mix(in oklch, var(--type-secondary) 56%, transparent);
-  font-size: 0.65rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-variant-numeric: tabular-nums;
 }
 
@@ -821,7 +821,7 @@
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.045);
   color: color-mix(in oklch, var(--type-secondary) 82%, white);
-  font-size: 0.74rem;
+  font-size: 0.75rem; /* 12 px floor */
   transition:
     background-color 180ms ease,
     color 180ms ease,
@@ -1068,7 +1068,7 @@
 
 .library-v2-track-subtitle {
   margin-top: 0.18rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem; /* 12 px floor */
   color: rgba(255, 255, 255, 0.76);
 }
 
@@ -1079,13 +1079,13 @@
  */
 .library-v2-track-tertiary {
   margin-top: 0.12rem;
-  font-size: 0.68rem;
+  font-size: 0.75rem; /* 12 px floor */
   color: rgba(255, 255, 255, 0.64);
 }
 
 .library-v2-lyrics-match {
   margin-top: 0.22rem;
-  font-size: 0.62rem;
+  font-size: 0.75rem; /* 12 px floor */
   color: color-mix(in oklch, var(--hero-accent) 82%, white);
   font-style: italic;
 }
@@ -1194,7 +1194,7 @@
 .library-v2-loading-more {
   padding: 0.56rem;
   text-align: center;
-  font-size: 0.74rem;
+  font-size: 0.75rem; /* 12 px floor */
   color: color-mix(in oklch, var(--type-secondary) 84%, transparent);
 }
 
@@ -1381,7 +1381,7 @@
   align-items: center;
   border-bottom: 1px solid color-mix(in oklch, var(--glass-border) 46%, transparent);
   padding: 0.66rem 0.95rem;
-  font-size: 0.61rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1441,7 +1441,7 @@
   background: color-mix(in oklch, var(--hero-accent) 18%, transparent);
   color: color-mix(in oklch, var(--hero-accent) 90%, white);
   padding: 0.1rem 0.36rem;
-  font-size: 0.55rem;
+  font-size: 0.75rem; /* 12 px floor */
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;

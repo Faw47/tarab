@@ -935,6 +935,13 @@ input[type="range"]::-moz-range-thumb {
   .app-shell-grain::after {
     animation: none;
   }
+
+  /* The utility variant starts at opacity 0, so removing the animation must also show it. */
+  .tarab-fade-up {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Home player motion and album-card interactions */

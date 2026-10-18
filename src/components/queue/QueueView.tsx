@@ -710,7 +710,7 @@ const SummaryChip = memo(({ label, value, icon: Icon }: SummaryChipProps) => (
       <p className="font-display font-extrabold text-white tabular-nums leading-none tracking-tight text-xl">
         {value}
       </p>
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.24em] text-white/50 mt-[5px]">
+      <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-white/60 mt-[5px]">
         {label}
       </p>
     </div>
