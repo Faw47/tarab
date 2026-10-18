@@ -279,7 +279,7 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * hardware media keys
 * operating-system playback actions
 * custom global shortcuts
-* application menu commands
+* application menu commands, including Help > Tarab Help to open the project README
 * system status icon
 * hide-on-close support
 * always-on-top 320 × 92 mini player
