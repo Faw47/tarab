@@ -91,6 +91,22 @@ for (const actionReference of remoteActionReferences) {
   }
 }
 
+// Signing secrets must be scoped to the steps that use them. A job-level (or workflow-level) env
+// exposes them to dependency install and build scripts in every later step.
+let envIndent = null;
+for (const line of releaseWorkflow.split('\n')) {
+  const indent = line.length - line.trimStart().length;
+  if (envIndent !== null && line.trim() !== '' && indent <= envIndent) envIndent = null;
+  const isJobOrWorkflowEnv = /^env:\s*$/.test(line.trim()) && indent <= 4;
+  if (isJobOrWorkflowEnv) {
+    envIndent = indent;
+    continue;
+  }
+  if (envIndent !== null && /\$\{\{\s*secrets\./.test(line)) {
+    failures.push(`Release secrets must be set in step-level env, not job env: ${line.trim()}`);
+  }
+}
+
 if (failures.length > 0) {
   for (const failure of failures) {
     console.error(`Release configuration error: ${failure}`);
