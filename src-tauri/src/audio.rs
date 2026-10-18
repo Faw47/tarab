@@ -32,7 +32,7 @@ use crossfade::{
     apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
     CrossfadeState,
 };
-use device::open_output_stream;
+use device::{ensure_output_stream, open_output_stream};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
 use events::{
@@ -40,6 +40,7 @@ use events::{
     PlaybackTransition,
 };
 use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
+use state::playback_identity;
 pub use state::PlaybackState;
 
 enum AudioCommand {
@@ -230,9 +231,9 @@ impl AudioManager {
                     }
                 };
 
-            if stream_bundle.is_none() {
-                return;
-            }
+            // Keep the command loop alive without a device: Play, crossfade and seek reopen
+            // the stream on demand, and SetOutputDevice installs a new one.
+            let mut preferred_device: Option<String> = None;
 
             let mut current_sink: Option<Sink> = None;
             let mut crossfade_state: Option<CrossfadeState> = None;
@@ -255,6 +256,12 @@ impl AudioManager {
                                 true,
                             );
                             *pending_gapless_path_thread.lock() = None;
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
@@ -354,6 +361,12 @@ impl AudioManager {
                                 true,
                             );
                             *pending_gapless_path_thread.lock() = None;
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
                             let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                 emit_playback_error(
                                     &app_for_audio,
@@ -490,17 +503,6 @@ impl AudioManager {
                         AudioCommand::Seek(position_secs) => {
                             let generation = state_clone.lock().generation;
                             *pending_gapless_path_thread.lock() = None;
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
                             if let Some(active) = crossfade_state.take() {
                                 active.outgoing_sink.stop();
                             }
@@ -532,9 +534,33 @@ impl AudioManager {
                                     state.warned_near_end = false;
                                 }
                                 reset_active_counter(&active_emitted_for_audio);
-                                let _ = app_for_audio.emit("playback-seeked", normalized_position);
+                                let _ = app_for_audio.emit(
+                                    "playback-seeked",
+                                    PlaybackPositionEvent {
+                                        generation,
+                                        position: normalized_position,
+                                    },
+                                );
                                 continue;
                             }
+
+                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                open_output_stream(preferred_device.as_deref())
+                                    .or_else(|_| open_output_stream(None))
+                            }) {
+                                eprintln!("Audio output is not available: {}", error);
+                            }
+                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                emit_playback_error(
+                                    &app_for_audio,
+                                    "",
+                                    generation,
+                                    "stream",
+                                    "Audio output is not available",
+                                    false,
+                                );
+                                continue;
+                            };
 
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
@@ -571,7 +597,13 @@ impl AudioManager {
                                             &active_emitted_for_audio,
                                             Arc::clone(&emitted_for_seek),
                                         );
-                                        let _ = app_for_audio.emit("playback-seeked", actual_start);
+                                        let _ = app_for_audio.emit(
+                                            "playback-seeked",
+                                            PlaybackPositionEvent {
+                                                generation,
+                                                position: actual_start,
+                                            },
+                                        );
                                     } else {
                                         emit_playback_error(
                                             &app_for_audio,
@@ -796,6 +828,7 @@ impl AudioManager {
                                         generation: outgoing_generation,
                                         seamless: true,
                                         next_generation: Some(next_generation),
+                                        next_path: Some(next_clone.clone()),
                                     };
                                     let _ = app_emit.emit("playback-ended", payload);
                                     emit_playback_transition(
@@ -828,6 +861,9 @@ impl AudioManager {
                             }
                         }
                         AudioCommand::SetOutputDevice(device_id) => {
+                            // Remember the choice even if it cannot open now; on-demand reopening
+                            // falls back to the system default when it still fails.
+                            preferred_device = device_id.clone();
                             let preferred = device_id.as_deref();
                             match open_output_stream(preferred) {
                                 Ok(new_stream_bundle) => {
@@ -858,17 +894,19 @@ impl AudioManager {
                                                 ) {
                                                     Ok(prepared) => prepared,
                                                     Err(error) => {
+                                                        let (generation, _) =
+                                                            playback_identity(&state_clone);
                                                         emit_playback_error(
                                                             &app_for_audio,
                                                             path,
-                                                            state_clone.lock().generation,
+                                                            generation,
                                                             "deviceSwitch",
                                                             error.clone(),
                                                             true,
                                                         );
                                                         emit_playback_transition(
                                                             &app_for_audio,
-                                                            state_clone.lock().generation,
+                                                            generation,
                                                             PlaybackTransition::DeviceSwitchFailed,
                                                             Some(path.clone()),
                                                             Some(error),
@@ -926,19 +964,21 @@ impl AudioManager {
                                     stream_bundle = Some(new_stream_bundle);
                                 }
                                 Err(e) => {
+                                    let (generation, current_file) =
+                                        playback_identity(&state_clone);
                                     emit_playback_error(
                                         &app_for_audio,
                                         "",
-                                        state_clone.lock().generation,
+                                        generation,
                                         "deviceSwitch",
                                         e.clone(),
                                         true,
                                     );
                                     emit_playback_transition(
                                         &app_for_audio,
-                                        state_clone.lock().generation,
+                                        generation,
                                         PlaybackTransition::DeviceSwitchFailed,
-                                        state_clone.lock().current_file.clone(),
+                                        current_file,
                                         Some(e),
                                         true,
                                     );
@@ -989,13 +1029,15 @@ impl AudioManager {
                                     generation: ended_generation,
                                     seamless: false,
                                     next_generation: None,
+                                    next_path: None,
                                 };
                                 let _ = app_for_audio.emit("playback-ended", payload);
+                                let (_, ended_file) = playback_identity(&state_clone);
                                 emit_playback_transition(
                                     &app_for_audio,
                                     ended_generation,
                                     PlaybackTransition::Ended,
-                                    state_clone.lock().current_file.clone(),
+                                    ended_file,
                                     None,
                                     true,
                                 );

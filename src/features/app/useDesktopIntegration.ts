@@ -318,8 +318,11 @@ export function useDesktopIntegration() {
               }
               return;
             case 'quit':
-              await flushPlayerStateWrites();
-              await desktopQuitApplication();
+              try {
+                await flushPlayerStateWrites();
+              } finally {
+                await desktopQuitApplication();
+              }
               return;
             default:
               return;
@@ -358,7 +361,7 @@ export function useDesktopIntegration() {
     'menu-quit',
     () => {
       void flushPlayerStateWrites()
-        .then(desktopQuitApplication)
+        .finally(desktopQuitApplication)
         .catch((error) => {
           reportError('Failed to quit from menu', {
             source: 'desktop-bridge',

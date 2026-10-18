@@ -72,4 +72,18 @@ describe('player state persistence', () => {
     expect(loaded?.revision).toBe(7);
     expect(loaded?.queueIds).toEqual(['a', 'b']);
   });
+
+  it('keeps saving after one write fails and flushes without rejecting', async () => {
+    const commands = await import('../../lib/tauri-commands');
+    const store = await import('./player-state-store');
+    store.markPlayerStateHydrated();
+    vi.mocked(commands.fixedStoreSet).mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(store.savePlayerStateToStore(payload(1))).rejects.toThrow('disk full');
+    await store.savePlayerStateToStore(payload(2));
+
+    await expect(store.flushPlayerStateWrites()).resolves.toBeUndefined();
+    const saved = persisted.get('player-state') as { timestamp: number };
+    expect(saved.timestamp).toBe(2);
+  });
 });

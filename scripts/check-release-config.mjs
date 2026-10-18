@@ -47,6 +47,13 @@ for (const extension of requiredAudioExtensions) {
   }
 }
 
+const mainWindow = (tauriConfig.app?.windows ?? []).find((window) => window.label === 'main');
+if (mainWindow?.backgroundThrottling !== 'disabled') {
+  failures.push(
+    'The main window must set backgroundThrottling to "disabled": it owns queue advance, media-key handling and tray quit while hidden.',
+  );
+}
+
 if (tauriConfig.bundle?.createUpdaterArtifacts !== false) {
   failures.push(
     'Updater artifacts must remain disabled until an updater release channel is configured.',

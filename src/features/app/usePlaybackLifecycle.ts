@@ -11,6 +11,8 @@ import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { invalidateLibraryForMutation } from '../library/mutations';
 import { getLibraryQueryClient } from '../library/queryClientBridge';
+import { type PreloadedGaplessEntry, resolveGaplessHandoffIndex } from './gapless-handoff';
+import { parsePlaybackPositionPayload } from './playback-events';
 import {
   getActivePlaybackGeneration,
   isCurrentPlaybackGeneration,
@@ -42,27 +44,33 @@ interface PlaybackTransitionEventPayload {
   recoverable: boolean;
 }
 
-interface PlaybackPositionEventPayload {
-  generation: number;
-  position: number;
-}
-
 interface PlaybackNearEndEventPayload {
   generation: number;
   remaining: number;
 }
 
-function parsePlaybackEndedPayload(raw: unknown): {
+interface ParsedPlaybackEnded {
   path: string | null;
   seamless: boolean;
   generation: number | null;
   nextGeneration: number | null;
-} {
+  nextPath: string | null;
+}
+
+const EMPTY_ENDED: ParsedPlaybackEnded = {
+  path: null,
+  seamless: false,
+  generation: null,
+  nextGeneration: null,
+  nextPath: null,
+};
+
+function parsePlaybackEndedPayload(raw: unknown): ParsedPlaybackEnded {
   if (raw === null || raw === undefined) {
-    return { path: null, seamless: false, generation: null, nextGeneration: null };
+    return EMPTY_ENDED;
   }
   if (typeof raw === 'string') {
-    return { path: raw, seamless: false, generation: null, nextGeneration: null };
+    return { ...EMPTY_ENDED, path: raw };
   }
   if (typeof raw === 'object' && raw !== null && 'path' in raw) {
     const o = raw as {
@@ -70,15 +78,17 @@ function parsePlaybackEndedPayload(raw: unknown): {
       seamless?: boolean;
       generation?: number;
       nextGeneration?: number | null;
+      nextPath?: string | null;
     };
     return {
       path: typeof o.path === 'string' ? o.path : (o.path ?? null),
       seamless: Boolean(o.seamless),
       generation: typeof o.generation === 'number' ? o.generation : null,
       nextGeneration: typeof o.nextGeneration === 'number' ? o.nextGeneration : null,
+      nextPath: typeof o.nextPath === 'string' ? o.nextPath : null,
     };
   }
-  return { path: null, seamless: false, generation: null, nextGeneration: null };
+  return EMPTY_ENDED;
 }
 
 export function usePlaybackLifecycle() {
@@ -90,6 +100,7 @@ export function usePlaybackLifecycle() {
     incomingIndex: number;
   } | null>(null);
   const halfPlayRecordedForTrackIdRef = useRef<string | null>(null);
+  const preloadedGaplessRef = useRef<PreloadedGaplessEntry | null>(null);
 
   useEffect(() => {
     return usePlayerStore.subscribe((state, prev) => {
@@ -99,12 +110,18 @@ export function usePlaybackLifecycle() {
     });
   }, []);
 
-  useTauriEvent<PlaybackPositionEventPayload | number>(
+  useTauriEvent<unknown>(
     'playback-position',
     (event) => {
-      const payload = event.payload;
-      const pos = typeof payload === 'number' ? payload : payload.position;
-      if (typeof payload !== 'number' && !isCurrentPlaybackGeneration(payload)) return;
+      const parsed = parsePlaybackPositionPayload(event.payload);
+      if (!parsed) return;
+      if (
+        parsed.generation !== null &&
+        !isCurrentPlaybackGeneration({ generation: parsed.generation })
+      ) {
+        return;
+      }
+      const pos = parsed.position;
       const { currentTrack, duration } = usePlayerStore.getState();
       if (!currentTrack || duration <= 0) {
         return;
@@ -143,12 +160,17 @@ export function usePlaybackLifecycle() {
             const playerState = usePlayerStore.getState();
             const next = playerState.previewNext();
             if (next) {
-              void preloadGaplessSource(next.track.filePath).catch((error) =>
+              const entry: PreloadedGaplessEntry = { track: next.track, index: next.index };
+              preloadedGaplessRef.current = entry;
+              void preloadGaplessSource(next.track.filePath).catch((error) => {
+                if (preloadedGaplessRef.current === entry) {
+                  preloadedGaplessRef.current = null;
+                }
                 reportError('Failed to preload next track for gapless playback', {
                   source: 'app',
                   error,
-                }),
-              );
+                });
+              });
             }
           }
           return;
@@ -245,6 +267,7 @@ export function usePlaybackLifecycle() {
           seamless,
           generation,
           nextGeneration,
+          nextPath,
         } = parsePlaybackEndedPayload(event.payload);
         const pending = pendingCrossfadeRef.current;
         if (endedPath && pending && endedPath === pending.outgoingPath) {
@@ -259,17 +282,28 @@ export function usePlaybackLifecycle() {
           if (endedPath && activeTrack && endedPath !== activeTrack.filePath) {
             return;
           }
-          const next = playerState.previewNext();
-          if (next) {
-            if (nextGeneration !== null) {
-              setActivePlaybackGeneration(nextGeneration);
-            }
-            playerState.activateTrackAtIndex(next.index);
-            playerState.setDuration(next.track.duration);
-            playerState.setCurrentTime(0);
-            playerState.setIsPlaying(true);
-            playerState.setHasActivePlayback(true);
+          const preloaded = preloadedGaplessRef.current;
+          preloadedGaplessRef.current = null;
+          if (nextGeneration !== null) {
+            setActivePlaybackGeneration(nextGeneration);
           }
+          const index = resolveGaplessHandoffIndex(playerState.queue, preloaded, nextPath);
+          const incoming =
+            index >= 0
+              ? playerState.activateTrackAtIndex(index)
+              : preloaded && (nextPath === null || preloaded.track.filePath === nextPath)
+                ? preloaded.track
+                : null;
+          if (index < 0 && incoming) {
+            // The preloaded entry left the queue; still show what is actually playing.
+            playerState.setCurrentTrack(incoming);
+          }
+          if (incoming) {
+            playerState.setDuration(incoming.duration);
+          }
+          playerState.setCurrentTime(0);
+          playerState.setIsPlaying(true);
+          playerState.setHasActivePlayback(true);
           return;
         }
 

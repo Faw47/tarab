@@ -311,18 +311,16 @@ pub fn desktop_set_native_ui_state(
     Ok(())
 }
 
+/// Largest base64 artwork payload accepted for the OS media session (about 6 MiB decoded).
+const MAX_MEDIA_ARTWORK_BASE64_LEN: usize = 8 * 1024 * 1024;
+
 #[tauri::command]
 pub fn desktop_sync_media_session(
-    payload: serde_json::Value,
+    payload: DesktopMediaSessionSyncPayload,
     app: AppHandle,
 ) -> Result<(), String> {
-    let payload: DesktopMediaSessionSyncPayload = match serde_json::from_value(payload.clone()) {
-        Ok(p) => p,
-        Err(err) => {
-            eprintln!("[desktop_sync_media_session] Payload parsing fallback triggered: {} | Raw payload: {:?}", err, payload);
-            return Ok(());
-        }
-    };
+    // Typed parameter: a malformed payload is rejected to the caller by the IPC layer instead of
+    // being logged verbatim (titles, artwork) and reported as success.
 
     if !payload.enabled {
         let _ = app.media().set_playback_status(PlaybackStatus::Stopped);
@@ -385,6 +383,14 @@ pub fn desktop_sync_media_session(
 
 fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
     let encoded = data?;
+    if encoded.len() > MAX_MEDIA_ARTWORK_BASE64_LEN {
+        eprintln!(
+            "Ignoring media artwork payload of {} bytes (limit {})",
+            encoded.len(),
+            MAX_MEDIA_ARTWORK_BASE64_LEN
+        );
+        return None;
+    }
 
     match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(bytes) => Some(bytes),
@@ -720,6 +726,50 @@ fn focus_main_window(app: &AppHandle<Wry>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_session_payload_rejects_a_non_numeric_position() {
+        // Regression for PB-01/SEC-11: an object position used to be swallowed as success.
+        let raw = serde_json::json!({
+            "enabled": true,
+            "title": "Song",
+            "isPlaying": true,
+            "position": { "generation": 3, "position": 61.5 },
+        });
+        assert!(serde_json::from_value::<DesktopMediaSessionSyncPayload>(raw).is_err());
+    }
+
+    #[test]
+    fn media_session_payload_accepts_the_renderer_shape() {
+        let raw = serde_json::json!({
+            "enabled": true,
+            "title": "Song",
+            "artist": "Artist",
+            "album": null,
+            "albumArtist": null,
+            "artworkDataBase64": null,
+            "isPlaying": true,
+            "position": 61.5,
+            "duration": 200.0,
+            "shuffle": false,
+            "repeatMode": "all",
+            "playbackRate": 1.0,
+        });
+        let payload: DesktopMediaSessionSyncPayload =
+            serde_json::from_value(raw).expect("renderer payload parses");
+        assert_eq!(payload.position, 61.5);
+        assert!(matches!(payload.repeat_mode, DesktopRepeatMode::All));
+    }
+
+    #[test]
+    fn oversized_media_artwork_is_ignored() {
+        let oversized = "A".repeat(MAX_MEDIA_ARTWORK_BASE64_LEN + 4);
+        assert!(decode_optional_artwork(Some(&oversized)).is_none());
+        assert_eq!(
+            decode_optional_artwork(Some(&"AAAA".to_string())),
+            Some(vec![0, 0, 0])
+        );
+    }
 
     #[test]
     fn maps_known_menu_ids_to_desktop_actions() {
