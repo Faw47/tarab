@@ -4,23 +4,27 @@ import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import {
   crossfadeToSource,
+  pauseCurrentPlayback,
   playAdjacentTrack,
+  startEditorPreview,
   seekToPosition,
   startPlayback,
   stopCurrentPlayback,
   switchAudioOutputDevice,
 } from '../playback-actions';
 
-const { playTrackMock, stopPlaybackMock } = vi.hoisted(() => ({
+const { playTrackMock, stopPlaybackMock, pausePlaybackMock, seekPlaybackMock } = vi.hoisted(() => ({
   playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
   stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
+  pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
+  seekPlaybackMock: vi.fn(async (_position: number): Promise<void> => undefined),
 }));
 
 vi.mock('../tauri-commands', () => ({
-  pausePlayback: vi.fn(async () => undefined),
+  pausePlayback: pausePlaybackMock,
   playTrack: playTrackMock,
   resumePlayback: vi.fn(async () => undefined),
-  seekPlayback: vi.fn(async () => undefined),
+  seekPlayback: seekPlaybackMock,
   stopPlayback: stopPlaybackMock,
   setAudioOutputDevice: vi.fn(async () => undefined),
   crossfadeToTrack: vi.fn(async () => 2),
@@ -49,6 +53,10 @@ describe('startPlayback', () => {
     playTrackMock.mockResolvedValue(1);
     stopPlaybackMock.mockReset();
     stopPlaybackMock.mockResolvedValue(undefined);
+    pausePlaybackMock.mockReset();
+    pausePlaybackMock.mockResolvedValue(undefined);
+    seekPlaybackMock.mockReset();
+    seekPlaybackMock.mockResolvedValue(undefined);
     usePlayerStore.setState(initialPlayerState, true);
   });
 
@@ -78,6 +86,10 @@ describe('overlapping source requests', () => {
     playTrackMock.mockResolvedValue(1);
     stopPlaybackMock.mockReset();
     stopPlaybackMock.mockResolvedValue(undefined);
+    pausePlaybackMock.mockReset();
+    pausePlaybackMock.mockResolvedValue(undefined);
+    seekPlaybackMock.mockReset();
+    seekPlaybackMock.mockResolvedValue(undefined);
     usePlayerStore.setState(initialPlayerState, true);
   });
 
@@ -125,6 +137,58 @@ describe('overlapping source requests', () => {
     expect(usePlayerStore.getState().queueIndex).toBe(0);
   });
 
+  it('does not reset a newer track when an editor preview finishes late', async () => {
+    let finishPreview: (generation: number) => void = () => undefined;
+    playTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          finishPreview = resolve;
+        }),
+    );
+
+    const preview = startEditorPreview('/music/preview.mp3');
+    await startPlayback(track('newer'));
+    finishPreview(8);
+    await preview;
+
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
+  it('does not commit a stale seek position after selecting another track', async () => {
+    let finishSeek: () => void = () => undefined;
+    seekPlaybackMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSeek = resolve;
+        }),
+    );
+
+    const seek = seekToPosition(75);
+    await startPlayback(track('newer'));
+    finishSeek();
+    await seek;
+
+    expect(usePlayerStore.getState().currentTime).toBe(0);
+  });
+
+  it('does not pause a newer source when a previous pause resolves late', async () => {
+    let finishPause: () => void = () => undefined;
+    pausePlaybackMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPause = resolve;
+        }),
+    );
+
+    const pause = pauseCurrentPlayback();
+    await startPlayback(track('newer'));
+    finishPause();
+    await pause;
+
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
   it('does not mark newer playback stopped when an older stop completes late', async () => {
     let finishStop: () => void = () => undefined;
     stopPlaybackMock.mockImplementationOnce(
@@ -167,6 +231,10 @@ describe('adjacent track transitions (PB-28)', () => {
     playTrackMock.mockResolvedValue(1);
     stopPlaybackMock.mockReset();
     stopPlaybackMock.mockResolvedValue(undefined);
+    pausePlaybackMock.mockReset();
+    pausePlaybackMock.mockResolvedValue(undefined);
+    seekPlaybackMock.mockReset();
+    seekPlaybackMock.mockResolvedValue(undefined);
     usePlayerStore.setState(initialPlayerState, true);
 
     const queue = [track('first'), track('second'), track('third')];
