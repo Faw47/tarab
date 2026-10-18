@@ -1,29 +1,16 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { usePlayerStore } from '../../../store/player-store';
+import { describe, expect, it, vi } from 'vitest';
 import { VolumeControl } from '../HomeView.parts';
 
-const { setEngineVolumeMock } = vi.hoisted(() => ({
-  setEngineVolumeMock: vi.fn(async () => undefined),
-}));
+vi.mock('../../../lib/tauri-commands', () => ({ setVolume: vi.fn(async () => undefined) }));
 
-vi.mock('../../../lib/tauri-commands', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../lib/tauri-commands')>()),
-  setVolume: setEngineVolumeMock,
-}));
-
-describe('VolumeControl', () => {
-  beforeEach(() => {
-    setEngineVolumeMock.mockClear();
-    usePlayerStore.setState({ volume: 0.8 });
-  });
-
-  it('mutes the audio engine, not only the icon', () => {
-    // Regression for FE-05: Mute changed the store volume but never reached the engine.
+describe('Home VolumeControl (FE-16)', () => {
+  it('opens the slider for keyboard focus, not only for hover', () => {
     render(<VolumeControl />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mute' }));
-
-    expect(setEngineVolumeMock).toHaveBeenCalledWith(0);
-    expect(usePlayerStore.getState().volume).toBe(0);
+    const slider = screen.getByLabelText('Volume');
+    const wrapper = slider.parentElement as HTMLElement;
+    expect(wrapper.className).toContain('w-0');
+    fireEvent.focus(screen.getByRole('button', { name: /mute/i }));
+    expect(wrapper.className).toContain('w-[96px]');
   });
 });

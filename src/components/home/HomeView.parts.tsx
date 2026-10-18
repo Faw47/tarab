@@ -5,8 +5,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { getAlbumArtist } from '../../lib/album-key';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
-import { reportError } from '../../lib/report-error';
-import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
+import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
@@ -142,29 +141,10 @@ CardLyricsDisplay.displayName = 'CardLyricsDisplay';
 
 export const VolumeControl = memo(
   ({ accentColor = 'var(--hero-accent)' }: { accentColor?: string }) => {
-    const { volume, setVolume } = usePlayerStore(
-      useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
-    );
+    const volume = usePlayerStore((s) => s.volume);
+    const muted = isMuted(volume);
     const [expanded, setExpanded] = useState(false);
-    const restoreRef = useRef(0.55);
     const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    useEffect(() => {
-      if (volume > 0.001) restoreRef.current = volume;
-    }, [volume]);
-
-    const commit = useCallback(
-      async (v: number) => {
-        const clamped = clamp01(v);
-        setVolume(clamped);
-        try {
-          await setAudioVolume(clamped);
-        } catch (e) {
-          reportError('Could not set the volume', { source: 'home-volume', error: e });
-        }
-      },
-      [setVolume],
-    );
 
     const onEnter = useCallback(() => {
       if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -183,15 +163,24 @@ export const VolumeControl = memo(
     );
 
     return (
-      <div className="inline-flex items-center gap-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <div
+        className="inline-flex items-center gap-0"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        // The slider opens for keyboard focus too; it used to sit focusable at zero width.
+        onFocus={onEnter}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+        }}
+      >
         <Button
-          onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
+          onClick={() => void toggleMute('home-volume')}
           className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
-          aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+          aria-label={muted ? 'Unmute' : 'Mute'}
           title="Volume"
           accentColor={accentColor}
         >
-          {volume <= 0.001 ? (
+          {muted ? (
             <VolumeX className="h-[14px] w-[14px]" />
           ) : (
             <Volume2 className="h-[14px] w-[14px]" />
@@ -215,7 +204,7 @@ export const VolumeControl = memo(
             max={1}
             step={0.01}
             value={volume}
-            onChange={(e) => void commit(parseFloat(e.target.value))}
+            onChange={(e) => void applyVolume(parseFloat(e.target.value), 'home-volume')}
             className="h-1 w-[96px] cursor-pointer"
             style={
               {

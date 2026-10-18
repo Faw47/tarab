@@ -17,18 +17,16 @@ import { cn } from '@/lib/utils';
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
-import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
+import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
+import { NeoVolumeSegments } from '../player/NeoVolumeSegments';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import type { HomeViewProps } from './homeTypes';
 import { useHomeLibraryModel } from './useHomeLibraryModel';
-
-const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
 const BORDER = 'border-2 border-black';
 const SHADOW_COMP = 'shadow-[4px_4px_0_0_#000]';
@@ -72,29 +70,10 @@ function polaroidTapeRotation(i: number): string {
 }
 
 const NeoVolumeControl = memo(() => {
-  const { volume, setVolume } = usePlayerStore(
-    useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
-  );
+  const volume = usePlayerStore((s) => s.volume);
+  const muted = isMuted(volume);
   const [expanded, setExpanded] = useState(false);
-  const restoreRef = useRef(0.55);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (volume > 0.001) restoreRef.current = volume;
-  }, [volume]);
-
-  const commit = useCallback(
-    async (v: number) => {
-      const clamped = clamp01(v);
-      setVolume(clamped);
-      try {
-        await setAudioVolume(clamped);
-      } catch (e) {
-        reportError('Failed to set volume', { source: 'home-neo', error: e });
-      }
-    },
-    [setVolume],
-  );
 
   const onEnter = useCallback(() => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -113,7 +92,15 @@ const NeoVolumeControl = memo(() => {
   );
 
   return (
-    <div className="inline-flex items-center gap-2" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div
+      className="inline-flex items-center gap-2"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onEnter}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+      }}
+    >
       <button
         type="button"
         className={cn(
@@ -123,11 +110,11 @@ const NeoVolumeControl = memo(() => {
           PRESS_EFFECT,
           SHADOW_COMP,
         )}
-        onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
-        aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+        onClick={() => void toggleMute('home-neo')}
+        aria-label={muted ? 'Unmute' : 'Mute'}
         title="Volume"
       >
-        {volume <= 0.001 ? (
+        {muted ? (
           <VolumeX size={16} strokeWidth={STROKE} />
         ) : (
           <Volume2 size={16} strokeWidth={STROKE} />
@@ -141,28 +128,10 @@ const NeoVolumeControl = memo(() => {
         )}
       >
         <div className={cn(BORDER, SHADOW_COMP, 'bg-white px-2 py-1.5')}>
-          <div className="neo-volume-wrap">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const segmentValue = (i + 1) / 10;
-              const active = volume >= segmentValue - 0.05;
-              return (
-                <div
-                  key={i}
-                  role="button"
-                  tabIndex={0}
-                  className={cn('neo-volume-segment', active && 'active')}
-                  onClick={() => void commit(segmentValue)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      void commit(segmentValue);
-                    }
-                  }}
-                  aria-label={`Set volume to ${Math.round(segmentValue * 100)}%`}
-                />
-              );
-            })}
-          </div>
+          <NeoVolumeSegments
+            volume={volume}
+            onChange={(next) => void applyVolume(next, 'home-neo')}
+          />
         </div>
       </div>
     </div>

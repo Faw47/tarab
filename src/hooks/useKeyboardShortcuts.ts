@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
-import { setVolume as setAudioVolume } from '../lib/tauri-commands';
+import { stepVolume, toggleMute } from '../lib/volume';
 import { usePlayerStore } from '../store/player-store';
 import type { ContextMenuPosition, Track } from '../types';
 
@@ -49,8 +49,6 @@ export const useKeyboardShortcuts = ({
   canGoBack = false,
   onBack,
 }: UseKeyboardShortcutsParams) => {
-  const preMuteVolumeRef = useRef<number>(0.8);
-
   // Keep volatile values in refs so the effect doesn't re-register
   // the keydown listener on every state change.
   const showFullPlayerRef = useRef(showFullPlayer);
@@ -115,14 +113,7 @@ export const useKeyboardShortcuts = ({
             target?.closest('.overflow-y-auto');
           if (inScrollable) break;
           e.preventDefault();
-          const state = usePlayerStore.getState();
-          const newVolumeUp = Math.min(1, state.volume + 0.1);
-          state.setVolume(newVolumeUp);
-          try {
-            await setAudioVolume(newVolumeUp);
-          } catch (error) {
-            reportError('Failed to increase volume', { source: 'app', error });
-          }
+          await stepVolume(0.1, 'app');
           break;
         }
 
@@ -134,37 +125,13 @@ export const useKeyboardShortcuts = ({
             target?.closest('.overflow-y-auto');
           if (inScrollable) break;
           e.preventDefault();
-          const state = usePlayerStore.getState();
-          const newVolumeDown = Math.max(0, state.volume - 0.1);
-          state.setVolume(newVolumeDown);
-          try {
-            await setAudioVolume(newVolumeDown);
-          } catch (error) {
-            reportError('Failed to decrease volume', { source: 'app', error });
-          }
+          await stepVolume(-0.1, 'app');
           break;
         }
 
         case 'KeyM': {
           e.preventDefault();
-          const state = usePlayerStore.getState();
-          if (state.volume > 0) {
-            preMuteVolumeRef.current = state.volume;
-            state.setVolume(0);
-            try {
-              await setAudioVolume(0);
-            } catch (error) {
-              reportError('Failed to mute volume', { source: 'app', error });
-            }
-          } else {
-            const restoreVolume = preMuteVolumeRef.current || 0.8;
-            state.setVolume(restoreVolume);
-            try {
-              await setAudioVolume(restoreVolume);
-            } catch (error) {
-              reportError('Failed to restore volume', { source: 'app', error });
-            }
-          }
+          await toggleMute('app');
           break;
         }
 
