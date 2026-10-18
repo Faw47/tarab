@@ -131,8 +131,9 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
               }
               onNavigate(tab.view);
             }}
+            title={tab.label}
             className={cn(
-              'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5',
+              'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 lg:px-3.5',
               'text-[13px] font-medium transition-colors duration-[var(--motion-emphasis)] motion-reduce:transition-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
               isActive ? 'text-white' : 'text-white/50 hover:bg-white/[0.04] hover:text-white/90',
@@ -140,7 +141,10 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             style={isActive ? { color: 'var(--hero-accent, #fff)' } : undefined}
           >
             <tab.icon className="h-4 w-4 shrink-0" />
-            <span className={isActive ? 'text-white' : undefined}>{tab.label}</span>
+            {/* Icon-only below lg: with Windows caption buttons, labelled tabs overflow 800 px. */}
+            <span className={cn('sr-only lg:not-sr-only', isActive && 'text-white')}>
+              {tab.label}
+            </span>
           </button>
         );
       })}
