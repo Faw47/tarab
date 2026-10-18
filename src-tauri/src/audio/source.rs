@@ -63,19 +63,24 @@ fn open_decoder_for_file_unguarded(file_path: &str) -> Result<OpenedDecoder, Str
     Ok((reader, decoder, duration))
 }
 
+/// Runs on the audio command thread. Opening, seeking (container index parsing) and packet
+/// skipping are guarded as one unit: a parser panic here would otherwise end that thread and leave
+/// playback dead for the rest of the session.
 pub(super) fn prepare_source(
     file_path: &str,
     requested_start: f64,
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
 ) -> Result<(SymphoniaSource, f64, f64), String> {
-    prepare_source_with_seek(
-        file_path,
-        requested_start,
-        state,
-        emitted_samples,
-        seek_decoder,
-    )
+    crate::parse_guard::guard(file_path, || {
+        prepare_source_with_seek(
+            file_path,
+            requested_start,
+            state,
+            emitted_samples,
+            seek_decoder,
+        )
+    })?
 }
 
 type SeekFn = fn(&mut dyn SymphoniaDecoder, &mut dyn FormatReader, f64) -> Result<u64, String>;

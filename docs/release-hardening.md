@@ -130,7 +130,7 @@ Release builds use `panic = "unwind"` (enforced by `check-release-config`). Per-
 
 The workflow fails if required signing material is absent. It does not publish unsigned macOS or Windows packages.
 
-Signing secrets are set only in the `env` of the steps that use them, and `check-release-config` rejects any secret in job-level or workflow-level `env`. Dependency installation and the native Rust tests run before the signing certificate is imported. The macOS job deletes its temporary keychain at the end; the Windows certificate is imported non-exportable. Remaining exposure: `tauri build` itself still runs the frontend build and Rust build scripts while the notarization credentials (macOS) are in its environment and the signing identity is usable. Moving signing and notarization into a separate job that only receives the built bundle would remove that.
+Signing secrets are set only in the `env` of the steps that use them, and `check-release-config` rejects any secret in job-level or workflow-level `env`. Dependency installation and the native Rust tests run before the signing certificate is imported. The macOS job deletes its temporary keychain at the end; the Windows certificate is imported non-exportable. Remaining exposure: `tauri build` itself still runs the frontend build and Rust build scripts while the notarization credentials (macOS) are in its environment, and the macOS Developer ID key sits in an unlocked keychain imported with `-A`, so any process in that step could use it to sign. Moving signing and notarization into a separate job that only receives the built bundle would remove that.
 
 ### Release workflow guarantees
 
