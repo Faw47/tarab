@@ -27,7 +27,7 @@ import { getAlbumArtist } from '../../lib/album-key';
 import { coverArtUrl } from '../../lib/cover-art-url';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
 import { type LibrarySearchScope, useLibraryStore } from '../../store/library-store';
@@ -60,6 +60,7 @@ import {
   type LibraryDetailScope,
   type LibraryFacet,
   type LibrarySmartFilter,
+  libraryEmptyStateCopy,
 } from './library-view-model';
 
 export type LibraryViewDensity = 'grid' | 'list';
@@ -856,7 +857,7 @@ export const LibraryView = memo(function LibraryView({
         applyCoverArtHashes(hashes);
         hashes.forEach(([path]) => prefetchedCoverArt.current.add(path));
       } catch (error) {
-        reportError('Failed to precompute cover art', {
+        logError('Failed to precompute cover art', {
           source: 'library-view',
           error,
         });
@@ -1212,6 +1213,7 @@ export const LibraryView = memo(function LibraryView({
   const needsLongerLyricsQuery =
     searchScope === 'lyrics' && trimmedSearchQuery.length > 0 && trimmedSearchQuery.length < 3;
   const isTrueEmptyLibrary = trimmedSearchQuery.length === 0 && trackCount === 0;
+  const emptyCopy = libraryEmptyStateCopy({ trackCount, facet: resultFacet, smartFilter });
 
   if (isLibraryLoading) {
     return (
@@ -1382,13 +1384,13 @@ export const LibraryView = memo(function LibraryView({
                   <TrackIcon className="h-10 w-10 text-primary" />
                 </div>
                 <div className="library-v2-empty-copy">
-                  <h3>{isTrueEmptyLibrary ? 'No music yet' : 'No tracks found'}</h3>
+                  <h3>{searchQuery ? 'No tracks found' : emptyCopy.title}</h3>
                   <p>
                     {searchQuery
                       ? needsLongerLyricsQuery
                         ? 'Type at least 3 characters to search lyrics.'
                         : `No ${getScopeLabel(searchScope)} match "${searchQuery}". Try a different search term.`
-                      : 'Your library is empty. Add folders to start building your music collection.'}
+                      : emptyCopy.message}
                   </p>
                   {isTrueEmptyLibrary && onNavigateToFolders && (
                     <button

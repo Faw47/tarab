@@ -160,7 +160,7 @@ export const VolumeControl = memo(
         try {
           await setAudioVolume(clamped);
         } catch (e) {
-          reportError('volume commit failed', { source: 'home-volume', error: e });
+          reportError('Could not set the volume', { source: 'home-volume', error: e });
         }
       },
       [setVolume],
@@ -413,28 +413,22 @@ export const AlbumSpotlightCard = memo(
         style={{ animationDelay: !reducedEffects ? `${staggerIndex * 50}ms` : undefined }}
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
-        onClick={() =>
-          onOpenAlbumDetails?.({
-            album: track.album,
-            artist: getAlbumArtist(track),
-            coverArt: track.coverArt,
-            tracks: albumTracks,
-          })
-        }
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter' && e.key !== ' ') return;
-          e.preventDefault();
-          onOpenAlbumDetails?.({
-            album: track.album,
-            artist: getAlbumArtist(track),
-            coverArt: track.coverArt,
-            tracks: albumTracks,
-          });
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label={`Open ${track.album} by ${track.artist}`}
       >
+        {/* Open and Play are sibling buttons: a button inside a role="button" card is invalid, and
+            Enter on Play used to bubble up and open the album instead. */}
+        <button
+          type="button"
+          className="absolute inset-0 z-10 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          onClick={() =>
+            onOpenAlbumDetails?.({
+              album: track.album,
+              artist: getAlbumArtist(track),
+              coverArt: track.coverArt,
+              tracks: albumTracks,
+            })
+          }
+          aria-label={`Open ${track.album} by ${track.artist}`}
+        />
         {/* Cursor spotlight overlay */}
         <div
           className={clsx(
@@ -459,7 +453,9 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'absolute inset-0 transition-opacity duration-[var(--motion-emphasis)]',
-              featured ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+              featured
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
             )}
             style={{
               background:
@@ -470,13 +466,13 @@ export const AlbumSpotlightCard = memo(
           {/* Track count badge (top-right, appears on hover) */}
           <div
             className={clsx(
-              'absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full',
+              'pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full',
               'text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70',
               'bg-black/50 backdrop-blur-none',
               'transition-[opacity,transform] duration-[var(--motion-standard)]',
               featured
                 ? 'opacity-70'
-                : 'opacity-0 translate-y-[-4px] group-hover:opacity-100 group-hover:translate-y-0',
+                : 'opacity-0 translate-y-[-4px] group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0',
             )}
           >
             {count} {count === 1 ? 'track' : 'tracks'}
@@ -485,10 +481,10 @@ export const AlbumSpotlightCard = memo(
           {/* Album info */}
           <div
             className={clsx(
-              'absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
+              'pointer-events-none absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
               featured
                 ? 'p-4 opacity-100 translate-y-0'
-                : 'p-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0',
+                : 'p-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0',
             )}
           >
             <div className="min-w-0 flex-1">
@@ -518,10 +514,10 @@ export const AlbumSpotlightCard = memo(
                 void onPlayAlbum(track, albumTracks);
               }}
               className={clsx(
-                'shrink-0 rounded-full border border-black/10 bg-white/95 text-black inline-flex items-center justify-center',
+                'pointer-events-auto shrink-0 rounded-full border border-black/10 bg-white/95 text-black inline-flex items-center justify-center',
                 'shadow-[0_4px_12px_rgba(0,0,0,0.20)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 'hover:scale-[1.08] active:scale-[0.95]',
-                'focus-visible:outline-none',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',
                 featured ? 'w-11 h-11' : 'w-9 h-9',
               )}
               aria-label={`Play ${track.album}`}

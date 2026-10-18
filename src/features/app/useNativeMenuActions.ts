@@ -5,7 +5,7 @@ import type { NavView } from '../../components/navigation';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { isSameOrSubPath, normalizePath } from '../../lib/path-utils';
 import { seekToPosition } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { selectLibraryFolder } from '../../lib/tauri-commands';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { dialog } from '../../platform/dialog';
@@ -146,7 +146,7 @@ export function useNativeMenuActions({
       setLibraryFolders,
     ],
     (error) =>
-      reportError('Failed to setup native menu listener', {
+      logError('Failed to setup native menu listener', {
         source: 'native-menu',
         error,
       }),

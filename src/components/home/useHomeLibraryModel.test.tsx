@@ -17,6 +17,7 @@ vi.mock('../../lib/playback-actions', () => ({
 
 vi.mock('../../lib/report-error', () => ({
   reportError: (...args: unknown[]) => reportError(...args),
+  logError: vi.fn(),
 }));
 
 const makeTrack = (id: string, overrides: Partial<Track> = {}): Track => ({
@@ -78,7 +79,7 @@ describe('useHomeLibraryModel', () => {
       queueIndex: 0,
       shuffleEnabled: false,
     });
-    expect(reportError).toHaveBeenCalledWith('play album failed', {
+    expect(reportError).toHaveBeenCalledWith('Could not play the album', {
       source: 'home-view',
       error: failure,
     });

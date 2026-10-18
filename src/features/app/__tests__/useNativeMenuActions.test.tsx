@@ -23,7 +23,7 @@ vi.mock('../../../platform/dialog', () => ({ dialog: { openAudioFiles: openAudio
 vi.mock('../../../lib/track-refresh', () => ({ refreshTracksByFilePaths: refreshMock }));
 vi.mock('../../../lib/tauri-commands', () => ({ selectLibraryFolder: vi.fn(async () => null) }));
 vi.mock('../../../lib/playback-actions', () => ({ seekToPosition: vi.fn() }));
-vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn() }));
+vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn(), logError: vi.fn() }));
 vi.mock('../../../platform/tauri-zustand-storage', () => ({
   createTauriZustandStorage: () => ({
     getItem: async () => null,

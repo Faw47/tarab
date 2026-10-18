@@ -1,6 +1,8 @@
+import { MotionConfig } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { NavView } from './components/navigation';
+import { PlaybackRecoveryBanner } from './components/player/PlaybackRecoveryBanner';
 import { ConfirmDialog, type ConfirmDialogProps } from './components/ui/ConfirmDialog';
 
 // Components
@@ -17,7 +19,6 @@ import {
 } from './features/app/AppTransientSurfaces';
 import { AppViewRenderer } from './features/app/AppViewRenderer';
 import { useAppCommandActions } from './features/app/useAppCommandActions';
-import { useAppErrorEvent } from './features/app/useAppErrorEvent';
 import { useAppSearchShell } from './features/app/useAppSearchShell';
 import { useAppSessionPersistence } from './features/app/useAppSessionPersistence';
 import { useAppShellPalette } from './features/app/useAppShellPalette';
@@ -44,7 +45,7 @@ import { useCoverArtPrefetching } from './hooks/useCoverArtPrefetching';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 // Utils
 import { useRenderLog } from './lib/performance';
-import { reportError } from './lib/report-error';
+import { logError } from './lib/report-error';
 import { generateCoverArtHashes } from './lib/tauri-commands';
 import { refreshTracksByFilePaths } from './lib/track-refresh';
 import { useLibraryStore } from './store/library-store';
@@ -89,7 +90,7 @@ const App = () => {
       (results) => {
         for (const result of results) {
           if (result.status === 'rejected') {
-            reportError('Optional startup module preload failed', {
+            logError('Optional startup module preload failed', {
               source: 'app-startup',
               error: result.reason,
             });
@@ -105,8 +106,6 @@ const App = () => {
 
   const [isScrolled, setIsScrolled] = useState(false);
   const [showFullPlayer, setShowFullPlayer] = useState(false);
-
-  const { appError, setAppError } = useAppErrorEvent();
 
   // Tag editor
 
@@ -126,6 +125,7 @@ const App = () => {
     setIsPlaying,
     // playPrevious now read via getState() in handlers
     addToQueue,
+    hasPlaybackError,
   } = usePlayerStore(
     useShallow((s) => ({
       currentTrack: s.currentTrack,
@@ -134,6 +134,7 @@ const App = () => {
       // currentTime removed to avoid re-renders
       // playPrevious now read via getState() in handlers
       addToQueue: s.addToQueue,
+      hasPlaybackError: s.playbackError !== null,
       // duration: s.duration, // Removed
     })),
   );
@@ -333,11 +334,9 @@ const App = () => {
 
   useKeyboardShortcuts({
     setContextMenuPosition,
-    setTagEditorTracks,
     setShowFullPlayer,
     setSelectedTracks,
     contextMenuPosition,
-    tagEditorTracks,
     showFullPlayer,
     selectedTracks,
     canGoBack,
@@ -487,10 +486,14 @@ const App = () => {
 
   const overlayMessages = (
     <AppOverlayMessages
-      appError={appError}
       playlistRepair={playlistRepair}
+      belowHeader={isAlbumView && theme !== 'neobrutalism'}
+      playbackRecovery={
+        hasPlaybackError && !showFullPlayer ? (
+          <PlaybackRecoveryBanner theme={theme} placement="shell" />
+        ) : null
+      }
       theme={theme}
-      onDismissError={() => setAppError(null)}
       onRetryPlaylistLoad={() => void handleRetryPlaylistLoad()}
       onResetPlaylistData={handleResetPlaylistData}
       onOpenPlaylistsDataFolder={() => void handleOpenPlaylistsDataFolder()}
@@ -545,48 +548,52 @@ const App = () => {
   );
   return (
     <GlassSystemProvider reducedEffects={effectiveReducedEffects} theme={theme}>
-      <SmoothTimeProvider>
-        <HotkeysBootstrap onSearch={openGlobalSearch} />
-        {appLayout}
+      {/* framer-motion skips transform and layout animations when Reduced Effects or the OS
+          reduce-motion preference is on. */}
+      <MotionConfig reducedMotion={effectiveReducedEffects ? 'always' : 'never'}>
+        <SmoothTimeProvider>
+          <HotkeysBootstrap onSearch={openGlobalSearch} />
+          {appLayout}
 
-        <AppTransientSurfaces
-          currentView={currentView}
-          theme={theme}
-          showDropOverlay={showDropOverlay}
-          showFullPlayer={showFullPlayer}
-          showScanComplete={showScanComplete}
-          hasCurrentTrack={Boolean(currentTrack)}
-          isPlaying={isPlaying}
-          isScanning={isScanning}
-          onNavigate={handleNavigate}
-          onShuffleAll={handleShuffleAll}
-          onTogglePlayback={handleTogglePlaybackFromPalette}
-          onNextTrack={handleNextTrackFromPalette}
-          onPreviousTrack={handlePreviousTrackFromPalette}
-          onRescanLibrary={handleRescanFromPalette}
-          onOpenFullPlayer={() => setShowFullPlayer(true)}
-          onCloseFullPlayer={() => setShowFullPlayer(false)}
-        />
-        <AppDialogHost
-          tagEditorTracks={tagEditorTracks}
-          onCloseTagEditor={() => setTagEditorTracks(null)}
-          onSaveTagEditor={() => {
-            if (tagEditorTracks?.length) {
-              const paths = tagEditorTracks.map((t) => t.filePath);
-              refreshTracksByFilePaths(paths);
-            }
-          }}
-          playlistPickerOpen={showPlaylistPicker}
-          playlistPickerTrackIds={playlistPickerTrackIds}
-          onClosePlaylistPicker={closePlaylistPicker}
-          contextMenuPosition={contextMenuPosition}
-          contextMenuItems={contextMenuItems}
-          onCloseContextMenu={closeContextMenu}
-          confirmDialog={confirmDialog}
-          onCancelConfirmDialog={() => setConfirmDialog(null)}
-        />
-        {launchFileDialog ? <ConfirmDialog {...launchFileDialog} /> : null}
-      </SmoothTimeProvider>
+          <AppTransientSurfaces
+            currentView={currentView}
+            theme={theme}
+            showDropOverlay={showDropOverlay}
+            showFullPlayer={showFullPlayer}
+            showScanComplete={showScanComplete}
+            hasCurrentTrack={Boolean(currentTrack)}
+            isPlaying={isPlaying}
+            isScanning={isScanning}
+            onNavigate={handleNavigate}
+            onShuffleAll={handleShuffleAll}
+            onTogglePlayback={handleTogglePlaybackFromPalette}
+            onNextTrack={handleNextTrackFromPalette}
+            onPreviousTrack={handlePreviousTrackFromPalette}
+            onRescanLibrary={handleRescanFromPalette}
+            onOpenFullPlayer={() => setShowFullPlayer(true)}
+            onCloseFullPlayer={() => setShowFullPlayer(false)}
+          />
+          <AppDialogHost
+            tagEditorTracks={tagEditorTracks}
+            onCloseTagEditor={() => setTagEditorTracks(null)}
+            onSaveTagEditor={() => {
+              if (tagEditorTracks?.length) {
+                const paths = tagEditorTracks.map((t) => t.filePath);
+                refreshTracksByFilePaths(paths);
+              }
+            }}
+            playlistPickerOpen={showPlaylistPicker}
+            playlistPickerTrackIds={playlistPickerTrackIds}
+            onClosePlaylistPicker={closePlaylistPicker}
+            contextMenuPosition={contextMenuPosition}
+            contextMenuItems={contextMenuItems}
+            onCloseContextMenu={closeContextMenu}
+            confirmDialog={confirmDialog}
+            onCancelConfirmDialog={() => setConfirmDialog(null)}
+          />
+          {launchFileDialog ? <ConfirmDialog {...launchFileDialog} /> : null}
+        </SmoothTimeProvider>
+      </MotionConfig>
     </GlassSystemProvider>
   );
 };

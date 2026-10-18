@@ -6,7 +6,7 @@ import { usePlayerStore } from '../store/player-store';
 import { useSettingsStore } from '../store/settings-store';
 import type { Track } from '../types';
 import { getPathBaseName } from './path-utils';
-import { reportError } from './report-error';
+import { logError, reportError } from './report-error';
 import {
   dbGetTracksByIds,
   dbUpsertTracks,
@@ -39,7 +39,7 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
       const hashed = await generateCoverArtHashes(artTargets);
       coverArtHashMap = new Map(hashed);
     } catch (err) {
-      reportError('Failed to refresh cover art hashes', { source: 'track-refresh', error: err });
+      logError('Failed to refresh cover art hashes', { source: 'track-refresh', error: err });
     }
   }
 

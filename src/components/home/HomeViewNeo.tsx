@@ -267,20 +267,19 @@ const NeoAlbumCard = memo(
       <div
         className={cn(
           NEO_POLAROID_CARD,
-          'flex aspect-[4/5] flex-col',
+          'group relative flex aspect-[4/5] flex-col',
           polaroidRotation(index),
           isPlayingAlbum && NEO_POLAROID_PLAYING,
         )}
-        onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}
-        role="button"
-        tabIndex={0}
       >
+        {/* Open and Play are sibling buttons, so Enter on Play plays instead of opening. */}
+        <button
+          type="button"
+          // `ghost`: the neo rule styles every other button as an opaque white chip, which hid the card.
+          className="ghost absolute inset-0 z-10 bg-transparent focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-black"
+          onClick={open}
+          aria-label={`Open ${track.album} by ${track.artist}`}
+        />
         <div
           className={cn(NEO_TAPE, polaroidTapeRotation(index))}
           style={TAPE_STYLE}
@@ -304,7 +303,7 @@ const NeoAlbumCard = memo(
               SNAP,
               PRESS_EFFECT,
               'shadow-[3px_3px_0_0_#000] hover:bg-[var(--signal-active)]',
-              'opacity-0 group-hover:opacity-100',
+              'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
             )}
             onClick={(e) => {
               e.stopPropagation();
@@ -318,7 +317,7 @@ const NeoAlbumCard = memo(
         <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-black/50">
+        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]">
           {track.artist}
         </p>
       </div>

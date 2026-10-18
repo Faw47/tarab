@@ -11,9 +11,7 @@ const meta = {
   },
   args: {
     theme: 'liquid-glass',
-    appError: null,
     playlistRepair: null,
-    onDismissError: noop,
     onRetryPlaylistLoad: noop,
     onResetPlaylistData: noop,
     onOpenPlaylistsDataFolder: noop,
@@ -28,15 +26,6 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
-
-export const AppError: Story = {
-  args: {
-    appError: {
-      message: 'Library scan failed',
-      detail: 'The selected folder is no longer available.',
-    },
-  },
-};
 
 export const PlaylistCorrupt: Story = {
   args: {
@@ -64,10 +53,6 @@ export const CombinedNeobrutalism: Story = {
   },
   args: {
     theme: 'neobrutalism',
-    appError: {
-      message: 'Audio output unavailable',
-      detail: 'Tarab fell back to the system default device.',
-    },
     playlistRepair: {
       reason: 'Automatic recovery was attempted but no valid backup was found.',
       attemptedRecovery: true,

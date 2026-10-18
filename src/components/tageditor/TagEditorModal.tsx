@@ -29,9 +29,10 @@ import { useMetadataClipboardStore } from '../../store/metadata-clipboard-store'
 import type { TagClearField, TagInfo, TagUpdate, Track } from '../../types';
 import { MetadataClipboard } from '../metadata/MetadataClipboard';
 import { Button } from '../ui/button';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
-import { LyricsEditor } from './LyricsEditor';
+import { LyricsEditor, lyricsEquivalent } from './LyricsEditor';
 import { TagEditorArtworkPanel } from './TagEditorArtworkPanel';
 import { TagEditorFileInfo } from './TagEditorFileInfo';
 import { TagEditorMetadataForm } from './TagEditorMetadataForm';
@@ -55,6 +56,37 @@ const deriveTagsFromPath = (filePath: string) => {
     album: derivedAlbum,
   };
 };
+
+interface EditableTagFields {
+  title: string;
+  artist: string;
+  album: string;
+  albumArtist: string;
+  year: string;
+  trackNumber: string;
+  discNumber: string;
+  genre: string;
+  composer: string;
+  comment: string;
+  extendedFields: { key: string; value: string }[];
+}
+
+const EMPTY_TAG_FIELDS: EditableTagFields = {
+  title: '',
+  artist: '',
+  album: '',
+  albumArtist: '',
+  year: '',
+  trackNumber: '',
+  discNumber: '',
+  genre: '',
+  composer: '',
+  comment: '',
+  extendedFields: [],
+};
+
+/** Stable key for comparing the editable fields with what was loaded. */
+export const tagFieldsKey = (fields: EditableTagFields): string => JSON.stringify(fields);
 
 const base64ToBlobUrl = (base64: string, mime: string): string => {
   const byteString = atob(base64);
@@ -105,6 +137,10 @@ export const TagEditorModal = memo(
     const [lyricsError, setLyricsError] = useState<string | null>(null);
     const [isLyricsSaving, setIsLyricsSaving] = useState(false);
     const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
+    // What the form held right after loading, so closing can warn about unsaved edits.
+    const [loadedFieldsKey, setLoadedFieldsKey] = useState(() => tagFieldsKey(EMPTY_TAG_FIELDS));
+    const [loadedLyrics, setLoadedLyrics] = useState('');
+    const [confirmDiscard, setConfirmDiscard] = useState(false);
     const trackPath = tracks[0]?.filePath ?? null;
     const coverArtUrl = useCoverArt(
       tracks[0]?.filePath,
@@ -149,28 +185,41 @@ export const TagEditorModal = memo(
             // For batch edit, just show empty fields
             setIsLoading(false);
             setExtendedFields([]);
+            setLoadedFieldsKey(tagFieldsKey(EMPTY_TAG_FIELDS));
           } else {
             // Single track - load full info
             const info = await readFullTags(tracks[0].filePath);
             setTagInfo(info);
 
-            setTitle(info.title || '');
-            setArtist(info.artist || '');
-            setAlbum(info.album || '');
-            setAlbumArtist(info.albumArtist || '');
-            setYear(info.year?.toString() || '');
-            setTrackNumber(info.trackNumber?.toString() || '');
-            setDiscNumber(info.discNumber?.toString() || '');
-            setGenre(info.genre || '');
-            setComposer(info.composer || '');
-            setComment(info.comment || '');
-            setRemoveCover(false);
-            setNewCoverArt(null);
-            setExtendedFields(
-              info.extraTags
+            const loaded: EditableTagFields = {
+              title: info.title || '',
+              artist: info.artist || '',
+              album: info.album || '',
+              albumArtist: info.albumArtist || '',
+              year: info.year?.toString() || '',
+              trackNumber: info.trackNumber?.toString() || '',
+              discNumber: info.discNumber?.toString() || '',
+              genre: info.genre || '',
+              composer: info.composer || '',
+              comment: info.comment || '',
+              extendedFields: info.extraTags
                 ? Object.entries(info.extraTags).map(([key, value]) => ({ key, value }))
                 : [],
-            );
+            };
+            setTitle(loaded.title);
+            setArtist(loaded.artist);
+            setAlbum(loaded.album);
+            setAlbumArtist(loaded.albumArtist);
+            setYear(loaded.year);
+            setTrackNumber(loaded.trackNumber);
+            setDiscNumber(loaded.discNumber);
+            setGenre(loaded.genre);
+            setComposer(loaded.composer);
+            setComment(loaded.comment);
+            setRemoveCover(false);
+            setNewCoverArt(null);
+            setExtendedFields(loaded.extendedFields);
+            setLoadedFieldsKey(tagFieldsKey(loaded));
 
             setIsLoading(false);
           }
@@ -187,6 +236,7 @@ export const TagEditorModal = memo(
       const loadLyrics = async () => {
         if (isBatchEdit || !trackPath) {
           setLyricsContent('');
+          setLoadedLyrics('');
           setLyricsError(null);
           return;
         }
@@ -203,12 +253,15 @@ export const TagEditorModal = memo(
           );
           if (content) {
             setLyricsContent(content);
+            setLoadedLyrics(content);
           } else {
             setLyricsContent('');
+            setLoadedLyrics('');
             setLyricsError('No .lrc found yet. Saving will create one next to the track.');
           }
         } catch (err) {
           setLyricsContent('');
+          setLoadedLyrics('');
           setLyricsError('No .lrc found yet. Saving will create one next to the track.');
         }
       };
@@ -319,6 +372,7 @@ export const TagEditorModal = memo(
         setIsLyricsSaving(true);
         setLyricsError(null);
         await writeLyricsForTrack(trackPath, lyricsContent ?? '');
+        setLoadedLyrics(lyricsContent ?? '');
       } catch (err) {
         setLyricsError(err instanceof Error ? err.message : 'Failed to save lyrics');
       } finally {
@@ -450,6 +504,11 @@ export const TagEditorModal = memo(
           if (removeCover) {
             await removeCoverArt(tracks[0].filePath);
           }
+          // Save Changes covers the Lyrics tab too, so closing never drops lyric edits.
+          if (!lyricsEquivalent(lyricsContent, loadedLyrics)) {
+            await writeLyricsForTrack(tracks[0].filePath, lyricsContent);
+            setLoadedLyrics(lyricsContent);
+          }
           await refreshTracksByFilePaths([tracks[0].filePath]);
         }
 
@@ -476,6 +535,8 @@ export const TagEditorModal = memo(
       newCoverArt,
       removeCover,
       extendedFields,
+      lyricsContent,
+      loadedLyrics,
       onSave,
       onClose,
     ]);
@@ -574,10 +635,44 @@ export const TagEditorModal = memo(
       setClipboardMessage('Pasted metadata');
     }, [clipboardData, clipboardArt, newCoverArt, setClipboardMessage]);
 
+    const isDirty =
+      !isLoading &&
+      (newCoverArt !== null ||
+        removeCover ||
+        !lyricsEquivalent(lyricsContent, loadedLyrics) ||
+        tagFieldsKey({
+          title,
+          artist,
+          album,
+          albumArtist,
+          year,
+          trackNumber,
+          discNumber,
+          genre,
+          composer,
+          comment,
+          extendedFields,
+        }) !== loadedFieldsKey);
+
+    const requestClose = useCallback(() => {
+      if (isSaving) return;
+      if (isDirty) {
+        setConfirmDiscard(true);
+        return;
+      }
+      onClose();
+    }, [isDirty, isSaving, onClose]);
+
     return (
-      <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <Dialog open onOpenChange={(open) => !open && requestClose()}>
         <DialogContent
           showCloseButton={false}
+          onEscapeKeyDown={(event) => {
+            // Escape in a field that cancels its own edit (a lyric line) must not close the editor.
+            if (event.target instanceof Element && event.target.closest('[data-local-escape]')) {
+              event.preventDefault();
+            }
+          }}
           className="inset-0 top-0 left-0 z-50 block h-screen max-h-none w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 bg-background p-0 text-text-primary shadow-none"
         >
           <DialogTitle className="sr-only">Metadata editor</DialogTitle>
@@ -586,7 +681,7 @@ export const TagEditorModal = memo(
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-background-elevated/50 backdrop-blur-xl">
               <div className="flex items-center gap-3">
                 <IconButton
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="p-2 text-text-secondary hover:text-white rounded-full transition-colors"
                   aria-label="Close"
                 >
@@ -636,7 +731,7 @@ export const TagEditorModal = memo(
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={onClose}
+                  onClick={requestClose}
                   disabled={isSaving}
                   className="rounded-xl"
                 >
@@ -794,6 +889,21 @@ export const TagEditorModal = memo(
             </div>
           </div>
         </DialogContent>
+        {confirmDiscard && (
+          <ConfirmDialog
+            title="Discard unsaved changes?"
+            message={
+              isBatchEdit
+                ? `Your edits to ${tracks.length} tracks have not been saved.`
+                : 'Your edits to this track have not been saved.'
+            }
+            confirmLabel="Discard"
+            cancelLabel="Keep editing"
+            variant="danger"
+            onConfirm={onClose}
+            onCancel={() => setConfirmDiscard(false)}
+          />
+        )}
       </Dialog>
     );
   },

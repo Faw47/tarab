@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 import { formatTime } from '../../lib/format-time';
 import { useRenderLog } from '../../lib/performance';
@@ -87,6 +88,32 @@ export const QueueView = memo(
         reorderQueue: state.reorderQueue,
       })),
     );
+
+    // One click clears; the toast offers Undo instead of a confirmation dialog.
+    const handleClearQueue = useCallback(() => {
+      const { queue, queueIndex, shufflePass, shufflePriority } = usePlayerStore.getState();
+      if (queue.length === 0) return;
+      clearQueue();
+      toast('Queue cleared', {
+        // One toast: a later clear replaces it, so Undo always restores the latest queue.
+        id: 'queue-cleared',
+        description: `${queue.length} ${queue.length === 1 ? 'track' : 'tracks'} removed.`,
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            const restored = usePlayerStore
+              .getState()
+              .restoreQueue({ queue, queueIndex, shufflePass, shufflePriority });
+            if (!restored) {
+              toast('Queue not restored', {
+                id: 'queue-cleared',
+                description: 'Tracks were added after it was cleared.',
+              });
+            }
+          },
+        },
+      });
+    }, [clearQueue]);
 
     const isNeobrutalism = useSettingsStore((s) => s.theme === 'neobrutalism');
     const [showFullHistory, setShowFullHistory] = useState(false);
@@ -230,7 +257,7 @@ export const QueueView = memo(
                 {queue.length > 0 && (
                   <button
                     type="button"
-                    onClick={clearQueue}
+                    onClick={handleClearQueue}
                     className="inline-flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.08em] shadow-[4px_4px_0_0_#000] transition-none hover:bg-[var(--signal-danger)] hover:text-white active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={2.5} />
@@ -434,7 +461,7 @@ export const QueueView = memo(
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={clearQueue}
+                  onClick={handleClearQueue}
                   className="h-10 rounded-full bg-white/[0.08] px-5 text-xs font-semibold text-white/80 transition-colors duration-[var(--motion-fast)] hover:bg-red-500/20 hover:text-red-200"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -811,7 +838,7 @@ const QueueRowBase = memo(
           className={clsx(
             'truncate text-[13px] mt-0.5',
             isNeobrutalism
-              ? 'font-bold uppercase tracking-[0.06em] text-black/55'
+              ? 'font-bold uppercase tracking-[0.06em] text-[#595959]'
               : 'font-medium text-white/60',
           )}
         >
@@ -958,7 +985,7 @@ const HistoryRow = memo(
           className={clsx(
             'truncate text-[12px] mt-0.5',
             isNeobrutalism
-              ? 'font-bold uppercase tracking-[0.06em] text-black/50'
+              ? 'font-bold uppercase tracking-[0.06em] text-[#595959]'
               : 'font-medium text-white/60',
           )}
         >
@@ -970,7 +997,7 @@ const HistoryRow = memo(
         className={clsx(
           'text-[12px] tabular-nums mr-2',
           isNeobrutalism
-            ? 'font-mono font-black text-black/50 group-hover:text-black/70'
+            ? 'font-mono font-black text-[#595959] group-hover:text-black'
             : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
         )}
       >

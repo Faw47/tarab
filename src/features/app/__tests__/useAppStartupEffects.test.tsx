@@ -17,6 +17,7 @@ vi.mock('../../../lib/performance', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
+  logError: vi.fn(),
 }));
 
 describe('useAppStartupEffects', () => {

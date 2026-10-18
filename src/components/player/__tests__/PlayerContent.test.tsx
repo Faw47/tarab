@@ -50,4 +50,32 @@ describe('PlayerContent', () => {
     expect(screen.getByTestId('player-progress-without-art')).toHaveClass('group');
     expect(screen.queryByAltText('Album cover')).not.toBeInTheDocument();
   });
+
+  it('shows elapsed and total time and a volume control in the default layout', () => {
+    // Regression for FE-12: the two-column layout had neither.
+    useSettingsStore.setState({ fullscreenPlayerLayout: true, fullscreenHideCoverArt: false });
+    usePlayerStore.setState({ currentTime: 42 });
+    renderPlayer();
+
+    expect(screen.getByTestId('player-elapsed')).toHaveTextContent('0:42');
+    expect(screen.getByTestId('player-duration')).toHaveTextContent('3:20');
+    expect(screen.getByRole('slider', { name: 'Volume' })).toBeInTheDocument();
+  });
+
+  it('lets the compact card reveal its seek bar', () => {
+    // Regression for FE-11: HidingProgressBar reveals on a group ancestor the card lacked.
+    useSettingsStore.setState({ fullscreenPlayerLayout: false });
+    const { container } = renderPlayer();
+
+    expect(container.querySelector('.max-w-5xl')).toHaveClass('group');
+  });
+
+  it('shows elapsed and total time in the compact card too', () => {
+    useSettingsStore.setState({ fullscreenPlayerLayout: false });
+    usePlayerStore.setState({ currentTime: 61 });
+    renderPlayer();
+
+    expect(screen.getByTestId('player-elapsed')).toHaveTextContent('1:01');
+    expect(screen.getByTestId('player-duration')).toHaveTextContent('3:20');
+  });
 });

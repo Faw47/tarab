@@ -26,6 +26,7 @@ const {
   preloadNextTrackMock,
   playAdjacentTrackMock,
   reportErrorMock,
+  logErrorMock,
 } = vi.hoisted(() => {
   const listeners = new Map<string, (event: { payload: unknown }) => unknown>();
   return {
@@ -43,6 +44,7 @@ const {
     preloadNextTrackMock: vi.fn(async () => undefined),
     playAdjacentTrackMock: vi.fn(async () => undefined),
     reportErrorMock: vi.fn(),
+    logErrorMock: vi.fn(),
   };
 });
 
@@ -70,6 +72,7 @@ vi.mock('../../../lib/playback-actions', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
+  logError: logErrorMock,
 }));
 
 const initialPlayerState = usePlayerStore.getState();
@@ -355,6 +358,10 @@ describe('usePlaybackLifecycle', () => {
         expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
       });
       expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^Skipped ".*" because it could not be played$/),
+        { source: 'app', detail: 'Unsupported format (/music/track-2.mp3)' },
+      );
     });
 
     it('stops instead of cycling when every remaining track fails', async () => {
@@ -426,7 +433,7 @@ describe('usePlaybackLifecycle', () => {
     });
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledTimes(1);
   });
-  it('reports play stats update failures after crossing 50%', async () => {
+  it('logs play stats update failures after crossing 50%', async () => {
     const error = new Error('stats failed');
     dbUpdatePlayStatsMock.mockRejectedValueOnce(error);
     render(<Harness />);
@@ -440,14 +447,14 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await waitFor(() => {
-      expect(reportErrorMock).toHaveBeenCalledWith('Failed to update play stats', {
+      expect(logErrorMock).toHaveBeenCalledWith('Failed to update play stats', {
         source: 'app',
         error,
       });
     });
   });
 
-  it('reports gapless preload failures', async () => {
+  it('logs gapless preload failures without notifying', async () => {
     const error = new Error('preload failed');
     preloadNextTrackMock.mockRejectedValueOnce(error);
     useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
@@ -460,7 +467,7 @@ describe('usePlaybackLifecycle', () => {
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
 
     await waitFor(() => {
-      expect(reportErrorMock).toHaveBeenCalledWith(
+      expect(logErrorMock).toHaveBeenCalledWith(
         'Failed to preload next track for gapless playback',
         { source: 'app', error },
       );
@@ -483,7 +490,9 @@ describe('usePlaybackLifecycle', () => {
       },
     });
 
-    expect(reportErrorMock).toHaveBeenCalledWith('Playback failed at stream', {
+    // The recovery banner reports it, so there is no second notification (FE-10, FE-31).
+    expect(reportErrorMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalledWith('Playback failed during stream', {
       source: 'audio-backend',
       detail: 'stream failed (/music/track-1.mp3)',
     });

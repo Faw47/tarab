@@ -73,6 +73,7 @@ vi.mock('../../../lib/playback-actions', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: vi.fn(),
+  logError: vi.fn(),
 }));
 
 import { LibraryView } from '../LibraryView';

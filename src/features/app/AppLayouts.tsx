@@ -18,6 +18,11 @@ const AppShellLiquidWebGL = lazy(() =>
   })),
 );
 
+// MotionConfig's reducedMotion only drops transform and layout animations; the player bar animates
+// height and opacity, so Reduced Effects (or the OS setting) makes those instant here.
+const INSTANT = { duration: 0 } as const;
+const BAR_TRANSITION = { duration: 0.25, ease: [0.32, 0.72, 0, 1] } as const;
+
 export interface AppLayoutsProps {
   theme: AppTheme;
   navMode: NavMode;
@@ -150,11 +155,12 @@ export function AppLayouts({
           />
 
           <main className="flex-1 overflow-hidden relative">
+            {/* Outside the scroll container so the banner stays in view while the page scrolls. */}
+            {overlayMessages}
             <div
               className="absolute inset-0 overflow-y-auto custom-scrollbar"
               onScroll={(event) => onScrollChange(event.currentTarget.scrollTop > 8)}
             >
-              {overlayMessages}
               <div key={currentView} className="main-content-view">
                 {currentViewContent}
               </div>
@@ -168,7 +174,7 @@ export function AppLayouts({
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: '6rem', opacity: 1 }} // h-24 = 6rem
                 exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                transition={reducedEffects ? INSTANT : BAR_TRANSITION}
                 className="border-t-2 border-black shrink-0 overflow-visible"
               >
                 <MiniPlayer
@@ -280,7 +286,7 @@ export function AppLayouts({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+            transition={reducedEffects ? INSTANT : BAR_TRANSITION}
             className="shrink-0 overflow-hidden"
           >
             <MiniPlayer
@@ -297,8 +303,8 @@ export function AppLayouts({
             key="pill-player"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 20, opacity: 0, transition: { duration: 0.15 } }}
-            transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1], delay: 0.1 }}
+            exit={{ y: 20, opacity: 0, transition: reducedEffects ? INSTANT : { duration: 0.15 } }}
+            transition={reducedEffects ? INSTANT : { ...BAR_TRANSITION, delay: 0.1 }}
             className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
           >
             <PillMiniPlayer onExpand={onExpandCollapsedPlayer} />

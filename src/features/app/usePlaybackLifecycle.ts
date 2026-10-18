@@ -5,7 +5,7 @@ import {
   playAdjacentTrack,
   preloadGaplessSource,
 } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { dbUpdatePlayStats } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
@@ -216,10 +216,10 @@ export function usePlaybackLifecycle() {
           if (!queryClient) return;
           await invalidateLibraryForMutation(queryClient, 'play-stats');
         })
-        .catch((error) => reportError('Failed to update play stats', { source: 'app', error }));
+        .catch((error) => logError('Failed to update play stats', { source: 'app', error }));
     },
     [],
-    (error) => reportError('Failed to setup playback position listener', { source: 'app', error }),
+    (error) => logError('Failed to setup playback position listener', { source: 'app', error }),
   );
 
   useTauriEvent<PlaybackNearEndEventPayload>(
@@ -241,7 +241,7 @@ export function usePlaybackLifecycle() {
                 if (preloadedGaplessRef.current === entry) {
                   preloadedGaplessRef.current = null;
                 }
-                reportError('Failed to preload next track for gapless playback', {
+                logError('Failed to preload next track for gapless playback', {
                   source: 'app',
                   error,
                 });
@@ -281,7 +281,7 @@ export function usePlaybackLifecycle() {
       })();
     },
     [],
-    (error) => reportError('Failed to setup near-end listener', { source: 'app', error }),
+    (error) => logError('Failed to setup near-end listener', { source: 'app', error }),
   );
 
   useTauriEvent<PlaybackTransitionEventPayload>(
@@ -329,8 +329,7 @@ export function usePlaybackLifecycle() {
       }
     },
     [],
-    (error) =>
-      reportError('Failed to setup playback transition listener', { source: 'app', error }),
+    (error) => logError('Failed to setup playback transition listener', { source: 'app', error }),
   );
 
   useTauriEvent<unknown>(
@@ -406,7 +405,7 @@ export function usePlaybackLifecycle() {
       })();
     },
     [],
-    (error) => reportError('Failed to setup playback-ended listener', { source: 'app', error }),
+    (error) => logError('Failed to setup playback-ended listener', { source: 'app', error }),
   );
 
   useTauriEvent<PlaybackErrorEventPayload>(
@@ -434,12 +433,12 @@ export function usePlaybackLifecycle() {
           return;
         }
 
-        const stageLabel = payload.stage ? `${payload.stage}` : 'playback';
         const detail = payload.filePath
           ? `${payload.message} (${payload.filePath})`
           : payload.message;
 
-        reportError(`Playback failed at ${stageLabel}`, {
+        // The recovery banner (full player and main shell) tells the user and offers actions.
+        logError(`Playback failed during ${payload.stage}`, {
           source: 'audio-backend',
           detail,
         });
@@ -463,11 +462,16 @@ export function usePlaybackLifecycle() {
           autoAdvance?.generation === payload.generation &&
           canAutoSkip(autoAdvance.skipped, state.queue.length)
         ) {
+          // Starting the next track clears the banner, so say what was skipped.
+          reportError(
+            `Skipped "${activeTrack?.title ?? 'a track'}" because it could not be played`,
+            { source: 'app', detail },
+          );
           await advanceQueueAutomatically(autoAdvanceRef, autoAdvance.skipped + 1);
         }
       })();
     },
     [],
-    (error) => reportError('Failed to setup playback-error listener', { source: 'app', error }),
+    (error) => logError('Failed to setup playback-error listener', { source: 'app', error }),
   );
 }

@@ -56,7 +56,7 @@ export const HidingProgressBar = memo(
         try {
           await seekToPosition(Math.max(0, Math.min(duration || 0, t)));
         } catch (e) {
-          reportError('seek failed', { source: 'hiding-progress-bar', error: e });
+          reportError('Could not seek', { source: 'hiding-progress-bar', error: e });
         }
       },
       [duration],

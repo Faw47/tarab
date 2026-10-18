@@ -74,7 +74,10 @@ export function useLaunchFileIntents({
     (event) => addIntent(event.payload),
     [addIntent],
     (error) => {
-      reportError('Failed to listen for file-open requests', { source: 'file-open', error });
+      reportError('Tarab cannot receive files opened from your file manager', {
+        source: 'file-open',
+        error,
+      });
     },
   );
 

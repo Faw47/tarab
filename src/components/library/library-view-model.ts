@@ -176,3 +176,44 @@ export function formatLongDuration(totalSeconds: number): string {
 
   return `${hours}h ${minutes}m`;
 }
+
+/**
+ * Empty-state copy for a library view with no results. "Your library is empty" is only true when
+ * there are no tracks at all; an empty facet or filter of a non-empty library says what is missing.
+ */
+export function libraryEmptyStateCopy({
+  trackCount,
+  facet,
+  smartFilter,
+}: {
+  trackCount: number;
+  facet: LibraryFacet;
+  smartFilter: LibrarySmartFilter;
+}): { title: string; message: string } {
+  if (trackCount === 0) {
+    return {
+      title: 'No music yet',
+      message: 'Your library is empty. Add folders to start building your music collection.',
+    };
+  }
+  if (smartFilter === 'missingArt') {
+    return { title: 'All covers present', message: 'Every track in this view has cover art.' };
+  }
+  if (smartFilter === 'untagged') {
+    return { title: 'All tracks tagged', message: 'Every track in this view has its tags.' };
+  }
+  switch (facet) {
+    case 'recent':
+      return {
+        title: 'Nothing added recently',
+        message: 'The tracks added to your library most recently appear here.',
+      };
+    case 'mostPlayed':
+      return {
+        title: 'Nothing played yet',
+        message: 'The tracks you play most will appear here.',
+      };
+    default:
+      return { title: 'No tracks found', message: 'No tracks match this view.' };
+  }
+}

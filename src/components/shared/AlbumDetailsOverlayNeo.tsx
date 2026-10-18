@@ -33,6 +33,7 @@ import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import type { AlbumDetailsOverlayProps } from './AlbumDetailsOverlay';
+import { moveTrackRowFocus, useTrackRowTabStop } from './album-track-rows';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,8 @@ const TrackRow = memo(
     handleRowActivate,
     handleTrackKeyDown,
     trackGridClass,
+    isTabStop,
+    onRowFocus,
   }: {
     track: Track;
     index: number;
@@ -110,6 +113,8 @@ const TrackRow = memo(
     handleRowActivate: (track: Track) => void;
     handleTrackKeyDown: (track: Track, e: ReactKeyboardEvent<HTMLDivElement>) => void;
     trackGridClass: string;
+    isTabStop: boolean;
+    onRowFocus: (id: string) => void;
   }) => {
     const rowPlaying = isCurrentTrack && isCurrentlyPlaying;
     const rowSelectedOnly = isSelected && !rowPlaying;
@@ -117,8 +122,9 @@ const TrackRow = memo(
     return (
       <div
         role="row"
-        tabIndex={0}
-        aria-selected={isSelected}
+        tabIndex={isTabStop ? 0 : -1}
+        aria-selected={selectionActive ? isSelected : undefined}
+        onFocus={() => onRowFocus(track.id)}
         onClick={(event) => {
           onTrackSelect?.(track, isMultiSelectKey(event));
         }}
@@ -142,7 +148,7 @@ const TrackRow = memo(
             'border-l-4 border-l-transparent bg-white hover:bg-[var(--neo-muted)]',
         )}
       >
-        <div role="cell" className="flex justify-center">
+        <div role="gridcell" className="flex justify-center">
           {selectionActive && (
             <button
               type="button"
@@ -151,6 +157,7 @@ const TrackRow = memo(
                 onTrackSelect?.(track, true);
               }}
               aria-label={isSelected ? `Deselect ${track.title}` : `Select ${track.title}`}
+              tabIndex={isTabStop ? 0 : -1}
               className="text-black"
             >
               {isSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
@@ -159,13 +166,13 @@ const TrackRow = memo(
         </div>
 
         <div
-          role="cell"
+          role="gridcell"
           className="text-center font-mono text-[13px] font-black tabular-nums text-black"
         >
           {String(index + 1).padStart(2, '0')}
         </div>
 
-        <div role="cell" className="min-w-0">
+        <div role="gridcell" className="min-w-0">
           <div className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2">
             {isCurrentTrack && isCurrentlyPlaying && (
               <div className="w-2 h-2 rounded-none bg-black animate-pulse shrink-0" />
@@ -177,7 +184,7 @@ const TrackRow = memo(
           </div>
         </div>
 
-        <div role="cell" className="text-right text-[12px] font-mono font-black text-black">
+        <div role="gridcell" className="text-right text-[12px] font-mono font-black text-black">
           {formatTime(track.duration)}
         </div>
       </div>
@@ -256,6 +263,8 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     onClearSelection,
     onSelectAll,
   });
+  const trackIds = useMemo(() => tracks.map((track) => track.id), [tracks]);
+  const { tabStopId, onRowFocus } = useTrackRowTabStop(trackIds);
   const canPlayAlbum = Boolean(onPlayAlbum && tracks.length > 0);
   const canShuffleAlbum = Boolean(onShuffleAlbum && tracks.length > 0);
 
@@ -314,7 +323,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     (track: Track) => {
       if (currentlyPlayingId === track.id) {
         void toggleCurrentPlayback().catch((error) => {
-          reportError('Failed to toggle track playback in neobrutalism overlay', {
+          reportError('Could not play or pause the track', {
             source: 'album-details-overlay-neo',
             error,
           });
@@ -328,9 +337,13 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
   const handleTrackKeyDown = useCallback(
     (track: Track, event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Keys pressed on the row's own buttons belong to those buttons.
+      if (event.target !== event.currentTarget) return;
+      if (moveTrackRowFocus(event)) return;
       if (event.key === 'Enter') {
         event.preventDefault();
         handleRowActivate(track);
+        return;
       }
 
       if (event.key === ' ' || event.key === 'Spacebar') {
@@ -426,7 +439,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                 className="flex flex-col justify-center rounded-none border-2 border-black bg-white p-6 md:p-8 shadow-[4px_4px_0_0_#000] animate-neo-pop"
                 style={{ animationDelay: '100ms' }}
               >
-                <p className="text-[12px] font-black uppercase tracking-[0.18em] text-black/50">
+                <p className="text-[12px] font-black uppercase tracking-[0.18em] text-[#595959]">
                   Album Release
                 </p>
                 <h1 className="mt-2 text-3xl md:text-5xl font-black uppercase leading-tight tracking-tight text-black break-words">
@@ -622,7 +635,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                 </div>
               </div>
 
-              <div role="table" aria-label={`${album} tracklist`}>
+              <div role="grid" aria-label={`${album} tracklist`}>
                 <div role="rowgroup" className="border-b-2 border-black bg-black text-white">
                   <div
                     role="row"
@@ -680,6 +693,8 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                         handleRowActivate={handleRowActivate}
                         handleTrackKeyDown={handleTrackKeyDown}
                         trackGridClass={TRACK_GRID}
+                        isTabStop={tabStopId === track.id}
+                        onRowFocus={onRowFocus}
                       />
                     ))}
                   </div>

@@ -23,7 +23,7 @@ vi.mock('../../store/playlist-store', () => ({
   usePlaylistStore: vi.fn((selector) => selector({ selectedPlaylistId: null })),
 }));
 
-vi.mock('../../lib/report-error', () => ({ reportError: vi.fn() }));
+vi.mock('../../lib/report-error', () => ({ reportError: vi.fn(), logError: vi.fn() }));
 
 import { PlaylistPickerDialog } from './PlaylistPickerDialog';
 

@@ -181,4 +181,33 @@ describe('player-store shuffle passes', () => {
     expect(usePlayerStore.getState().previewNext()?.track.id).toBe('a');
     expect(usePlayerStore.getState().previewNext({ ignoreRepeatOne: true })?.track.id).toBe('b');
   });
+
+  it('restores a cleared queue for undo, but not over a newer queue', () => {
+    // Regression for FE-20: Clear queue had no confirmation or undo.
+    const queue = [track('a'), track('b'), track('c')];
+    usePlayerStore.setState({ queue, queueIndex: 1, currentTrack: queue[1] });
+    const snapshot = { queue, queueIndex: 1, shufflePass: [], shufflePriority: [] };
+
+    usePlayerStore.getState().clearQueue();
+    expect(usePlayerStore.getState().queue).toHaveLength(0);
+    expect(usePlayerStore.getState().restoreQueue(snapshot)).toBe(true);
+    expect(usePlayerStore.getState().queue.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
+
+    usePlayerStore.getState().clearQueue();
+    usePlayerStore.setState({ queue: [track('z')], queueIndex: 0 });
+    expect(usePlayerStore.getState().restoreQueue(snapshot)).toBe(false);
+    expect(usePlayerStore.getState().queue.map((entry) => entry.id)).toEqual(['z']);
+  });
+
+  it('restores the index of the playing copy when a track is queued twice', () => {
+    const first = { ...track('a'), _queueId: 'q1' };
+    const second = { ...track('a'), _queueId: 'q2' };
+    const queue = [first, track('b'), second];
+    usePlayerStore.setState({ queue: [], queueIndex: -1, currentTrack: second });
+    // The saved index is stale (the entry moved), so the entry is found by its queue id.
+    const snapshot = { queue, queueIndex: 1, shufflePass: [], shufflePriority: [] };
+    expect(usePlayerStore.getState().restoreQueue(snapshot)).toBe(true);
+    expect(usePlayerStore.getState().queueIndex).toBe(2);
+  });
 });
