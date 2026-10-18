@@ -727,12 +727,16 @@ pub async fn get_batch_cover_art(
             file_paths
                 .par_iter()
                 .map(|path| {
-                    let art = Probe::open(Path::new(path))
-                        .ok()
-                        .and_then(|p| p.read().ok())
-                        .and_then(|file| {
-                            first_picture(&file).map(|pic| STANDARD.encode(pic.data()))
-                        });
+                    let art = crate::parse_guard::guard(path, || {
+                        Probe::open(Path::new(path))
+                            .ok()
+                            .and_then(|p| p.read().ok())
+                            .and_then(|file| {
+                                first_picture(&file).map(|pic| STANDARD.encode(pic.data()))
+                            })
+                    })
+                    .ok()
+                    .flatten();
                     (path.clone(), art)
                 })
                 .collect()
@@ -795,10 +799,14 @@ pub async fn generate_cover_art_hashes(
                         }
                     }
 
-                    let picture = Probe::open(Path::new(path))
-                        .ok()
-                        .and_then(|p| p.read().ok())
-                        .and_then(|file| first_picture(&file).cloned());
+                    let picture = crate::parse_guard::guard(path, || {
+                        Probe::open(Path::new(path))
+                            .ok()
+                            .and_then(|p| p.read().ok())
+                            .and_then(|file| first_picture(&file).cloned())
+                    })
+                    .ok()
+                    .flatten();
 
                     let result = picture.as_ref().and_then(|pic| {
                         let hash = cache.generate_thumbnails(pic.data()).ok()?;

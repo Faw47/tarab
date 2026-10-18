@@ -173,9 +173,6 @@ fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(),
     Ok(())
 }
 
-/// Replaces `target` without ever leaving it half-written. `write` fills a temporary sibling (a
-/// copy of `target` when `copy_original` is set), which is synced and renamed over `target`. A
-/// failure at any step leaves `target` unchanged and removes the temporary file.
 /// Moves a file, also across volumes. `fs::rename` cannot move between file systems (a library on
 /// an external drive or NAS mount and the Trash in app data); then the file is copied to a hidden
 /// temporary name in the target folder, synced, checked by length, renamed into place, and only
@@ -197,10 +194,18 @@ fn move_path_with(
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "Target has no parent")
     })?;
     let staged = parent.join(format!(".tarab-{:016x}.tmp", rand::random::<u64>()));
+    let source_permissions = fs::metadata(from)?.permissions();
+    // The copy is written through a handle created writable, so a read-only source (common for
+    // ripped music) can still be synced and cleaned up; its permissions are applied at the end.
     let copied = (|| {
-        let length = fs::copy(from, &staged)?;
-        fs::File::options().write(true).open(&staged)?.sync_all()?;
-        if length != fs::metadata(from)?.len() {
+        let mut source = fs::File::open(from)?;
+        let mut staged_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        let length = std::io::copy(&mut source, &mut staged_file)?;
+        staged_file.sync_all()?;
+        if length != source.metadata()?.len() {
             return Err(std::io::Error::other("The copied file is incomplete"));
         }
         fs::rename(&staged, to)
@@ -209,14 +214,36 @@ fn move_path_with(
         let _ = fs::remove_file(&staged);
         return Err(error);
     }
-    if let Err(error) = fs::remove_file(from) {
+    if let Err(error) = remove_file_even_if_read_only(from) {
         // Keep exactly one copy: undo the move rather than leave a duplicate.
         let _ = fs::remove_file(to);
         return Err(error);
     }
+    let _ = fs::set_permissions(to, source_permissions);
     Ok(())
 }
 
+/// Windows refuses to delete a file with the read-only attribute; Unix needs only a writable
+/// folder.
+fn remove_file_even_if_read_only(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            let mut permissions = fs::metadata(path)?.permissions();
+            if !permissions.readonly() {
+                return Err(error);
+            }
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(path, permissions)?;
+            fs::remove_file(path)
+        }
+        result => result,
+    }
+}
+
+/// Replaces `target` without ever leaving it half-written. `write` fills a temporary sibling (a
+/// copy of `target` when `copy_original` is set), which is synced and renamed over `target`. A
+/// failure at any step leaves `target` unchanged and removes the temporary file.
 pub(crate) fn replace_file_atomically(
     target: &Path,
     copy_original: bool,
@@ -1055,7 +1082,14 @@ fn list_trash_entries(trash_root: &Path) -> Vec<TrashedFileSummary> {
                 return None;
             }
             let record = read_trash_record(&entry.path().join(TRASH_RECORD_FILE)).ok()?;
-            if record.token != token {
+            let plain_name = matches!(
+                Path::new(&record.stored_file_name)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [std::path::Component::Normal(_)]
+            );
+            if record.version != 1 || record.token != token || !plain_name {
                 return None;
             }
             let size_bytes = fs::metadata(entry.path().join(&record.stored_file_name))
@@ -1454,6 +1488,21 @@ mod tests {
         assert_eq!(fs::read(&target).expect("read target"), b"audio bytes");
         let leftovers = fs::read_dir(dir.join("trash")).expect("list").count();
         assert_eq!(leftovers, 1, "no staged copy is left behind");
+
+        // Review regression for QA-02: a read-only source could not be synced or cleaned up.
+        let read_only = dir.join("ripped.flac");
+        fs::write(&read_only, b"ripped").expect("write read-only source");
+        let mut permissions = fs::metadata(&read_only).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&read_only, permissions).expect("set read-only");
+        let moved = dir.join("trash").join("ripped.flac");
+        move_path_with(&read_only, &moved, cross_device).expect("move read-only file");
+        assert!(!read_only.exists());
+        assert_eq!(fs::read(&moved).expect("read moved"), b"ripped");
+        assert!(fs::metadata(&moved)
+            .expect("moved metadata")
+            .permissions()
+            .readonly());
         let _ = fs::remove_dir_all(dir);
     }
 
