@@ -105,3 +105,31 @@ describe.each([false, true])('library tiles (neo: %s) (FE-21)', (isNeo) => {
     expect(onOpen).toHaveBeenCalledWith('Artist');
   });
 });
+
+describe('overlay buttons in neobrutalism', () => {
+  it('opt out of the global neo button chrome, which painted them as opaque white chips', async () => {
+    // Regression: neobrutalism.css gives every `button:not(.ghost)` a white fill, border and
+    // shadow, so the full-tile overlays blanked every neo library tile and Home card.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const css = readFileSync(join(__dirname, '../../../styles/neobrutalism.css'), 'utf8');
+    expect(css).toMatch(/button:not\(\.ghost\)/);
+
+    const { container } = render(
+      <TrackTile
+        track={track}
+        index={0}
+        searchQuery=""
+        isPlaying={false}
+        isSelected={false}
+        onPlayTrack={vi.fn()}
+        onDragStart={vi.fn()}
+        isLyricsMatch={false}
+        matchedLyricLine={null}
+        isNeo
+      />,
+    );
+    const proxy = container.querySelector('[data-tile-focus-proxy]');
+    expect(proxy).toHaveClass('ghost', 'bg-transparent');
+  });
+});
