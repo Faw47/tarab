@@ -13,17 +13,20 @@ const HERO_GLOW = 'var(--hero-glow)';
 
 export interface LiquidHomeAmbientBackdropProps {
   coverUrl: string | null | undefined;
+  /** True when the WebGL shell renders underneath; the opaque base would hide it completely. */
+  overShell?: boolean;
 }
 
 export const LiquidHomeAmbientBackdrop = memo(function LiquidHomeAmbientBackdrop({
   coverUrl,
+  overShell = false,
 }: LiquidHomeAmbientBackdropProps) {
   const reducedEffects = useEffectiveReducedEffects();
   const localAccent = useDominantColor(coverUrl ?? null);
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[4] overflow-hidden" aria-hidden="true">
-      <div className="absolute inset-0 bg-[#0d0b09]" />
+      {overShell ? null : <div className="absolute inset-0 bg-[#0d0b09]" />}
 
       {!coverUrl ? (
         <div
