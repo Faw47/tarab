@@ -198,6 +198,12 @@ Modal container:
 
 ## 10) Desktop-native polish patterns
 
+Startup accessibility:
+
+- Ordinary launches show the main window after startup detection.
+- A minimized login launch stays hidden only when settings load and the status icon is available and enabled.
+- If the status icon is disabled or unavailable, or settings hydration stalls for three seconds, show the main window. Effect teardown must not trigger a delayed window show.
+
 Mini window:
 
 - Always-on-top compact surface
