@@ -330,7 +330,7 @@ export const Sidebar = memo(function Sidebar({
     <aside
       className={cn(
         /* Liquid: stay fully transparent so shell/WebGL reads as one surface (no second blur stack). */
-        'relative hidden w-18 shrink-0 flex-col bg-transparent lg:flex',
+        'relative hidden w-18 shrink-0 flex-col bg-transparent md:flex',
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col">

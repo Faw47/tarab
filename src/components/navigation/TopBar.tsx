@@ -730,7 +730,7 @@ export const TopBar = memo(function TopBar({
 
         {/* Center Section: Search Pill (flex-none) */}
         <div
-          className="flex-none flex items-center justify-center w-full max-w-[min(100%,420px)] lg:max-w-[min(100%,520px)] px-2"
+          className="flex min-w-[160px] flex-[0_1_420px] items-center justify-center px-2 lg:flex-[0_1_520px]"
           style={chromeNoDragStyle}
         >
           <div

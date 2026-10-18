@@ -158,10 +158,12 @@ const NeoNavButton = memo(function NeoNavButton({
       type="button"
       onClick={() => onNavigate(view)}
       aria-current={isActive ? 'page' : undefined}
+      title={label}
       className={cn(
         BUTTON_BASE_CLASS,
         primaryButtonStateClass(isActive),
-        'h-10 px-0 pr-5 text-[12px] overflow-hidden',
+        // Icon-only below lg: four labelled tabs push the right-hand actions off an 800 px window.
+        'h-10 px-0 text-[12px] overflow-hidden lg:pr-5',
       )}
     >
       <div
@@ -172,7 +174,7 @@ const NeoNavButton = memo(function NeoNavButton({
       >
         <Icon className="h-4 w-4 shrink-0" strokeWidth={3} />
       </div>
-      <span className="ml-[6px]">{label}</span>
+      <span className="sr-only lg:not-sr-only lg:ml-[6px]">{label}</span>
     </button>
   );
 });
