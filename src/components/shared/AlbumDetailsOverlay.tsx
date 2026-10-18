@@ -35,6 +35,7 @@ import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { Button } from '../ui/button';
 import { QueueIcon as ListMusic, TrackIcon } from '../ui/Icons';
 import { cn, GlassCard } from '../ui/liquid-glass';
+import { moveTrackRowFocus } from './album-track-rows';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ============================================================================
@@ -232,7 +233,7 @@ const WAVE_BARS = [
 
 const WaveformBars = memo(
   ({ color, reducedEffects }: { color: string; reducedEffects: boolean }) => (
-    <div role="status" aria-label="Now playing" className="flex gap-0.5 items-end h-3.5">
+    <div aria-hidden="true" className="flex gap-0.5 items-end h-3.5">
       {WAVE_BARS.map((bar, i) => (
         <div
           key={i}
@@ -481,7 +482,13 @@ const TrackRow = memo(
         }}
         onTouchEnd={longPressHandlers.onTouchEnd}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') onPlayTrack?.(track);
+          // Keys pressed on the row's own buttons belong to those buttons.
+          if (e.target !== e.currentTarget) return;
+          if (moveTrackRowFocus(e)) return;
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onPlayTrack?.(track);
+          }
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -512,7 +519,7 @@ const TrackRow = memo(
             : undefined),
         }}
       >
-        <div role="cell" className="flex justify-center h-4 w-4">
+        <div role="gridcell" className="flex justify-center h-4 w-4">
           {selectionActive && (
             <button
               onClick={(e) => {
@@ -532,7 +539,7 @@ const TrackRow = memo(
         </div>
 
         <div
-          role="cell"
+          role="gridcell"
           className="relative flex items-center justify-center w-full h-full text-sm font-medium text-white/60"
         >
           {isPlayingNow ? (
@@ -542,7 +549,9 @@ const TrackRow = memo(
               <span
                 className={cn(
                   'font-mono tabular-nums transition-opacity duration-[var(--motion-fast)]',
-                  isCurrentTrack ? 'opacity-0' : 'group-hover:opacity-0',
+                  isCurrentTrack
+                    ? 'opacity-0'
+                    : 'group-hover:opacity-0 group-focus-within:opacity-0',
                 )}
                 style={{ color: isCurrentTrack ? inkTextColor : undefined }}
                 aria-hidden="true"
@@ -552,7 +561,9 @@ const TrackRow = memo(
               <div
                 className={cn(
                   'absolute inset-0 flex items-center justify-center transition-opacity duration-[var(--motion-fast)]',
-                  isCurrentTrack ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                  isCurrentTrack
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
                 )}
               >
                 <button
@@ -562,7 +573,7 @@ const TrackRow = memo(
                     onPlayTrack?.(track);
                   }}
                   aria-label={`Play ${track.title}`}
-                  className="flex h-7 w-7 items-center justify-center rounded-full shadow-md transition-[transform,box-shadow] duration-[var(--motion-fast)] hover:scale-110 active:scale-90"
+                  className="flex h-7 w-7 items-center justify-center rounded-full shadow-md transition-[transform,box-shadow] duration-[var(--motion-fast)] hover:scale-110 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
                   style={
                     isCurrentTrack
                       ? {
@@ -584,7 +595,7 @@ const TrackRow = memo(
           )}
         </div>
 
-        <div role="cell" className="flex flex-col min-w-0 pr-4">
+        <div role="gridcell" className="flex flex-col min-w-0 pr-4">
           <span
             className={cn(
               'text-[0.9375rem] font-bold truncate tracking-tight mb-0.5',
@@ -598,18 +609,21 @@ const TrackRow = memo(
           </span>
         </div>
 
-        <div role="cell" className="flex items-center justify-end gap-3 text-right">
+        <div role="gridcell" className="flex items-center justify-end gap-3 text-right">
           <span className="text-[0.8125rem] font-mono font-medium text-text-muted/60 tabular-nums">
             {formatTime(track.duration)}
           </span>
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onTrackContextMenu?.(e, track);
             }}
-            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-white/10 rounded-lg transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]"
+            aria-label={`More actions for ${track.title}`}
+            aria-haspopup="menu"
+            className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 p-1.5 hover:bg-white/10 rounded-lg transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
           >
-            <MoreHorizontal className="w-4 h-4" />
+            <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -1128,7 +1142,7 @@ export const AlbumDetailsOverlay = memo(
               </div>
             </div>
 
-            <div className="relative" role="table">
+            <div className="relative" role="grid" aria-label={`${album} tracklist`}>
               <div
                 className="absolute inset-0 rounded-3xl overflow-hidden -z-10 bg-black/40 border border-white/10"
                 style={{ backdropFilter: reducedEffects ? 'blur(4px)' : 'blur(12px)' }}

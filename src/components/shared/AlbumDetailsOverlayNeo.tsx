@@ -33,6 +33,7 @@ import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import type { AlbumDetailsOverlayProps } from './AlbumDetailsOverlay';
+import { moveTrackRowFocus } from './album-track-rows';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ---------------------------------------------------------------------------
@@ -142,7 +143,7 @@ const TrackRow = memo(
             'border-l-4 border-l-transparent bg-white hover:bg-[var(--neo-muted)]',
         )}
       >
-        <div role="cell" className="flex justify-center">
+        <div role="gridcell" className="flex justify-center">
           {selectionActive && (
             <button
               type="button"
@@ -159,13 +160,13 @@ const TrackRow = memo(
         </div>
 
         <div
-          role="cell"
+          role="gridcell"
           className="text-center font-mono text-[13px] font-black tabular-nums text-black"
         >
           {String(index + 1).padStart(2, '0')}
         </div>
 
-        <div role="cell" className="min-w-0">
+        <div role="gridcell" className="min-w-0">
           <div className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2">
             {isCurrentTrack && isCurrentlyPlaying && (
               <div className="w-2 h-2 rounded-none bg-black animate-pulse shrink-0" />
@@ -177,7 +178,7 @@ const TrackRow = memo(
           </div>
         </div>
 
-        <div role="cell" className="text-right text-[12px] font-mono font-black text-black">
+        <div role="gridcell" className="text-right text-[12px] font-mono font-black text-black">
           {formatTime(track.duration)}
         </div>
       </div>
@@ -328,9 +329,13 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
 
   const handleTrackKeyDown = useCallback(
     (track: Track, event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Keys pressed on the row's own buttons belong to those buttons.
+      if (event.target !== event.currentTarget) return;
+      if (moveTrackRowFocus(event)) return;
       if (event.key === 'Enter') {
         event.preventDefault();
         handleRowActivate(track);
+        return;
       }
 
       if (event.key === ' ' || event.key === 'Spacebar') {
@@ -622,7 +627,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                 </div>
               </div>
 
-              <div role="table" aria-label={`${album} tracklist`}>
+              <div role="grid" aria-label={`${album} tracklist`}>
                 <div role="rowgroup" className="border-b-2 border-black bg-black text-white">
                   <div
                     role="row"
