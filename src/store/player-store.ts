@@ -10,6 +10,14 @@ export interface PlaybackFailure {
   recoverable: boolean;
 }
 
+/** What `clearQueue` removed, kept by the caller for an undo. */
+export interface ClearedQueueSnapshot {
+  queue: Track[];
+  queueIndex: number;
+  shufflePass: string[];
+  shufflePriority: string[];
+}
+
 interface PlayerState {
   currentTrack: Track | null;
   queue: Track[];
@@ -43,6 +51,8 @@ interface PlayerState {
   addToQueue: (track: Track, position?: 'next' | 'last') => void;
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
+  /** Restores a queue cleared by `clearQueue` (undo), if nothing was queued since. */
+  restoreQueue: (snapshot: ClearedQueueSnapshot) => boolean;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   setQueueIndex: (index: number) => void;
   setCurrentTime: (time: number) => void;
@@ -321,6 +331,27 @@ export const usePlayerStore = create<PlayerState>()(
           false,
           'player/clearQueue',
         ),
+
+      restoreQueue: (snapshot) => {
+        const { queue, currentTrack } = get();
+        if (queue.length > 0) return false;
+        const sameEntry = snapshot.queue[snapshot.queueIndex]?.id === currentTrack?.id;
+        const queueIndex = sameEntry
+          ? snapshot.queueIndex
+          : snapshot.queue.findIndex((track) => track.id === currentTrack?.id);
+        set(
+          (state) => ({
+            queue: snapshot.queue,
+            queueIndex,
+            queueVersion: state.queueVersion + 1,
+            shufflePass: snapshot.shufflePass,
+            shufflePriority: snapshot.shufflePriority,
+          }),
+          false,
+          'player/restoreQueue',
+        );
+        return true;
+      },
 
       reorderQueue: (fromIndex, toIndex) => {
         const { queue, queueIndex } = get();
