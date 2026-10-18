@@ -184,7 +184,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-46 | P3 | Two settings behave inconsistently with their defaults or lifecycle | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-37 | P3 | Collapsed pill player is not keyboard-operable and is mispositioned | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-41 | P3 | Virtualized lists lack list semantics; queue drag-and-drop sees only rendered rows | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | PENDING | G1 tests added / G2 - / G3 - | The provider requested RAF continuously while paused or without subscribers. It now runs only while playing with listeners, publishes once on pause, and lets imperative readers compute time on demand. Five tests cover the loop lifecycle. CI and independent review pending. | 13ff91c, a21e4bf | #14 (draft) |
 | AR-20 | P3 | A single `Mutex<Connection>` serializes every read behind long write transactions | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-31 | P3 | Redundant UI dependencies | PENDING | - | Audit confidence CONFIRMED. | - | - |
