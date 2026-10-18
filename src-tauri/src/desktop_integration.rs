@@ -35,6 +35,7 @@ const MENU_VIEW_SHOW_MAIN_ID: &str = "desktop.menu.view.show-main";
 const MENU_VIEW_TOGGLE_MINI_ID: &str = "desktop.menu.view.toggle-mini";
 const MENU_WINDOW_SHOW_MAIN_ID: &str = "desktop.menu.window.show-main";
 const MENU_QUIT_ID: &str = "desktop.menu.quit";
+const MENU_HELP_ID: &str = "help.help";
 
 const TRAY_TRACK_LABEL_ID: &str = "desktop.tray.track-label";
 const TRAY_PLAY_PAUSE_ID: &str = "desktop.tray.play-pause";
@@ -182,6 +183,11 @@ pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>
     app_handle.on_menu_event(|app, event| {
         if let Some(action) = desktop_action_for_menu_id(event.id().as_ref()) {
             emit_desktop_control_action(app, action);
+        } else if cfg!(not(target_os = "macos")) {
+            // The macOS menu already forwards help.help from macos_menu.rs.
+            if let Some(action) = native_menu_action_for_menu_id(event.id().as_ref()) {
+                let _ = app.emit_to(MAIN_WINDOW_LABEL, "native-menu-action", action);
+            }
         }
     });
 
@@ -504,9 +510,7 @@ fn build_app_menu(app: &AppHandle<Wry>) -> tauri::Result<DesktopMenuHandles> {
         .item(&window_show_main)
         .build()?;
 
-    let help_item = MenuItemBuilder::new("Tarab Help")
-        .enabled(false)
-        .build(app)?;
+    let help_item = MenuItemBuilder::with_id(MENU_HELP_ID, "Tarab Help").build(app)?;
     let help_submenu = SubmenuBuilder::new(app, "Help").item(&help_item).build()?;
 
     let menu = MenuBuilder::new(app)
@@ -718,6 +722,13 @@ fn emit_desktop_control_action<R: Runtime>(app: &AppHandle<R>, action: DesktopCo
     let _ = app.emit_to(MAIN_WINDOW_LABEL, EVENT_DESKTOP_CONTROL_ACTION, action);
 }
 
+fn native_menu_action_for_menu_id(id: &str) -> Option<&'static str> {
+    match id {
+        MENU_HELP_ID => Some(MENU_HELP_ID),
+        _ => None,
+    }
+}
+
 fn desktop_action_for_menu_id(id: &str) -> Option<DesktopControlAction> {
     match id {
         MENU_PLAY_PAUSE_ID | TRAY_PLAY_PAUSE_ID => Some(DesktopControlAction::TogglePlay),
@@ -802,6 +813,14 @@ mod tests {
             decode_optional_artwork(Some(&"AAAA".to_string())),
             Some(vec![0, 0, 0])
         );
+    }
+
+    #[test]
+    fn help_menu_routes_to_the_renderer() {
+        // Regression for QA-10: the non-macOS Help item was disabled and had no action ID.
+        assert_eq!(native_menu_action_for_menu_id(MENU_HELP_ID), Some("help.help"));
+        assert_eq!(native_menu_action_for_menu_id("desktop.menu.unknown"), None);
+        assert_eq!(desktop_action_for_menu_id(MENU_HELP_ID), None);
     }
 
     #[test]
