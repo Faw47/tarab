@@ -219,6 +219,15 @@ pub fn should_hide_main_window_on_close(app: &AppHandle<Wry>) -> bool {
     playback.is_playing
 }
 
+fn is_minimized_launch(arguments: &[String]) -> bool {
+    arguments.iter().skip(1).any(|argument| argument == "--minimized")
+}
+
+#[tauri::command]
+pub fn desktop_should_start_minimized() -> bool {
+    is_minimized_launch(&std::env::args().collect::<Vec<_>>())
+}
+
 #[tauri::command]
 pub fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<DesktopIntegrationState>() else {
@@ -813,6 +822,21 @@ mod tests {
             decode_optional_artwork(Some(&"AAAA".to_string())),
             Some(vec![0, 0, 0])
         );
+    }
+
+    #[test]
+    fn minimized_launch_only_matches_the_explicit_flag() {
+        // Regression for QA-11: autostart's --minimized was never consumed.
+        assert!(is_minimized_launch(&[
+            "tarab".to_string(),
+            "--minimized".to_string(),
+        ]));
+        assert!(!is_minimized_launch(&["tarab".to_string()]));
+        assert!(!is_minimized_launch(&[
+            "tarab".to_string(),
+            "--minimized-extra".to_string(),
+        ]));
+        assert!(!is_minimized_launch(&["--minimized".to_string()]));
     }
 
     #[test]
