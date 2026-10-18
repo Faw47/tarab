@@ -10,7 +10,7 @@ The current 1.0.0 proof matrix is in `docs/release-evidence-1.0.0.md`.
 | --- | --- | --- | --- |
 | `core-main` | `main` | Main-window event listen/unlisten/emit-to routing, startup show, Windows window controls, and liquid-glass support/effect access. | Main only. Avoid `core:default` and `core:event:default`; add exact core permissions when a reviewed renderer API needs them. |
 | `core-mini` | `mini-player` | Snapshot/control events plus mini-window drag and minimize. | Mini only. No app/menu/tray/image/path/webview defaults and no direct backend/library ownership. |
-| `opener` | `main` | Reveal files in the system file manager from reviewed main-window flows. | Main only and reveal-only. Do not add open-url/open-path permission unless a reviewed user-facing flow needs it. |
+| `opener` | `main` | Reveal files in the system file manager; open the Tarab Help README link. | Main only: reveal-item plus an exact URL scope for `https://github.com/Faw47/tarab#readme`. Do not grant generic open-url/open-path access or mini-player URL access. |
 | `dialog` | `main` | Native open dialogs for library grants, playlist folders, audio, and image selection. | Main only and `dialog:allow-open` only. Library authority is created by the Rust picker command, not by a renderer path. |
 | `store` | none | Renderer store access is disabled. | Fixed main-window Rust commands own `settings.json` and `tarab-player.dat`. Mini gets snapshots from main, not persistent ownership. |
 | `deep-link` | `main` | Rust reads cold-start URLs and forwards running-instance events. | Main only with empty plugin command permissions. The custom startup command returns only URLs registered for the `tarab` scheme. |
