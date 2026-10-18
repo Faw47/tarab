@@ -66,6 +66,21 @@ describe('SmoothTimeProvider frame scheduling (FE-42)', () => {
     expect(requestFrameMock).not.toHaveBeenCalled();
   });
 
+  it('notifies paused subscribers after seeking without scheduling frames', () => {
+    getTimeMsMock.mockImplementation(() => usePlayerStore.getState().currentTime * 1000);
+    const onTime = vi.fn();
+    render(
+      <SmoothTimeProvider>
+        <Subscriber onTime={onTime} />
+      </SmoothTimeProvider>,
+    );
+
+    act(() => usePlayerStore.getState().setCurrentTime(35));
+
+    expect(onTime).toHaveBeenCalledWith(35);
+    expect(requestFrameMock).not.toHaveBeenCalled();
+  });
+
   it('animates while playing and cancels the loop on pause', () => {
     const onTime = vi.fn();
     usePlayerStore.getState().setIsPlaying(true);
