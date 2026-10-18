@@ -220,7 +220,10 @@ pub fn should_hide_main_window_on_close(app: &AppHandle<Wry>) -> bool {
 }
 
 fn is_minimized_launch(arguments: &[String]) -> bool {
-    arguments.iter().skip(1).any(|argument| argument == "--minimized")
+    arguments
+        .iter()
+        .skip(1)
+        .any(|argument| argument == "--minimized")
 }
 
 #[tauri::command]
