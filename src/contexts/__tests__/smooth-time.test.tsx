@@ -33,6 +33,7 @@ function Reader({ onRead }: { onRead: (getTime: () => number) => void }) {
 describe('SmoothTimeProvider frame scheduling (FE-42)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getTimeMsMock.mockImplementation(() => 5000);
     usePlayerStore.setState(initialPlayerState, true);
     frames.length = 0;
     vi.stubGlobal('requestAnimationFrame', requestFrameMock);
