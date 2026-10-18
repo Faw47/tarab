@@ -226,9 +226,16 @@ fn is_minimized_launch(arguments: &[String]) -> bool {
         .any(|argument| argument == "--minimized")
 }
 
+fn should_start_minimized(arguments: &[String], tray_available: bool) -> bool {
+    is_minimized_launch(arguments) && tray_available
+}
+
 #[tauri::command]
-pub fn desktop_should_start_minimized() -> bool {
-    is_minimized_launch(&std::env::args().collect::<Vec<_>>())
+pub fn desktop_should_start_minimized(app: AppHandle) -> bool {
+    let tray_available = app
+        .try_state::<DesktopIntegrationState>()
+        .is_some_and(|state| state.tray_handles.is_some());
+    should_start_minimized(&std::env::args().collect::<Vec<_>>(), tray_available)
 }
 
 #[tauri::command]
@@ -840,6 +847,10 @@ mod tests {
             "--minimized-extra".to_string(),
         ]));
         assert!(!is_minimized_launch(&["--minimized".to_string()]));
+        // An unavailable tray must never leave the app hidden at startup.
+        let minimized = ["tarab".to_string(), "--minimized".to_string()];
+        assert!(should_start_minimized(&minimized, true));
+        assert!(!should_start_minimized(&minimized, false));
     }
 
     #[test]
