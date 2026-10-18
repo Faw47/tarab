@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NavView } from '../../../components/navigation';
 import { useAppStartupEffects } from '../useAppStartupEffects';
@@ -12,6 +13,7 @@ const { minimizedMock, iconEnabledMock, hydratedMock } = vi.hoisted(() => ({
 const recordPerfBudgetMock = vi.hoisted(() => vi.fn());
 const reportErrorMock = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.hoisted(() => vi.fn());
+const hydrationListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: showMock }),
@@ -25,7 +27,10 @@ vi.mock('../../../store/settings-store', () => ({
   useSettingsStore: {
     persist: {
       hasHydrated: hydratedMock,
-      onFinishHydration: vi.fn(() => () => undefined),
+      onFinishHydration: (listener: () => void) => {
+        hydrationListeners.add(listener);
+        return () => hydrationListeners.delete(listener);
+      },
     },
     getState: () => ({ desktopStatusIconEnabled: iconEnabledMock() }),
   },
@@ -43,6 +48,7 @@ vi.mock('../../../lib/report-error', () => ({
 describe('useAppStartupEffects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hydrationListeners.clear();
     showMock.mockResolvedValue(undefined);
     minimizedMock.mockResolvedValue(false);
     iconEnabledMock.mockReturnValue(true);
@@ -122,6 +128,85 @@ describe('useAppStartupEffects', () => {
         await vi.advanceTimersByTimeAsync(200);
       });
       expect(showMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    'timeout',
+    'hydration',
+  ] as const)('does not show an unmounted minimized window after settings %s', async (completion) => {
+    minimizedMock.mockResolvedValue(true);
+    hydratedMock.mockReturnValue(false);
+    iconEnabledMock.mockReturnValue(false);
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderHook(() =>
+        useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(hydrationListeners.size).toBe(1);
+      unmount();
+
+      await act(async () => {
+        if (completion === 'hydration') {
+          hydratedMock.mockReturnValue(true);
+          for (const listener of [...hydrationListeners]) listener();
+        }
+        await vi.advanceTimersByTimeAsync(3200);
+      });
+
+      expect(showMock).not.toHaveBeenCalled();
+      expect(reportErrorMock).not.toHaveBeenCalled();
+      expect(hydrationListeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    true,
+    false,
+  ])('uses the hydrated status-icon setting (%s) before the timeout', async (enabled) => {
+    minimizedMock.mockResolvedValue(true);
+    hydratedMock.mockReturnValue(false);
+    iconEnabledMock.mockReturnValue(enabled);
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        hydratedMock.mockReturnValue(true);
+        for (const listener of [...hydrationListeners]) listener();
+        await vi.advanceTimersByTimeAsync(3200);
+      });
+
+      expect(showMock).toHaveBeenCalledTimes(enabled ? 0 : 1);
+      expect(hydrationListeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows only the active StrictMode startup after stalled hydration', async () => {
+    minimizedMock.mockResolvedValue(true);
+    hydratedMock.mockReturnValue(false);
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }), {
+        wrapper: StrictMode,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3200);
+      });
+
+      expect(showMock).toHaveBeenCalledTimes(1);
+      expect(hydrationListeners.size).toBe(0);
     } finally {
       vi.useRealTimers();
     }
