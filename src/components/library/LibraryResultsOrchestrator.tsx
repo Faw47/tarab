@@ -86,7 +86,9 @@ function TileFocusProxy({
       type="button"
       aria-label={label}
       data-tile-focus-proxy
-      className="pointer-events-none absolute inset-0 z-30 rounded-[inherit]"
+      // `ghost` opts out of the neobrutalism rule that gives every button a white fill, border
+      // and shadow; without it this overlay blanked every neo tile.
+      className="ghost pointer-events-none absolute inset-0 z-30 rounded-[inherit] bg-transparent"
       onClick={(event) => {
         // Only Enter, Space or an assistive-technology click reach this button.
         event.stopPropagation();

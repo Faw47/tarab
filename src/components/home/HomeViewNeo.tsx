@@ -244,7 +244,8 @@ const NeoAlbumCard = memo(
         {/* Open and Play are sibling buttons, so Enter on Play plays instead of opening. */}
         <button
           type="button"
-          className="absolute inset-0 z-10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-black"
+          // `ghost`: the neo rule styles every other button as an opaque white chip, which hid the card.
+          className="ghost absolute inset-0 z-10 bg-transparent focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-black"
           onClick={open}
           aria-label={`Open ${track.album} by ${track.artist}`}
         />
