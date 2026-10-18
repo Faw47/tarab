@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getLyricsForTrack, writeLyricsForTrack, writeTags } from '../../../lib/tauri-commands';
 import type { Track } from '../../../types';
+import { lyricsEquivalent } from '../LyricsEditor';
 import { TagEditorModal } from '../TagEditorModal';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -31,6 +33,14 @@ const track: Track = {
   hasCoverArt: false,
   dateAdded: 0,
 };
+
+function renderLyricsTab() {
+  const onClose = vi.fn();
+  render(
+    <TagEditorModal tracks={[track]} onClose={onClose} onSave={vi.fn()} initialTab="lyrics" />,
+  );
+  return { onClose };
+}
 
 async function renderEditor() {
   const onClose = vi.fn();
@@ -84,5 +94,52 @@ describe('TagEditorModal unsaved changes (FE-25)', () => {
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     title.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('does not call reformatted but unedited lyrics a change', async () => {
+    const loaded = '[ti:Song]\r\n[00:01.234] Hello\r\n[00:05.00] World\r\n';
+    vi.mocked(getLyricsForTrack).mockResolvedValueOnce(loaded);
+    const { onClose } = renderLyricsTab();
+    expect(await screen.findByText('Hello')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save Changes/ })).toBeEnabled());
+    // The loaded text survives the editor mounting before it arrived.
+    expect(screen.getByText('World')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByText('Hello'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save Changes also writes edited lyrics', async () => {
+    vi.mocked(getLyricsForTrack).mockResolvedValueOnce('[00:01.00] Hello\n[00:05.00] World');
+    vi.mocked(writeTags).mockResolvedValueOnce({ status: 'success' } as never);
+    const { onClose } = renderLyricsTab();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save Changes/ })).toBeEnabled());
+    const [deleteFirst] = await screen.findAllByRole('button', { name: 'Delete line' });
+    fireEvent.click(deleteFirst);
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(writeLyricsForTrack).toHaveBeenCalledWith('/music/a.flac', '[00:05.00] World');
+  });
+
+  it('Escape in a lyric line edit cancels that edit and keeps the editor open', async () => {
+    vi.mocked(getLyricsForTrack).mockResolvedValueOnce('[00:01.00] Hello');
+    const { onClose } = renderLyricsTab();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit lyric text' }))[0]);
+    const input = screen.getByRole('textbox', { name: 'Edit lyric text' });
+    fireEvent.change(input, { target: { value: 'Changed' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Edit lyric text' })).toBeNull(),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText('Discard unsaved changes?')).toBeNull();
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+});
+
+describe('lyricsEquivalent', () => {
+  it('ignores LRC formatting but not text changes', () => {
+    expect(lyricsEquivalent('[00:01.50] A\r\n', '[00:01.500]A')).toBe(true);
+    expect(lyricsEquivalent('[00:01.50] A', '[00:01.50] B')).toBe(false);
+    expect(lyricsEquivalent('plain words', 'other words')).toBe(false);
   });
 });

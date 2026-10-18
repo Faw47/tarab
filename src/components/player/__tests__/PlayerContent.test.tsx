@@ -69,4 +69,13 @@ describe('PlayerContent', () => {
 
     expect(container.querySelector('.max-w-5xl')).toHaveClass('group');
   });
+
+  it('shows elapsed and total time in the compact card too', () => {
+    useSettingsStore.setState({ fullscreenPlayerLayout: false });
+    usePlayerStore.setState({ currentTime: 61 });
+    renderPlayer();
+
+    expect(screen.getByTestId('player-elapsed')).toHaveTextContent('1:01');
+    expect(screen.getByTestId('player-duration')).toHaveTextContent('3:20');
+  });
 });

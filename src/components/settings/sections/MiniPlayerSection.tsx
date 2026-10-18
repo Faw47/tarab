@@ -15,7 +15,7 @@ export const MiniPlayerSection = memo(function MiniPlayerSection() {
   return (
     <SettingsSection
       title="Now Playing Bar"
-      description="The player bar at the bottom of the window outside Home."
+      description="The player bar at the bottom of the window. The Liquid theme hides it on Home, which has its own player."
       icon={<Monitor size={16} />}
     >
       <SettingsSwitch

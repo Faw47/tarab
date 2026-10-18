@@ -32,7 +32,7 @@ import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { IconButton } from '../ui/IconButton';
-import { LyricsEditor } from './LyricsEditor';
+import { LyricsEditor, lyricsEquivalent } from './LyricsEditor';
 import { TagEditorArtworkPanel } from './TagEditorArtworkPanel';
 import { TagEditorFileInfo } from './TagEditorFileInfo';
 import { TagEditorMetadataForm } from './TagEditorMetadataForm';
@@ -504,6 +504,11 @@ export const TagEditorModal = memo(
           if (removeCover) {
             await removeCoverArt(tracks[0].filePath);
           }
+          // Save Changes covers the Lyrics tab too, so closing never drops lyric edits.
+          if (!lyricsEquivalent(lyricsContent, loadedLyrics)) {
+            await writeLyricsForTrack(tracks[0].filePath, lyricsContent);
+            setLoadedLyrics(lyricsContent);
+          }
           await refreshTracksByFilePaths([tracks[0].filePath]);
         }
 
@@ -530,6 +535,8 @@ export const TagEditorModal = memo(
       newCoverArt,
       removeCover,
       extendedFields,
+      lyricsContent,
+      loadedLyrics,
       onSave,
       onClose,
     ]);
@@ -632,7 +639,7 @@ export const TagEditorModal = memo(
       !isLoading &&
       (newCoverArt !== null ||
         removeCover ||
-        lyricsContent !== loadedLyrics ||
+        !lyricsEquivalent(lyricsContent, loadedLyrics) ||
         tagFieldsKey({
           title,
           artist,
@@ -660,6 +667,12 @@ export const TagEditorModal = memo(
       <Dialog open onOpenChange={(open) => !open && requestClose()}>
         <DialogContent
           showCloseButton={false}
+          onEscapeKeyDown={(event) => {
+            // Escape in a field that cancels its own edit (a lyric line) must not close the editor.
+            if (event.target instanceof Element && event.target.closest('[data-local-escape]')) {
+              event.preventDefault();
+            }
+          }}
           className="inset-0 top-0 left-0 z-50 block h-screen max-h-none w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 bg-background p-0 text-text-primary shadow-none"
         >
           <DialogTitle className="sr-only">Metadata editor</DialogTitle>

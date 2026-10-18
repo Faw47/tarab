@@ -1,14 +1,6 @@
 import { toast } from 'sonner';
 import { clipboard } from '../platform/clipboard';
 
-export const APP_ERROR_EVENT = 'tarab:error';
-
-export interface AppErrorPayload {
-  message: string;
-  detail?: string;
-  source?: string;
-}
-
 const toMessage = (value: unknown): string | undefined => {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.message;
@@ -55,8 +47,8 @@ export const logError = (rawMessage: unknown, options?: ErrorOptions) => {
 };
 
 /**
- * Logs a failure and tells the user once, with a toast. The persistent banner is reserved for
- * the error boundary (`APP_ERROR_EVENT`), so one failure no longer shows up twice.
+ * Logs a failure and tells the user once, with a toast. Failures that need an action stay on
+ * screen through their own surfaces (playback recovery, playlist repair), not through this.
  */
 export const reportError = (rawMessage: unknown, options?: ErrorOptions) => {
   logError(rawMessage, options);

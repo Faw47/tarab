@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { startPlayback } from '../../lib/playback-actions';
-import { logError, reportError } from '../../lib/report-error';
+import { reportError } from '../../lib/report-error';
 import {
   getTrackMetadata,
   type LaunchFileIntent,
@@ -74,7 +74,10 @@ export function useLaunchFileIntents({
     (event) => addIntent(event.payload),
     [addIntent],
     (error) => {
-      logError('Failed to listen for file-open requests', { source: 'file-open', error });
+      reportError('Tarab cannot receive files opened from your file manager', {
+        source: 'file-open',
+        error,
+      });
     },
   );
 

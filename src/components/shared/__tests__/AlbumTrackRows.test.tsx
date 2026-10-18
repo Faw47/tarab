@@ -51,6 +51,23 @@ describe.each([
     expect(rows[2]).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('keeps one row in the tab order and marks selection only while selecting', () => {
+    renderOverlay(Overlay);
+    const grid = screen.getByRole('grid');
+    const rows = within(grid).getAllByRole('row').slice(1);
+    expect(rows.map((row) => row.tabIndex)).toEqual([0, -1, -1]);
+    for (const row of rows) expect(row).not.toHaveAttribute('aria-selected');
+    // Only rows and their header are owned by the grid.
+    for (const child of Array.from(grid.children)) {
+      expect(child.getAttribute('role')).toBe('rowgroup');
+    }
+
+    rows[0].focus();
+    fireEvent.keyDown(rows[0], { key: 'ArrowDown' });
+    expect(rows[1]).toHaveFocus();
+    expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0, -1]);
+  });
+
   it('moves focus between rows with arrow, Home and End keys', () => {
     renderOverlay(Overlay);
     const rows = within(screen.getByRole('grid')).getAllByRole('row').slice(1);

@@ -978,7 +978,9 @@
 }
 
 .library-v2-track-tile:hover .library-v2-play-overlay,
-.library-v2-album-tile:hover .library-v2-play-overlay {
+.library-v2-album-tile:hover .library-v2-play-overlay,
+.library-v2-track-tile:focus-within .library-v2-play-overlay,
+.library-v2-album-tile:focus-within .library-v2-play-overlay {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1012,6 +1014,7 @@
 }
 
 .library-v2-track-tile:hover .library-v2-select-dot,
+.library-v2-track-tile:focus-within .library-v2-select-dot,
 .library-v2-select-dot.is-selected {
   opacity: 1;
 }
@@ -1263,14 +1266,18 @@
 .library-v2-detail-play:focus-visible,
 .library-v2-detail-back:focus-visible,
 .library-v2-tab:focus-visible,
-.library-v2-track-tile:focus-visible,
-.library-v2-album-tile:focus-visible,
 .library-v2-selection-actions button:focus-visible,
 .library-v2-view-mode button:focus-visible,
 .library-v2-play-overlay:focus-visible,
 .library-v2-select-dot:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
   outline-offset: 2px;
+}
+
+/* Tiles clip their overflow, so the tile focus ring is drawn inside the edge. */
+[data-tile-focus-proxy]:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+  outline-offset: -3px;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */

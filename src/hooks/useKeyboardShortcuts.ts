@@ -7,11 +7,9 @@ import type { ContextMenuPosition, Track } from '../types';
 
 interface UseKeyboardShortcutsParams {
   setContextMenuPosition: (pos: ContextMenuPosition | null) => void;
-  setTagEditorTracks: (tracks: Track[] | null) => void;
   setShowFullPlayer: (show: boolean) => void;
   setSelectedTracks: React.Dispatch<React.SetStateAction<Track[]>>;
   contextMenuPosition: ContextMenuPosition | null;
-  tagEditorTracks: Track[] | null;
   showFullPlayer: boolean;
   selectedTracks: Track[];
   canGoBack?: boolean;
@@ -43,11 +41,9 @@ const isInteractiveTarget = (target: EventTarget | null): boolean => {
 
 export const useKeyboardShortcuts = ({
   setContextMenuPosition,
-  setTagEditorTracks,
   setShowFullPlayer,
   setSelectedTracks,
   contextMenuPosition,
-  tagEditorTracks,
   showFullPlayer,
   selectedTracks,
   canGoBack = false,
@@ -61,8 +57,6 @@ export const useKeyboardShortcuts = ({
   showFullPlayerRef.current = showFullPlayer;
   const contextMenuRef = useRef(contextMenuPosition);
   contextMenuRef.current = contextMenuPosition;
-  const tagEditorRef = useRef(tagEditorTracks);
-  tagEditorRef.current = tagEditorTracks;
   const selectedRef = useRef(selectedTracks);
   selectedRef.current = selectedTracks;
   const canGoBackRef = useRef(canGoBack);
@@ -184,10 +178,9 @@ export const useKeyboardShortcuts = ({
         }
 
         case 'Escape':
+          // The tag editor is a dialog that handles Escape itself (with an unsaved-changes check).
           if (contextMenuRef.current) {
             setContextMenuPosition(null);
-          } else if (tagEditorRef.current) {
-            setTagEditorTracks(null);
           } else if (showFullPlayerRef.current) {
             setShowFullPlayer(false);
           } else if (selectedRef.current.length > 0) {
@@ -201,5 +194,5 @@ export const useKeyboardShortcuts = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setContextMenuPosition, setTagEditorTracks, setShowFullPlayer, setSelectedTracks]);
+  }, [setContextMenuPosition, setShowFullPlayer, setSelectedTracks]);
 };

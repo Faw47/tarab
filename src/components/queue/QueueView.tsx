@@ -95,13 +95,21 @@ export const QueueView = memo(
       if (queue.length === 0) return;
       clearQueue();
       toast('Queue cleared', {
+        // One toast: a later clear replaces it, so Undo always restores the latest queue.
+        id: 'queue-cleared',
         description: `${queue.length} ${queue.length === 1 ? 'track' : 'tracks'} removed.`,
         action: {
           label: 'Undo',
           onClick: () => {
-            usePlayerStore
+            const restored = usePlayerStore
               .getState()
               .restoreQueue({ queue, queueIndex, shufflePass, shufflePriority });
+            if (!restored) {
+              toast('Queue not restored', {
+                id: 'queue-cleared',
+                description: 'Tracks were added after it was cleared.',
+              });
+            }
           },
         },
       });
@@ -830,7 +838,7 @@ const QueueRowBase = memo(
           className={clsx(
             'truncate text-[13px] mt-0.5',
             isNeobrutalism
-              ? 'font-bold uppercase tracking-[0.06em] text-black/55'
+              ? 'font-bold uppercase tracking-[0.06em] text-[#595959]'
               : 'font-medium text-white/60',
           )}
         >
@@ -977,7 +985,7 @@ const HistoryRow = memo(
           className={clsx(
             'truncate text-[12px] mt-0.5',
             isNeobrutalism
-              ? 'font-bold uppercase tracking-[0.06em] text-black/50'
+              ? 'font-bold uppercase tracking-[0.06em] text-[#595959]'
               : 'font-medium text-white/60',
           )}
         >
@@ -989,7 +997,7 @@ const HistoryRow = memo(
         className={clsx(
           'text-[12px] tabular-nums mr-2',
           isNeobrutalism
-            ? 'font-mono font-black text-black/50 group-hover:text-black/70'
+            ? 'font-mono font-black text-[#595959] group-hover:text-black'
             : 'font-medium text-white/50 group-hover:text-white/70 transition-colors',
         )}
       >

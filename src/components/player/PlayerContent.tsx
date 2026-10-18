@@ -817,6 +817,8 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               <LyricsSnippet />
             </div>
 
+            <PlayerTimeReadout className="mb-3" />
+
             {/* Bottom: Controls */}
             <div className="flex items-center justify-between gap-4 mt-auto">
               <div className="flex items-center gap-4">
@@ -845,7 +847,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                 >
                   <SkipForward className="w-5 h-5" fill="currentColor" />
                 </IconButton>
-                <div className="hidden lg:block ml-2">
+                <div className="hidden md:block ml-2">
                   <PlayerVolume />
                 </div>
               </div>

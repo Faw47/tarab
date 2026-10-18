@@ -48,11 +48,9 @@ describe('PlaybackRecoveryBanner (FE-10)', () => {
   it('shows plain wording and the recovery actions in the main shell', () => {
     render(
       <AppOverlayMessages
-        appError={null}
         playlistRepair={null}
         playbackRecovery={<PlaybackRecoveryBanner theme="liquid-glass" placement="shell" />}
         theme="liquid-glass"
-        onDismissError={vi.fn()}
         onRetryPlaylistLoad={vi.fn()}
         onResetPlaylistData={vi.fn()}
         onOpenPlaylistsDataFolder={vi.fn()}

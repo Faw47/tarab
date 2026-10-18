@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useState } from 'react';
 
 /**
  * Moves focus between the rows of an album tracklist grid with the arrow,
@@ -25,4 +25,15 @@ export function moveTrackRowFocus(event: ReactKeyboardEvent<HTMLElement>): boole
   event.preventDefault();
   next?.focus();
   return true;
+}
+
+/**
+ * Roving tab stop for a tracklist grid: one row is in the tab order (the last focused one, else the
+ * first), so Tab moves past the list instead of through every row.
+ */
+export function useTrackRowTabStop(trackIds: readonly string[]) {
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const tabStopId = focusedId && trackIds.includes(focusedId) ? focusedId : (trackIds[0] ?? null);
+  const onRowFocus = useCallback((id: string) => setFocusedId(id), []);
+  return { tabStopId, onRowFocus };
 }

@@ -49,4 +49,15 @@ describe('MiniPlayerLyrics', () => {
     });
     expect(screen.getByText('second line')).toBeInTheDocument();
   });
+
+  it('shows the right line when lyrics arrive while paused', () => {
+    usePlayerStore.setState({ lyrics: null, isPlaying: false, currentTime: 6 });
+    render(<MiniPlayerLyrics />);
+    expect(screen.queryByText('second line')).toBeNull();
+
+    act(() => {
+      usePlayerStore.setState({ lyrics: { lines, synced: true } as never });
+    });
+    expect(screen.getByText('second line')).toBeInTheDocument();
+  });
 });

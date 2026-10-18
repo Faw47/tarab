@@ -132,7 +132,7 @@ export const SettingsShell = memo(function SettingsShell({
             className={cn(
               'text-xs',
               isNeobrutalism
-                ? 'font-bold uppercase tracking-[0.1em] text-black/55'
+                ? 'font-bold uppercase tracking-[0.1em] text-[#595959]'
                 : 'text-white/40',
             )}
           >

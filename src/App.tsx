@@ -19,7 +19,6 @@ import {
 } from './features/app/AppTransientSurfaces';
 import { AppViewRenderer } from './features/app/AppViewRenderer';
 import { useAppCommandActions } from './features/app/useAppCommandActions';
-import { useAppErrorEvent } from './features/app/useAppErrorEvent';
 import { useAppSearchShell } from './features/app/useAppSearchShell';
 import { useAppSessionPersistence } from './features/app/useAppSessionPersistence';
 import { useAppShellPalette } from './features/app/useAppShellPalette';
@@ -107,8 +106,6 @@ const App = () => {
 
   const [isScrolled, setIsScrolled] = useState(false);
   const [showFullPlayer, setShowFullPlayer] = useState(false);
-
-  const { appError, setAppError } = useAppErrorEvent();
 
   // Tag editor
 
@@ -337,11 +334,9 @@ const App = () => {
 
   useKeyboardShortcuts({
     setContextMenuPosition,
-    setTagEditorTracks,
     setShowFullPlayer,
     setSelectedTracks,
     contextMenuPosition,
-    tagEditorTracks,
     showFullPlayer,
     selectedTracks,
     canGoBack,
@@ -491,15 +486,14 @@ const App = () => {
 
   const overlayMessages = (
     <AppOverlayMessages
-      appError={appError}
       playlistRepair={playlistRepair}
+      belowHeader={isAlbumView && theme !== 'neobrutalism'}
       playbackRecovery={
         hasPlaybackError && !showFullPlayer ? (
           <PlaybackRecoveryBanner theme={theme} placement="shell" />
         ) : null
       }
       theme={theme}
-      onDismissError={() => setAppError(null)}
       onRetryPlaylistLoad={() => void handleRetryPlaylistLoad()}
       onResetPlaylistData={handleResetPlaylistData}
       onOpenPlaylistsDataFolder={() => void handleOpenPlaylistsDataFolder()}

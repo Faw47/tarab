@@ -142,6 +142,17 @@ const linesToLRC = (lines: LyricLine[]): string =>
     .map((line) => `${formatLRCTime(line.time)} ${line.text}`)
     .join('\n');
 
+/**
+ * True when two lyric texts hold the same timed lines. The sync view rewrites loaded LRC
+ * (headers, CRLF, millisecond stamps, trailing newline) without any edit, so a plain string
+ * compare would report changes nobody made.
+ */
+export const lyricsEquivalent = (a: string, b: string): boolean => {
+  if (a === b) return true;
+  const parsedA = parseLRC(a);
+  return parsedA.length > 0 && linesToLRC(parsedA) === linesToLRC(parseLRC(b));
+};
+
 const REPEAT_DURATION = 5; // seconds
 
 export const LyricsEditor = memo(
@@ -190,10 +201,14 @@ export const LyricsEditor = memo(
     const [userScrolled, setUserScrolled] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const lastExternalLyricsRef = useRef(lyricsContent);
+    // Set when new lyrics arrive from the parent; the sync effect in the same commit still sees
+    // the old lines and must not echo them back over the new text.
+    const skipNextSyncRef = useRef(false);
 
     useEffect(() => {
       if (lastExternalLyricsRef.current === lyricsContent) return;
       lastExternalLyricsRef.current = lyricsContent;
+      skipNextSyncRef.current = true;
       const parsed = parseLRC(lyricsContent);
       dispatch({ type: 'reset', lines: parsed });
       setTextContent(lyricsContent);
@@ -265,6 +280,10 @@ export const LyricsEditor = memo(
     // Sync lines → parent only from sync view to avoid circular updates
     useEffect(() => {
       if (view !== 'sync') return;
+      if (skipNextSyncRef.current) {
+        skipNextSyncRef.current = false;
+        return;
+      }
       const newContent = linesToLRC(lines);
       if (newContent !== lyricsContent) onChange(newContent);
     }, [lines, view, lyricsContent, onChange]);
@@ -724,6 +743,7 @@ export const LyricsEditor = memo(
                               if (e.key === 'Escape') handleCancelEdit();
                             }}
                             autoFocus
+                            data-local-escape
                             className="flex-1 bg-white/10 rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
                             onClick={(e) => e.stopPropagation()}
                             aria-label="Edit lyric text"

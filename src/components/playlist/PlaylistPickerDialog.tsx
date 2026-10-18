@@ -173,7 +173,7 @@ export const PlaylistPickerDialog = memo(
                       <p
                         className={clsx(
                           'text-xs mt-0.5',
-                          isNeobrutalism ? 'font-bold text-black/50' : 'text-text-muted',
+                          isNeobrutalism ? 'font-bold text-[#595959]' : 'text-text-muted',
                         )}
                       >
                         {playlist.trackCount} tracks

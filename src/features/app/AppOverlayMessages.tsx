@@ -1,34 +1,31 @@
-import { X } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
-import { IconButton } from '../../components/ui/IconButton';
 import { cn } from '../../lib/utils';
 import type { AppTheme } from '../../store/settings-store';
 import type { PlaylistRepairState } from './app-state-types';
 
 export interface AppOverlayMessagesProps {
-  appError: { message: string; detail?: string } | null;
   playlistRepair: PlaylistRepairState | null;
   /** Playback recovery actions, rendered first while a playback failure is unresolved. */
   playbackRecovery?: ReactNode;
+  /** True when a transparent header overlays the content (liquid album view). */
+  belowHeader?: boolean;
   theme: AppTheme;
-  onDismissError: () => void;
   onRetryPlaylistLoad: () => void;
   onResetPlaylistData: () => void;
   onOpenPlaylistsDataFolder: () => void;
 }
 
 export const AppOverlayMessages = memo(function AppOverlayMessages({
-  appError,
   playlistRepair,
   playbackRecovery,
+  belowHeader = false,
   theme,
-  onDismissError,
   onRetryPlaylistLoad,
   onResetPlaylistData,
   onOpenPlaylistsDataFolder,
 }: AppOverlayMessagesProps) {
-  if (!appError && !playlistRepair && !playbackRecovery) return null;
+  if (!playlistRepair && !playbackRecovery) return null;
 
   const isNeo = theme === 'neobrutalism';
   const playlistWasRecovered = Boolean(
@@ -36,54 +33,13 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
   );
 
   return (
-    <div className="absolute left-8 right-8 top-4 z-40 flex flex-col gap-3">
+    <div
+      className={cn(
+        'absolute left-8 right-8 z-40 flex flex-col gap-3',
+        belowHeader ? 'top-[4.5rem]' : 'top-4',
+      )}
+    >
       {playbackRecovery}
-      {appError ? (
-        <div
-          role="alert"
-          className={cn(
-            'flex items-start justify-between gap-4 p-4 text-sm',
-            isNeo
-              ? 'rounded-none border-[3px] border-black bg-[#D88274] shadow-[6px_6px_0_0_#000]'
-              : 'rounded-2xl border border-red-400/40 bg-red-950/55 backdrop-blur-sm',
-          )}
-        >
-          <div>
-            <p
-              className={cn(
-                isNeo
-                  ? 'font-black uppercase tracking-[0.08em] text-black'
-                  : 'font-semibold text-red-100',
-              )}
-            >
-              {appError.message}
-            </p>
-            {appError.detail ? (
-              <p className={cn('mt-1', isNeo ? 'font-bold text-black' : 'text-red-200/85')}>
-                {appError.detail}
-              </p>
-            ) : null}
-          </div>
-          <IconButton
-            size="sm"
-            variant={isNeo ? 'default' : 'ghost'}
-            className={cn(
-              'shrink-0',
-              isNeo
-                ? 'rounded-none border-2 border-black bg-white text-black shadow-[2px_2px_0_0_#000] hover:bg-[var(--neo-muted)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none'
-                : 'text-red-100 hover:text-white',
-            )}
-            onClick={onDismissError}
-            aria-label="Dismiss error"
-          >
-            <X
-              className={cn('h-4 w-4', isNeo ? 'text-black' : 'text-red-100')}
-              strokeWidth={isNeo ? 3 : undefined}
-            />
-          </IconButton>
-        </div>
-      ) : null}
-
       {playlistRepair ? (
         <div
           role="status"

@@ -13,7 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSmoothTimeSubscription, useSmoothTimeValue } from '../../contexts/smooth-time';
 import { useRenderLog } from '../../lib/performance';
@@ -55,6 +55,12 @@ export const MiniPlayerLyrics = memo(() => {
     const next = lyrics ? activeLyricIndex(lyrics.lines, nextTimeSec * 1000) : -1;
     setLineIndex((current) => (current === next ? current : next));
   });
+
+  // New lyrics (another track, or lyrics loaded while paused) re-resolve the line at once.
+  useEffect(() => {
+    const timeMs = usePlayerStore.getState().currentTime * 1000;
+    setLineIndex(lyrics ? activeLyricIndex(lyrics.lines, timeMs) : -1);
+  }, [lyrics]);
 
   const currentLyricLine = lyrics?.lines[lineIndex]?.text ?? null;
 

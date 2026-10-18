@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { APP_ERROR_EVENT, logError, reportError } from '../report-error';
+import { logError, reportError } from '../report-error';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('../../platform/clipboard', () => ({ clipboard: { writeText: vi.fn() } }));
@@ -25,15 +25,11 @@ describe('reportError', () => {
     ]);
   });
 
-  it('notifies once: a toast, not also the persistent banner (FE-31)', () => {
+  it('notifies once, with a toast that repeats replace (FE-31)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const banner = vi.fn();
-    window.addEventListener(APP_ERROR_EVENT, banner);
 
     reportError('Could not seek', { error: new Error('stream closed') });
-    window.removeEventListener(APP_ERROR_EVENT, banner);
 
-    expect(banner).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith(
       'Could not seek',

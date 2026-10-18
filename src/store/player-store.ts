@@ -335,10 +335,17 @@ export const usePlayerStore = create<PlayerState>()(
       restoreQueue: (snapshot) => {
         const { queue, currentTrack } = get();
         if (queue.length > 0) return false;
-        const sameEntry = snapshot.queue[snapshot.queueIndex]?.id === currentTrack?.id;
-        const queueIndex = sameEntry
+        // Match the queue entry (`_queueId`) first, so a track queued twice resolves to the right one.
+        const isCurrent = (track: Track | undefined) =>
+          currentTrack?._queueId
+            ? track?._queueId === currentTrack._queueId
+            : track?.id === currentTrack?.id;
+        let queueIndex = isCurrent(snapshot.queue[snapshot.queueIndex])
           ? snapshot.queueIndex
-          : snapshot.queue.findIndex((track) => track.id === currentTrack?.id);
+          : snapshot.queue.findIndex(isCurrent);
+        if (queueIndex < 0) {
+          queueIndex = snapshot.queue.findIndex((track) => track.id === currentTrack?.id);
+        }
         set(
           (state) => ({
             queue: snapshot.queue,

@@ -1,5 +1,5 @@
 import { Check, Play } from 'lucide-react';
-import type { CSSProperties, DragEvent } from 'react';
+import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { getContextMenuPosition } from '../../lib/context-menu-position';
@@ -69,6 +69,33 @@ interface TrackTileProps {
   isNeo?: boolean;
 }
 
+/**
+ * Keyboard and assistive-technology target for a library tile. It covers the tile but ignores the
+ * pointer, so mouse input reaches the tile (select, open, drag, context menu) while the tile's Play
+ * and Select buttons stay its siblings instead of being nested inside a role="button".
+ */
+function TileFocusProxy({
+  label,
+  onActivate,
+}: {
+  label: string;
+  onActivate: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      data-tile-focus-proxy
+      className="pointer-events-none absolute inset-0 z-30 rounded-[inherit]"
+      onClick={(event) => {
+        // Only Enter, Space or an assistive-technology click reach this button.
+        event.stopPropagation();
+        onActivate(event);
+      }}
+    />
+  );
+}
+
 const TrackTile = memo(function TrackTile({
   track,
   index,
@@ -87,11 +114,7 @@ const TrackTile = memo(function TrackTile({
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         draggable
-        aria-selected={isSelected}
-        aria-label={`${track.title} by ${track.artist}`}
         className={cn(
           NEO_CARD_BASE,
           'aspect-[4/5] flex min-w-0 flex-col',
@@ -112,20 +135,18 @@ const TrackTile = memo(function TrackTile({
           onTrackContextMenu(track, { x, y });
         }}
         onDragStart={(event) => onDragStart(event, track)}
-        onKeyDown={(event) => {
-          // Keys aimed at an inner control (Play) belong to that control.
-          if (event.target !== event.currentTarget) return;
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
+      >
+        <TileFocusProxy
+          label={`${track.title} by ${track.artist}${isSelected ? ', selected' : ''}`}
+          onActivate={(event) => {
             const multi = event.metaKey || event.ctrlKey || event.shiftKey;
             if (onTrackSelect) {
               onTrackSelect(track, multi);
               return;
             }
             onPlayTrack(track);
-          }
-        }}
-      >
+          }}
+        />
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -179,11 +200,7 @@ const TrackTile = memo(function TrackTile({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
       draggable
-      aria-selected={isSelected}
-      aria-label={`${track.title} by ${track.artist}`}
       className={cn('library-v2-track-tile', isSelected && 'is-selected')}
       onClick={(event) => {
         const multi = event.metaKey || event.ctrlKey || event.shiftKey;
@@ -198,15 +215,13 @@ const TrackTile = memo(function TrackTile({
         onTrackContextMenu(track, { x, y });
       }}
       onDragStart={(event) => onDragStart(event, track)}
-      onKeyDown={(event) => {
-        // Keys aimed at an inner control (Play) belong to that control.
-        if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onPlayTrack(track);
-        }
-      }}
     >
+      <TileFocusProxy
+        label={`${track.title} by ${track.artist}${isSelected ? ', selected' : ''}`}
+        onActivate={() => {
+          onPlayTrack(track);
+        }}
+      />
       <div className="library-v2-track-media">
         <CoverArtImage
           track={track}
@@ -291,8 +306,6 @@ const AlbumTile = memo(function AlbumTile({
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
           NEO_CARD_BASE,
           'aspect-[4/5] flex min-w-0 flex-col',
@@ -300,16 +313,13 @@ const AlbumTile = memo(function AlbumTile({
           isPlayingAlbum && NEO_CARD_PLAYING,
         )}
         onClick={() => onOpen(album.track)}
-        onKeyDown={(event) => {
-          // Keys aimed at an inner control (Play) belong to that control.
-          if (event.target !== event.currentTarget) return;
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onOpen(album.track);
-          }
-        }}
-        aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
       >
+        <TileFocusProxy
+          label={`Open album ${album.track.album} by ${album.track.artist}`}
+          onActivate={() => {
+            onOpen(album.track);
+          }}
+        />
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -362,24 +372,18 @@ const AlbumTile = memo(function AlbumTile({
   if (isFeatured) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
           'library-v2-album-tile group relative overflow-hidden rounded-[22px] border border-white/10 bg-black/25',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
           'library-v2-album-featured-span',
         )}
         onClick={() => onOpen(album.track)}
-        onKeyDown={(event) => {
-          // Keys aimed at an inner control (Play) belong to that control.
-          if (event.target !== event.currentTarget) return;
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onOpen(album.track);
-          }
-        }}
-        aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
       >
+        <TileFocusProxy
+          label={`Open album ${album.track.album} by ${album.track.artist}`}
+          onActivate={() => {
+            onOpen(album.track);
+          }}
+        />
         <div className="library-v2-album-featured-layout h-full min-h-[160px]">
           <div className="library-v2-album-featured-media relative overflow-hidden aspect-square">
             <CoverArtImage
@@ -400,7 +404,7 @@ const AlbumTile = memo(function AlbumTile({
             />
             <button
               type="button"
-              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-visible:opacity-100"
+              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 group-focus-within:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 onPlay(album.track);
@@ -448,23 +452,15 @@ const AlbumTile = memo(function AlbumTile({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
-      className={cn(
-        'library-v2-album-tile group relative overflow-hidden rounded-[18px]',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/28',
-      )}
+      className={cn('library-v2-album-tile group relative overflow-hidden rounded-[18px]')}
       onClick={() => onOpen(album.track)}
-      onKeyDown={(event) => {
-        // Keys aimed at an inner control (Play) belong to that control.
-        if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onOpen(album.track);
-        }
-      }}
-      aria-label={`Open album ${album.track.album} by ${album.track.artist}`}
     >
+      <TileFocusProxy
+        label={`Open album ${album.track.album} by ${album.track.artist}`}
+        onActivate={() => {
+          onOpen(album.track);
+        }}
+      />
       <div className="library-v2-album-media relative w-full aspect-square">
         <CoverArtImage
           track={album.track}
@@ -476,16 +472,16 @@ const AlbumTile = memo(function AlbumTile({
           alt={album.track.album}
         />
         <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-hover:opacity-100"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[var(--motion-emphasis)] group-hover:opacity-100 group-focus-within:opacity-100"
           style={{
             background:
               'linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.18) 52%, rgba(0,0,0,0.90) 100%)',
           }}
         />
-        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-[var(--motion-standard)] group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute z-20 top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-[0.18em] text-white/70 bg-black/50 backdrop-blur-sm border border-white/[0.10] opacity-0 -translate-y-1 transition-[opacity,transform] duration-[var(--motion-standard)] group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
           {album.count} {album.count === 1 ? 'track' : 'tracks'}
         </div>
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] group-hover:opacity-100 group-hover:translate-y-0">
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 p-3 flex items-end justify-between gap-3 opacity-0 translate-y-1.5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
           <Button
             variant="ghost"
             size="icon"
@@ -538,8 +534,6 @@ const ArtistTile = memo(function ArtistTile({
   if (isNeo) {
     return (
       <article
-        role="button"
-        tabIndex={0}
         className={cn(
           NEO_CARD_BASE,
           'aspect-[4/5] flex min-w-0 flex-col pt-4 pb-7',
@@ -547,16 +541,13 @@ const ArtistTile = memo(function ArtistTile({
           isPlayingArtist && NEO_CARD_PLAYING,
         )}
         onClick={() => onOpen(artist.artist)}
-        onKeyDown={(event) => {
-          // Keys aimed at an inner control (Play) belong to that control.
-          if (event.target !== event.currentTarget) return;
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onOpen(artist.artist);
-          }
-        }}
-        aria-label={`Open artist ${artist.artist}`}
       >
+        <TileFocusProxy
+          label={`Open artist ${artist.artist}`}
+          onActivate={() => {
+            onOpen(artist.artist);
+          }}
+        />
         <div
           className={cn(NEO_TAPE_STYLE, getAlbumTapeRotationClass(index))}
           style={TAPE_INNER_STYLE}
@@ -614,21 +605,13 @@ const ArtistTile = memo(function ArtistTile({
   }
 
   return (
-    <article
-      role="button"
-      tabIndex={0}
-      className="library-v2-track-tile"
-      onClick={() => onOpen(artist.artist)}
-      onKeyDown={(event) => {
-        // Keys aimed at an inner control (Play) belong to that control.
-        if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
+    <article className="library-v2-track-tile" onClick={() => onOpen(artist.artist)}>
+      <TileFocusProxy
+        label={`Open artist ${artist.artist}`}
+        onActivate={() => {
           onOpen(artist.artist);
-        }
-      }}
-      aria-label={`Open artist ${artist.artist}`}
-    >
+        }}
+      />
       <div className="library-v2-track-media">
         {artist.coverArt ? (
           <img
@@ -903,3 +886,5 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
 
   return null;
 });
+
+export { AlbumTile, ArtistTile, TrackTile };

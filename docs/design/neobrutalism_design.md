@@ -291,8 +291,10 @@ The lime green appears exactly where it needs to: when a track is playing, the c
 
 Active states are fill-based. Never outline-based.
 
-Keyboard focus is the exception: it uses a two-tone ring (3px black outline, 2px offset, over a 2px
-white gap) so it is visible on white paper and on black panels. Muted text is `#595959` or darker
+Keyboard focus is the exception: it uses a two-tone ring (a 3px black outline at a 2px offset with
+a 2px white halo around it, drawn with `filter: drop-shadow`) so it is visible on white paper and on
+black panels. The halo is not a `box-shadow`, so a focused control keeps its hard shadow and does not
+look pressed. Muted text is `#595959` or darker
 (at least 4.5:1) and never smaller than 12px.
 
 **The rule:** when an element is selected, active, current, or focused, its background fills with a solid color. It does not get a thicker border. It does not change text color alone. It does not get an underline.

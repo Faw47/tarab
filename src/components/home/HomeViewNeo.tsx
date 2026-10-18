@@ -316,7 +316,7 @@ const NeoAlbumCard = memo(
         <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-black/50">
+        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]">
           {track.artist}
         </p>
       </div>

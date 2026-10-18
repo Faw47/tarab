@@ -1,5 +1,4 @@
 import React from 'react';
-import { APP_ERROR_EVENT, type AppErrorPayload } from '../../lib/report-error';
 
 interface AppErrorBoundaryState {
   error: Error | null;
@@ -30,16 +29,6 @@ export class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    const detail: AppErrorPayload = {
-      message: 'Unexpected application error',
-      detail: error.message,
-      source: 'error-boundary',
-    };
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent<AppErrorPayload>(APP_ERROR_EVENT, { detail }));
-    }
-
     this.setState({ stack: errorInfo.componentStack || null });
     console.error('[error-boundary] uncaught error', error, errorInfo);
   }

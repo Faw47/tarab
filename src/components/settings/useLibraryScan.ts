@@ -599,7 +599,12 @@ export function useLibraryScan(): UseLibraryScanResult {
 
     void watchLibraryPaths(libraryFolders).catch((error) => {
       if (!disposed) {
-        logError('Failed to setup filesystem watchers', { source: 'library-scan', error });
+        // The library still works without watchers, but stops updating on its own.
+        reportError('Tarab cannot watch your music folders for changes', {
+          source: 'library-scan',
+          detail: 'New and changed files appear after the next rescan.',
+          error,
+        });
       }
     });
 

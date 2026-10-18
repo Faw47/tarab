@@ -206,7 +206,7 @@ export function libraryEmptyStateCopy({
     case 'recent':
       return {
         title: 'Nothing added recently',
-        message: 'Tracks added to your library in the last 30 days appear here.',
+        message: 'The tracks added to your library most recently appear here.',
       };
     case 'mostPlayed':
       return {
