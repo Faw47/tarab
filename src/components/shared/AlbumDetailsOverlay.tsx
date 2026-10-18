@@ -29,7 +29,7 @@ import { getCoverArtBlobFallback, useCoverArt } from '../../hooks/useCoverArt';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { isCoverArtProtocolUrl } from '../../lib/cover-art-url';
 import { formatTime } from '../../lib/format-time';
-import { reportError } from '../../lib/report-error';
+import { logError } from '../../lib/report-error';
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { Button } from '../ui/button';
@@ -213,7 +213,7 @@ const useResolvedCoverArt = (src: string | undefined, track: Track | null) => {
           return;
         }
       } catch (err) {
-        reportError('Failed to load thumbnail via IPC', {
+        logError('Failed to load thumbnail via IPC', {
           source: 'album-details-overlay',
           error: err,
         });

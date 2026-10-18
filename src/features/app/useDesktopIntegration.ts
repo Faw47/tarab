@@ -8,7 +8,7 @@ import {
   seekToPosition,
   toggleCurrentPlayback,
 } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import {
   desktopFocusMainWindow,
   desktopQuitApplication,
@@ -134,7 +134,7 @@ export function useDesktopIntegration() {
     try {
       await desktopSetNativeUiState(nativeState);
     } catch (error) {
-      reportError('Failed to sync desktop native UI state', {
+      logError('Failed to sync desktop native UI state', {
         source: 'desktop-bridge',
         error,
       });
@@ -208,7 +208,7 @@ export function useDesktopIntegration() {
       }
     } catch (error) {
       lastMediaMetadataKeyRef.current = null;
-      reportError('Failed to sync desktop media session', {
+      logError('Failed to sync desktop media session', {
         source: 'desktop-bridge',
         error,
       });
@@ -222,7 +222,7 @@ export function useDesktopIntegration() {
     },
     [emitDesktopSnapshotToMini],
     (error) =>
-      reportError('Failed to setup desktop snapshot listener', { source: 'desktop-bridge', error }),
+      logError('Failed to setup desktop snapshot listener', { source: 'desktop-bridge', error }),
   );
 
   useEffect(() => {
@@ -367,7 +367,7 @@ export function useDesktopIntegration() {
     },
     [miniWindowEnabled],
     (error) =>
-      reportError('Failed to setup desktop action listener', { source: 'desktop-bridge', error }),
+      logError('Failed to setup desktop action listener', { source: 'desktop-bridge', error }),
   );
 
   useTauriEvent<DesktopSeekPayload>(
@@ -383,7 +383,7 @@ export function useDesktopIntegration() {
     },
     [miniWindowEnabled],
     (error) =>
-      reportError('Failed to setup desktop seek listener', { source: 'desktop-bridge', error }),
+      logError('Failed to setup desktop seek listener', { source: 'desktop-bridge', error }),
   );
 
   useTauriEvent<void>(
@@ -399,7 +399,6 @@ export function useDesktopIntegration() {
         });
     },
     [],
-    (error) =>
-      reportError('Failed to setup menu-quit listener', { source: 'desktop-bridge', error }),
+    (error) => logError('Failed to setup menu-quit listener', { source: 'desktop-bridge', error }),
   );
 }

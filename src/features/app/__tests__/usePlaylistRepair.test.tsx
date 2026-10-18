@@ -26,6 +26,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
+  logError: vi.fn(),
 }));
 
 function renderPlaylistRepair() {

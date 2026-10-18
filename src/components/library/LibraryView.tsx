@@ -27,7 +27,7 @@ import { getAlbumArtist } from '../../lib/album-key';
 import { coverArtUrl } from '../../lib/cover-art-url';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
 import { type LibrarySearchScope, useLibraryStore } from '../../store/library-store';
@@ -857,7 +857,7 @@ export const LibraryView = memo(function LibraryView({
         applyCoverArtHashes(hashes);
         hashes.forEach(([path]) => prefetchedCoverArt.current.add(path));
       } catch (error) {
-        reportError('Failed to precompute cover art', {
+        logError('Failed to precompute cover art', {
           source: 'library-view',
           error,
         });

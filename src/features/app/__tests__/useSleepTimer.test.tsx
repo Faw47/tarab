@@ -13,6 +13,7 @@ vi.mock('../../../lib/playback-actions', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
+  logError: vi.fn(),
 }));
 
 describe('useSleepTimer', () => {

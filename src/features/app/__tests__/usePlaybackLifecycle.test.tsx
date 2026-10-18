@@ -26,6 +26,7 @@ const {
   preloadNextTrackMock,
   playAdjacentTrackMock,
   reportErrorMock,
+  logErrorMock,
 } = vi.hoisted(() => {
   const listeners = new Map<string, (event: { payload: unknown }) => unknown>();
   return {
@@ -43,6 +44,7 @@ const {
     preloadNextTrackMock: vi.fn(async () => undefined),
     playAdjacentTrackMock: vi.fn(async () => undefined),
     reportErrorMock: vi.fn(),
+    logErrorMock: vi.fn(),
   };
 });
 
@@ -70,6 +72,7 @@ vi.mock('../../../lib/playback-actions', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
+  logError: logErrorMock,
 }));
 
 const initialPlayerState = usePlayerStore.getState();
@@ -426,7 +429,7 @@ describe('usePlaybackLifecycle', () => {
     });
     expect(dbUpdatePlayStatsMock).toHaveBeenCalledTimes(1);
   });
-  it('reports play stats update failures after crossing 50%', async () => {
+  it('logs play stats update failures after crossing 50%', async () => {
     const error = new Error('stats failed');
     dbUpdatePlayStatsMock.mockRejectedValueOnce(error);
     render(<Harness />);
@@ -440,14 +443,14 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await waitFor(() => {
-      expect(reportErrorMock).toHaveBeenCalledWith('Failed to update play stats', {
+      expect(logErrorMock).toHaveBeenCalledWith('Failed to update play stats', {
         source: 'app',
         error,
       });
     });
   });
 
-  it('reports gapless preload failures', async () => {
+  it('logs gapless preload failures without notifying', async () => {
     const error = new Error('preload failed');
     preloadNextTrackMock.mockRejectedValueOnce(error);
     useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
@@ -460,7 +463,7 @@ describe('usePlaybackLifecycle', () => {
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
 
     await waitFor(() => {
-      expect(reportErrorMock).toHaveBeenCalledWith(
+      expect(logErrorMock).toHaveBeenCalledWith(
         'Failed to preload next track for gapless playback',
         { source: 'app', error },
       );

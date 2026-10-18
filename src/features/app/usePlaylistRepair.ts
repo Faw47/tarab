@@ -3,7 +3,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useCallback, useState } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { getPlaylistsDataPath, resetPlaylistsData } from '../../lib/tauri-commands';
 import { playlistKeys } from '../playlists/queryKeys';
 import type { PlaylistRepairState } from './app-state-types';
@@ -37,7 +37,7 @@ export function usePlaylistRepair({ queryClient, setConfirmDialog }: UsePlaylist
       });
     },
     [],
-    (error) => reportError('Failed to listen for playlist repair events', { source: 'app', error }),
+    (error) => logError('Failed to listen for playlist repair events', { source: 'app', error }),
   );
 
   useTauriEvent<PlaylistRecoveredPayload>(
@@ -50,8 +50,7 @@ export function usePlaylistRepair({ queryClient, setConfirmDialog }: UsePlaylist
       });
     },
     [],
-    (error) =>
-      reportError('Failed to listen for playlist recovery events', { source: 'app', error }),
+    (error) => logError('Failed to listen for playlist recovery events', { source: 'app', error }),
   );
 
   const handleRetryPlaylistLoad = useCallback(async () => {

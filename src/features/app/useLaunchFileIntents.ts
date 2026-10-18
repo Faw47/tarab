@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { startPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import {
   getTrackMetadata,
   type LaunchFileIntent,
@@ -74,7 +74,7 @@ export function useLaunchFileIntents({
     (event) => addIntent(event.payload),
     [addIntent],
     (error) => {
-      reportError('Failed to listen for file-open requests', { source: 'file-open', error });
+      logError('Failed to listen for file-open requests', { source: 'file-open', error });
     },
   );
 

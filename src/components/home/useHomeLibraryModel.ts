@@ -39,7 +39,7 @@ export function useHomeLibraryModel() {
     try {
       await startPlayback(ordered[0], { queue: ordered, queueIndex: 0, shuffleEnabled: false });
     } catch (error) {
-      reportError('play album failed', { source: 'home-view', error });
+      reportError('Could not play the album', { source: 'home-view', error });
     }
   }, []);
 

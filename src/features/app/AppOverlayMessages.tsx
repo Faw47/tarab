@@ -36,6 +36,7 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
     <div className="absolute left-8 right-8 top-4 z-40 flex flex-col gap-3">
       {appError ? (
         <div
+          role="alert"
           className={cn(
             'flex items-start justify-between gap-4 p-4 text-sm',
             isNeo
@@ -81,6 +82,7 @@ export const AppOverlayMessages = memo(function AppOverlayMessages({
 
       {playlistRepair ? (
         <div
+          role="status"
           className={cn(
             'flex flex-col gap-3 p-4 text-sm lg:flex-row lg:items-center lg:justify-between',
             isNeo

@@ -136,7 +136,7 @@ export const HomeView = memo(
       try {
         await toggleCurrentPlayback();
       } catch (e) {
-        reportError('toggle failed', { source: 'home-view', error: e });
+        reportError('Could not play or pause', { source: 'home-view', error: e });
       }
     }, [currentTrack]);
 
@@ -144,7 +144,7 @@ export const HomeView = memo(
       try {
         await playAdjacentTrack('previous');
       } catch (e) {
-        reportError('previous failed', { source: 'home-view', error: e });
+        reportError('Could not play the previous track', { source: 'home-view', error: e });
       }
     }, []);
 
@@ -152,7 +152,7 @@ export const HomeView = memo(
       try {
         await playAdjacentTrack('next');
       } catch (e) {
-        reportError('next failed', { source: 'home-view', error: e });
+        reportError('Could not play the next track', { source: 'home-view', error: e });
       }
     }, []);
 

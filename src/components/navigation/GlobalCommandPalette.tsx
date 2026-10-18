@@ -71,7 +71,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
     setOpen(false);
     setQuery('');
     void Promise.resolve(runner()).catch((error) =>
-      reportError('Command failed', {
+      reportError('That command could not finish', {
         source: 'command-palette',
         error,
       }),

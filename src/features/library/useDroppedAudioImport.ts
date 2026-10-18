@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { runBatches } from '../../lib/batch-utils';
 import { getPathBaseName, isSameOrSubPath, normalizePath } from '../../lib/path-utils';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import {
   dbGetExistingPaths,
   dbGetTrackCount,
@@ -175,7 +175,7 @@ export function useDroppedAudioImport({
                   );
                   coverArtHashes = Object.fromEntries(hashed);
                 } catch (err) {
-                  reportError('Failed to precompute cover art hashes', {
+                  logError('Failed to precompute cover art hashes', {
                     source: 'app',
                     error: err,
                   });

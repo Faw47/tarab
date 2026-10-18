@@ -45,7 +45,7 @@ import { useCoverArtPrefetching } from './hooks/useCoverArtPrefetching';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 // Utils
 import { useRenderLog } from './lib/performance';
-import { reportError } from './lib/report-error';
+import { logError } from './lib/report-error';
 import { generateCoverArtHashes } from './lib/tauri-commands';
 import { refreshTracksByFilePaths } from './lib/track-refresh';
 import { useLibraryStore } from './store/library-store';
@@ -90,7 +90,7 @@ const App = () => {
       (results) => {
         for (const result of results) {
           if (result.status === 'rejected') {
-            reportError('Optional startup module preload failed', {
+            logError('Optional startup module preload failed', {
               source: 'app-startup',
               error: result.reason,
             });

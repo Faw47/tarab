@@ -25,20 +25,26 @@ const describeUnknown = (value: unknown): string => {
   }
 };
 
-export const reportError = (
-  rawMessage: unknown,
-  options?: {
-    source?: string;
-    error?: unknown;
-    detail?: string;
-  },
-) => {
-  // Callers sometimes pass reportError straight to .catch, so the rejection value arrives here as
-  // the message. Rendering a non-string message would crash the error banner and the whole app.
-  const message = typeof rawMessage === 'string' ? rawMessage : describeUnknown(rawMessage);
-  const source = options?.source ? `[${options.source}] ` : '';
-  const detail = options?.detail ?? toMessage(options?.error);
+interface ErrorOptions {
+  source?: string;
+  error?: unknown;
+  detail?: string;
+}
 
+const normalize = (rawMessage: unknown, options?: ErrorOptions) => ({
+  // Callers sometimes pass reportError straight to .catch, so the rejection value arrives here as
+  // the message. A non-string message would otherwise reach the UI as an object.
+  message: typeof rawMessage === 'string' ? rawMessage : describeUnknown(rawMessage),
+  detail: options?.detail ?? toMessage(options?.error),
+});
+
+/**
+ * Records a failure in the console only. Use it for background work the user did not ask for
+ * (listeners, prefetching, caches), where a notification would only be noise.
+ */
+export const logError = (rawMessage: unknown, options?: ErrorOptions) => {
+  const { message, detail } = normalize(rawMessage, options);
+  const source = options?.source ? `[${options.source}] ` : '';
   if (options?.error !== undefined) {
     console.error(`${source}${message}`, options.error);
   } else if (detail) {
@@ -46,9 +52,18 @@ export const reportError = (
   } else {
     console.error(`${source}${message}`);
   }
+};
 
-  // Use sonner for UI notifications
+/**
+ * Logs a failure and tells the user once, with a toast. The persistent banner is reserved for
+ * the error boundary (`APP_ERROR_EVENT`), so one failure no longer shows up twice.
+ */
+export const reportError = (rawMessage: unknown, options?: ErrorOptions) => {
+  logError(rawMessage, options);
+  const { message, detail } = normalize(rawMessage, options);
   toast.error(message, {
+    // The same failure repeated (a seek drag, a held volume key) replaces its toast.
+    id: `error:${message}`,
     description: detail,
     duration: 5000,
     action: detail
@@ -60,16 +75,4 @@ export const reportError = (
         }
       : undefined,
   });
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent<AppErrorPayload>(APP_ERROR_EVENT, {
-        detail: {
-          message,
-          detail,
-          source: options?.source,
-        },
-      }),
-    );
-  }
 };

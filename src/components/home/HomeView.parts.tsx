@@ -160,7 +160,7 @@ export const VolumeControl = memo(
         try {
           await setAudioVolume(clamped);
         } catch (e) {
-          reportError('volume commit failed', { source: 'home-volume', error: e });
+          reportError('Could not set the volume', { source: 'home-volume', error: e });
         }
       },
       [setVolume],

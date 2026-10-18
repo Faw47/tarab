@@ -315,7 +315,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     (track: Track) => {
       if (currentlyPlayingId === track.id) {
         void toggleCurrentPlayback().catch((error) => {
-          reportError('Failed to toggle track playback in neobrutalism overlay', {
+          reportError('Could not play or pause the track', {
             source: 'album-details-overlay-neo',
             error,
           });

@@ -30,6 +30,7 @@ vi.mock('../../../lib/track-refresh', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: vi.fn(),
+  logError: vi.fn(),
 }));
 
 const initialPlayerState = usePlayerStore.getState();

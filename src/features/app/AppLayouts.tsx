@@ -150,11 +150,12 @@ export function AppLayouts({
           />
 
           <main className="flex-1 overflow-hidden relative">
+            {/* Outside the scroll container so the banner stays in view while the page scrolls. */}
+            {overlayMessages}
             <div
               className="absolute inset-0 overflow-y-auto custom-scrollbar"
               onScroll={(event) => onScrollChange(event.currentTarget.scrollTop > 8)}
             >
-              {overlayMessages}
               <div key={currentView} className="main-content-view">
                 {currentViewContent}
               </div>

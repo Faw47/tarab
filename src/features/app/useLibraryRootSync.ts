@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import { listLibraryGrants, syncLyricsIndex } from '../../lib/tauri-commands';
 import type { Track } from '../../types';
 
@@ -48,7 +48,7 @@ export function useLibraryRootSync({
         if (syncedLyricsRootKeyRef.current !== rootKey) {
           syncedLyricsRootKeyRef.current = rootKey;
           void syncLyricsIndex().catch((error) => {
-            reportError('Failed to refresh lyrics index', { source: 'app', error });
+            logError('Failed to refresh lyrics index', { source: 'app', error });
           });
         }
       } catch (error) {

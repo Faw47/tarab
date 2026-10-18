@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateLibraryForMutation } from '../../features/library/mutations';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { getPathBaseName, isSameOrSubPath } from '../../lib/path-utils';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
 import {
   cancelLibraryScan,
   dbReconcileFolderScan,
@@ -191,7 +191,7 @@ async function scanSingleFolder({
         );
         coverArtHashes = Object.fromEntries(hashed);
       } catch (err) {
-        reportError('Failed to precompute cover art hashes', {
+        logError('Failed to precompute cover art hashes', {
           source: 'useLibraryScan',
           error: err,
         });
@@ -353,7 +353,7 @@ export function useLibraryScan(): UseLibraryScanResult {
         }
 
         void syncLyricsIndex().catch((err) =>
-          reportError('Failed to refresh lyrics index', {
+          logError('Failed to refresh lyrics index', {
             source: 'useLibraryScan',
             error: err,
           }),
@@ -444,7 +444,7 @@ export function useLibraryScan(): UseLibraryScanResult {
     }
 
     void syncLyricsIndex().catch((err) =>
-      reportError('Failed to refresh lyrics index', {
+      logError('Failed to refresh lyrics index', {
         source: 'useLibraryScan',
         error: err,
       }),
@@ -560,7 +560,7 @@ export function useLibraryScan(): UseLibraryScanResult {
     (event) => handleWatchEvent(event.payload),
     [handleWatchEvent],
     (error) =>
-      reportError('Failed to listen for library file change events', {
+      logError('Failed to listen for library file change events', {
         source: 'library-scan',
         error,
       }),
@@ -571,7 +571,7 @@ export function useLibraryScan(): UseLibraryScanResult {
     (event) => handleWatchEvent(event.payload),
     [handleWatchEvent],
     (error) =>
-      reportError('Failed to listen for library file removal events', {
+      logError('Failed to listen for library file removal events', {
         source: 'library-scan',
         error,
       }),
@@ -599,7 +599,7 @@ export function useLibraryScan(): UseLibraryScanResult {
 
     void watchLibraryPaths(libraryFolders).catch((error) => {
       if (!disposed) {
-        reportError('Failed to setup filesystem watchers', { source: 'library-scan', error });
+        logError('Failed to setup filesystem watchers', { source: 'library-scan', error });
       }
     });
 
