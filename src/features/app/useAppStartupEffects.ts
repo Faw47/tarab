@@ -77,7 +77,7 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
         if (!useSettingsStore.persist.hasHydrated()) {
           await new Promise<void>((resolve) => {
             let finished = false;
-            let unsubscribe = () => undefined;
+            let unsubscribe: () => void = () => undefined;
             const finish = () => {
               if (finished) return;
               finished = true;
