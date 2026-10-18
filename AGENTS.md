@@ -63,7 +63,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   - `hideToStatusIconOnClose`
 - Media keys/global shortcut registration is best-effort; do not crash app on registration failure.
 - The main window sets `backgroundThrottling: "disabled"` because its renderer owns queue advance, media-key handling and tray quit while hidden to the status icon. Keep it; `scripts/check-release-config.mjs` enforces it (effective on macOS 14+, unsupported by Tauri on Windows and Linux).
-- The main window starts with `visible: false` to avoid flashing on login. `useAppStartupEffects` shows ordinary launches after checking the native `--minimized` flag; autostart stays hidden only if the persisted status icon is enabled. Secondary launches focus the existing window. Do not restore an unconditional startup show.
+- The main window starts with `visible: false` to avoid flashing on login. `useAppStartupEffects` shows ordinary launches after checking the native `--minimized` flag; autostart stays hidden only if the persisted status icon is enabled. If settings hydration stalls for 3 s or the native status icon is unavailable, show the window rather than trapping the user in a hidden app. Secondary launches focus the existing window. Do not restore an unconditional startup show.
 - Vendored media plugin exists at `src-tauri/vendor/tauri-plugin-media/` and contains local safety patches.
 
 ## When Editing Rust Desktop Shell Code

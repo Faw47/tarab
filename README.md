@@ -283,7 +283,7 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * system status icon
 * hide-on-close support
 * always-on-top 320 × 92 mini player
-* open at login (starts hidden in the status icon; if the status icon is disabled, the main window opens)
+* open at login (starts hidden in the status icon; if the status icon is disabled, missing, or settings cannot be loaded, the main window opens)
 * audio file associations
 * `tarab://` deep links
 
