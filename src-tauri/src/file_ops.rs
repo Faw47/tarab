@@ -337,25 +337,45 @@ fn persist_grants(app: &AppHandle, grants: &[LibraryGrantRecord]) -> Result<(), 
     )
 }
 
+/// Re-checks every grant folder on disk, so it runs off the main thread.
 #[tauri::command]
-pub fn list_library_grants(
+pub async fn list_library_grants(
     roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Vec<LibraryGrantSummary> {
-    let mut state = roots_state.write();
-    state.roots = active_roots(&state.grants);
-    state.grants.iter().map(grant_summary).collect()
+) -> Result<Vec<LibraryGrantSummary>, String> {
+    let roots_state = roots_state.inner().clone();
+    spawn_blocking(move || {
+        let grants = roots_state.read().grants.clone();
+        let roots = active_roots(&grants);
+        let summaries = grants.iter().map(grant_summary).collect();
+        roots_state.write().roots = roots;
+        summaries
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
+/// Checks grant folders on disk and counts indexed tracks per folder, off the main thread.
 #[tauri::command]
-pub fn get_library_health(
+pub async fn get_library_health(
     roots_state: tauri::State<'_, SharedLibraryRoots>,
     db: tauri::State<'_, SharedDatabase>,
 ) -> Result<LibraryHealthState, String> {
-    let mut state = roots_state.write();
-    state.roots = active_roots(&state.grants);
-    let native_grants = state.grants.iter().map(grant_summary).collect::<Vec<_>>();
-    let cached_sources = state
-        .grants
+    let roots_state = roots_state.inner().clone();
+    let db = db.inner().clone();
+    spawn_blocking(move || library_health(&roots_state, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn library_health(
+    roots_state: &SharedLibraryRoots,
+    db: &SharedDatabase,
+) -> Result<LibraryHealthState, String> {
+    // Disk checks and database counts run without holding the roots lock.
+    let grants = roots_state.read().grants.clone();
+    let roots = active_roots(&grants);
+    let native_grants = grants.iter().map(grant_summary).collect::<Vec<_>>();
+    let cached_sources = grants
         .iter()
         .map(|grant| {
             Ok(LibraryCachedSourceHealth {
@@ -372,7 +392,7 @@ pub fn get_library_health(
         .filter(|grant| grant.status == "missing")
         .cloned()
         .collect::<Vec<_>>();
-    let watcher_state = if state.roots.is_empty() {
+    let watcher_state = if roots.is_empty() {
         "inactive"
     } else {
         "ready"
@@ -384,6 +404,7 @@ pub fn get_library_health(
     } else {
         vec!["reauthorize", "addFolder", "viewDetails"]
     };
+    roots_state.write().roots = roots;
     Ok(LibraryHealthState {
         native_grants,
         cached_sources,
@@ -397,6 +418,18 @@ pub fn get_library_health(
 pub async fn select_library_folder(
     app: AppHandle,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<LibraryGrantSummary>, String> {
+    let roots_state = roots_state.inner().clone();
+    // The dialog wait, canonicalize and grants write all block, so none of it runs on an async
+    // worker.
+    spawn_blocking(move || select_library_folder_blocking(&app, &roots_state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn select_library_folder_blocking(
+    app: &AppHandle,
+    roots_state: &SharedLibraryRoots,
 ) -> Result<Option<LibraryGrantSummary>, String> {
     let selected = app
         .dialog()
@@ -414,7 +447,7 @@ pub async fn select_library_folder(
     }
     let canonical = fs::canonicalize(&selected)
         .map_err(|e| format!("Failed to resolve selected library folder: {}", e))?;
-    grant_library_path(&app, roots_state.inner(), canonical).map(Some)
+    grant_library_path(app, roots_state, canonical).map(Some)
 }
 
 #[tauri::command]
@@ -423,6 +456,19 @@ pub async fn reauthorize_library_grant(
     grant_id: String,
     db: tauri::State<'_, SharedDatabase>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<Option<LibraryGrantSummary>, String> {
+    let db = db.inner().clone();
+    let roots_state = roots_state.inner().clone();
+    spawn_blocking(move || reauthorize_library_grant_blocking(&app, &grant_id, &db, &roots_state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn reauthorize_library_grant_blocking(
+    app: &AppHandle,
+    grant_id: &str,
+    db: &SharedDatabase,
+    roots_state: &SharedLibraryRoots,
 ) -> Result<Option<LibraryGrantSummary>, String> {
     let selected = app
         .dialog()
@@ -467,7 +513,7 @@ pub async fn reauthorize_library_grant(
     if let Some(entry) = next.iter_mut().find(|entry| entry.id == grant_id) {
         entry.path = canonical_string;
     }
-    if let Err(error) = persist_grants(&app, &next) {
+    if let Err(error) = persist_grants(app, &next) {
         let _ = db.rebase_track_paths(
             next.iter()
                 .find(|entry| entry.id == grant_id)
@@ -590,10 +636,22 @@ pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Pa
 }
 
 #[tauri::command]
-pub fn revoke_library_grant(
+pub async fn revoke_library_grant(
     app: AppHandle,
     grant_id: String,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<bool, String> {
+    let roots_state = roots_state.inner().clone();
+    spawn_blocking(move || revoke_grant(&app, &grant_id, &roots_state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Writes the grants file, so it runs off the main thread.
+fn revoke_grant(
+    app: &AppHandle,
+    grant_id: &str,
+    roots_state: &SharedLibraryRoots,
 ) -> Result<bool, String> {
     let current = roots_state.read().grants.clone();
     let mut next = current.clone();
@@ -601,7 +659,7 @@ pub fn revoke_library_grant(
     if next.len() == current.len() {
         return Ok(false);
     }
-    persist_grants(&app, &next)?;
+    persist_grants(app, &next)?;
     let mut state = roots_state.write();
     state.grants = next;
     state.roots = active_roots(&state.grants);

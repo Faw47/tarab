@@ -315,14 +315,26 @@ pub fn waveform_has(file_path: String, gen: tauri::State<'_, SharedWaveformGener
     gen.has_waveform(&file_path)
 }
 
+/// Walks the waveform cache directory, so it runs off the main thread.
 #[tauri::command]
-pub fn waveform_get_stats(gen: tauri::State<'_, SharedWaveformGenerator>) -> WaveformCacheStats {
-    gen.get_stats()
+pub async fn waveform_get_stats(
+    gen: tauri::State<'_, SharedWaveformGenerator>,
+) -> Result<WaveformCacheStats, String> {
+    let gen = gen.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || gen.get_stats())
+        .await
+        .map_err(|e| e.to_string())
 }
 
+/// Deletes the waveform cache files, so it runs off the main thread.
 #[tauri::command]
-pub fn waveform_clear_cache(gen: tauri::State<'_, SharedWaveformGenerator>) -> Result<u64, String> {
-    gen.clear_cache()
+pub async fn waveform_clear_cache(
+    gen: tauri::State<'_, SharedWaveformGenerator>,
+) -> Result<u64, String> {
+    let gen = gen.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || gen.clear_cache())
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

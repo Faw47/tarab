@@ -1494,9 +1494,14 @@ pub fn set_audio_booster(
     state.set_booster(level)
 }
 
+/// Device enumeration can take hundreds of milliseconds, so it runs off the main thread. The
+/// playback commands stay synchronous: they only queue a message for the audio thread, and their
+/// order (play before pause) must be preserved.
 #[tauri::command]
-pub fn list_audio_output_devices() -> Result<Vec<AudioOutputDeviceInfo>, String> {
-    enumerate_output_devices()
+pub async fn list_audio_output_devices() -> Result<Vec<AudioOutputDeviceInfo>, String> {
+    tauri::async_runtime::spawn_blocking(enumerate_output_devices)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

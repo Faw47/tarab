@@ -214,14 +214,19 @@ pub async fn fetch_lrclib_lyrics(
     fetch_lrclib(&artist, &title, &album, duration).await
 }
 
+/// Writes the sidecar through a staged copy and fsync, so it runs off the main thread.
 #[tauri::command]
-pub fn write_lyrics_for_track(
+pub async fn write_lyrics_for_track(
     track_path: String,
     content: String,
     roots_state: State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
     let roots = roots_state.read().roots.clone();
-    write_lyrics_for_track_checked(&track_path, content, &roots)
+    tauri::async_runtime::spawn_blocking(move || {
+        write_lyrics_for_track_checked(&track_path, content, &roots)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn write_lyrics_for_track_checked(
