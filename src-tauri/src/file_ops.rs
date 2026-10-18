@@ -255,7 +255,9 @@ fn move_path_with(
 /// folder.
 fn remove_file_even_if_read_only(path: &Path) -> std::io::Result<()> {
     match fs::remove_file(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+        // Only Windows: on Unix the file mode does not affect deletion, and clearing it would just
+        // leave the file writable by everyone.
+        Err(error) if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied => {
             let mut permissions = fs::metadata(path)?.permissions();
             if !permissions.readonly() {
                 return Err(error);
