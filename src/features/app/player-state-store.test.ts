@@ -3,14 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const persisted = new Map<string, unknown>();
 const writes: Array<{ key: string; value: unknown }> = [];
 
+// Keys are `store/key`, so the state and queue stores stay separate.
 vi.mock('../../lib/tauri-commands', () => ({
   loadPlaybackSession: vi.fn(async () => null),
-  fixedStoreGet: vi.fn(async (_store: string, key: string) => persisted.get(key) ?? null),
-  fixedStoreSet: vi.fn(async (_store: string, key: string, value: unknown) => {
-    writes.push({ key, value });
-    persisted.set(key, value);
+  fixedStoreGet: vi.fn(
+    async (store: string, key: string) => persisted.get(`${store}/${key}`) ?? null,
+  ),
+  fixedStoreSet: vi.fn(async (store: string, key: string, value: unknown) => {
+    writes.push({ key: `${store}/${key}`, value });
+    persisted.set(`${store}/${key}`, value);
   }),
 }));
+
+const stateWrites = () => writes.filter((write) => write.key === 'player/player-state');
+const queueWrites = () => writes.filter((write) => write.key === 'player-queue/queue');
 
 const payload = (timestamp: number) => ({
   version: 1,
@@ -54,21 +60,58 @@ describe('player state persistence', () => {
     ]);
     await store.flushPlayerStateWrites();
 
-    expect(writes).toHaveLength(2);
-    const first = writes[0].value as { revision: number; timestamp: number };
-    const second = writes[1].value as { revision: number; timestamp: number };
+    expect(stateWrites()).toHaveLength(2);
+    const first = stateWrites()[0].value as { revision: number; timestamp: number };
+    const second = stateWrites()[1].value as { revision: number; timestamp: number };
     expect(first.revision).toBeLessThan(second.revision);
     expect(second.timestamp).toBe(2);
-    expect(persisted.get('player-state')).toEqual(writes[1].value);
+    expect(persisted.get('player/player-state')).toEqual(stateWrites()[1].value);
+  });
+
+  it('rewrites the queue only when it changes and never reads before writing', async () => {
+    // Regression for AR-17: every 5-second save read the whole store back and rewrote the queue.
+    const commands = await import('../../lib/tauri-commands');
+    const store = await import('./player-state-store');
+    store.markPlayerStateHydrated();
+    const queue = Array.from({ length: 5000 }, (_, index) => `track-${index}`);
+
+    await store.savePlayerStateToStore({ ...payload(1), queueIds: queue });
+    await store.savePlayerStateToStore({ ...payload(2), queueIds: [...queue], currentTime: 5 });
+    await store.savePlayerStateToStore({ ...payload(3), queueIds: queue.slice(1) });
+
+    expect(queueWrites()).toHaveLength(2);
+    expect(stateWrites()).toHaveLength(3);
+    expect(stateWrites()[1].value).not.toHaveProperty('queueIds');
+    expect(commands.fixedStoreGet).not.toHaveBeenCalled();
+  });
+
+  it('loads a split session and moves an inline queue to the queue store', async () => {
+    const { queueIds: _inline, ...splitState } = payload(5);
+    persisted.set('player/player-state', { ...splitState, version: 3, revision: 4 });
+    persisted.set('player-queue/queue', { queueIds: ['x', 'y'], revision: 4 });
+    const split = await import('./player-state-store');
+    expect((await split.loadPlayerStateFromStore())?.queueIds).toEqual(['x', 'y']);
+
+    vi.resetModules();
+    persisted.clear();
+    writes.length = 0;
+    persisted.set('player/player-state', { ...payload(5), queueIds: ['a'], revision: 2 });
+    const inline = await import('./player-state-store');
+    const loaded = await inline.loadPlayerStateFromStore();
+    inline.markPlayerStateHydrated();
+    await inline.savePlayerStateToStore({ ...(loaded as ReturnType<typeof payload>) });
+
+    expect(persisted.get('player-queue/queue')).toMatchObject({ queueIds: ['a'] });
+    expect(persisted.get('player/player-state')).not.toHaveProperty('queueIds');
   });
 
   it('migrates version one state without losing queue data', async () => {
-    persisted.set('player-state', { ...payload(5), queueIds: ['a', 'b'], revision: 7 });
+    persisted.set('player/player-state', { ...payload(5), queueIds: ['a', 'b'], revision: 7 });
     const store = await import('./player-state-store');
 
     const loaded = await store.loadPlayerStateFromStore();
 
-    expect(loaded?.version).toBe(2);
+    expect(loaded?.version).toBe(3);
     expect(loaded?.revision).toBe(7);
     expect(loaded?.queueIds).toEqual(['a', 'b']);
   });
@@ -83,7 +126,7 @@ describe('player state persistence', () => {
     await store.savePlayerStateToStore(payload(2));
 
     await expect(store.flushPlayerStateWrites()).resolves.toBeUndefined();
-    const saved = persisted.get('player-state') as { timestamp: number };
+    const saved = persisted.get('player/player-state') as { timestamp: number };
     expect(saved.timestamp).toBe(2);
   });
 });
