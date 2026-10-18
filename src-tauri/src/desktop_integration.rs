@@ -818,8 +818,14 @@ mod tests {
     #[test]
     fn help_menu_routes_to_the_renderer() {
         // Regression for QA-10: the non-macOS Help item was disabled and had no action ID.
-        assert_eq!(native_menu_action_for_menu_id(MENU_HELP_ID), Some("help.help"));
-        assert_eq!(native_menu_action_for_menu_id("desktop.menu.unknown"), None);
+        assert_eq!(
+            native_menu_action_for_menu_id(MENU_HELP_ID),
+            Some("help.help")
+        );
+        assert_eq!(
+            native_menu_action_for_menu_id("desktop.menu.unknown"),
+            None
+        );
         assert_eq!(desktop_action_for_menu_id(MENU_HELP_ID), None);
     }
 
