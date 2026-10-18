@@ -17,6 +17,8 @@ fn store_path(store: &str) -> Result<PathBuf, String> {
     let name = match store {
         "settings" => "settings.json",
         "player" => "tarab-player.dat",
+        // The queue has its own file so frequent position saves do not rewrite it.
+        "player-queue" => "tarab-player-queue.dat",
         _ => return Err("Unsupported store".to_string()),
     };
     Ok(get_app_data_dir()?.join(name))

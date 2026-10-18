@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const backendSource = readFileSync('src-tauri/src/lib.rs', 'utf8');
 const frontendSource = readFileSync('src/lib/tauri-commands.ts', 'utf8');
@@ -46,6 +47,119 @@ if (missingFrontendWrappers.length || missingBackendCommands.length) {
   throw new Error(`Tauri IPC contract drift detected (${problems.join('; ')})`);
 }
 
+// Argument names. Tauri matches invoke arguments by name, converting each Rust parameter to
+// camelCase; a renamed or missing key fails only at run time. Parameters Tauri injects (state,
+// app handle, window) are not sent by the renderer, and Option parameters may be omitted.
+const INJECTED_TYPE = /\b(State|AppHandle|Window|WebviewWindow|Webview)\b/;
+const camelCase = (name) => name.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
+
+function rustSources(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return rustSources(path);
+    return entry.name.endsWith('.rs') ? [readFileSync(path, 'utf8')] : [];
+  });
+}
+
+/** Text between the parenthesis at `open` and its match. */
+function balanced(text, open, left = '(', right = ')') {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === left) depth += 1;
+    else if (text[index] === right) {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, index);
+    }
+  }
+  return null;
+}
+
+/** Splits on commas that are not inside <>, (), [] or {}. */
+function splitTopLevel(text) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (const char of text) {
+    if ('<([{'.includes(char)) depth += 1;
+    if ('>)]}'.includes(char)) depth -= 1;
+    if (char === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+const backendArguments = new Map();
+for (const source of rustSources('src-tauri/src')) {
+  for (const match of source.matchAll(
+    /#\[tauri::command[^\]]*\][\s\S]*?\bfn\s+([a-z_][\w]*)\s*(<[^>]*>)?\s*\(/g,
+  )) {
+    const params = balanced(source, match.index + match[0].length - 1);
+    if (params === null) continue;
+    const args = new Map();
+    for (const param of splitTopLevel(params)) {
+      const separator = param.indexOf(':');
+      if (separator < 0) continue;
+      const name = param
+        .slice(0, separator)
+        .replace(/^mut\s+/, '')
+        .trim();
+      const type = param.slice(separator + 1).trim();
+      if (INJECTED_TYPE.test(type)) continue;
+      args.set(camelCase(name.replace(/^_+/, '')), { optional: /^Option\s*</.test(type) });
+    }
+    backendArguments.set(match[1], args);
+  }
+}
+
+const argumentProblems = [];
+let checkedCalls = 0;
+for (const match of frontendSource.matchAll(/\binvoke(?:<[^>()]*>)?\(\s*['"]([a-z_][\w]*)['"]/g)) {
+  const command = match[1];
+  const expected = backendArguments.get(command);
+  if (!expected) continue;
+  const callArgs = balanced(frontendSource, match.index + match[0].indexOf('('));
+  const rest = callArgs
+    ?.slice(callArgs.indexOf(command) + command.length + 1)
+    .replace(/^\s*,?\s*/, '');
+  let sent = new Set();
+  if (rest?.startsWith('{')) {
+    const body = balanced(rest, 0, '{', '}') ?? '';
+    sent = new Set(
+      splitTopLevel(body).map((entry) =>
+        entry
+          .replace(/^\.\.\./, '')
+          .split(':')[0]
+          .trim(),
+      ),
+    );
+  } else if (rest) {
+    // A non-literal argument object cannot be checked here.
+    continue;
+  }
+  checkedCalls += 1;
+  const missing = [...expected].filter(([name, { optional }]) => !optional && !sent.has(name));
+  const unknown = [...sent].filter((name) => !expected.has(name));
+  if (missing.length || unknown.length) {
+    argumentProblems.push(
+      `${command}: ${[
+        missing.length ? `missing ${missing.map(([name]) => name).join(', ')}` : '',
+        unknown.length ? `unknown ${unknown.join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('; ')}`,
+    );
+  }
+}
+
+if (argumentProblems.length) {
+  throw new Error(`Tauri IPC argument drift detected (${argumentProblems.join('; ')})`);
+}
+
 console.log(
-  `IPC contract verified: ${frontendCommands.size} frontend wrappers map to registered Rust commands.`,
+  `IPC contract verified: ${frontendCommands.size} frontend wrappers map to registered Rust commands; argument names checked for ${checkedCalls} calls.`,
 );

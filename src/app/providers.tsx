@@ -6,6 +6,7 @@ import { type ReactNode, useState } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { Toaster } from 'sonner';
 import { setLibraryQueryClient } from '../features/library/queryClientBridge';
+import { QUERY_CACHE_BUSTER, shouldPersistQuery } from './query-persistence';
 
 const QUERY_CACHE_KEY = 'tarab-query-cache';
 const PERSIST_MAX_AGE_MS = 86400000;
@@ -67,6 +68,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
       persistOptions={{
         persister,
         maxAge: PERSIST_MAX_AGE_MS,
+        buster: QUERY_CACHE_BUSTER,
+        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
     >
       <HotkeysProvider>

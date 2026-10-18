@@ -52,8 +52,14 @@ fn write_atomic(path: &PathBuf, data: &[u8]) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn load_playback_session(app: AppHandle) -> Result<Option<PlaybackSession>, String> {
-    let path = session_path(&app)?;
+pub async fn load_playback_session(app: AppHandle) -> Result<Option<PlaybackSession>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_session(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_session(app: &AppHandle) -> Result<Option<PlaybackSession>, String> {
+    let path = session_path(app)?;
     let contents = match fs::read_to_string(&path) {
         Ok(data) => data,
         Err(err) => {
@@ -74,10 +80,15 @@ pub fn load_playback_session(app: AppHandle) -> Result<Option<PlaybackSession>, 
     }
 }
 
+/// Writes and fsyncs the session file, so it runs off the main thread.
 #[tauri::command]
-pub fn save_playback_session(app: AppHandle, session: PlaybackSession) -> Result<(), String> {
-    let path = session_path(&app)?;
-    let data =
-        serde_json::to_vec(&session).map_err(|e| format!("Failed to serialize session: {}", e))?;
-    write_atomic(&path, &data)
+pub async fn save_playback_session(app: AppHandle, session: PlaybackSession) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = session_path(&app)?;
+        let data = serde_json::to_vec(&session)
+            .map_err(|e| format!("Failed to serialize session: {}", e))?;
+        write_atomic(&path, &data)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

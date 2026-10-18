@@ -53,13 +53,16 @@ fn get_initial_deep_links(app: tauri::AppHandle) -> Result<Vec<String>, String> 
         .map_err(|error| format!("Failed to read startup deep links: {}", error))
 }
 
+/// Reads up to MAX_IMAGE_READ_BYTES from disk, so it runs off the main thread.
 #[tauri::command]
-fn read_image_as_base64(
+async fn read_image_as_base64(
     file_path: String,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(String, String), String> {
     let roots = roots_state.read().roots.clone();
-    read_image_as_base64_checked(&file_path, &roots)
+    tauri::async_runtime::spawn_blocking(move || read_image_as_base64_checked(&file_path, &roots))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 fn read_image_as_base64_checked(
@@ -418,7 +421,8 @@ pub fn run() {
             app.manage(playlist_guard);
 
             let playlist_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            // Blocking file and database work: a blocking-pool thread, not an async worker.
+            tauri::async_runtime::spawn_blocking(move || {
                 let start = Instant::now();
                 if let Err(err) =
                     playlist::bootstrap_playlist_storage(playlist_handle, playlist_bootstrap_db)

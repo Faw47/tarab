@@ -29,9 +29,12 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 
 - **Library authority**: Rust owns persistent folder grants in app data file **`library-grants.json`**. The renderer settings list is a display cache only. Library grant creation must use `select_library_folder`; do not restore a renderer command that accepts arbitrary root paths.
 - **File associations**: native launches create opaque pending intents. **Play once** grants one exact file until playback opens it; **Import folder** creates a persistent native grant; **Cancel** discards the request.
-- **Player session** (queue, position, speed, flags): fixed native store commands persist
-  **`tarab-player.dat`**, key **`player-state`** (`src/features/app/player-state-store.ts`). The
-  renderer cannot choose a store path. On first load, if that key is empty, the app migrates from
+- **Player session** (queue, position, speed, flags): fixed native store commands persist the
+  small state in **`tarab-player.dat`**, key **`player-state`**, and the queue IDs in
+  **`tarab-player-queue.dat`**, key **`queue`** (`src/features/app/player-state-store.ts`). The
+  queue is written only when it changes, so position saves stay small; sessions saved before the
+  split keep the queue inline and move it on the next save. The renderer cannot choose a store
+  path. On first load, if that key is empty, the app migrates from
   legacy **`session.json`** using the Rust command `load_playback_session`.
 - Player-state writes use a monotonic revision and one serialized latest-wins queue. Do not save
   before hydration completes. Flush queued writes before a native quit.

@@ -118,7 +118,7 @@ export const savePlaybackSession = async (session: PlaybackSessionPayload): Prom
   return invoke('save_playback_session', { session });
 };
 
-type FixedStoreName = 'settings' | 'player';
+type FixedStoreName = 'settings' | 'player' | 'player-queue';
 
 export const fixedStoreGet = async <T>(store: FixedStoreName, key: string): Promise<T | null> => {
   return invoke('fixed_store_get', { store, key });
