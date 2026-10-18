@@ -4,11 +4,30 @@ import type { NavView } from '../../../components/navigation';
 import { useAppStartupEffects } from '../useAppStartupEffects';
 
 const showMock = vi.hoisted(() => vi.fn(async () => undefined));
+const { minimizedMock, iconEnabledMock } = vi.hoisted(() => ({
+  minimizedMock: vi.fn(async () => false),
+  iconEnabledMock: vi.fn(() => true),
+}));
 const recordPerfBudgetMock = vi.hoisted(() => vi.fn());
 const reportErrorMock = vi.hoisted(() => vi.fn());
+const logErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: showMock }),
+}));
+
+vi.mock('../../../lib/tauri-commands', () => ({
+  desktopShouldStartMinimized: minimizedMock,
+}));
+
+vi.mock('../../../store/settings-store', () => ({
+  useSettingsStore: {
+    persist: {
+      hasHydrated: () => true,
+      onFinishHydration: vi.fn(() => () => undefined),
+    },
+    getState: () => ({ desktopStatusIconEnabled: iconEnabledMock() }),
+  },
 }));
 
 vi.mock('../../../lib/performance', () => ({
@@ -17,13 +36,15 @@ vi.mock('../../../lib/performance', () => ({
 
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
-  logError: vi.fn(),
+  logError: logErrorMock,
 }));
 
 describe('useAppStartupEffects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     showMock.mockResolvedValue(undefined);
+    minimizedMock.mockResolvedValue(false);
+    iconEnabledMock.mockReturnValue(true);
     Object.defineProperty(window, 'requestIdleCallback', { configurable: true, value: undefined });
     Object.defineProperty(window, 'cancelIdleCallback', { configurable: true, value: undefined });
     vi.spyOn(performance, 'mark').mockImplementation(
@@ -53,6 +74,37 @@ describe('useAppStartupEffects', () => {
 
     await waitFor(() => expect(showMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(preloadModules).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  it('keeps the main window hidden on autostart with an enabled status icon', async () => {
+    minimizedMock.mockResolvedValue(true);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+    await waitFor(() => expect(minimizedMock).toHaveBeenCalledTimes(1));
+
+    expect(showMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the window on autostart when the status icon is disabled', async () => {
+    minimizedMock.mockResolvedValue(true);
+    iconEnabledMock.mockReturnValue(false);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+
+    await waitFor(() => expect(showMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the window if the autostart check fails', async () => {
+    const failure = new Error('command unavailable');
+    minimizedMock.mockRejectedValueOnce(failure);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+
+    await waitFor(() => expect(showMock).toHaveBeenCalledTimes(1));
+    expect(logErrorMock).toHaveBeenCalledWith('Failed to read startup window state', {
+      source: 'app-startup',
+      error: failure,
+    });
   });
 
   it('reports a window-show failure without rejecting startup', async () => {
