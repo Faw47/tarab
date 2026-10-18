@@ -42,10 +42,12 @@ interface UseDeepLinkBridgeOptions {
 export function useDeepLinkBridge({ onSearch }: UseDeepLinkBridgeOptions) {
   useAsyncCleanup(
     async () => {
-      const handled = new Set<string>();
+      let lastLink: { url: string; at: number } | null = null;
       const handleLink = (url: string) => {
-        if (handled.has(url)) return;
-        handled.add(url);
+        // Suppress an initial/open event delivered twice, not intentional later opens.
+        const now = Date.now();
+        if (lastLink?.url === url && now - lastLink.at < 1000) return;
+        lastLink = { url, at: now };
         try {
           logger.info(DOMAIN, 'Handling deep link', { url });
           const intent = parseDeepLink(url);
