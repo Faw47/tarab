@@ -258,6 +258,13 @@
 }
 
 @layer base {
+  /* Mixed-direction metadata (FE-22): each line of text takes its direction from its first strong
+     letter, as dir="auto" would, so Arabic titles keep their punctuation in place, align to their
+     start and truncate at their end. Latin text is unaffected. */
+  :where(p, h1, h2, h3, h4, h5, h6, li, dt, dd, label, figcaption, input, textarea, .truncate) {
+    unicode-bidi: plaintext;
+  }
+
   html,
   body,
   #root {
