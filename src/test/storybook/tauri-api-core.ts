@@ -38,3 +38,8 @@ export const invoke = async <T>(command: string): Promise<T> => {
       throw new Error(`Storybook mock missing Tauri command: ${command}`);
   }
 };
+
+/** Outside Tauri the real function throws; cover-art URLs then use their fallback form. */
+export const convertFileSrc = (_filePath: string, _protocol?: string): string => {
+  throw new Error('convertFileSrc is not available in Storybook');
+};
