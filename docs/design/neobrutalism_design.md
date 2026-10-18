@@ -291,6 +291,10 @@ The lime green appears exactly where it needs to: when a track is playing, the c
 
 Active states are fill-based. Never outline-based.
 
+Keyboard focus is the exception: it uses a two-tone ring (3px black outline, 2px offset, over a 2px
+white gap) so it is visible on white paper and on black panels. Muted text is `#595959` or darker
+(at least 4.5:1) and never smaller than 12px.
+
 **The rule:** when an element is selected, active, current, or focused, its background fills with a solid color. It does not get a thicker border. It does not change text color alone. It does not get an underline.
 
 - **Active navigation tab:** `background: #F5C518; border: 2px solid #000;` square fill behind the icon
@@ -309,7 +313,7 @@ Exactly four levels. Zero intermediate sizes. The gap between levels must be lar
 |---|---|---|---|
 | 1 | Screen title | `clamp(40px, 8vw, 64px) / weight 800 / uppercase / tracking -0.02em` | View titles, hero labels only |
 | 2 | Section header | `16px / weight 700 / uppercase / tracking 0.06em` | Panel headers, group names |
-| 3 | Field label | `11px / weight 600 / uppercase / tracking 0.12em / color #888888` | Tag pills, field annotations, metadata sub-labels |
+| 3 | Field label | `12px / weight 600 / uppercase / tracking 0.12em / color #595959` (at least 4.5:1 on its surface) | Tag pills, field annotations, metadata sub-labels |
 | 4 | Data value | `28px / weight 800 / normal case / tracking -0.01em` | Track titles, large numbers, dominant content |
 
 **Body text** (non-hierarchical reading content): `16px / weight 400 / sentence case`
@@ -636,11 +640,11 @@ When summarizing submitted data, the layout references a thermal printer receipt
 }
 
 .receipt-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #888888;
+  color: #595959;
   text-align: left;
 }
 
@@ -855,13 +859,13 @@ Replaces all icon-based toggle buttons. The entire control reads as a single lab
 }
 .neo-toggle[data-active="true"] .neo-toggle-off {
   background: #e0e0e0;
-  color: #888888;
+  color: #595959;
 }
 
 /* Inactive state */
 .neo-toggle[data-active="false"] .neo-toggle-on {
   background: #e0e0e0;
-  color: #888888;
+  color: #595959;
 }
 .neo-toggle[data-active="false"] .neo-toggle-off {
   background: #e0e0e0;
@@ -1037,7 +1041,7 @@ For data input (vitals, ratings, scales) and passive data visualization (bar cha
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #888888;
+  color: #595959;
 }
 
 /* Emoji icon at left of slider row (for vitals) */
@@ -1117,7 +1121,7 @@ Empty upload areas use dashed borders to signal "awaiting content."
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #888888;
+  color: #595959;
 }
 ```
 
@@ -1410,7 +1414,7 @@ A self-contained framed tile displaying a large numeric value with an emoji icon
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #888888;
+  color: #595959;
   margin-top: 4px;
 }
 ```
@@ -1553,7 +1557,7 @@ Destructive actions are isolated within their own clearly signaled container. Th
 .neo-danger-sub {
   font-size: 11px;
   font-weight: 400;
-  color: #888888;
+  color: #595959;
   text-transform: none;
   letter-spacing: 0;
 }
@@ -1697,7 +1701,7 @@ The standard settings profile card. Two-column layout: avatar on left, metadata 
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #888888;
+  color: #595959;
 }
 
 .neo-profile-field-value {
@@ -1922,7 +1926,7 @@ font-size: 11px;
 font-weight: 600;
 text-transform: uppercase;
 letter-spacing: 0.12em;
-color: #888888;
+color: #595959;
 line-height: 1.4;
 ```
 Used for: field annotations, tag pill text, metadata sub-labels, pole labels on sliders (`GOOD / SEVERE`), friend code display, version badge text. The wide tracking at this small size is what makes it read as a label.
@@ -2192,7 +2196,7 @@ No chart should use gradients, soft shadows, rounded corners, or any non-system 
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: #888888;
+  color: #595959;
   margin-top: 4px;
 }
 ```

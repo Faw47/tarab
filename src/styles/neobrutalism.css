@@ -114,7 +114,14 @@
 
 [data-theme="neobrutalism"] * {
   border-color: #000000 !important;
-  outline-color: #000000 !important;
+}
+
+/* Two-tone focus ring: a black outline over a white gap stays visible on white and on black
+   surfaces (a black outline alone vanished on dark panels). */
+[data-theme="neobrutalism"] :focus-visible {
+  outline: 3px solid #000000 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 2px #ffffff !important;
 }
 
 /* Four-level typography — apply via class in neo views */
@@ -133,11 +140,12 @@
 }
 
 [data-theme="neobrutalism"] .neo-type-level-3 {
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.12em !important;
-  color: #888888 !important;
+  /* #595959 is about 7:1 on white; #888 was about 3.5:1, below AA for small text. */
+  color: #595959 !important;
 }
 
 [data-theme="neobrutalism"] .neo-type-level-4 {
@@ -437,7 +445,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888888;
+  color: #595959;
 }
 
 [data-theme="neobrutalism"] .neo-toggle[data-active="true"] .neo-toggle-on {
@@ -469,11 +477,11 @@
 }
 
 [data-theme="neobrutalism"] .neo-empty-state-secondary {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: #888888;
+  color: #595959;
   margin-top: 4px;
 }
 
@@ -579,11 +587,11 @@
 }
 
 [data-theme="neobrutalism"] .neo-version-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #888888;
+  color: #595959;
   position: absolute;
   right: 16px;
   top: 20px;
