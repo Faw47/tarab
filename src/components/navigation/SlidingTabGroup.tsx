@@ -1,21 +1,11 @@
 import type { LucideIcon } from 'lucide-react';
-import {
-  type CSSProperties,
-  memo,
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import { type CSSProperties, memo, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
-import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
 import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
-import { useSettingsStore } from '@/store/settings-store';
 
 import type { NavView } from './FloatingDock';
 
@@ -32,17 +22,11 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
 }: SlidingTabGroupProps) {
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
-  const hoveringRef = useRef(false);
-  const pressingRef = useRef(false);
 
-  const useGpuLiquidPill = useSettingsStore((s) => s.theme === 'liquid-glass' && !s.reducedEffects);
-
+  // -1 when the current view (for example Settings) has no tab here; the pill is then hidden
+  // instead of sitting on the first tab.
   const activeIndex = useMemo(
-    () =>
-      Math.max(
-        0,
-        tabs.findIndex((t) => t.view === currentView),
-      ),
+    () => tabs.findIndex((t) => t.view === currentView),
     [tabs, currentView],
   );
 
@@ -69,41 +53,7 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     onCommitIndex,
     syncDependencies: [currentView, tabs],
-  });
-
-  const listPropsWrapped = useMemo(
-    () => ({
-      ...listProps,
-      onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        pressingRef.current = true;
-        listProps.onPointerDownCapture(e);
-      },
-      onPointerUpCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onPointerUpCapture(e);
-        pressingRef.current = false;
-      },
-      onPointerCancelCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onPointerCancelCapture(e);
-        pressingRef.current = false;
-      },
-      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        listProps.onLostPointerCapture(e);
-        pressingRef.current = false;
-      },
-    }),
-    [listProps],
-  );
-
-  useLiquidControlMotionHorizontal({
-    enabled: useGpuLiquidPill,
-    rootRef: navRef,
-    pillStyle,
-    pillLayoutFromDom,
-    pillGeometryRef,
-    isDragging,
-    hoveringRef,
-    pressingRef,
-    activeIndex: activeIndex >= 0 ? activeIndex : 0,
+    enabled: activeIndex >= 0,
   });
 
   useLayoutEffect(() => {
@@ -113,17 +63,13 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
     if (el && g) applyHorizontalPillDom(el, g.left, g.width);
   }, [pillLayoutFromDom, dragPreviewIndex, isDragging, pillGeometryRef]);
 
-  /*
-   * Always keep a visible DOM pill: the GPU composite runs on AppShellLiquidWebGL’s canvas (z-0),
-   * while TopBar stacks above (z-10+), so the GL pill sits under the header and is not seen through
-   * opaque chrome. CSS provides the actual selection chrome until header/stacking is refactored for
-   * see-through glass over the shell.
-   */
+  // The DOM pill is the selection chrome. It is hidden when no tab matches the current view.
   const domPillStyle = useMemo((): CSSProperties => {
     return {
       ...(pillLayoutFromDom
         ? {}
         : { left: pillStyle.left, width: pillStyle.width, opacity: pillStyle.opacity }),
+      ...(activeIndex < 0 ? { opacity: 0 } : {}),
       background: [
         'linear-gradient(180deg,',
         `  color-mix(in oklch, var(--surface-tint, rgba(255,255,255,0.08)) 60%, rgba(255,255,255,0.13)) 0%,`,
@@ -138,20 +84,14 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
         '0 2px 8px -4px rgba(0,0,0,0.25)',
       ].join(', '),
     };
-  }, [pillLayoutFromDom, pillStyle.left, pillStyle.width, pillStyle.opacity]);
+  }, [activeIndex, pillLayoutFromDom, pillStyle.left, pillStyle.width, pillStyle.opacity]);
 
   return (
     <nav
       ref={navRef}
       aria-label="Primary sections"
       className="relative flex min-w-0 items-center gap-1 rounded-full border border-white/[0.04] bg-white/[0.02] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
-      onPointerEnter={() => {
-        hoveringRef.current = true;
-      }}
-      onPointerLeave={() => {
-        hoveringRef.current = false;
-      }}
-      {...listPropsWrapped}
+      {...listProps}
     >
       <div
         ref={pillRef}
@@ -184,15 +124,17 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             key={tab.view}
             type="button"
             aria-current={isActive ? 'page' : undefined}
-            onClick={() => {
-              if (suppressNextTabClickRef.current) {
+            onClick={(event) => {
+              // Only a pointer click (detail > 0) can follow a drag; Enter and Space always navigate.
+              if (suppressNextTabClickRef.current && event.detail > 0) {
                 suppressNextTabClickRef.current = false;
                 return;
               }
               onNavigate(tab.view);
             }}
+            title={tab.label}
             className={cn(
-              'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5',
+              'relative z-10 flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 lg:px-3.5',
               'text-[13px] font-medium transition-colors duration-[var(--motion-emphasis)] motion-reduce:transition-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
               isActive ? 'text-white' : 'text-white/50 hover:bg-white/[0.04] hover:text-white/90',
@@ -200,7 +142,10 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             style={isActive ? { color: 'var(--hero-accent, #fff)' } : undefined}
           >
             <tab.icon className="h-4 w-4 shrink-0" />
-            <span className={isActive ? 'text-white' : undefined}>{tab.label}</span>
+            {/* Icon-only below lg: with Windows caption buttons, labelled tabs overflow 800 px. */}
+            <span className={cn('sr-only lg:not-sr-only', isActive && 'text-white')}>
+              {tab.label}
+            </span>
           </button>
         );
       })}

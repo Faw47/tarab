@@ -21,6 +21,7 @@ import {
   useRef,
 } from 'react';
 import { cn } from '@/lib/utils';
+import { QueueIcon } from '../ui/Icons';
 import type { NavView } from './FloatingDock';
 import { useTopBarSearchShortcuts } from './useTopBarSearchShortcuts';
 import { WindowsWindowControls } from './WindowsWindowControls';
@@ -50,9 +51,7 @@ interface TopBarNeoProps {
   focusSearchNonce?: number;
   onBack?: () => void;
   canGoBack?: boolean;
-  // NOTE: Secondary tabs (Tags, Settings) are intentionally absent in
-  // iconRail mode — FloatingDock owns them in that layout. This is a
-  // deliberate design contract, not an oversight.
+  // Secondary tabs (Tags, Settings) are absent in iconRail mode: the icon rail carries them.
 }
 
 interface StatusData {
@@ -79,7 +78,7 @@ const PLATFORM_SHORTCUT = {
 const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
   { view: 'home', label: 'Home', icon: Home },
   { view: 'library', label: 'Library', icon: Library },
-  { view: 'queue', label: 'Queue', icon: ListMusic },
+  { view: 'queue', label: 'Queue', icon: QueueIcon as LucideIcon },
   { view: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 
@@ -158,10 +157,12 @@ const NeoNavButton = memo(function NeoNavButton({
       type="button"
       onClick={() => onNavigate(view)}
       aria-current={isActive ? 'page' : undefined}
+      title={label}
       className={cn(
         BUTTON_BASE_CLASS,
         primaryButtonStateClass(isActive),
-        'h-10 px-0 pr-5 text-[12px] overflow-hidden',
+        // Icon-only below lg: four labelled tabs push the right-hand actions off an 800 px window.
+        'h-10 px-0 text-[12px] overflow-hidden lg:pr-5',
       )}
     >
       <div
@@ -172,7 +173,7 @@ const NeoNavButton = memo(function NeoNavButton({
       >
         <Icon className="h-4 w-4 shrink-0" strokeWidth={3} />
       </div>
-      <span className="ml-[6px]">{label}</span>
+      <span className="sr-only lg:not-sr-only lg:ml-[6px]">{label}</span>
     </button>
   );
 });

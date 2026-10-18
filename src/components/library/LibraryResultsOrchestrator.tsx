@@ -94,7 +94,7 @@ const TrackTile = memo(function TrackTile({
         aria-label={`${track.title} by ${track.artist}`}
         className={cn(
           NEO_CARD_BASE,
-          'aspect-[4/5] flex flex-col',
+          'aspect-[4/5] flex min-w-0 flex-col',
           getAlbumRotationClass(index),
           isPlaying && NEO_CARD_PLAYING,
           isSelected && !isPlaying && NEO_CARD_SELECTED,
@@ -291,7 +291,7 @@ const AlbumTile = memo(function AlbumTile({
         tabIndex={0}
         className={cn(
           NEO_CARD_BASE,
-          'aspect-[4/5] flex flex-col',
+          'aspect-[4/5] flex min-w-0 flex-col',
           getAlbumRotationClass(index),
           isPlayingAlbum && NEO_CARD_PLAYING,
         )}
@@ -533,7 +533,7 @@ const ArtistTile = memo(function ArtistTile({
         tabIndex={0}
         className={cn(
           NEO_CARD_BASE,
-          'aspect-[4/5] flex flex-col pt-4 pb-7',
+          'aspect-[4/5] flex min-w-0 flex-col pt-4 pb-7',
           getAlbumRotationClass(index),
           isPlayingArtist && NEO_CARD_PLAYING,
         )}

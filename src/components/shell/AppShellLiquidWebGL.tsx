@@ -2,10 +2,24 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { topBarAuroraFragmentShader, topBarAuroraVertexShader } from './header-aurora-shaders';
-import { LiquidBackgroundPlane, type LiquidBgColors } from './liquid-background-mesh';
+import { LiquidBackgroundPlane, type LiquidBgColors, shaderColor } from './liquid-background-mesh';
 import { LiquidShellRenderPipeline } from './liquid-shell-render-pipeline';
 import { useDocumentHidden } from './use-document-hidden';
 import { LIQUID_HEADER_STRIP_PX, liquidShellGl, liquidShellOrthoCamera } from './webgl-defaults';
+
+/** Frame rate of the shell's ambient motion; slow gradients do not need display refresh rate. */
+const SHELL_FPS = 30;
+
+/** Requests frames for the `demand` frameloop while animation runs; none while paused. */
+function ShellFrameTicker({ running }: { running: boolean }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => invalidate(), 1000 / SHELL_FPS);
+    return () => window.clearInterval(id);
+  }, [invalidate, running]);
+  return null;
+}
 
 /* ─── AURORA COMPONENT ───────────────────────────────────────────────────── */
 
@@ -32,7 +46,7 @@ function HeaderAuroraPlane({
     meshRef.current?.layers.set(1);
   }, []);
 
-  const accentColor = useMemo(() => new THREE.Color(accent), [accent]);
+  const accentColor = useMemo(() => shaderColor(accent), [accent]);
 
   const uniforms = useMemo(
     () => ({
@@ -51,7 +65,7 @@ function HeaderAuroraPlane({
     if (!materialRef.current || pauseAnimation) return;
 
     const u = materialRef.current.uniforms;
-    u.uTime.value += delta * 0.45;
+    u.uTime.value += Math.min(delta, 0.1) * 0.45;
 
     // Smooth transitions for interaction states
     u.uScroll.value = THREE.MathUtils.lerp(u.uScroll.value, isScrolled ? 1 : 0, 0.08);
@@ -207,12 +221,14 @@ export const AppShellLiquidWebGL = memo(function AppShellLiquidWebGL({
         gl={liquidShellGl}
         camera={liquidShellOrthoCamera}
         orthographic
-        dpr={[1, 2]}
+        dpr={1}
+        frameloop="demand"
         onCreated={({ gl }) => {
           gl.domElement.setAttribute('data-liquid-shell-canvas', '');
         }}
       >
         <LiquidShellRenderPipeline />
+        <ShellFrameTicker running={!pauseAnimation} />
 
         <LiquidBackgroundPlane colors={colors} pauseAnimation={pauseAnimation} />
 
@@ -230,7 +246,7 @@ export const AppShellLiquidWebGL = memo(function AppShellLiquidWebGL({
       {/* Subtle depth veil to ensure UI readability over the metaballs */}
       <div
         className="absolute inset-0 z-10"
-        style={{ background: 'oklch(0.08 0.005 140 / 0.55)' }}
+        style={{ background: 'oklch(0.08 0.005 140 / 0.35)' }}
       />
     </div>
   );

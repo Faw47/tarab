@@ -422,10 +422,17 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
         {/* Main Two-Column Layout */}
         <div className="flex-1 w-full h-full flex flex-col md:flex-row items-stretch overflow-y-auto p-6 sm:p-8 md:p-12 gap-6 md:gap-8 relative">
-          {/* LEFT COLUMN: Album Art + Controls */}
-          {!fullscreenHideCoverArt && (
-            <div className="w-full md:w-[45%] flex flex-col justify-center items-center gap-5 md:gap-6 shrink-0">
-              {/* Album Art with Integrated Progress Bar */}
+          {/* LEFT COLUMN: Album Art + Controls. Hide Cover Art removes only the artwork. */}
+          <div className="w-full md:w-[45%] flex flex-col justify-center items-center gap-5 md:gap-6 shrink-0">
+            {fullscreenHideCoverArt ? (
+              <div
+                className="group relative w-full max-w-md h-6"
+                data-testid="player-progress-without-art"
+              >
+                <HidingProgressBar accentColor="var(--hero-accent)" />
+              </div>
+            ) : (
+              /* Album Art with Integrated Progress Bar */
               <div className="relative w-full max-w-md aspect-square group">
                 {/* Cover Art Container */}
                 <div className="w-full h-full rounded-2xl overflow-hidden relative">
@@ -443,111 +450,106 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
                   <HidingProgressBar accentColor="var(--hero-accent)" />
                 </div>
               </div>
+            )}
 
-              {/* Track Info */}
-              <div className="w-full max-w-md text-center space-y-2">
-                <div className="flex items-center justify-center gap-2">
-                  <TrackIcon className="w-4 h-4 text-white/60" />
-                  <h1 className="text-2xl md:text-3xl font-bold text-white truncate">
-                    {currentTrack.title}
-                  </h1>
-                </div>
-                <div className="flex items-center justify-center gap-2 text-zinc-300">
-                  <User className="w-3.5 h-3.5" />
-                  <p className="text-lg text-zinc-300 truncate">{currentTrack.artist}</p>
-                </div>
-                <div className="flex items-center justify-center gap-2 text-zinc-400">
-                  <VinylIcon className="w-3.5 h-3.5" />
-                  <p className="text-sm text-zinc-400 truncate">{currentTrack.album}</p>
-                </div>
+            {/* Track Info */}
+            <div className="w-full max-w-md text-center space-y-2">
+              <div className="flex items-center justify-center gap-2">
+                <TrackIcon className="w-4 h-4 text-white/60" />
+                <h1 className="text-2xl md:text-3xl font-bold text-white truncate">
+                  {currentTrack.title}
+                </h1>
               </div>
-
-              {/* Controls Row - Buttons styled with cover art accent */}
-              <div className="flex items-center gap-3">
-                {/* Shuffle */}
-                <div className="relative">
-                  <IconButton
-                    onClick={toggleShuffle}
-                    title={shuffleEnabled ? 'Turn shuffle off' : 'Turn shuffle on'}
-                    className={clsx(
-                      'w-10 h-10',
-                      shuffleEnabled
-                        ? 'bg-white/20 text-white shadow-lg ring-1 ring-white/50'
-                        : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white',
-                    )}
-                  >
-                    <Shuffle className="w-4 h-4" />
-                  </IconButton>
-                  {shuffleEnabled && (
-                    <div className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]" />
-                  )}
-                </div>
-
-                {/* Previous */}
-                <IconButton
-                  onClick={handlePrevious}
-                  title="Previous track"
-                  className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
-                >
-                  <SkipBack className="w-5 h-5" fill="currentColor" />
-                </IconButton>
-
-                {/* Play/Pause - Main Button */}
-                <IconButton
-                  onClick={handleTogglePlay}
-                  title={isPlaying ? 'Pause' : 'Play'}
-                  className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/30"
-                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.96)', color: '#09090b' }}
-                >
-                  {isPlaying ? (
-                    <Pause className="w-6 h-6" fill="currentColor" />
-                  ) : (
-                    <Play className="w-6 h-6 ml-1" fill="currentColor" />
-                  )}
-                </IconButton>
-
-                {/* Next */}
-                <IconButton
-                  onClick={handleNext}
-                  title="Next track"
-                  className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
-                >
-                  <SkipForward className="w-5 h-5" fill="currentColor" />
-                </IconButton>
-
-                {/* Loop */}
-                <div className="relative">
-                  <IconButton
-                    onClick={toggleLoop}
-                    title={loopMode === 'off' ? 'Turn repeat on' : 'Change repeat mode'}
-                    className={clsx(
-                      'w-10 h-10',
-                      loopMode !== 'off'
-                        ? 'bg-white/20 text-white shadow-lg ring-1 ring-white/50'
-                        : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white',
-                    )}
-                  >
-                    {loopMode === 'one' ? (
-                      <Repeat1 className="w-4 h-4" />
-                    ) : (
-                      <Repeat className="w-4 h-4" />
-                    )}
-                  </IconButton>
-                  {loopMode !== 'off' && (
-                    <div className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]" />
-                  )}
-                </div>
+              <div className="flex items-center justify-center gap-2 text-zinc-300">
+                <User className="w-3.5 h-3.5" />
+                <p className="text-lg text-zinc-300 truncate">{currentTrack.artist}</p>
+              </div>
+              <div className="flex items-center justify-center gap-2 text-zinc-400">
+                <VinylIcon className="w-3.5 h-3.5" />
+                <p className="text-sm text-zinc-400 truncate">{currentTrack.album}</p>
               </div>
             </div>
-          )}
+
+            {/* Controls Row - Buttons styled with cover art accent */}
+            <div className="flex items-center gap-3">
+              {/* Shuffle */}
+              <div className="relative">
+                <IconButton
+                  onClick={toggleShuffle}
+                  title={shuffleEnabled ? 'Turn shuffle off' : 'Turn shuffle on'}
+                  className={clsx(
+                    'w-10 h-10',
+                    shuffleEnabled
+                      ? 'bg-white/20 text-white shadow-lg ring-1 ring-white/50'
+                      : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white',
+                  )}
+                >
+                  <Shuffle className="w-4 h-4" />
+                </IconButton>
+                {shuffleEnabled && (
+                  <div className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]" />
+                )}
+              </div>
+
+              {/* Previous */}
+              <IconButton
+                onClick={handlePrevious}
+                title="Previous track"
+                className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
+              >
+                <SkipBack className="w-5 h-5" fill="currentColor" />
+              </IconButton>
+
+              {/* Play/Pause - Main Button */}
+              <IconButton
+                onClick={handleTogglePlay}
+                title={isPlaying ? 'Pause' : 'Play'}
+                className="w-14 h-14 bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/30"
+                style={{ backgroundColor: 'rgba(255, 255, 255, 0.96)', color: '#09090b' }}
+              >
+                {isPlaying ? (
+                  <Pause className="w-6 h-6" fill="currentColor" />
+                ) : (
+                  <Play className="w-6 h-6 ml-1" fill="currentColor" />
+                )}
+              </IconButton>
+
+              {/* Next */}
+              <IconButton
+                onClick={handleNext}
+                title="Next track"
+                className="w-11 h-11 bg-white/15 text-white hover:bg-white/25 active:scale-95"
+              >
+                <SkipForward className="w-5 h-5" fill="currentColor" />
+              </IconButton>
+
+              {/* Loop */}
+              <div className="relative">
+                <IconButton
+                  onClick={toggleLoop}
+                  title={loopMode === 'off' ? 'Turn repeat on' : 'Change repeat mode'}
+                  className={clsx(
+                    'w-10 h-10',
+                    loopMode !== 'off'
+                      ? 'bg-white/20 text-white shadow-lg ring-1 ring-white/50'
+                      : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white',
+                  )}
+                >
+                  {loopMode === 'one' ? (
+                    <Repeat1 className="w-4 h-4" />
+                  ) : (
+                    <Repeat className="w-4 h-4" />
+                  )}
+                </IconButton>
+                {loopMode !== 'off' && (
+                  <div className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white shadow-[0_0_8px_2px_rgba(255,255,255,0.5)]" />
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* RIGHT COLUMN: Lyrics */}
-          <div
-            className={clsx(
-              'flex flex-1 flex-col justify-center items-center relative min-h-[45vh]',
-              fullscreenHideCoverArt ? 'w-full min-h-full' : 'w-full md:flex',
-            )}
-          >
+          <div className="flex flex-1 flex-col justify-center items-center relative min-h-[45vh] w-full md:flex">
             {hasLyrics ? (
               <div className="w-full h-[70vh] max-h-[600px]">
                 <LyricsDisplay

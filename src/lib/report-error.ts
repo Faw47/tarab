@@ -15,14 +15,27 @@ const toMessage = (value: unknown): string | undefined => {
   return undefined;
 };
 
+const describeUnknown = (value: unknown): string => {
+  const text = toMessage(value);
+  if (text) return text;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+};
+
 export const reportError = (
-  message: string,
+  rawMessage: unknown,
   options?: {
     source?: string;
     error?: unknown;
     detail?: string;
   },
 ) => {
+  // Callers sometimes pass reportError straight to .catch, so the rejection value arrives here as
+  // the message. Rendering a non-string message would crash the error banner and the whole app.
+  const message = typeof rawMessage === 'string' ? rawMessage : describeUnknown(rawMessage);
   const source = options?.source ? `[${options.source}] ` : '';
   const detail = options?.detail ?? toMessage(options?.error);
 

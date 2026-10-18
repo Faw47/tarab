@@ -21,12 +21,13 @@ export function useTopBarSearchShortcuts({
       if (event.defaultPrevented) return;
 
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const isSearchInput = target?.id === inputId;
+      const isSearchInput = target?.id === inputId || target === inputRef.current;
       const isSlash =
         !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === '/';
 
       if (isSlash) {
-        if (isTextEntryTarget(target) && !isSearchInput) return;
+        // Inside any text field, including search itself, / is typed ("AC/DC").
+        if (isTextEntryTarget(target) || isSearchInput) return;
         event.preventDefault();
         onFocusSearch();
         return;

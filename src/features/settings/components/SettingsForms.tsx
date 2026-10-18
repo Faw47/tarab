@@ -384,7 +384,6 @@ export const AppearanceSettingsForm = memo(() => {
   const lyricsEnabled = useSettingsStore((s) => s.lyricsEnabled);
   const backgroundEnabled = useSettingsStore((s) => s.backgroundEnabled);
   const reducedEffects = useSettingsStore((s) => s.reducedEffects);
-  const debugLiquidControlGlass = useSettingsStore((s) => s.debugLiquidControlGlass);
   const compactMode = useSettingsStore((s) => s.compactMode);
   const fullscreenPlayerLayout = useSettingsStore((s) => s.fullscreenPlayerLayout);
   const navMode = useSettingsStore((s) => s.navMode);
@@ -393,15 +392,9 @@ export const AppearanceSettingsForm = memo(() => {
   const setLyricsEnabled = useSettingsStore((s) => s.setLyricsEnabled);
   const setBackgroundEnabled = useSettingsStore((s) => s.setBackgroundEnabled);
   const setReducedEffects = useSettingsStore((s) => s.setReducedEffects);
-  const setDebugLiquidControlGlass = useSettingsStore((s) => s.setDebugLiquidControlGlass);
   const setCompactMode = useSettingsStore((s) => s.setCompactMode);
   const setFullscreenPlayerLayout = useSettingsStore((s) => s.setFullscreenPlayerLayout);
   const setNavMode = useSettingsStore((s) => s.setNavMode);
-
-  const showLiquidDebugControl =
-    debugLiquidControlGlass ||
-    (typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('debugLiquidGlass') === '1');
 
   return (
     <>
@@ -438,14 +431,6 @@ export const AppearanceSettingsForm = memo(() => {
           onChange={setReducedEffects}
           description="Reduce heavier motion and visual effects."
         />
-        {theme === 'liquid-glass' && showLiquidDebugControl ? (
-          <SettingsSwitch
-            label="Debug liquid tab glass"
-            checked={debugLiquidControlGlass}
-            onChange={setDebugLiquidControlGlass}
-            description="Exaggerate GPU tab pill refraction and glare. URL: ?debugLiquidGlass=1"
-          />
-        ) : null}
       </SettingsSection>
 
       <SettingsSection

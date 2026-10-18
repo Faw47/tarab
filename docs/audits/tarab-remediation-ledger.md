@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 28 |
+| FIXED_VERIFIED | 38 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 9 |
 | DECISION_REQUIRED | 0 |
 | BLOCKED | 0 |
-| PENDING | 122 |
+| PENDING | 112 |
 | **Total** | **160** |
 
 ## Findings
@@ -93,16 +93,16 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | AR-05 | P2 | Media-session sync re-sends full-resolution base64 artwork every two seconds to a main-thread command | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve (after 3 objection rounds) | Repeat syncs send metadataUnchanged and skip the artwork fetch; the command returns whether the OS session holds the metadata. Review rounds added: key includes filePath and hasCoverArt; per-sync sequence drops stale artwork syncs; the key is cleared while a full sync is pending (A-B-A track change); the redundant renderer mini-window close was removed. Tests in useDesktopIntegration.test.tsx fail before each fix. Limitations: the command is still synchronous on the main thread; artwork is still full resolution, not a 512 px thumbnail; albumArtist is null and hasPrevious is true for any non-empty queue; Linux MPRIS serves no metadata (plugin bug, pre-existing). | 8a7e351, 09fb788, 767880e, 09e5b5f | #4 |
 | AR-13 | P2 | Linux applies the full app menu to every window, including the 320x92 mini player | NATIVE_VALIDATION_REQUIRED | G1 n/a (platform) / G2 pass / G3 approve | Linux attaches the app menu to the main window only, so the mini player gets no menu bar. Needs a check on a Linux desktop. | 1036599 | #6 |
 | FE-24 | P2 | Native menu items do less than their labels say | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | New Playlist opens the create dialog; Albums and Artists open those facets (navigation-intent store, consumed on mount); Import imports exactly the chosen files and offers Add Folder for the rest; Diagnostics became Library Health and opens the Library settings page. Tests in useNativeMenuActions.test.tsx. Review notes fixed in 05b4819 (toast reads current folders; facet request closes a detail view). Limitation: the inside/outside check uses renderer folder strings, so Windows behaviour depends on QA-06. | 7600ee8, 05b4819 | #6 |
-| FE-01 | P2 | The liquid WebGL shell renders continuously but is always covered by an opaque layer | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| LD-01 | P2 | All three liquid-shell post-processing shaders fail to compile | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-02 | P2 | Unused full-window blur passes and a per-frame layout loop feeding a store nothing reads | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-07 | P2 | At the minimum window size the floating dock covers player controls; its labels clip and the search bar overflows | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| LD-08 | P2 | Neobrutalism album grid columns expand to fit long titles | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-09 | P2 | Selection pills highlight the wrong navigation item | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-04 | P2 | Search shortcuts focus the hidden mobile search input | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-05 | P2 | Liquid Home Mute button changes the icon but not the audio | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-06 | P2 | "Hide cover art" in the full player removes every transport control | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-03 | P2 | Passing `reportError` directly to `.catch` can replace the whole UI with the error boundary | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| FE-01 | P2 | The liquid WebGL shell renders continuously but is always covered by an opaque layer | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Product decision (user): make the shell visible. Root causes beyond the opaque backdrop base: R3F's pixel-unit orthographic frustum drew the 2x2 background plane two pixels wide, and colors were linearized before unconverted shader output. Fixed with an explicit -1..1 frustum, shaderColor, overShell backdrop without its base, veil 0.35, demand frameloop at 30 fps and DPR 1 (about 34 draw calls/s measured, previously display rate at up to 2x). Tests in shell-scene.test.ts fail before. Browser-checked in SwiftShader; GPU-specific appearance not checked natively. | 287dc89 | #7 |
+| LD-01 | P2 | All three liquid-shell post-processing shaders fail to compile | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | The post pipeline whose raw GLSL 3 shaders failed to compile is replaced by a direct two-layer render (renderShellLayers, unit test); no custom post shaders remain. | 9a6789f | #7 |
+| FE-02 | P2 | Unused full-window blur passes and a per-frame layout loop feeding a store nothing reads | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Removed the unsampled blur passes, the per-frame use-liquid-control-motion layout loop, its store, the no-op debug switch and setting, the unused pill shader and the Gaussian kernel helper. | 9a6789f, 2b42f95 | #7 |
+| FE-07 | P2 | At the minimum window size the floating dock covers player controls; its labels clip and the search bar overflows | FIXED_VERIFIED | G1 browser check / G2 pass / G3 approve | Rail shows from md and the dock only below md; liquid search pill shrinks (160 to 420/520 px); liquid and neo primary tabs are icon-only below lg. Browser-checked at 800x600 (including a Windows platform with caption buttons) and 1200x800 in both themes and nav modes: no off-screen header control, no dock overlap. | 3922ebb, 980d0d6 | #7 |
+| LD-08 | P2 | Neobrutalism album grid columns expand to fit long titles | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Grid columns are repeat(N, minmax(0, 1fr)) and neo cards are min-w-0, so long titles truncate in their column. VirtualizedGrid test. | 85969ae, d5c45a5 | #7 |
+| FE-09 | P2 | Selection pills highlight the wrong navigation item | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve after 1 objection | Top tabs and sidebar hide the selection pill when no item matches the view. Review fix: the pill hook's click-suppression flag resets on every press and when disabled, so the first tab click after disabling is not swallowed (pointer-event test). | fb5ce38, 2b42f95 | #7 |
+| FE-04 | P2 | Search shortcuts focus the hidden mobile search input | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Desktop and compact search inputs have separate refs and ids; searchInputRef resolves to the input shown at the current width. Follow-up: / typed in search is text. TopBar and shortcut tests fail before. Limitation: between 640 and 767 px (narrow previews only) the compact input is hidden by sm:hidden. | 093e0be, 2b42f95 | #7 |
+| FE-05 | P2 | Liquid Home Mute button changes the icon but not the audio | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Liquid Home Mute uses the control's commit path (engine and store). VolumeControl test fails before. | a51a15d | #7 |
+| FE-06 | P2 | "Hide cover art" in the full player removes every transport control | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve after 1 objection | Hide Cover Art hides only the artwork; track info, transport and a standalone progress row stay. Review fix: the row has the group class so the seek bar reveals and seeks (browser-checked). PlayerContent test. | a7bbd7a, 2b42f95 | #7 |
+| FE-03 | P2 | Passing `reportError` directly to `.catch` can replace the whole UI with the error boundary | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | reportError turns a non-string message into text; the mini player passes a message and the error option instead of .catch(reportError). Test report-error.test.ts fails before. | 9c5631c | #7 |
 | FE-10 | P2 | Playback-failure recovery actions exist only inside the full player | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-11 | P2 | Compact full player's seek bar is never visible or mouse-usable | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-12 | P2 | Full player shows no elapsed/total time and no volume in the default layout | PENDING | - | Audit confidence CONFIRMED. | - | - |

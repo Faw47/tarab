@@ -9,7 +9,16 @@ export const liquidShellGl: CanvasProps['gl'] = {
   powerPreference: 'low-power',
 };
 
+/**
+ * The shell planes are laid out in a -1..1 view. An explicit frustum makes R3F treat the camera as
+ * manual; its default orthographic frustum is in pixels, which shrank the 2x2 background plane to
+ * two pixels.
+ */
 export const liquidShellOrthoCamera = {
+  left: -1,
+  right: 1,
+  top: 1,
+  bottom: -1,
   position: [0, 0, 1] as [number, number, number],
   zoom: 1,
   near: 0.1,

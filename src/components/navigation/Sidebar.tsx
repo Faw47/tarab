@@ -111,13 +111,17 @@ const SidebarNavButton = memo(function SidebarNavButton({
     if (segment === 'libraryBrowse') return onLibrarySurface && !searchUiOpen;
     return currentView === view;
   }, [previewActive, segment, onLibrarySurface, searchUiOpen, currentView, view]);
-  const handleClick = useCallback(() => {
-    if (suppressNextTabClickRef?.current) {
-      suppressNextTabClickRef.current = false;
-      return;
-    }
-    onNavigate(view);
-  }, [onNavigate, view, suppressNextTabClickRef]);
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      // Only a pointer click (detail > 0) can follow a drag; Enter and Space always navigate.
+      if (suppressNextTabClickRef?.current && event.detail > 0) {
+        suppressNextTabClickRef.current = false;
+        return;
+      }
+      onNavigate(view);
+    },
+    [onNavigate, view, suppressNextTabClickRef],
+  );
   const glassVars = useMemo(() => getIconNavButtonVars(active), [active]);
 
   if (theme === 'neobrutalism') {
@@ -201,7 +205,8 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
       if (t.segment === 'libraryBrowse') return onLib && !searchUiOpen;
       return currentView === t.view;
     });
-    return idx >= 0 ? idx : 0;
+    // -1 when no item matches the current view; the pill is then hidden.
+    return idx;
   }, [items, currentView, searchUiOpen]);
 
   const onCommitIndex = useCallback(
@@ -234,7 +239,7 @@ const SidebarNavGroup = memo(function SidebarNavGroup({
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     onCommitIndex,
     syncDependencies: [currentView, items, searchUiOpen],
-    enabled: !isNeobrutalism,
+    enabled: !isNeobrutalism && activeIndex >= 0,
   });
 
   useLayoutEffect(() => {
@@ -329,7 +334,7 @@ export const Sidebar = memo(function Sidebar({
     <aside
       className={cn(
         /* Liquid: stay fully transparent so shell/WebGL reads as one surface (no second blur stack). */
-        'relative hidden w-18 shrink-0 flex-col bg-transparent lg:flex',
+        'relative hidden w-18 shrink-0 flex-col bg-transparent md:flex',
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col">

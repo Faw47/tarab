@@ -212,7 +212,9 @@ export function AppLayouts({
         </Suspense>
       )}
 
-      {backgroundEnabled ? <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} /> : null}
+      {backgroundEnabled ? (
+        <LiquidHomeAmbientBackdrop coverUrl={homeAmbientCoverUrl} overShell={!reducedEffects} />
+      ) : null}
 
       <div className="flex h-full w-full overflow-hidden relative z-10">
         <Sidebar

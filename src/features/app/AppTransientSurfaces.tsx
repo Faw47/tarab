@@ -167,7 +167,9 @@ export function AppTransientSurfaces({
         </div>
       )}
 
-      <div className="lg:hidden">
+      {/* The rail or top bar navigates from md up, and the window is at least 800 px wide, so the
+          dock appears only in narrow previews; on desktop it covered the player controls. */}
+      <div className="md:hidden">
         <FloatingDock activeView={currentView} onNavigate={onNavigate} />
       </div>
     </>

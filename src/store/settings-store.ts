@@ -71,8 +71,6 @@ interface SettingsState {
   autoLyrics: boolean;
   compactMode: boolean;
   reducedEffects: boolean;
-  /** Exaggerate liquid tab glass (stretch / refraction / glare); also `?debugLiquidGlass=1`. */
-  debugLiquidControlGlass: boolean;
   gapless: boolean;
   crossfadeSeconds: number;
   miniPlayerVolumeVisible: boolean;
@@ -112,7 +110,6 @@ interface SettingsState {
   setAutoLyrics: (enabled: boolean) => void;
   setCompactMode: (enabled: boolean) => void;
   setReducedEffects: (enabled: boolean) => void;
-  setDebugLiquidControlGlass: (enabled: boolean) => void;
   setGapless: (enabled: boolean) => void;
   setCrossfadeSeconds: (seconds: number) => void;
   setMiniPlayerVolumeVisible: (visible: boolean) => void;
@@ -155,7 +152,6 @@ export const useSettingsStore = create<SettingsState>()(
         autoLyrics: false,
         compactMode: false,
         reducedEffects: false,
-        debugLiquidControlGlass: false,
         gapless: true,
         crossfadeSeconds: 0,
         miniPlayerVolumeVisible: false,
@@ -227,8 +223,6 @@ export const useSettingsStore = create<SettingsState>()(
           set({ compactMode: enabled }, false, 'settings/setCompactMode'),
         setReducedEffects: (enabled) =>
           set({ reducedEffects: enabled }, false, 'settings/setReducedEffects'),
-        setDebugLiquidControlGlass: (enabled) =>
-          set({ debugLiquidControlGlass: enabled }, false, 'settings/setDebugLiquidControlGlass'),
         setGapless: (enabled) => set({ gapless: enabled }, false, 'settings/setGapless'),
         setCrossfadeSeconds: (seconds) =>
           set(
@@ -313,11 +307,6 @@ export const useSettingsStore = create<SettingsState>()(
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
         version: 7,
-        partialize: (state) => {
-          if (__DEV__) return state;
-          const { debugLiquidControlGlass: _debugState, ...productionState } = state;
-          return productionState as SettingsState;
-        },
         migrate: (persisted, version) => {
           let incoming = (persisted as Partial<SettingsState>) ?? {};
           if ((version ?? 0) < 2) {
@@ -359,7 +348,6 @@ export const useSettingsStore = create<SettingsState>()(
           }
           incoming = {
             ...incoming,
-            debugLiquidControlGlass: __DEV__ ? incoming.debugLiquidControlGlass : false,
             libraryFolders: mergeLibraryFolders([], incoming.libraryFolders ?? []),
             shortcuts: normalizeShortcuts(incoming.shortcuts),
           } as Partial<SettingsState>;

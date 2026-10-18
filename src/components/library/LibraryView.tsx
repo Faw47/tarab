@@ -4,14 +4,12 @@ import type {
   ComponentType,
   DragEvent,
   ReactNode,
-  PointerEvent as ReactPointerEvent,
   RefObject,
   UIEvent,
   UIEventHandler,
 } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useLiquidControlMotionHorizontal } from '@/hooks/use-liquid-control-motion';
 import {
   applyHorizontalPillDom,
   useLiquidSegmentedPillHorizontal,
@@ -223,8 +221,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
   const pillRef = useRef<HTMLDivElement>(null);
   const viewModeListRef = useRef<HTMLDivElement>(null);
   const viewModePillRef = useRef<HTMLDivElement>(null);
-  const viewModeHoveringRef = useRef(false);
-  const viewModePressingRef = useRef(false);
 
   const sortDropdownRef = useRef<HTMLDivElement>(null);
   const sortTriggerRef = useRef<HTMLButtonElement>(null);
@@ -316,29 +312,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     syncDependencies: [viewMode],
   });
 
-  const vmListPropsWrapped = useMemo(
-    () => ({
-      ...vmListProps,
-      onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        viewModePressingRef.current = true;
-        vmListProps.onPointerDownCapture(e);
-      },
-      onPointerUpCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onPointerUpCapture(e);
-        viewModePressingRef.current = false;
-      },
-      onPointerCancelCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onPointerCancelCapture(e);
-        viewModePressingRef.current = false;
-      },
-      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => {
-        vmListProps.onLostPointerCapture(e);
-        viewModePressingRef.current = false;
-      },
-    }),
-    [vmListProps],
-  );
-
   useLayoutEffect(() => {
     if (!pillLayoutFromDom) return;
     const el = pillRef.current;
@@ -352,18 +325,6 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
     const g = vmPillGeometryRef.current;
     if (el && g) applyHorizontalPillDom(el, g.left, g.width);
   }, [vmPillLayoutFromDom, vmIsDragging, vmPillGeometryRef]);
-
-  useLiquidControlMotionHorizontal({
-    enabled: true,
-    rootRef: viewModeListRef,
-    pillStyle: vmPillStyle,
-    pillLayoutFromDom: vmPillLayoutFromDom,
-    pillGeometryRef: vmPillGeometryRef,
-    isDragging: vmIsDragging,
-    hoveringRef: viewModeHoveringRef,
-    pressingRef: viewModePressingRef,
-    activeIndex: viewMode === 'grid' ? 0 : 1,
-  });
 
   return (
     <section className={cn('library-v2-command-deck', isScrolled && 'is-scrolled')}>
@@ -410,7 +371,8 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                   aria-selected={isActive}
                   className={cn('library-v2-tab', isActive && 'is-active')}
                   onClick={(e) => {
-                    if (suppressNextTabClickRef.current) {
+                    // Only a pointer click (detail > 0) can follow a drag.
+                    if (suppressNextTabClickRef.current && e.detail > 0) {
                       suppressNextTabClickRef.current = false;
                       e.preventDefault();
                       e.stopPropagation();
@@ -529,13 +491,7 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
             className="library-view-mode-selector"
             role="group"
             aria-label="View mode"
-            onPointerEnter={() => {
-              viewModeHoveringRef.current = true;
-            }}
-            onPointerLeave={() => {
-              viewModeHoveringRef.current = false;
-            }}
-            {...vmListPropsWrapped}
+            {...vmListProps}
           >
             <div
               ref={viewModePillRef}

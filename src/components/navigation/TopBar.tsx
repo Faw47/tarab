@@ -35,6 +35,7 @@ import { WindowsWindowControls } from './WindowsWindowControls';
 /* ─── CONSTANTS ──────────────────────────────────────────────────────────── */
 
 const SEARCH_INPUT_ID = 'global-library-search';
+const COMPACT_SEARCH_INPUT_ID = 'global-library-search-compact';
 
 const PRIMARY_TABS: Array<{ view: NavView; label: string; icon: LucideIcon }> = [
   { view: 'home', label: 'Home', icon: Home },
@@ -315,7 +316,7 @@ const SearchBarBase = forwardRef<HTMLInputElement, SearchBarProps>(
 
         <input
           ref={ref}
-          id={SEARCH_INPUT_ID}
+          id={compact ? COMPACT_SEARCH_INPUT_ID : SEARCH_INPUT_ID}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -473,7 +474,22 @@ export const TopBar = memo(function TopBar({
   canGoBack = false,
   className,
 }: TopBarProps) {
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const desktopSearchInputRef = useRef<HTMLInputElement>(null);
+  const compactSearchInputRef = useRef<HTMLInputElement>(null);
+  // Resolves to the search input shown at the current width. The window is never narrower than
+  // md, so this is the desktop input; the compact one only shows in narrow previews.
+  const searchInputRef = useMemo(
+    () => ({
+      get current(): HTMLInputElement | null {
+        const narrow =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          !window.matchMedia('(min-width: 768px)').matches;
+        return narrow ? compactSearchInputRef.current : desktopSearchInputRef.current;
+      },
+    }),
+    [],
+  );
   const headerRef = useRef<HTMLElement>(null);
   const fallbackPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pointerNormRef = headerPointerRef ?? fallbackPointerRef;
@@ -714,7 +730,7 @@ export const TopBar = memo(function TopBar({
 
         {/* Center Section: Search Pill (flex-none) */}
         <div
-          className="flex-none flex items-center justify-center w-full max-w-[min(100%,420px)] lg:max-w-[min(100%,520px)] px-2"
+          className="flex min-w-[160px] flex-[0_1_420px] items-center justify-center px-2 lg:flex-[0_1_520px]"
           style={chromeNoDragStyle}
         >
           <div
@@ -724,7 +740,7 @@ export const TopBar = memo(function TopBar({
             )}
           >
             <SearchBar
-              ref={searchInputRef}
+              ref={desktopSearchInputRef}
               value={searchQuery}
               onChange={handleSearchChange}
               onFocus={handleSearchFocus}
@@ -810,7 +826,7 @@ export const TopBar = memo(function TopBar({
 
         <div className="flex min-w-0 flex-[2] items-center" style={chromeNoDragStyle}>
           <SearchBar
-            ref={searchInputRef}
+            ref={compactSearchInputRef}
             value={searchQuery}
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}

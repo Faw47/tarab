@@ -166,8 +166,6 @@ export const VolumeControl = memo(
       [setVolume],
     );
 
-    // Removed toggleMute as per instruction's direct onClick logic
-
     const onEnter = useCallback(() => {
       if (leaveTimer.current) clearTimeout(leaveTimer.current);
       setExpanded(true);
@@ -184,12 +182,10 @@ export const VolumeControl = memo(
       [],
     );
 
-    // Removed VIcon as per instruction's direct icon logic
-
     return (
       <div className="inline-flex items-center gap-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
         <Button
-          onClick={() => setVolume(volume === 0 ? Math.max(restoreRef.current, 0.5) : 0)}
+          onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
           className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
           aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
           title="Volume"
