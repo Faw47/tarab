@@ -1,12 +1,13 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NavView } from '../../../components/navigation';
 import { useAppStartupEffects } from '../useAppStartupEffects';
 
 const showMock = vi.hoisted(() => vi.fn(async () => undefined));
-const { minimizedMock, iconEnabledMock } = vi.hoisted(() => ({
+const { minimizedMock, iconEnabledMock, hydratedMock } = vi.hoisted(() => ({
   minimizedMock: vi.fn(async () => false),
   iconEnabledMock: vi.fn(() => true),
+  hydratedMock: vi.fn(() => true),
 }));
 const recordPerfBudgetMock = vi.hoisted(() => vi.fn());
 const reportErrorMock = vi.hoisted(() => vi.fn());
@@ -23,7 +24,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
 vi.mock('../../../store/settings-store', () => ({
   useSettingsStore: {
     persist: {
-      hasHydrated: () => true,
+      hasHydrated: hydratedMock,
       onFinishHydration: vi.fn(() => () => undefined),
     },
     getState: () => ({ desktopStatusIconEnabled: iconEnabledMock() }),
@@ -45,6 +46,7 @@ describe('useAppStartupEffects', () => {
     showMock.mockResolvedValue(undefined);
     minimizedMock.mockResolvedValue(false);
     iconEnabledMock.mockReturnValue(true);
+    hydratedMock.mockReturnValue(true);
     Object.defineProperty(window, 'requestIdleCallback', { configurable: true, value: undefined });
     Object.defineProperty(window, 'cancelIdleCallback', { configurable: true, value: undefined });
     vi.spyOn(performance, 'mark').mockImplementation(
@@ -92,6 +94,37 @@ describe('useAppStartupEffects', () => {
     renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
 
     await waitFor(() => expect(showMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the window if settings never finish hydrating on a minimized launch', async () => {
+    minimizedMock.mockResolvedValue(true);
+    hydratedMock.mockReturnValue(false);
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3200);
+      });
+      expect(showMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show a window after startup effects unmount', async () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderHook(() =>
+        useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }),
+      );
+      unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(showMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the window if the autostart check fails', async () => {
