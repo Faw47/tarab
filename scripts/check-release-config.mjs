@@ -49,7 +49,9 @@ for (const extension of requiredAudioExtensions) {
 
 const mainWindow = (tauriConfig.app?.windows ?? []).find((window) => window.label === 'main');
 if (mainWindow?.visible !== false) {
-  errors.push('The main window must start hidden so --minimized launches do not flash a visible window (QA-11).');
+  errors.push(
+    'The main window must start hidden so --minimized launches do not flash a visible window (QA-11).',
+  );
 }
 if (mainWindow?.backgroundThrottling !== 'disabled') {
   failures.push(
