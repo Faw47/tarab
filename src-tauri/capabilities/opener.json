@@ -2,18 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "opener",
   "description": "Main window can reveal items and open only the project Help URL; mini player cannot open files or URLs.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "opener:allow-reveal-item-in-dir",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [
-        {
-          "url": "https://github.com/Faw47/tarab#readme"
-        }
-      ]
+      "allow": [{ "url": "https://github.com/Faw47/tarab#readme" }]
     }
   ]
 }
