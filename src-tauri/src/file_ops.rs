@@ -176,6 +176,47 @@ fn write_grants_atomic(path: &Path, grant_file: &LibraryGrantFile) -> Result<(),
 /// Replaces `target` without ever leaving it half-written. `write` fills a temporary sibling (a
 /// copy of `target` when `copy_original` is set), which is synced and renamed over `target`. A
 /// failure at any step leaves `target` unchanged and removes the temporary file.
+/// Moves a file, also across volumes. `fs::rename` cannot move between file systems (a library on
+/// an external drive or NAS mount and the Trash in app data); then the file is copied to a hidden
+/// temporary name in the target folder, synced, checked by length, renamed into place, and only
+/// then removed from its source.
+pub(crate) fn move_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    move_path_with(from, to, |from, to| fs::rename(from, to))
+}
+
+fn move_path_with(
+    from: &Path,
+    to: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match rename(from, to) {
+        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {}
+        result => return result,
+    }
+    let parent = to.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Target has no parent")
+    })?;
+    let staged = parent.join(format!(".tarab-{:016x}.tmp", rand::random::<u64>()));
+    let copied = (|| {
+        let length = fs::copy(from, &staged)?;
+        fs::File::options().write(true).open(&staged)?.sync_all()?;
+        if length != fs::metadata(from)?.len() {
+            return Err(std::io::Error::other("The copied file is incomplete"));
+        }
+        fs::rename(&staged, to)
+    })();
+    if let Err(error) = copied {
+        let _ = fs::remove_file(&staged);
+        return Err(error);
+    }
+    if let Err(error) = fs::remove_file(from) {
+        // Keep exactly one copy: undo the move rather than leave a duplicate.
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+    Ok(())
+}
+
 pub(crate) fn replace_file_atomically(
     target: &Path,
     copy_original: bool,
@@ -828,11 +869,11 @@ pub async fn move_file(
         }
         let _target_canonical = ensure_target_path_allowed(&target, &roots, "move destination file")?;
         create_destination_parent_dir(&target)?;
-        fs::rename(&source_canonical, &target).map_err(|e| format!("Failed to move file: {}", e))?;
+        move_path(&source_canonical, &target).map_err(|e| format!("Failed to move file: {}", e))?;
         let target_str = target.to_string_lossy().to_string();
         if let Err(err) = db.rename_track_path(&old_path, &target_str) {
             // Try to restore original file path if DB update fails.
-            let rollback_result = fs::rename(&target, &source_canonical);
+            let rollback_result = move_path(&target, &source_canonical);
             return match rollback_result {
                 Ok(()) => Err(format!(
                     "Failed to update database after move, operation rolled back: {}",
@@ -940,7 +981,7 @@ pub async fn trash_files(
                 });
                 continue;
             }
-            if let Err(error) = fs::rename(&canonical_path, &stored_path) {
+            if let Err(error) = move_path(&canonical_path, &stored_path) {
                 let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
                 let _ = fs::remove_dir(&entry_dir);
                 results.push(FileMutationResult {
@@ -955,7 +996,7 @@ pub async fn trash_files(
                 continue;
             }
             if let Err(error) = db.delete_tracks(std::slice::from_ref(&original_path)) {
-                let rollback = fs::rename(&stored_path, &canonical_path);
+                let rollback = move_path(&stored_path, &canonical_path);
                 if rollback.is_ok() {
                     let _ = fs::remove_file(entry_dir.join(TRASH_RECORD_FILE));
                     let _ = fs::remove_dir(&entry_dir);
@@ -1084,7 +1125,7 @@ pub async fn restore_trashed_files(
                 });
                 continue;
             }
-            if let Err(error) = fs::rename(&stored_path, &original_path) {
+            if let Err(error) = move_path(&stored_path, &original_path) {
                 results.push(FileMutationResult {
                     path: record.original_path,
                     status: "failed".to_string(),
@@ -1098,7 +1139,7 @@ pub async fn restore_trashed_files(
             }
             if let Some(track) = &record.track {
                 if let Err(error) = db.upsert_tracks_batch(std::slice::from_ref(track)) {
-                    let rollback = fs::rename(&original_path, &stored_path);
+                    let rollback = move_path(&original_path, &stored_path);
                     results.push(FileMutationResult {
                         path: record.original_path,
                         status: "failed".to_string(),
@@ -1240,6 +1281,27 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_move_across_volumes_copies_then_removes_the_source() {
+        // Regression for QA-02: Trash and Move used fs::rename, which fails across volumes.
+        let dir = temp_dir("cross-device-move");
+        fs::create_dir_all(dir.join("trash")).expect("create trash dir");
+        let source = dir.join("song.flac");
+        let target = dir.join("trash").join("song.flac");
+        fs::write(&source, b"audio bytes").expect("write source");
+
+        let cross_device = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices))
+        };
+        move_path_with(&source, &target, cross_device).expect("move");
+
+        assert!(!source.exists());
+        assert_eq!(fs::read(&target).expect("read target"), b"audio bytes");
+        let leftovers = fs::read_dir(dir.join("trash")).expect("list").count();
+        assert_eq!(leftovers, 1, "no staged copy is left behind");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
