@@ -12,6 +12,23 @@ use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
 const SAMPLES_PER_SECOND: u32 = 10; // 10 samples per second = 100ms resolution
 const MAX_CACHE_SIZE: usize = 1000; // Max waveforms in memory
+const MAX_WAVEFORM_SAMPLE_RATE: u32 = 384_000;
+const MAX_WAVEFORM_CHANNELS: u16 = 8;
+
+/// Reject malformed decoder metadata before allocating a waveform chunk.
+fn waveform_chunk_size(sample_rate: u32, channels: u16) -> Result<usize, String> {
+    if !(1..=MAX_WAVEFORM_SAMPLE_RATE).contains(&sample_rate) {
+        return Err(format!("Unsupported waveform sample rate: {}", sample_rate));
+    }
+    if !(1..=MAX_WAVEFORM_CHANNELS).contains(&channels) {
+        return Err(format!("Unsupported waveform channel count: {}", channels));
+    }
+
+    let frames = (sample_rate as usize).div_ceil(SAMPLES_PER_SECOND as usize);
+    frames
+        .checked_mul(channels as usize)
+        .ok_or_else(|| "Waveform chunk size overflowed".to_string())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,15 +110,15 @@ impl WaveformGenerator {
         let source = Decoder::new(reader).map_err(|e| format!("Failed to decode: {}", e))?;
 
         let sample_rate = source.sample_rate();
-        let channels = source.channels() as usize;
+        let channel_count = source.channels();
+        let samples_per_chunk = waveform_chunk_size(sample_rate, channel_count)?;
+        let channels = channel_count as usize;
         let duration = source
             .total_duration()
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
 
-        // Calculate samples per chunk for desired resolution
-        let samples_per_chunk = (sample_rate as usize) / (SAMPLES_PER_SECOND as usize) * channels;
-
+        // Each chunk contains at least one interleaved frame, even at low sample rates.
         let mut peaks: Vec<f32> = Vec::new();
         let mut chunk: Vec<f32> = Vec::with_capacity(samples_per_chunk);
         let mut sample_count = 0;
@@ -352,6 +369,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-waveform-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn waveform_chunk_size_bounds_decoder_metadata() {
+        // Regression for SEC-03: untrusted decoder metadata must not cause huge allocations.
+        assert!(waveform_chunk_size(0, 2).is_err());
+        assert!(waveform_chunk_size(u32::MAX, 2).is_err());
+        assert!(waveform_chunk_size(48_000, 0).is_err());
+        assert!(waveform_chunk_size(48_000, u16::MAX).is_err());
+        assert_eq!(waveform_chunk_size(48_000, 2).unwrap(), 9_600);
+        assert_eq!(waveform_chunk_size(1, 1).unwrap(), 1);
+        assert_eq!(
+            waveform_chunk_size(MAX_WAVEFORM_SAMPLE_RATE, MAX_WAVEFORM_CHANNELS).unwrap(),
+            307_200
+        );
     }
 
     #[test]

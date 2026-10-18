@@ -195,7 +195,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | AR-29 | P3 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-22 | P3 | `rubato` dependency unused; sample-rate conversion uses rodio's linear converter | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-37 | P3 | Minor reliability items | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| SEC-03 | P3 | Waveform generator sizes a buffer from an unvalidated sample rate | PENDING | - | Audit confidence LIKELY. | - | - |
+| SEC-03 | P3 | Waveform generator sizes a buffer from an unvalidated sample rate | PENDING | G1 tests added / G2 - / G3 - | Validates decoder-provided sample rate (1–384000 Hz) and channel count (1–8) before allocating waveform chunks; uses checked allocation arithmetic and at least one interleaved frame per chunk. Rust regression tests cover zero/oversized rates, invalid channel counts, stereo output and the maximum allocation. Cross-platform CI and independent review pending. | f28b588 | #18 (draft) |
 | SEC-05 | P3 | Library grants accept `/` or the home folder; "Import folder" grants the launched file's parent with only a base-name prompt | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-06 | P3 | `opener:allow-reveal-item-in-dir` has no path scope | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-07 | P3 | The online-lyrics opt-in is enforced only in the renderer, and request errors carry metadata | PENDING | - | Audit confidence CONFIRMED. | - | - |
