@@ -8,7 +8,7 @@ Status: **post-merge review with follow-up corrections**, not release approval o
 
 ## Review method and limitations
 
-Inspected the merged production code, its tests, original audit definitions and GitHub PR/CI metadata. Compared intended behavior to control flow, including error paths and out-of-order events. Reproductions below are code-path analyses and regression tests written on review branches, **not claims of actual audio hardware or native UI testing**. GitHub CI for individual review branches must be consulted at their latest heads. No independent second-agent adversarial pass or macOS/Windows/Linux interactive smoke testing was completed during this review.
+Inspected the merged production code, its tests, original audit definitions and GitHub PR/CI metadata. Compared intended behavior to control flow, including error paths and out-of-order events. Reproductions below are code-path analyses and regression tests written on review branches, **not claims of actual audio hardware or native UI testing**. GitHub CI for individual review branches must be consulted at their latest heads. The initial review did not include an independent pass. A subsequent independent adversarial review of #20, #23, #24 and #25 is recorded below. Native macOS/Windows/Linux interactive smoke testing remains unperformed.
 
 The audit ledger's disposition counts must not be advanced to `FIXED_VERIFIED` merely because a PR was merged or a mocked test passed. Treat its `PENDING` counts as **unreconciled**, not as a current count of unimplemented fixes.
 
@@ -35,6 +35,20 @@ The audit ledger's disposition counts must not be advanced to `FIXED_VERIFIED` m
 - [#24](https://github.com/Faw47/tarab/pull/24): enable and narrowly scope Help URL opener permissions, report failures, assert real capability in tests, repair release-configuration failure path.
 
 These corrections were created as independent draft PRs against `main`. #21 and #22 have merged; remaining fixes should only be merged after checking latest-head CI, reviewing each change and obtaining applicable native evidence.
+
+## Continuation: corrective stabilization
+
+An isolated local checkout is now available. The tested candidate set is `main` at `496fd54` plus #20 `afe4559`, #23 `87a0c59`, #24 `6c14bd7` and this documentation branch. All changes preserve the existing coordinator, intervention epoch and native grant ownership. No release is approved.
+
+- Independent review found that a queued second Next survived a newer Stop or Play. The correction tracks adjacent-request batches using the existing intervention epoch. Old requests cancel; an intentional fresh Next still executes.
+- Review also found that guarding only successful results left stale failures visible. Settled native results now reach a synchronous epoch check before committing state or throwing. Both success and rejection microtask gaps were reproduced as failing tests before correction.
+- #20 adds 13 cases beyond its previous head. The final renderer review found no unresolved blocker. Current-operation failures and uninterrupted rapid Next behavior remain covered.
+- #23 adds five lifecycle cases. All 13 startup tests pass, including stalled hydration, both tray settings, unmount and StrictMode. The bounded hydration listener lifetime after unmount is retained; no stale window show occurs.
+- #24 passed independent review. The actual capability and release guard reject missing/broadened Help permission, mini-player URL access and an initially visible main window. Native opener enforcement is still untested.
+- Combined candidate verification on Node 22.18.0 / pnpm 9.15.2 passes: 89 files, 384 tests, TypeScript, Biome, 116 IPC contracts, production build and bundle check, Storybook, Knip and release configuration. Nonfatal output includes the pre-existing confusing-void mock type warning, jsdom `window.scrollTo` warning and Vite chunk-size warnings; these were not hidden or waived test failures.
+- Local `cargo check --manifest-path src-tauri/Cargo.toml` could not run: Cargo is not installed. Cross-platform CI results must be read at each final candidate SHA. Actual desktop playback/startup/Help checks remain release gates.
+
+**Still unresolved:** native commands already in flight can execute outside a unified source order; editor preview ownership remains partial (LD-04). Nothing in this correction establishes complete playback coordination or current installer readiness.
 
 ## Mandatory validation before release
 

@@ -2,13 +2,13 @@
 
 **Decision: NO-GO for a public 1.0.0 release.** This is a documented evidence review, not an assertion that all release tests were run.
 
-**Source revision:** `main` at `496fd54ae6097c8bae58fb97d14ee9d6cc19850e` immediately after PRs #21 and #22.  
+**Original snapshot source revision:** `main` at `496fd54ae6097c8bae58fb97d14ee9d6cc19850e` immediately after PRs #21 and #22.
 **Source of truth for finding names and dispositions:** `docs/audits/tarab-remediation-ledger.md` (160 entries).  
 **Historical original audit:** `docs/audits/2026-10-17-tarab-comprehensive-audit.md`.  
 **Release artifacts reference:** `docs/release-evidence-1.0.0.md` (dated 2026-07-28; not proof of October revision or signed distribution).  
-**Review method:** GitHub contents/diffs, CI status and logs, repository permissions, release definitions, release metadata, and audit ledger. Native app GUI/audio/device tests were **not** executed in this chat. Direct local checkout and build were unavailable because the runtime could not resolve github.com.
+**Review method:** GitHub contents/diffs, CI status and logs, repository permissions, release definitions, release metadata, and audit ledger. Native app GUI/audio/device tests were **not** executed in this chat. The initial review had no local checkout. The continuation below records the now-available local checkout and actual frontend checks; Rust/native tests remain unavailable locally.
 
-## Merge record and CI snapshot
+## Original merge record and CI snapshot
 
 - **Merged:** #21 deep-link startup mirror / rapid repeats, #22 globally ordered LRC offset metadata; each passed JavaScript, three Rust platforms, and dependency audit on its reviewed PR head.
 - **Open:** #20 playback races, #23 minimized startup hydration failure, #24 Help URL capability, #25 audit review/report; each must pass current-head CI and obtain the applicable independent and native reviews before merging.
@@ -16,7 +16,7 @@
 - The normal `.github/workflows/ci.yml` runs `pnpm verify` (TypeScript, Biome, Vitest, IPC contract, Vite build), Storybook, Knip, Rust fmt/test/check/Clippy on Linux/macOS/Windows, and production dependency audits. It does **not** run `pnpm verify:release`, signed installers, native desktop GUI smoke tests, or the release workflow.
 - No public GitHub release was returned. `main` reported `protected:false` and no enforced required checks; this is a release-process defect even when CI is green.
 
-## Release-gate evidence matrix
+## Original release-gate evidence matrix
 
 | Gate | Evidence observed | Outcome |
 |---|---|---|
@@ -33,6 +33,18 @@
 
 The July release-evidence file's local test counts and DMG proof **do not** validate the October code. Absence of published assets does not establish that signing credentials are unavailable: account secrets were not readable.
 
+## Corrective stabilization continuation
+
+The independently reviewed candidate set is #20 `afe4559`, #23 `87a0c59`, #24 `6c14bd7`, and this audit branch, integrated over `main` at `496fd54` in a separate local worktree. The combined frontend gate passes **384 tests in 89 files**, TypeScript, Biome, 116 IPC contracts, production build/bundle check, Storybook, Knip and release configuration. Four malformed Help/startup configuration mutations are correctly rejected.
+
+#20 now invalidates queued adjacent requests after newer source interventions and suppresses stale command errors at the synchronous commit boundary. Thirteen regressions were added; the independent reviewer found and rechecked the queued-request and rejection-settlement defects. #23 adds five hydration/unmount/StrictMode cases. #24's exact main-only Help capability passed code and mutation review. See the companion remediation review for evidence and nonfatal warning details.
+
+Local Rust verification was attempted and blocked by `cargo: command not found`. Neither native audio/OS tests nor signed package checks were performed. The composite `pnpm verify:release` is therefore **not passed**. Latest-head GitHub CI must complete before a code merge. Native acceptance remains outstanding even after merging code; no finding becomes FIXED_VERIFIED merely because its PR merges.
+
+QA-18 is a decision about generated IPC bindings and the original missing tests. The earlier plan's phrase "coverage requirement" did not accurately identify that decision. A numeric coverage threshold would be a separate release-engineering choice.
+
+The next implementation scope is security and data integrity: **SEC-05** must reject filesystem roots and the bare home directory in both grant creation and reauthorization, show the full import-folder path, and preserve exact-file Play once. **QA-29** must bound reads/writes, sync staged contents before replacement, and preserve recoverability if replacement fails, including Windows. **PB-20** must capture a fresh session before flushing through all native quit paths, without treating hide-to-tray as a quit. Existing broad grants or user files must not be silently revoked or rewritten while implementing those changes.
+
 ## Priority and execution plan
 
 The original Claude workflow is preserved: one tracked finding or tightly coupled root-cause group per branch/PR, no unrelated refactors, traceable G1 (failing regression before + passing after), G2 (targeted and full checks), G3 (independent adversarial review), and native OS check when required. Keep the `main` branch out of release until the last acceptance gate.
@@ -43,7 +55,7 @@ The original Claude workflow is preserved: one tracked finding or tightly couple
 4. **Reconcile merged-but-pending results.** Evidence-based retest for FE-08/16/17/18/22/26/30, PB-27/29, QA-10/11/13, FE-42, SEC-03. Treat partial shared-theme architecture (FE-18) as open. Update PR references that still say draft after merges.
 5. **Address UX, architecture, performance, and reliability backlog.** Complete all other `PENDING` rows listed below in severity and audit order; group only related tests and changes. Preserve the Tauri/React architecture and project-specific UX design documents.
 6. **Native validation matrix.** Resolve all 10 `NATIVE_VALIDATION_REQUIRED` rows: macOS hidden playback/autostart/menu/permission, Windows output loss/SMTC/artwork/path canonicalization, Linux window menus, and real signing isolation. Record OS version and observed outcomes, never infer hardware success from CI compilation.
-7. **Formal test and release engineering.** Decide QA-18 coverage requirement; add CI coverage thresholds, current release security action pinning and minimal permissions, eliminate `--clobber`-style nondeterministic publication, exercise `pnpm verify:release`/native smoke gates, require protected branch checks and reviewed releases.
+7. **Formal test and release engineering.** Resolve QA-18 generated Rust/TypeScript IPC binding and missing-test decisions; agree any numeric coverage threshold separately, then add CI enforcement, current release security action pinning and minimal permissions, eliminate `--clobber`-style nondeterministic publication, exercise `pnpm verify:release`/native smoke gates, require protected branch checks and reviewed releases.
 8. **Release candidate only after closure.** Validate signed/notarized macOS DMG, Authenticode-signed Windows installers, x64/arm64 Linux packages, reproducible checked checksums and attestations, clean install/upgrade/file associations/offline startup on all supported hosts. Do not auto-tag or publish until these gates pass and release authorization is explicit.
 
 ## Full outstanding ledger — all 97 items
@@ -111,8 +123,8 @@ This enumeration is generated directly from the original ledger's current dispos
 | PB-25 | Decoder does not filter packets by track ID | - |
 | PB-26 | Scanner accepts formats the decoder cannot play; Opus is not scanned | - |
 | PB-32 | Volume booster hard-clips and is not persisted | - |
-| LD-04 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | #19 (draft); partial G1 test / G2 - / G3 - |
-| PB-28 | Two quick Next presses advance only one track | #17 (draft); G1 tests added / G2 - / G3 - |
+| LD-04 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | #19; partial G1 test / G2 - / G3 - |
+| PB-28 | Two quick Next presses advance only one track | #17; G1 tests added / G2 - / G3 - |
 | PB-29 | Removing the playing track from the queue makes Next skip a track | #12; G1 tests added / G2 CI pass / G3 - |
 | PB-20 | Quit and window close do not save the latest state | - |
 | PB-16 | Playlist reorder resets every entry's added date and rewrites the whole list from client state | - |
@@ -128,9 +140,9 @@ This enumeration is generated directly from the original ledger's current dispos
 | QA-04 | Legacy `music-player` data may not migrate on Linux | - |
 | LD-19 | Backend diagnostics go to stderr instead of the configured log plugin | - |
 | AR-32 | Hidden mini-player webview is created at startup even though the feature is off by default | - |
-| QA-10 | Help > README menu item is broken | #13 (draft); G1 tests added / G2 - / G3 - |
-| QA-11 | Autostart `--minimized` flag is never read | #15 (draft); G1 tests added / G2 - / G3 - |
-| QA-13 | The same deep link clicked twice in one session does nothing the second time | #16 (draft); G1 tests added / G2 - / G3 - |
+| QA-10 | Help > README menu item is broken | #13; G1 tests added / G2 - / G3 - |
+| QA-11 | Autostart `--minimized` flag is never read | #15; G1 tests added / G2 - / G3 - |
+| QA-13 | The same deep link clicked twice in one session does nothing the second time | #16; G1 tests added / G2 - / G3 - |
 | QA-14 | "Play once" authority is consumed when playback starts, so artwork, palette and preload for that file fail | - |
 | SEC-10 | macOS media plugin never releases its Objective-C objects and has no autorelease pool | - |
 | LD-11 | Copy and pluralization defects | - |
@@ -146,7 +158,7 @@ This enumeration is generated directly from the original ledger's current dispos
 | FE-46 | Two settings behave inconsistently with their defaults or lifecycle | - |
 | FE-37 | Collapsed pill player is not keyboard-operable and is mispositioned | - |
 | FE-41 | Virtualized lists lack list semantics; queue drag-and-drop sees only rendered rows | - |
-| FE-42 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | #14 (draft); G1 tests added / G2 - / G3 - |
+| FE-42 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | #14; G1 tests added / G2 - / G3 - |
 | AR-20 | A single `Mutex<Connection>` serializes every read behind long write transactions | - |
 | AR-30 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | - |
 | AR-31 | Redundant UI dependencies | - |
@@ -157,7 +169,7 @@ This enumeration is generated directly from the original ledger's current dispos
 | AR-29 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | - |
 | PB-22 | `rubato` dependency unused; sample-rate conversion uses rodio's linear converter | - |
 | AR-37 | Minor reliability items | - |
-| SEC-03 | Waveform generator sizes a buffer from an unvalidated sample rate | #18 (draft); G1 tests added / G2 - / G3 - |
+| SEC-03 | Waveform generator sizes a buffer from an unvalidated sample rate | #18; G1 tests added / G2 - / G3 - |
 | SEC-05 | Library grants accept `/` or the home folder; "Import folder" grants the launched file's parent with only a base-name prompt | - |
 | SEC-06 | `opener:allow-reveal-item-in-dir` has no path scope | - |
 | SEC-07 | The online-lyrics opt-in is enforced only in the renderer, and request errors carry metadata | - |
