@@ -124,7 +124,7 @@ export const startEditorPreview = async (filePath: string): Promise<void> => {
  * `automatic` (the queue advancing after a track ended) repeats the track instead. `entry` plays
  * that already previewed next entry, since a second shuffle preview picks a different one.
  */
-export const playAdjacentTrack = async (
+const playAdjacentTrackOnce = async (
   direction: 'next' | 'previous',
   options?: { automatic?: boolean; entry?: { track: Track; index: number } },
 ): Promise<Track | null> => {
@@ -166,6 +166,23 @@ export const playAdjacentTrack = async (
   freshState.setIsPlaying(true);
   freshState.setHasActivePlayback(true);
   return next.track;
+};
+
+// Read the next queue entry only after the previous adjacent transition has committed.
+// Two quick Next/Previous requests must not preview and play the same entry.
+let adjacentTransition: Promise<void> = Promise.resolve();
+
+export const playAdjacentTrack = (
+  direction: 'next' | 'previous',
+  options?: { automatic?: boolean; entry?: { track: Track; index: number } },
+): Promise<Track | null> => {
+  const result = adjacentTransition.then(() => playAdjacentTrackOnce(direction, options));
+  // A failed load must not prevent later transport actions from running.
+  adjacentTransition = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 };
 
 export const cyclePlaybackLoopMode = (): void => {
