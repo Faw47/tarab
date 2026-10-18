@@ -100,8 +100,9 @@ export const resolveActiveQueueIndex = (
   if (
     indexedTrack &&
     (!currentTrack ||
-      indexedTrack._queueId === currentTrack._queueId ||
-      indexedTrack.id === currentTrack.id)
+      (currentTrack._queueId
+        ? indexedTrack._queueId === currentTrack._queueId
+        : indexedTrack.id === currentTrack.id))
   ) {
     return queueIndex;
   }
@@ -109,9 +110,8 @@ export const resolveActiveQueueIndex = (
   if (currentTrack?._queueId) {
     const byQueueId = queue.findIndex((track) => track._queueId === currentTrack._queueId);
     if (byQueueId >= 0) return byQueueId;
-  }
-
-  if (currentTrack) {
+  } else if (currentTrack) {
+    // Never substitute another copy of an explicitly identified queue entry.
     const byTrackId = queue.findIndex((track) => track.id === currentTrack.id);
     if (byTrackId >= 0) return byTrackId;
   }
