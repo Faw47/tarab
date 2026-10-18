@@ -42,7 +42,7 @@ const {
     crossfadeToTrackMock: vi.fn(async () => 2),
     dbUpdatePlayStatsMock: vi.fn(async () => undefined),
     preloadNextTrackMock: vi.fn(async () => undefined),
-    playAdjacentTrackMock: vi.fn(async () => undefined),
+    playAdjacentTrackMock: vi.fn(async (): Promise<Track | null | void> => undefined),
     reportErrorMock: vi.fn(),
     logErrorMock: vi.fn(),
   };
@@ -282,6 +282,27 @@ describe('usePlaybackLifecycle', () => {
         payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
       });
     };
+
+    it('does not treat a superseded automatic advance as successfully started', async () => {
+      playAdjacentTrackMock.mockResolvedValueOnce(null);
+      await endTrackOne();
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+      });
+
+      await listeners.get('playback-error')?.({
+        payload: {
+          generation: 1,
+          filePath: '/music/track-1.mp3',
+          stage: 'decode',
+          message: 'Stale decoding error',
+          recoverable: false,
+        },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+    });
 
     it('skips a track that cannot start and plays the one after it', async () => {
       playAdjacentTrackMock
