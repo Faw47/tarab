@@ -1,3 +1,4 @@
+import { MotionConfig } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { NavView } from './components/navigation';
@@ -545,48 +546,52 @@ const App = () => {
   );
   return (
     <GlassSystemProvider reducedEffects={effectiveReducedEffects} theme={theme}>
-      <SmoothTimeProvider>
-        <HotkeysBootstrap onSearch={openGlobalSearch} />
-        {appLayout}
+      {/* framer-motion skips transform and layout animations when Reduced Effects or the OS
+          reduce-motion preference is on. */}
+      <MotionConfig reducedMotion={effectiveReducedEffects ? 'always' : 'never'}>
+        <SmoothTimeProvider>
+          <HotkeysBootstrap onSearch={openGlobalSearch} />
+          {appLayout}
 
-        <AppTransientSurfaces
-          currentView={currentView}
-          theme={theme}
-          showDropOverlay={showDropOverlay}
-          showFullPlayer={showFullPlayer}
-          showScanComplete={showScanComplete}
-          hasCurrentTrack={Boolean(currentTrack)}
-          isPlaying={isPlaying}
-          isScanning={isScanning}
-          onNavigate={handleNavigate}
-          onShuffleAll={handleShuffleAll}
-          onTogglePlayback={handleTogglePlaybackFromPalette}
-          onNextTrack={handleNextTrackFromPalette}
-          onPreviousTrack={handlePreviousTrackFromPalette}
-          onRescanLibrary={handleRescanFromPalette}
-          onOpenFullPlayer={() => setShowFullPlayer(true)}
-          onCloseFullPlayer={() => setShowFullPlayer(false)}
-        />
-        <AppDialogHost
-          tagEditorTracks={tagEditorTracks}
-          onCloseTagEditor={() => setTagEditorTracks(null)}
-          onSaveTagEditor={() => {
-            if (tagEditorTracks?.length) {
-              const paths = tagEditorTracks.map((t) => t.filePath);
-              refreshTracksByFilePaths(paths);
-            }
-          }}
-          playlistPickerOpen={showPlaylistPicker}
-          playlistPickerTrackIds={playlistPickerTrackIds}
-          onClosePlaylistPicker={closePlaylistPicker}
-          contextMenuPosition={contextMenuPosition}
-          contextMenuItems={contextMenuItems}
-          onCloseContextMenu={closeContextMenu}
-          confirmDialog={confirmDialog}
-          onCancelConfirmDialog={() => setConfirmDialog(null)}
-        />
-        {launchFileDialog ? <ConfirmDialog {...launchFileDialog} /> : null}
-      </SmoothTimeProvider>
+          <AppTransientSurfaces
+            currentView={currentView}
+            theme={theme}
+            showDropOverlay={showDropOverlay}
+            showFullPlayer={showFullPlayer}
+            showScanComplete={showScanComplete}
+            hasCurrentTrack={Boolean(currentTrack)}
+            isPlaying={isPlaying}
+            isScanning={isScanning}
+            onNavigate={handleNavigate}
+            onShuffleAll={handleShuffleAll}
+            onTogglePlayback={handleTogglePlaybackFromPalette}
+            onNextTrack={handleNextTrackFromPalette}
+            onPreviousTrack={handlePreviousTrackFromPalette}
+            onRescanLibrary={handleRescanFromPalette}
+            onOpenFullPlayer={() => setShowFullPlayer(true)}
+            onCloseFullPlayer={() => setShowFullPlayer(false)}
+          />
+          <AppDialogHost
+            tagEditorTracks={tagEditorTracks}
+            onCloseTagEditor={() => setTagEditorTracks(null)}
+            onSaveTagEditor={() => {
+              if (tagEditorTracks?.length) {
+                const paths = tagEditorTracks.map((t) => t.filePath);
+                refreshTracksByFilePaths(paths);
+              }
+            }}
+            playlistPickerOpen={showPlaylistPicker}
+            playlistPickerTrackIds={playlistPickerTrackIds}
+            onClosePlaylistPicker={closePlaylistPicker}
+            contextMenuPosition={contextMenuPosition}
+            contextMenuItems={contextMenuItems}
+            onCloseContextMenu={closeContextMenu}
+            confirmDialog={confirmDialog}
+            onCancelConfirmDialog={() => setConfirmDialog(null)}
+          />
+          {launchFileDialog ? <ConfirmDialog {...launchFileDialog} /> : null}
+        </SmoothTimeProvider>
+      </MotionConfig>
     </GlassSystemProvider>
   );
 };
