@@ -154,7 +154,7 @@ Signing secrets are set only in the `env` of the steps that use them, and `check
 
 1. `pnpm verify` passes: TypeScript, Biome check, Vitest, and production UI build.
 2. `pnpm verify:release` passes: standard verify, Storybook build, Knip, release configuration, Rust formatting, Rust tests, and strict Clippy.
-3. If desktop shell/capability/window behavior changed, `cargo run --manifest-path src-tauri/Cargo.toml` launches without panic.
+3. If desktop shell/capability/window behavior changed, `cargo run --manifest-path src-tauri/Cargo.toml` launches without panic. Exercise ordinary launches, `--minimized` autostart, disabled or unavailable status icon, and stalled settings hydration; the main window must remain accessible.
 4. Reduced effects disables the app-shell WebGL canvas.
 5. Mini player reflects main-window state and does not own queue/playback/library state.
 6. Tray/menu/media-key actions route through `desktop-control-action` and keep UI state synchronized.
