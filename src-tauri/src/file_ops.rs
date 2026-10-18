@@ -197,7 +197,10 @@ pub(crate) fn replace_file_atomically(
                 .map_err(|e| format!("Failed to stage a copy of the file: {}", e))?;
         }
         write(&temp_path)?;
-        fs::File::open(&temp_path)
+        // Windows flushes only through a handle with write access.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&temp_path)
             .and_then(|file| file.sync_all())
             .map_err(|e| format!("Failed to sync the updated file: {}", e))?;
         fs::rename(&temp_path, target).map_err(|e| format!("Failed to replace the file: {}", e))
