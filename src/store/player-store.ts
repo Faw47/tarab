@@ -100,8 +100,9 @@ export const resolveActiveQueueIndex = (
   if (
     indexedTrack &&
     (!currentTrack ||
-      indexedTrack._queueId === currentTrack._queueId ||
-      indexedTrack.id === currentTrack.id)
+      (currentTrack._queueId
+        ? indexedTrack._queueId === currentTrack._queueId
+        : indexedTrack.id === currentTrack.id))
   ) {
     return queueIndex;
   }
@@ -109,9 +110,8 @@ export const resolveActiveQueueIndex = (
   if (currentTrack?._queueId) {
     const byQueueId = queue.findIndex((track) => track._queueId === currentTrack._queueId);
     if (byQueueId >= 0) return byQueueId;
-  }
-
-  if (currentTrack) {
+  } else if (currentTrack) {
+    // Never substitute another copy of an explicitly identified queue entry.
     const byTrackId = queue.findIndex((track) => track.id === currentTrack.id);
     if (byTrackId >= 0) return byTrackId;
   }
@@ -288,19 +288,14 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       removeFromQueue: (index) => {
-        const { queue, queueIndex } = get();
+        const { queue, queueIndex, currentTrack } = get();
         if (index < 0 || index >= queue.length) return;
 
+        const activeIndex = resolveActiveQueueIndex(queue, queueIndex, currentTrack);
         const newQueue = queue.filter((_, i) => i !== index);
-        let newIndex = queueIndex;
-
-        if (index < queueIndex) {
-          newIndex = queueIndex - 1;
-        } else if (index === queueIndex) {
-          // After filter, the next track slides into this position.
-          // Keep the index so the next track becomes active.
-          newIndex = queueIndex;
-        }
+        // If the playing entry is removed, its audio continues until Next. Keep the cursor
+        // immediately before its former successor so the following entry is not skipped.
+        let newIndex = index <= activeIndex ? activeIndex - 1 : activeIndex;
 
         if (newQueue.length === 0) {
           newIndex = -1;
@@ -313,6 +308,8 @@ export const usePlayerStore = create<PlayerState>()(
             queue: newQueue,
             queueIndex: newIndex,
             queueVersion: state.queueVersion + 1,
+            shufflePass: pruneShuffleKeys(state.shufflePass, newQueue),
+            shufflePriority: pruneShuffleKeys(state.shufflePriority, newQueue),
           }),
           false,
           'player/removeFromQueue',

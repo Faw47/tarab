@@ -41,6 +41,60 @@ describe('player-store queue index', () => {
   });
 });
 
+describe('player-store queue removal (PB-29)', () => {
+  beforeEach(() => {
+    usePlayerStore.setState(initialPlayerState, true);
+  });
+
+  const startQueue = (ids: string[], playingIndex: number) => {
+    const player = usePlayerStore.getState();
+    player.setQueue(ids.map(track));
+    const selected = usePlayerStore.getState().queue[playingIndex];
+    player.setQueueIndex(playingIndex);
+    player.setCurrentTrack(selected);
+    return selected;
+  };
+
+  it('does not skip the next entry after removing the playing track', () => {
+    const playing = startQueue(['a', 'b', 'c', 'd'], 1);
+
+    usePlayerStore.getState().removeFromQueue(1);
+
+    expect(usePlayerStore.getState().currentTrack?._queueId).toBe(playing._queueId);
+    expect(usePlayerStore.getState().queueIndex).toBe(0);
+    expect(usePlayerStore.getState().queue.map((entry) => entry.id)).toEqual(['a', 'c', 'd']);
+    expect(usePlayerStore.getState().previewNext()?.track.id).toBe('c');
+  });
+
+  it('plays the first remaining entry when the first playing track is removed', () => {
+    startQueue(['a', 'b', 'c'], 0);
+
+    usePlayerStore.getState().removeFromQueue(0);
+
+    expect(usePlayerStore.getState().queueIndex).toBe(-1);
+    expect(usePlayerStore.getState().previewNext()?.track.id).toBe('b');
+  });
+
+  it('preserves the cursor when an earlier queue entry is removed', () => {
+    startQueue(['a', 'b', 'c', 'd'], 2);
+
+    usePlayerStore.getState().removeFromQueue(0);
+
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
+    expect(usePlayerStore.getState().previewNext()?.track.id).toBe('d');
+  });
+
+  it('uses queue-entry identity when the same track is queued twice', () => {
+    const playing = startQueue(['a', 'b', 'a', 'c'], 2);
+
+    usePlayerStore.getState().removeFromQueue(2);
+
+    expect(usePlayerStore.getState().currentTrack?._queueId).toBe(playing._queueId);
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
+    expect(usePlayerStore.getState().previewNext()?.track.id).toBe('c');
+  });
+});
+
 describe('player-store shuffle passes', () => {
   beforeEach(() => {
     usePlayerStore.setState(initialPlayerState, true);

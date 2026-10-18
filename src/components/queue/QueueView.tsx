@@ -119,10 +119,27 @@ export const QueueView = memo(
     const [showFullHistory, setShowFullHistory] = useState(false);
 
     const activeIndex = resolveActiveQueueIndex(queue, queueIndex, currentTrack);
-    const nowPlayingTrack = activeIndex >= 0 ? queue[activeIndex] : currentTrack;
+    // A removed entry can still be playing. The queue cursor then points immediately
+    // before its former successor, but the visible Now Playing track remains the audio source.
+    const currentIsQueued = currentTrack
+      ? queue.some((entry) =>
+          currentTrack._queueId
+            ? entry._queueId === currentTrack._queueId
+            : entry.id === currentTrack.id,
+        )
+      : false;
+    const nowPlayingTrack =
+      currentTrack && !currentIsQueued
+        ? currentTrack
+        : activeIndex >= 0
+          ? queue[activeIndex]
+          : currentTrack;
 
     const upcomingTracks = activeIndex >= 0 ? queue.slice(activeIndex + 1) : queue;
-    const playedTracks = activeIndex > 0 ? queue.slice(0, activeIndex) : [];
+    const playedTracks =
+      activeIndex >= 0
+        ? queue.slice(0, activeIndex + (currentTrack && !currentIsQueued ? 1 : 0))
+        : [];
 
     // Added KeyboardSensor for A11y drag & drop
     const sensors = useSensors(
