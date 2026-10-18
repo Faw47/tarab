@@ -1,3 +1,4 @@
+import openerCapability from '../../../../src-tauri/capabilities/opener.json';
 import { QueryClient } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +88,18 @@ describe('native menu actions', () => {
     expect(navigate).toHaveBeenCalledWith('library');
     expect(useNavigationIntentStore.getState().consumeLibraryFacet()).toBe('artists');
     expect(useNavigationIntentStore.getState().consumeLibraryFacet()).toBeNull();
+  });
+
+  it('authorizes only the project Help URL from the main window', () => {
+    expect(openerCapability.windows).toEqual(['main']);
+    const urlPermission = openerCapability.permissions.find(
+      (permission) =>
+        typeof permission === 'object' && permission.identifier === 'opener:allow-open-url',
+    );
+    expect(urlPermission).toEqual({
+      identifier: 'opener:allow-open-url',
+      allow: [{ url: 'https://github.com/Faw47/tarab#readme' }],
+    });
   });
 
   it('opens the README from the native Help menu', async () => {
