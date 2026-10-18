@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
+import { type CoverArtSize, coverArtUrl, isCoverArtProtocolUrl } from '../lib/cover-art-url';
 import { ipcBatchLimit } from '../lib/ipc-concurrency';
 import { cacheGetThumbnailBytes, getCoverArt, resolveCoverArt } from '../lib/tauri-commands';
-
-type CoverArtSize = 'small' | 'medium' | 'large';
 
 const MAX_URL_CACHE_ENTRIES = 300;
 const MAX_FALLBACK_BLOB_BYTES = 64 * 1024 * 1024;
@@ -16,12 +15,11 @@ const inflight = new Map<string, Promise<string | null>>();
 const ipcFallbackRequests: number[] = [];
 const failedIpcFallbacks = new Set<string>();
 
-const buildCoverArtUrl = (hash: string, size: CoverArtSize = 'large') =>
-  `cover-art://localhost/${hash}/${size}`;
+const buildCoverArtUrl = (hash: string, size: CoverArtSize = 'large') => coverArtUrl(hash, size);
 const cacheKey = (filePath: string, size: CoverArtSize, hash?: string | null) =>
   `${filePath}::${size}::${hash ?? 'nohash'}`;
 const fallbackKey = (hash: string, size: CoverArtSize) => `${hash}:${size}`;
-const isPersistableCoverArtUrl = (value: string) => value.startsWith('cover-art://');
+const isPersistableCoverArtUrl = (value: string) => isCoverArtProtocolUrl(value);
 
 const removeCachedBlobUrl = (url: string) => {
   for (const [key, value] of Array.from(coverArtCache.entries())) {

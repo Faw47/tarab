@@ -26,12 +26,14 @@ import {
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
 import { getAlbumArtist } from '../../lib/album-key';
+import { coverArtUrl } from '../../lib/cover-art-url';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
 import { type LibrarySearchScope, useLibraryStore } from '../../store/library-store';
+import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { ContextMenuPosition, SortBy, Track } from '../../types';
@@ -636,13 +638,22 @@ export const LibraryView = memo(function LibraryView({
 
   const coverUrlFromHash = useCallback(
     (hash?: string | null, size: 'small' | 'medium' | 'large' = 'medium') =>
-      hash ? `cover-art://localhost/${hash}/${size}` : undefined,
+      hash ? coverArtUrl(hash, size) : undefined,
     [],
   );
 
   const [viewMode, setViewMode] = useState<LibraryViewDensity>(getPersistedViewMode);
   const [activeFacet, setActiveFacet] = useState<LibraryFacet>('albums');
   const [detailScope, setDetailScopeState] = useState<LibraryDetailScope>(null);
+  const requestedFacet = useNavigationIntentStore((s) => s.libraryFacet);
+  useEffect(() => {
+    if (!requestedFacet) return;
+    const facet = useNavigationIntentStore.getState().consumeLibraryFacet();
+    if (!facet) return;
+    // An open album or artist detail would keep the requested facet out of view.
+    setDetailScopeState(null);
+    setActiveFacet(facet);
+  }, [requestedFacet]);
   const [databaseDetailTracks, setDatabaseDetailTracks] = useState<{
     key: string;
     tracks: Track[];
@@ -1060,7 +1071,7 @@ export const LibraryView = memo(function LibraryView({
         const albumTracks = await fetchAlbumTracks(track.album, albumArtist);
         const coverArt =
           track.coverArt ??
-          (track.coverArtHash ? `cover-art://localhost/${track.coverArtHash}/large` : undefined);
+          (track.coverArtHash ? coverArtUrl(track.coverArtHash, 'large') : undefined);
 
         if (onOpenAlbumDetails) {
           onOpenAlbumDetails({

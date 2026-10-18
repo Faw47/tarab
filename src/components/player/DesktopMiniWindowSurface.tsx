@@ -19,6 +19,7 @@ import {
 } from '../../features/app/desktop-events';
 import { useReactivePalette } from '../../hooks/useReactivePalette';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
+import { coverArtUrl } from '../../lib/cover-art-url';
 import { formatTime } from '../../lib/format-time';
 import type { DesktopControlAction, DesktopPlaybackSnapshot } from '../../types';
 import { Button } from '../ui/button';
@@ -53,7 +54,7 @@ export const DesktopMiniWindowSurface = ({
 
   const coverArtHash = snapshot.track?.coverArtHash ?? null;
   const coverArt = useMemo(
-    () => (coverArtHash ? `cover-art://localhost/${coverArtHash}/small` : null),
+    () => (coverArtHash ? coverArtUrl(coverArtHash, 'small') : null),
     [coverArtHash],
   );
   const palette = useReactivePalette({

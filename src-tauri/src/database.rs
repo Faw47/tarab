@@ -469,7 +469,7 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     Ok(app_dir)
 }
 
-fn get_database_path() -> Result<PathBuf, String> {
+pub(crate) fn get_database_path() -> Result<PathBuf, String> {
     let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     prepare_app_directory(&base_dir).map(|directory| directory.join("library.db"))
 }

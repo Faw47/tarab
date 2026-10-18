@@ -11,7 +11,7 @@ import {
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useCreatePlaylistMutation,
   useDeletePlaylistMutation,
@@ -28,6 +28,7 @@ import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { dialog } from '../../platform/dialog';
+import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { PlaylistEntry, Track } from '../../types';
 import { Button } from '../ui/button';
@@ -49,6 +50,12 @@ export function PlaylistsView() {
   const relinkTrack = useRelinkPlaylistTrackMutation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const createRequested = useNavigationIntentStore((s) => s.createPlaylist);
+  useEffect(() => {
+    if (createRequested && useNavigationIntentStore.getState().consumeCreatePlaylist()) {
+      setCreateOpen(true);
+    }
+  }, [createRequested]);
   const [editOpen, setEditOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(new Set());

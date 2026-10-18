@@ -378,6 +378,7 @@ const App = () => {
     libraryFolders,
     setLibraryFolders,
     scanFolder: libraryScan.scanFolder,
+    queryClient,
   });
 
   const handleBack = useCallback(() => {

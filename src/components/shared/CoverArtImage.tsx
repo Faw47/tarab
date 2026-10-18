@@ -10,6 +10,7 @@ import {
   repairCoverArt,
   useCoverArt,
 } from '../../hooks/useCoverArt';
+import { isCoverArtProtocolUrl } from '../../lib/cover-art-url';
 import { getCoverArt } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
@@ -96,7 +97,7 @@ export const CoverArtImage = memo(
       errorCount.current += 1;
 
       // Mark protocol as failed for this hash/size combination
-      if (track.coverArtHash && src?.startsWith('cover-art://')) {
+      if (track.coverArtHash && isCoverArtProtocolUrl(src)) {
         markCoverArtProtocolFailed(track.coverArtHash, size);
       }
 

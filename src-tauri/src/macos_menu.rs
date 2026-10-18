@@ -1,11 +1,16 @@
 #[cfg(target_os = "macos")]
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-    App, Emitter, Runtime,
+    App, Emitter, Wry,
 };
 
 #[cfg(target_os = "macos")]
-pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
+use crate::desktop_integration::DesktopMenuHandles;
+
+/// Builds the macOS menu bar. Returns its playback items so native UI state updates (Play or
+/// Pause label, enabled state) reach the menu that is actually installed.
+#[cfg(target_os = "macos")]
+pub fn build_menu(app: &App<Wry>) -> tauri::Result<DesktopMenuHandles> {
     let pkg_info = app.package_info();
     let app_name = &pkg_info.name;
 
@@ -68,18 +73,17 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         )
         .build()?;
 
+    let play_pause = MenuItemBuilder::with_id("playback.toggle", "Play").build(app)?;
+    let previous = MenuItemBuilder::with_id("playback.previous", "Previous")
+        .accelerator("Cmd+Left")
+        .build(app)?;
+    let next = MenuItemBuilder::with_id("playback.next", "Next")
+        .accelerator("Cmd+Right")
+        .build(app)?;
     let playback_menu = SubmenuBuilder::new(app, "Playback")
-        .item(&MenuItemBuilder::with_id("playback.toggle", "Play or Pause").build(app)?)
-        .item(
-            &MenuItemBuilder::with_id("playback.previous", "Previous")
-                .accelerator("Cmd+Left")
-                .build(app)?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("playback.next", "Next")
-                .accelerator("Cmd+Right")
-                .build(app)?,
-        )
+        .item(&play_pause)
+        .item(&previous)
+        .item(&next)
         .item(
             &MenuItemBuilder::with_id("playback.seek-backward", "Seek Backward 10 Seconds")
                 .accelerator("Cmd+Shift+Left")
@@ -119,7 +123,7 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
 
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&MenuItemBuilder::with_id("help.help", "Tarab Help").build(app)?)
-        .item(&MenuItemBuilder::with_id("help.diagnostics", "Diagnostics").build(app)?)
+        .item(&MenuItemBuilder::with_id("help.diagnostics", "Library Health").build(app)?)
         .build()?;
 
     let menu = MenuBuilder::new(app)
@@ -158,5 +162,9 @@ pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         }
     });
 
-    Ok(())
+    Ok(DesktopMenuHandles {
+        play_pause,
+        previous,
+        next,
+    })
 }

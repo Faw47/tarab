@@ -13,6 +13,7 @@ mod macos_menu;
 mod metadata;
 mod playlist;
 mod session;
+mod startup_failure;
 mod tageditor;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -109,56 +110,93 @@ fn read_image_as_base64_checked(
 fn parse_cover_art_request(uri: &http::Uri) -> Option<(&str, &str)> {
     let host = uri.host().unwrap_or_default();
     let mut parts = uri.path().split('/').filter(|part| !part.is_empty());
-    if !host.is_empty() && host != "localhost" {
+    // Handlers receive cover-art://localhost/{hash}/{size} (wry maps WebView2's
+    // http://cover-art.localhost form back to it). The cover-art.localhost host is accepted too, in
+    // case a runtime passes it through. Older URLs carried the hash as the host.
+    let serving_host = host.is_empty() || host == "localhost" || host == "cover-art.localhost";
+    if !serving_host {
         return Some((host, parts.next().unwrap_or("medium")));
     }
     Some((parts.next()?, parts.next().unwrap_or("medium")))
 }
 
+fn cover_art_response(cache: &image_cache::ImageCache, uri: &http::Uri) -> http::Response<Vec<u8>> {
+    let (hash, size) = parse_cover_art_request(uri).unwrap_or_default();
+
+    let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
+        http::Response::builder()
+            .status(status)
+            .header(http::header::CONTENT_LENGTH, "0")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Vec::new())
+            .unwrap_or_else(|_| http::Response::new(Vec::new()))
+    };
+
+    if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
+        return empty_response(http::StatusCode::BAD_REQUEST);
+    }
+
+    match cache.get_thumbnail_bytes(hash, size) {
+        Ok(Some(bytes)) => {
+            let content_length = bytes.len().to_string();
+            http::Response::builder()
+                .header(
+                    http::header::CONTENT_TYPE,
+                    image_cache::THUMBNAIL_CONTENT_TYPE,
+                )
+                .header(http::header::CONTENT_LENGTH, content_length)
+                .header("Access-Control-Allow-Origin", "*")
+                .header(
+                    http::header::CACHE_CONTROL,
+                    "public, max-age=31536000, immutable",
+                )
+                .header(http::header::ETAG, format!("\"{}\"", hash))
+                .body(bytes)
+                .unwrap_or_else(|_| http::Response::new(Vec::new()))
+        }
+        Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
+        Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The first running copy opens the library before Tauri starts: a setup error panics inside
+    // the event loop (and aborts in release builds), so a failure there could never be shown. A
+    // second copy skips this; the single-instance plugin hands it off during build.
+    let instance = startup_failure::acquire_instance_lock();
+    let db_start = Instant::now();
+    let preopened_database = if instance.is_primary() {
+        match create_database() {
+            Ok(database) => Some(database),
+            Err(err) => {
+                startup_failure::report_database_failure(
+                    &format!("Failed to initialize library database: {}", err),
+                    instance,
+                );
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let db_init_ms = db_start.elapsed().as_secs_f64() * 1000.0;
+    // Held until the app exits.
+    let _instance = instance;
+
     let shared_image_cache: SharedImageCache = create_image_cache();
 
     let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol("cover-art", {
+        // Asynchronous so a cold-cache disk read never runs on the webview thread while a grid
+        // of covers scrolls.
+        .register_asynchronous_uri_scheme_protocol("cover-art", {
             let cache = shared_image_cache.clone();
-            move |_ctx, request| {
-                let (hash, size) = parse_cover_art_request(request.uri()).unwrap_or_default();
-
-                let empty_response = |status: http::StatusCode| -> http::Response<Vec<u8>> {
-                    http::Response::builder()
-                        .status(status)
-                        .header(http::header::CONTENT_LENGTH, "0")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Vec::new())
-                        .unwrap_or_else(|_| http::Response::new(Vec::new()))
-                };
-
-                if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
-                    return empty_response(http::StatusCode::BAD_REQUEST);
-                }
-
-                match cache.get_thumbnail_bytes(hash, size) {
-                    Ok(Some(bytes)) => {
-                        let content_length = bytes.len().to_string();
-                        http::Response::builder()
-                            .header(
-                                http::header::CONTENT_TYPE,
-                                image_cache::THUMBNAIL_CONTENT_TYPE,
-                            )
-                            .header(http::header::CONTENT_LENGTH, content_length)
-                            .header("Access-Control-Allow-Origin", "*")
-                            .header(
-                                http::header::CACHE_CONTROL,
-                                "public, max-age=31536000, immutable",
-                            )
-                            .header(http::header::ETAG, format!("\"{}\"", hash))
-                            .body(bytes)
-                            .unwrap_or_else(|_| http::Response::new(Vec::new()))
-                    }
-                    Ok(None) => empty_response(http::StatusCode::NOT_FOUND),
-                    Err(_e) => empty_response(http::StatusCode::INTERNAL_SERVER_ERROR),
-                }
+            move |_ctx, request, responder| {
+                let cache = cache.clone();
+                let uri = request.uri().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(cover_art_response(&cache, &uri));
+                });
             }
         })
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -335,22 +373,14 @@ pub fn run() {
             let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
             app.manage(audio_manager);
 
-            // Create database
-            let db_start = Instant::now();
-            let database = match create_database() {
-                Ok(database) => database,
-                Err(err) => {
-                    let message = format!("Failed to initialize library database: {}", err);
-                    eprintln!("{}", message);
-                    return Err(message.into());
-                }
+            let database = match preopened_database {
+                Some(database) => database,
+                None => create_database()
+                    .map_err(|err| format!("Failed to initialize library database: {}", err))?,
             };
             let playlist_bootstrap_db = database.clone();
             app.manage(database);
-            eprintln!(
-                "[startup] db_init_ms={:.1}",
-                db_start.elapsed().as_secs_f64() * 1000.0
-            );
+            eprintln!("[startup] db_init_ms={:.1}", db_init_ms);
 
             // Create image cache
             app.manage(shared_image_cache.clone());
@@ -416,11 +446,6 @@ pub fn run() {
                 let _ = window.set_decorations(false);
             }
 
-            #[cfg(target_os = "macos")]
-            if let Err(err) = macos_menu::build_menu(app) {
-                eprintln!("macOS menu setup failed: {}", err);
-            }
-
             eprintln!(
                 "[startup] setup_total_ms={:.1}",
                 setup_start.elapsed().as_secs_f64() * 1000.0
@@ -473,7 +498,7 @@ pub fn run() {
                 }
             }
         }),
-        Err(error) => eprintln!("error while building Tauri application: {}", error),
+        Err(error) => startup_failure::report_build_failure(&error.to_string()),
     }
 }
 
@@ -510,6 +535,41 @@ mod tests {
         assert_eq!(
             parse_cover_art_request(&path_uri),
             Some((hash.as_str(), "small"))
+        );
+    }
+
+    #[test]
+    fn cover_art_response_reports_bad_and_missing_requests() {
+        let dir = std::env::temp_dir().join(format!("tarab-cover-response-{}", std::process::id()));
+        let cache = image_cache::ImageCache::with_dir(dir.clone());
+        let bad: http::Uri = "cover-art://localhost/not-a-hash/large"
+            .parse()
+            .expect("uri");
+        let missing: http::Uri = format!("cover-art://localhost/{}/large", "c".repeat(64))
+            .parse()
+            .expect("uri");
+
+        assert_eq!(
+            cover_art_response(&cache, &bad).status(),
+            http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            cover_art_response(&cache, &missing).status(),
+            http::StatusCode::NOT_FOUND
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cover_art_protocol_accepts_the_windows_webview_host() {
+        let hash = "b".repeat(64);
+        let uri: http::Uri = format!("http://cover-art.localhost/{}/medium", hash)
+            .parse()
+            .expect("windows URI");
+
+        assert_eq!(
+            parse_cover_art_request(&uri),
+            Some((hash.as_str(), "medium"))
         );
     }
 
