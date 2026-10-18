@@ -1,11 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  SmoothTimeProvider,
-  useSmoothTimeSubscription,
-  useSmoothTimeValue,
-} from '../smooth-time';
 import { usePlayerStore } from '../../store/player-store';
+import { SmoothTimeProvider, useSmoothTimeSubscription, useSmoothTimeValue } from '../smooth-time';
 
 const { getTimeMsMock } = vi.hoisted(() => ({
   getTimeMsMock: vi.fn(() => 5000),
@@ -106,7 +102,11 @@ describe('SmoothTimeProvider frame scheduling (FE-42)', () => {
     let readTime: (() => number) | undefined;
     render(
       <SmoothTimeProvider>
-        <Reader onRead={(getter) => { readTime = getter; }} />
+        <Reader
+          onRead={(getter) => {
+            readTime = getter;
+          }}
+        />
       </SmoothTimeProvider>,
     );
 
