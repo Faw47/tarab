@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNavigationIntentStore } from '../../../store/navigation-intent-store';
 import { useNativeMenuActions } from '../useNativeMenuActions';
 
-const { listeners, openAudioFilesMock, refreshMock, toastErrorMock } = vi.hoisted(() => ({
+const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock } = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
   openAudioFilesMock: vi.fn(),
+  openUrlMock: vi.fn(async () => undefined),
   refreshMock: vi.fn(async () => undefined),
   toastErrorMock: vi.fn(),
 }));
@@ -17,7 +18,7 @@ vi.mock('@tauri-apps/api/event', () => ({
     return () => listeners.delete(name);
   }),
 }));
-vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: openUrlMock }));
 vi.mock('sonner', () => ({ toast: { error: toastErrorMock } }));
 vi.mock('../../../platform/dialog', () => ({ dialog: { openAudioFiles: openAudioFilesMock } }));
 vi.mock('../../../lib/track-refresh', () => ({ refreshTracksByFilePaths: refreshMock }));
@@ -73,6 +74,14 @@ describe('native menu actions', () => {
     expect(navigate).toHaveBeenCalledWith('library');
     expect(useNavigationIntentStore.getState().consumeLibraryFacet()).toBe('artists');
     expect(useNavigationIntentStore.getState().consumeLibraryFacet()).toBeNull();
+  });
+
+  it('opens the README from the native Help menu', async () => {
+    // Regression for QA-10: Help was disabled on Windows and Linux.
+    render(<Harness />);
+    await menuAction('help.help');
+
+    expect(openUrlMock).toHaveBeenCalledWith('https://github.com/Faw47/tarab#readme');
   });
 
   it('asks the playlists view to open the create dialog', async () => {
