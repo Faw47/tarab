@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useRef } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useSmoothTime } from '../hooks/useSmoothTime';
+import { usePlayerStore } from '../store/player-store';
 
 type SmoothTimeContextValue = {
   getTimeSec: () => number;
@@ -14,19 +15,21 @@ const SmoothTimeContext = createContext<SmoothTimeContextValue>({
 
 export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
   const getTimeMs = useSmoothTime();
+  const isPlaying = usePlayerStore((state) => state.isPlaying);
+  const [hasSubscribers, setHasSubscribers] = useState(false);
   const subscribersRef = useRef<Set<(timeSec: number) => void>>(new Set());
   const rafIdRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
+  const getTimeMsRef = useRef(getTimeMs);
+  getTimeMsRef.current = getTimeMs;
 
-  // RAF loop that notifies subscribers without React state updates
+  // Notify subscribers without React state updates. No frame loop when paused or unused.
   useEffect(() => {
-    let running = true;
+    if (!hasSubscribers) return;
 
-    const tick = () => {
-      if (!running) return;
-
+    const notify = () => {
       const timeSec = getTimeMs() / 1000;
-      // Only notify if time changed meaningfully (> 16ms = ~60fps)
+      // Only notify if time changed meaningfully (> 10ms).
       if (Math.abs(timeSec - lastTimeRef.current) > 0.01) {
         lastTimeRef.current = timeSec;
         subscribersRef.current.forEach((cb) => {
@@ -37,25 +40,41 @@ export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
           }
         });
       }
-
-      rafIdRef.current = requestAnimationFrame(tick);
     };
 
+    // A pause or seek may still change the timestamp; publish once without another frame.
+    if (!isPlaying) {
+      notify();
+      return;
+    }
+
+    let running = true;
+    const tick = () => {
+      if (!running) return;
+      notify();
+      rafIdRef.current = requestAnimationFrame(tick);
+    };
     rafIdRef.current = requestAnimationFrame(tick);
 
     return () => {
       running = false;
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
       }
     };
-  }, [getTimeMs]);
+  }, [getTimeMs, hasSubscribers, isPlaying]);
 
   const value = useRef<SmoothTimeContextValue>({
-    getTimeSec: () => lastTimeRef.current,
+    // Imperative readers do not need a subscription or a running frame loop.
+    getTimeSec: () => getTimeMsRef.current() / 1000,
     subscribe: (callback) => {
       subscribersRef.current.add(callback);
-      return () => subscribersRef.current.delete(callback);
+      setHasSubscribers(true);
+      return () => {
+        subscribersRef.current.delete(callback);
+        if (subscribersRef.current.size === 0) setHasSubscribers(false);
+      };
     },
   });
 
