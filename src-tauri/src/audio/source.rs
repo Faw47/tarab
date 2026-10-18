@@ -49,9 +49,11 @@ fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
         (track.codec_params.time_base, track.codec_params.n_frames)
     {
         let t = tb.calc_time(frames);
-        t.seconds as f64 + t.frac / tb.denom as f64
+        // `frac` is already a fraction of a second.
+        t.seconds as f64 + t.frac
     } else {
-        0.0
+        // Without a frame count, near-end detection (gapless and crossfade) needs an estimate.
+        crate::metadata::probe_duration_secs(file_path).unwrap_or(0.0)
     };
 
     Ok((reader, decoder, duration))
@@ -63,60 +65,155 @@ pub(super) fn prepare_source(
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
 ) -> Result<(SymphoniaSource, f64, f64), String> {
+    prepare_source_with_seek(
+        file_path,
+        requested_start,
+        state,
+        emitted_samples,
+        seek_decoder,
+    )
+}
+
+type SeekFn = fn(&mut dyn SymphoniaDecoder, &mut dyn FormatReader, f64) -> Result<u64, String>;
+
+fn prepare_source_with_seek(
+    file_path: &str,
+    requested_start: f64,
+    state: &Arc<Mutex<PlaybackState>>,
+    emitted_samples: &Arc<AtomicU64>,
+    seek: SeekFn,
+) -> Result<(SymphoniaSource, f64, f64), String> {
     let (mut format, mut decoder, mut duration) = open_decoder_for_file(file_path)?;
     let mut actual_start = requested_start.max(0.0);
     if duration > 0.0 {
         actual_start = actual_start.min(duration);
     }
 
+    let mut start = SeekStart::default();
     if actual_start > 0.0 {
-        if let Err(seek_err) = seek_decoder(decoder.as_mut(), format.as_mut(), actual_start) {
-            eprintln!(
-                "Seek to {} failed for {} ({}); reopening from start",
-                actual_start, file_path, seek_err
-            );
-            let reopened = open_decoder_for_file(file_path)?;
-            format = reopened.0;
-            decoder = reopened.1;
-            duration = reopened.2;
-            actual_start = 0.0;
+        match seek(decoder.as_mut(), format.as_mut(), actual_start) {
+            Ok(skip_frames) => start.skip_frames = skip_frames,
+            Err(seek_err) => {
+                // Unseekable streams (for example some MP3s): read packet headers from the start
+                // up to the target instead of restarting the track at 0:00.
+                eprintln!(
+                    "Seek to {} failed for {} ({}); skipping packets from the start",
+                    actual_start, file_path, seek_err
+                );
+                let reopened = open_decoder_for_file(file_path)?;
+                format = reopened.0;
+                decoder = reopened.1;
+                duration = reopened.2;
+                start = skip_packets_to(format.as_mut(), actual_start).map_err(|err| {
+                    format!("seek failed ({}) and fallback failed ({})", seek_err, err)
+                })?;
+            }
         }
     }
 
-    let source = SymphoniaSource::new(
+    let mut source = SymphoniaSource::new(
         decoder,
         format,
-        state.clone(),
+        state.lock().booster.clone(),
         emitted_samples.clone(),
         file_path.to_string(),
     )
     .ok_or_else(|| "missing channels or sample rate in codec params".to_string())?;
+    source.pending_packet = start.packet;
+    source.skip_samples = (start.skip_frames as usize).saturating_mul(source.channels as usize);
 
     Ok((source, duration, actual_start))
 }
 
+/// Where decoding starts after a seek: an already-read packet to decode first, and how many
+/// decoded frames to drop so playback starts exactly at the target.
+#[derive(Default)]
+struct SeekStart {
+    packet: Option<Packet>,
+    skip_frames: u64,
+}
+
+struct TrackTiming {
+    track_id: u32,
+    time_base: TimeBase,
+    sample_rate: Option<u32>,
+}
+
+fn default_track_timing(format: &dyn FormatReader) -> Result<TrackTiming, String> {
+    let track = format
+        .default_track()
+        .ok_or_else(|| "no default track".to_string())?;
+    let time_base = track
+        .codec_params
+        .time_base
+        .ok_or_else(|| "no time base".to_string())?;
+    Ok(TrackTiming {
+        track_id: track.id,
+        time_base,
+        sample_rate: track.codec_params.sample_rate,
+    })
+}
+
+/// Converts a timestamp difference to audio frames. Most containers count timestamps in frames
+/// (time base 1/sample rate), but Matroska uses milliseconds and MP4 its own timescale.
+fn ts_delta_to_frames(delta: u64, timing: &TrackTiming) -> u64 {
+    let Some(sample_rate) = timing.sample_rate else {
+        return delta;
+    };
+    let tb = timing.time_base;
+    if tb.denom == 0 {
+        return delta;
+    }
+    let frames =
+        u128::from(delta) * u128::from(tb.numer) * u128::from(sample_rate) / u128::from(tb.denom);
+    u64::try_from(frames).unwrap_or(u64::MAX)
+}
+
+/// Seeks accurately and returns the frames to drop between the seeked packet and the target, so
+/// the reported position matches the audio (coarse MP3 seeks assume a constant bitrate).
 fn seek_decoder(
     decoder: &mut dyn SymphoniaDecoder,
     format: &mut dyn FormatReader,
     position_secs: f64,
-) -> Result<(), String> {
-    let tb = format
-        .default_track()
-        .and_then(|t| t.codec_params.time_base)
-        .ok_or_else(|| "no time base".to_string())?;
-    let ts = (position_secs * tb.denom as f64 / tb.numer as f64) as u64;
-
-    format
+) -> Result<u64, String> {
+    let timing = default_track_timing(format)?;
+    let seeked = format
         .seek(
-            SeekMode::Coarse,
+            SeekMode::Accurate,
             SeekTo::Time {
-                time: tb.calc_time(ts),
+                time: Time::from(position_secs),
                 track_id: None,
             },
         )
         .map_err(|e| format!("seek error: {}", e))?;
     decoder.reset();
-    Ok(())
+    Ok(ts_delta_to_frames(
+        seeked.required_ts.saturating_sub(seeked.actual_ts),
+        &timing,
+    ))
+}
+
+/// Reads packets without decoding until the one containing `position_secs`. A target past the
+/// real end (the estimated duration can be too long) leaves the reader at the end, so the track
+/// ends and the queue advances normally.
+fn skip_packets_to(format: &mut dyn FormatReader, position_secs: f64) -> Result<SeekStart, String> {
+    let timing = default_track_timing(format)?;
+    let target = timing.time_base.calc_timestamp(Time::from(position_secs));
+    loop {
+        let Ok(packet) = format.next_packet() else {
+            return Ok(SeekStart::default());
+        };
+        if packet.track_id() != timing.track_id {
+            continue;
+        }
+        if packet.ts().saturating_add(packet.dur()) > target {
+            let skip_frames = ts_delta_to_frames(target.saturating_sub(packet.ts()), &timing);
+            return Ok(SeekStart {
+                packet: Some(packet),
+                skip_frames,
+            });
+        }
+    }
 }
 
 pub(super) fn play_with_source(
@@ -157,10 +254,16 @@ pub(super) fn play_with_source(
 pub(super) struct SymphoniaSource {
     decoder: Box<dyn SymphoniaDecoder>,
     format: Box<dyn FormatReader>,
-    state: Arc<Mutex<PlaybackState>>,
+    booster: BoosterGain,
     emitted_samples: Arc<AtomicU64>,
     file_path: String,
     buffer: Vec<f32>,
+    // Reused for every packet so decoding does not allocate on the mixer thread.
+    scratch: Option<SampleBuffer<f32>>,
+    /// Packet read while seeking that must be decoded before the next one from the reader.
+    pending_packet: Option<Packet>,
+    /// Decoded samples to drop before output, so playback starts exactly at the seek target.
+    skip_samples: usize,
     buf_pos: usize,
     channels: u16,
     sample_rate: u32,
@@ -170,7 +273,7 @@ impl SymphoniaSource {
     pub(super) fn new(
         decoder: Box<dyn SymphoniaDecoder>,
         format: Box<dyn FormatReader>,
-        state: Arc<Mutex<PlaybackState>>,
+        booster: BoosterGain,
         emitted_samples: Arc<AtomicU64>,
         file_path: String,
     ) -> Option<Self> {
@@ -180,10 +283,13 @@ impl SymphoniaSource {
         Some(Self {
             decoder,
             format,
-            state,
+            booster,
             emitted_samples,
             file_path,
             buffer: Vec::new(),
+            scratch: None,
+            pending_packet: None,
+            skip_samples: 0,
             buf_pos: 0,
             channels,
             sample_rate,
@@ -201,19 +307,29 @@ impl SymphoniaSource {
                 return None;
             }
 
-            let packet = match self.format.next_packet() {
-                Ok(packet) => packet,
-                Err(_) => return None,
+            let packet = match self.pending_packet.take() {
+                Some(packet) => packet,
+                None => match self.format.next_packet() {
+                    Ok(packet) => packet,
+                    Err(_) => return None,
+                },
             };
 
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
-                    if let Some((out, chans, rate)) = convert_to_f32(decoded) {
+                    if let Some((chans, rate)) =
+                        convert_to_f32(decoded, &mut self.scratch, &mut self.buffer)
+                    {
                         self.channels = chans;
                         self.sample_rate = rate;
-                        self.buffer = out;
-                        self.buf_pos = 0;
-                        return Some(());
+                        let skipped = self.skip_samples.min(self.buffer.len());
+                        self.skip_samples -= skipped;
+                        self.buf_pos = skipped;
+                        if self.buf_pos < self.buffer.len() {
+                            return Some(());
+                        }
+                        // The whole packet precedes the seek target; decode the next one.
+                        continue;
                     }
                     attempts += 1;
                     eprintln!(
@@ -242,11 +358,7 @@ impl Iterator for SymphoniaSource {
 
         let mut sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
-        let gain = {
-            let state = self.state.lock();
-            state.booster
-        };
-        sample = (sample * gain).clamp(-1.0, 1.0);
+        sample = (sample * self.booster.get()).clamp(-1.0, 1.0);
         self.emitted_samples.fetch_add(1, Ordering::Relaxed);
         Some(sample)
     }
@@ -323,21 +435,29 @@ impl Source for GaplessHandoffSource {
     }
 }
 
-fn convert_to_f32(buf: AudioBufferRef) -> Option<(Vec<f32>, u16, u32)> {
-    let chans = buf.spec().channels.count() as u16;
-    let rate = buf.spec().rate;
+/// Interleaves a decoded packet into `out`, reusing `scratch` and `out` across packets.
+fn convert_to_f32(
+    buf: AudioBufferRef,
+    scratch: &mut Option<SampleBuffer<f32>>,
+    out: &mut Vec<f32>,
+) -> Option<(u16, u32)> {
+    let spec = *buf.spec();
+    let chans = spec.channels.count() as u16;
+    let rate = spec.rate;
     let frames = buf.frames();
     let sample_count = validate_decoded_packet(chans, frames, rate)?;
 
-    let mut converted = buf.make_equivalent::<f32>();
-    buf.convert(&mut converted);
-    let mut out = Vec::with_capacity(sample_count);
-    for frame_idx in 0..frames {
-        for chan_idx in 0..chans as usize {
-            out.push(*converted.chan(chan_idx).get(frame_idx)?);
-        }
+    let fits = scratch
+        .as_ref()
+        .is_some_and(|existing| existing.capacity() >= sample_count);
+    if !fits {
+        *scratch = Some(SampleBuffer::new(buf.capacity() as u64, spec));
     }
-    Some((out, chans, rate))
+    let samples = scratch.as_mut()?;
+    samples.copy_interleaved_ref(buf);
+    out.clear();
+    out.extend_from_slice(samples.samples());
+    (out.len() == sample_count).then_some((chans, rate))
 }
 
 pub(super) fn validate_decoded_packet(
@@ -351,4 +471,194 @@ pub(super) fn validate_decoded_packet(
         && (MIN_AUDIO_SAMPLE_RATE..=MAX_AUDIO_SAMPLE_RATE).contains(&sample_rate)
         && sample_count <= MAX_DECODED_SAMPLES_PER_PACKET)
         .then_some(sample_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    /// A 16-bit stereo PCM WAV whose left channel counts up and right channel counts down.
+    fn stereo_wav(frames: u16) -> Vec<u8> {
+        let data_len = u32::from(frames) * 4;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&32_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for frame in 0..frames {
+            let value = (frame as i16) * 4;
+            bytes.extend_from_slice(&value.to_le_bytes());
+            bytes.extend_from_slice(&(-value).to_le_bytes());
+        }
+        bytes
+    }
+
+    fn write_temp_wav(name: &str, frames: u16) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!("tarab-source-{name}-{nonce}.wav"));
+        std::fs::write(&path, stereo_wav(frames)).expect("write wav");
+        path
+    }
+
+    #[test]
+    fn decoded_samples_stay_interleaved_across_packets() {
+        let path = write_temp_wav("interleave", 3000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let samples: Vec<f32> = source.collect();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(samples.len(), 6000);
+        for (frame, pair) in samples.chunks(2).enumerate() {
+            let expected = (frame as f32 * 4.0) / 32768.0;
+            assert!((pair[0] - expected).abs() < 1e-6, "left sample {frame}");
+            assert!((pair[1] + expected).abs() < 1e-6, "right sample {frame}");
+        }
+    }
+
+    fn first_frame_value(source: &mut SymphoniaSource) -> f32 {
+        source.next().expect("first sample") * 32768.0 / 4.0
+    }
+
+    #[test]
+    fn seeking_starts_at_the_requested_frame_not_the_packet_boundary() {
+        // Regression for PB-07: the seeked packet's start was reported as the requested time.
+        let path = write_temp_wav("seek", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, actual_start) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.5123, &state, &counter)
+                .expect("prepare source");
+        let frame = first_frame_value(&mut source);
+        let _ = std::fs::remove_file(&path);
+
+        assert!((actual_start - 0.5123).abs() < 1e-9);
+        // 0.5123 s at 8 kHz is frame 4098.
+        assert_eq!(frame.round() as i64, 4098);
+    }
+
+    #[test]
+    fn a_failed_seek_skips_packets_instead_of_restarting_at_zero() {
+        // Regression for PB-08: an unseekable stream restarted the track at 0:00.
+        fn unseekable(
+            _: &mut dyn SymphoniaDecoder,
+            _: &mut dyn FormatReader,
+            _: f64,
+        ) -> Result<u64, String> {
+            Err("seek error: unseekable".to_string())
+        }
+        let path = write_temp_wav("fallback", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, actual_start) = prepare_source_with_seek(
+            path.to_str().expect("utf-8 path"),
+            0.75,
+            &state,
+            &counter,
+            unseekable,
+        )
+        .expect("prepare source");
+        let frame = first_frame_value(&mut source);
+        let remaining = source.count() + 1;
+        let _ = std::fs::remove_file(&path);
+
+        assert!((actual_start - 0.75).abs() < 1e-9);
+        assert_eq!(frame.round() as i64, 6000);
+        assert_eq!(remaining, (8000 - 6000) * 2);
+    }
+
+    #[test]
+    fn a_seek_past_the_real_end_ends_the_track() {
+        // A too-long duration estimate let the seek target pass the end; that stopped playback
+        // with an error instead of ending the track so the queue could advance.
+        fn unseekable(
+            _: &mut dyn SymphoniaDecoder,
+            _: &mut dyn FormatReader,
+            _: f64,
+        ) -> Result<u64, String> {
+            Err("seek error: out of range".to_string())
+        }
+        let path = write_temp_wav("past-end", 800);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let prepared = prepare_source_with_seek(
+            path.to_str().expect("utf-8 path"),
+            5.0,
+            &state,
+            &counter,
+            unseekable,
+        );
+        let _ = std::fs::remove_file(&path);
+
+        let (source, _, _) = prepared.expect("an exhausted source, not an error");
+        assert_eq!(source.count(), 0);
+    }
+
+    #[test]
+    fn timestamp_deltas_convert_to_frames_for_millisecond_time_bases() {
+        let millis = TrackTiming {
+            track_id: 1,
+            time_base: TimeBase::new(1, 1000),
+            sample_rate: Some(44_100),
+        };
+        assert_eq!(ts_delta_to_frames(500, &millis), 22_050);
+        let frames = TrackTiming {
+            track_id: 1,
+            time_base: TimeBase::new(1, 44_100),
+            sample_rate: Some(44_100),
+        };
+        assert_eq!(ts_delta_to_frames(500, &frames), 500);
+    }
+
+    #[test]
+    fn decoder_duration_keeps_the_fractional_second() {
+        let path = write_temp_wav("duration", 8004);
+        let opened = open_decoder_for_file(path.to_str().expect("utf-8 path"));
+        let estimated = crate::metadata::probe_duration_secs(path.to_str().expect("utf-8 path"));
+        let _ = std::fs::remove_file(&path);
+
+        let duration = opened.expect("open").2;
+        assert!((duration - 1.0005).abs() < 1e-9, "duration {duration}");
+        assert!(estimated.is_some_and(|secs| (secs - 1.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn source_produces_samples_while_the_playback_lock_is_held() {
+        // Regression for PB-09: the mixer used to take the playback lock for every sample.
+        let path = write_temp_wav("lock", 2000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let guard = state.lock();
+        let (done_tx, done_rx) = mpsc::channel();
+        let mixer = std::thread::spawn(move || {
+            let pulled = (0..1000).filter_map(|_| source.next()).count();
+            let _ = done_tx.send(pulled);
+        });
+        let pulled = done_rx.recv_timeout(Duration::from_secs(2));
+        drop(guard);
+        let _ = mixer.join();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(pulled, Ok(1000));
+    }
 }

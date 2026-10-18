@@ -23,7 +23,6 @@ const frontendCommands = new Set(
 const backendOnlyCommands = new Set([
   'clear_progress',
   'get_cover_art_with_blurhash',
-  'update_media_metadata',
   'update_progress',
 ]);
 

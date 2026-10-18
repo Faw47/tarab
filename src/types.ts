@@ -284,6 +284,8 @@ export interface DesktopNativeUiState {
 
 export interface DesktopMediaSessionSyncPayload {
   enabled: boolean;
+  /** True when title, artist, album and artwork match the last successful sync. */
+  metadataUnchanged: boolean;
   title: string | null;
   artist: string | null;
   album: string | null;

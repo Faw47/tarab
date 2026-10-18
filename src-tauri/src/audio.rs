@@ -7,13 +7,14 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;
 use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, Packet, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::{Time, TimeBase};
 use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
@@ -32,7 +33,7 @@ use crossfade::{
     apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
     CrossfadeState,
 };
-use device::{ensure_output_stream, open_output_stream};
+use device::{default_output_device_name, ensure_output_stream, open_output_stream, OutputWatch};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
 use events::{
@@ -40,8 +41,8 @@ use events::{
     PlaybackTransition,
 };
 use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
-use state::playback_identity;
 pub use state::PlaybackState;
+use state::{playback_identity, BoosterGain};
 
 enum AudioCommand {
     Play {
@@ -69,10 +70,20 @@ enum AudioCommand {
     SetCrossfade(f32),
     SetBooster(f32),
     SetOutputDevice(Option<String>),
+    /// Sent by the output watch: reopen the current device choice after a lost device or a new
+    /// system default. Unlike a user switch, a failure stops playback.
+    RecoverOutput,
     PreloadNext(Option<(String, u64)>),
     SourceRenamed {
         old_path: String,
         new_path: String,
+    },
+    /// Sent by the mixer thread when a gapless follow-on track plays its first sample, so the
+    /// IPC emits happen on the audio thread instead of the real-time mixer.
+    GaplessHandoffStarted {
+        ended: PlaybackEndedPayload,
+        next_generation: u64,
+        next_path: String,
     },
 }
 
@@ -97,6 +108,34 @@ fn position_from_samples(state: &PlaybackState, emitted_samples: u64) -> f64 {
     let sample_rate = state.position_sample_rate as f64;
     let channels = state.position_channels as f64;
     state.start_position + (emitted_samples as f64 / (sample_rate * channels))
+}
+
+/// After an automatic output reopen fails, stop playback instead of leaving a sink on a dead or
+/// stale stream "playing" while the renderer shows the deviceSwitch error as stopped. The stream is
+/// dropped so the next Play opens a fresh one.
+#[allow(clippy::too_many_arguments)]
+fn stop_after_failed_recovery(
+    state: &Arc<Mutex<PlaybackState>>,
+    pending_gapless_path: &Arc<Mutex<Option<String>>>,
+    active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
+    crossfade_state: &mut Option<CrossfadeState>,
+    current_sink: &mut Option<Sink>,
+    volume_ramp: &mut Option<VolumeRampState>,
+    stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
+) {
+    *pending_gapless_path.lock() = None;
+    if let Some(active) = crossfade_state.take() {
+        active.outgoing_sink.stop();
+    }
+    if let Some(sink) = current_sink.take() {
+        sink.stop();
+    }
+    reset_active_counter(active_emitted);
+    *volume_ramp = None;
+    *stream_bundle = None;
+    let mut state = state.lock();
+    state.is_playing = false;
+    state.is_paused = false;
 }
 
 fn reset_active_counter(slot: &Arc<Mutex<Arc<AtomicU64>>>) {
@@ -213,6 +252,8 @@ impl AudioManager {
         let pending_gapless_path = Arc::new(Mutex::new(None::<String>));
         let pending_gapless_path_thread = Arc::clone(&pending_gapless_path);
         let audio_is_running = Arc::clone(&is_running);
+        // The mixer's gapless handoff and the output watch post commands back to this loop.
+        let loop_sender = sender.clone();
         thread::spawn(move || {
             let mut stream_bundle: Option<(OutputStream, OutputStreamHandle)> =
                 match open_output_stream(None) {
@@ -238,673 +279,726 @@ impl AudioManager {
             let mut current_sink: Option<Sink> = None;
             let mut crossfade_state: Option<CrossfadeState> = None;
             let mut volume_ramp: Option<VolumeRampState> = None;
+            let mut output_watch = OutputWatch::new(Instant::now());
+            let mut had_stream = false;
+            let mut handled_command = false;
 
             loop {
+                // A long command (a slow decode or seek) is not an output stall: count the time
+                // spent handling it as activity.
+                if handled_command {
+                    output_watch.note_activity(Instant::now());
+                    handled_command = false;
+                }
                 match receiver.recv_timeout(Duration::from_millis(20)) {
-                    Ok(command) => match command {
-                        AudioCommand::Play {
-                            file_path,
-                            start_pos,
-                            generation,
-                        } => {
-                            emit_playback_transition(
-                                &app_for_audio,
+                    Ok(command) => {
+                        handled_command = true;
+                        match command {
+                            AudioCommand::Play {
+                                file_path,
+                                start_pos,
                                 generation,
-                                PlaybackTransition::Loading,
-                                Some(file_path.clone()),
-                                None,
-                                true,
-                            );
-                            *pending_gapless_path_thread.lock() = None;
-                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
-                                open_output_stream(preferred_device.as_deref())
-                                    .or_else(|_| open_output_stream(None))
-                            }) {
-                                eprintln!("Audio output is not available: {}", error);
-                            }
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
-                            if let Some(active) = crossfade_state.take() {
-                                active.outgoing_sink.stop();
-                            }
-                            let requested_start = start_pos.unwrap_or(0.0).max(0.0);
-                            let emitted_for_play = Arc::new(AtomicU64::new(0));
-                            match prepare_source(
-                                &file_path,
-                                requested_start,
-                                &state_clone,
-                                &emitted_for_play,
-                            ) {
-                                Ok((source, duration, actual_start)) => {
-                                    if let Some(new_sink) = play_with_source(
-                                        stream_handle,
-                                        source,
-                                        &state_clone,
-                                        PlaybackStart {
-                                            file_path: &file_path,
-                                            duration,
-                                            start_secs: actual_start,
-                                            generation,
-                                            initial_volume: None,
-                                        },
-                                    ) {
-                                        if let Some(sink) = current_sink.take() {
-                                            sink.stop();
-                                        }
-                                        current_sink = Some(new_sink);
-                                        set_active_counter(
-                                            &active_emitted_for_audio,
-                                            Arc::clone(&emitted_for_play),
-                                        );
-                                        volume_ramp = None;
-                                        emit_playback_transition(
-                                            &app_for_audio,
-                                            generation,
-                                            PlaybackTransition::Playing,
-                                            Some(file_path.clone()),
-                                            None,
-                                            true,
-                                        );
-                                    } else {
-                                        emit_playback_error(
-                                            &app_for_audio,
-                                            file_path.clone(),
-                                            generation,
-                                            "stream",
-                                            "Failed to initialize audio output stream",
-                                            false,
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    eprintln!("Failed to start playback: {}", err);
-                                    emit_playback_error(
-                                        &app_for_audio,
-                                        file_path.clone(),
-                                        generation,
-                                        "decode",
-                                        err.clone(),
-                                        false,
-                                    );
-                                    emit_playback_transition(
-                                        &app_for_audio,
-                                        generation,
-                                        PlaybackTransition::DecodeFailed,
-                                        Some(file_path.clone()),
-                                        Some(err),
-                                        false,
-                                    );
-                                }
-                            }
-                        }
-                        AudioCommand::CrossfadeTo {
-                            file_path,
-                            start_pos,
-                            duration_ms,
-                            generation,
-                        } => {
-                            emit_playback_transition(
-                                &app_for_audio,
-                                generation,
-                                PlaybackTransition::Loading,
-                                Some(file_path.clone()),
-                                None,
-                                true,
-                            );
-                            *pending_gapless_path_thread.lock() = None;
-                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
-                                open_output_stream(preferred_device.as_deref())
-                                    .or_else(|_| open_output_stream(None))
-                            }) {
-                                eprintln!("Audio output is not available: {}", error);
-                            }
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
-                            if crossfade_state.is_some() {
-                                let message =
-                                    "A crossfade transition is already active".to_string();
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    file_path.clone(),
-                                    generation,
-                                    "stream",
-                                    message.clone(),
-                                    true,
-                                );
+                            } => {
                                 emit_playback_transition(
                                     &app_for_audio,
                                     generation,
-                                    PlaybackTransition::DecodeFailed,
-                                    Some(file_path),
-                                    Some(message),
+                                    PlaybackTransition::Loading,
+                                    Some(file_path.clone()),
+                                    None,
                                     true,
                                 );
-                                continue;
-                            }
-
-                            let requested_start = start_pos.unwrap_or(0.0).max(0.0);
-                            let should_fallback_to_play =
-                                current_sink.is_none() || duration_ms == 0;
-                            let emitted_for_crossfade = Arc::new(AtomicU64::new(0));
-
-                            match prepare_source(
-                                &file_path,
-                                requested_start,
-                                &state_clone,
-                                &emitted_for_crossfade,
-                            ) {
-                                Ok((source, duration, actual_start)) => {
-                                    let initial_volume = if should_fallback_to_play {
-                                        None
-                                    } else {
-                                        Some(0.0)
-                                    };
-                                    if let Some(new_sink) = play_with_source(
-                                        stream_handle,
-                                        source,
-                                        &state_clone,
-                                        PlaybackStart {
-                                            file_path: &file_path,
-                                            duration,
-                                            start_secs: actual_start,
-                                            generation,
-                                            initial_volume,
-                                        },
-                                    ) {
-                                        if should_fallback_to_play {
+                                *pending_gapless_path_thread.lock() = None;
+                                if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                    open_output_stream(preferred_device.as_deref())
+                                        .or_else(|_| open_output_stream(None))
+                                }) {
+                                    eprintln!("Audio output is not available: {}", error);
+                                }
+                                let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                    emit_playback_error(
+                                        &app_for_audio,
+                                        "",
+                                        generation,
+                                        "stream",
+                                        "Audio output is not available",
+                                        false,
+                                    );
+                                    continue;
+                                };
+                                if let Some(active) = crossfade_state.take() {
+                                    active.outgoing_sink.stop();
+                                }
+                                let requested_start = start_pos.unwrap_or(0.0).max(0.0);
+                                let emitted_for_play = Arc::new(AtomicU64::new(0));
+                                match prepare_source(
+                                    &file_path,
+                                    requested_start,
+                                    &state_clone,
+                                    &emitted_for_play,
+                                ) {
+                                    Ok((source, duration, actual_start)) => {
+                                        if let Some(new_sink) = play_with_source(
+                                            stream_handle,
+                                            source,
+                                            &state_clone,
+                                            PlaybackStart {
+                                                file_path: &file_path,
+                                                duration,
+                                                start_secs: actual_start,
+                                                generation,
+                                                initial_volume: None,
+                                            },
+                                        ) {
                                             if let Some(sink) = current_sink.take() {
                                                 sink.stop();
                                             }
                                             current_sink = Some(new_sink);
-                                        } else if let Some(outgoing_sink) = current_sink.take() {
-                                            current_sink = Some(new_sink);
-                                            crossfade_state = Some(CrossfadeState {
-                                                outgoing_sink,
-                                                start: Instant::now(),
-                                                duration: Duration::from_millis(duration_ms.max(1)),
+                                            set_active_counter(
+                                                &active_emitted_for_audio,
+                                                Arc::clone(&emitted_for_play),
+                                            );
+                                            volume_ramp = None;
+                                            emit_playback_transition(
+                                                &app_for_audio,
                                                 generation,
-                                                incoming_path: file_path.clone(),
-                                            });
-                                            apply_crossfade_step(
-                                                &mut crossfade_state,
-                                                &state_clone,
-                                                current_sink.as_ref(),
+                                                PlaybackTransition::Playing,
+                                                Some(file_path.clone()),
+                                                None,
+                                                true,
                                             );
                                         } else {
-                                            current_sink = Some(new_sink);
+                                            emit_playback_error(
+                                                &app_for_audio,
+                                                file_path.clone(),
+                                                generation,
+                                                "stream",
+                                                "Failed to initialize audio output stream",
+                                                false,
+                                            );
                                         }
-
-                                        set_active_counter(
-                                            &active_emitted_for_audio,
-                                            Arc::clone(&emitted_for_crossfade),
-                                        );
-                                        volume_ramp = None;
-                                        emit_playback_transition(
-                                            &app_for_audio,
-                                            generation,
-                                            if should_fallback_to_play {
-                                                PlaybackTransition::Playing
-                                            } else {
-                                                PlaybackTransition::CrossfadeStarted
-                                            },
-                                            Some(file_path.clone()),
-                                            None,
-                                            true,
-                                        );
-                                    } else {
+                                    }
+                                    Err(err) => {
+                                        eprintln!("Failed to start playback: {}", err);
                                         emit_playback_error(
                                             &app_for_audio,
                                             file_path.clone(),
                                             generation,
-                                            "stream",
-                                            "Failed to initialize audio output stream",
-                                            true,
+                                            "decode",
+                                            err.clone(),
+                                            false,
+                                        );
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::DecodeFailed,
+                                            Some(file_path.clone()),
+                                            Some(err),
+                                            false,
                                         );
                                     }
                                 }
-                                Err(err) => {
+                            }
+                            AudioCommand::CrossfadeTo {
+                                file_path,
+                                start_pos,
+                                duration_ms,
+                                generation,
+                            } => {
+                                emit_playback_transition(
+                                    &app_for_audio,
+                                    generation,
+                                    PlaybackTransition::Loading,
+                                    Some(file_path.clone()),
+                                    None,
+                                    true,
+                                );
+                                *pending_gapless_path_thread.lock() = None;
+                                if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                    open_output_stream(preferred_device.as_deref())
+                                        .or_else(|_| open_output_stream(None))
+                                }) {
+                                    eprintln!("Audio output is not available: {}", error);
+                                }
+                                let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                    emit_playback_error(
+                                        &app_for_audio,
+                                        "",
+                                        generation,
+                                        "stream",
+                                        "Audio output is not available",
+                                        false,
+                                    );
+                                    continue;
+                                };
+                                if crossfade_state.is_some() {
+                                    let message =
+                                        "A crossfade transition is already active".to_string();
                                     emit_playback_error(
                                         &app_for_audio,
                                         file_path.clone(),
                                         generation,
-                                        "decode",
-                                        err.clone(),
+                                        "stream",
+                                        message.clone(),
                                         true,
                                     );
                                     emit_playback_transition(
                                         &app_for_audio,
                                         generation,
                                         PlaybackTransition::DecodeFailed,
-                                        Some(file_path.clone()),
-                                        Some(err),
+                                        Some(file_path),
+                                        Some(message),
                                         true,
                                     );
+                                    continue;
                                 }
-                            }
-                        }
-                        AudioCommand::Seek(position_secs) => {
-                            let generation = state_clone.lock().generation;
-                            *pending_gapless_path_thread.lock() = None;
-                            if let Some(active) = crossfade_state.take() {
-                                active.outgoing_sink.stop();
-                            }
-                            let target_position = position_secs.max(0.0);
-                            let (active_path, was_paused, had_sink, duration) = {
-                                let state = state_clone.lock();
-                                (
-                                    state.current_file.clone().unwrap_or_default(),
-                                    state.is_paused,
-                                    current_sink.is_some(),
-                                    state.duration,
-                                )
-                            };
 
-                            if active_path.is_empty() {
-                                continue;
-                            }
+                                let requested_start = start_pos.unwrap_or(0.0).max(0.0);
+                                let should_fallback_to_play =
+                                    current_sink.is_none() || duration_ms == 0;
+                                let emitted_for_crossfade = Arc::new(AtomicU64::new(0));
 
-                            let normalized_position = if duration > 0.0 {
-                                target_position.min(duration)
-                            } else {
-                                target_position
-                            };
-
-                            if !had_sink {
-                                {
-                                    let mut state = state_clone.lock();
-                                    state.start_position = normalized_position;
-                                    state.warned_near_end = false;
-                                }
-                                reset_active_counter(&active_emitted_for_audio);
-                                let _ = app_for_audio.emit(
-                                    "playback-seeked",
-                                    PlaybackPositionEvent {
-                                        generation,
-                                        position: normalized_position,
-                                    },
-                                );
-                                continue;
-                            }
-
-                            if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
-                                open_output_stream(preferred_device.as_deref())
-                                    .or_else(|_| open_output_stream(None))
-                            }) {
-                                eprintln!("Audio output is not available: {}", error);
-                            }
-                            let Some((_, stream_handle)) = stream_bundle.as_ref() else {
-                                emit_playback_error(
-                                    &app_for_audio,
-                                    "",
-                                    generation,
-                                    "stream",
-                                    "Audio output is not available",
-                                    false,
-                                );
-                                continue;
-                            };
-
-                            if let Some(sink) = current_sink.take() {
-                                sink.stop();
-                            }
-
-                            let emitted_for_seek = Arc::new(AtomicU64::new(0));
-                            match prepare_source(
-                                &active_path,
-                                normalized_position,
-                                &state_clone,
-                                &emitted_for_seek,
-                            ) {
-                                Ok((source, updated_duration, actual_start)) => {
-                                    if let Some(sink) = play_with_source(
-                                        stream_handle,
-                                        source,
-                                        &state_clone,
-                                        PlaybackStart {
-                                            file_path: &active_path,
-                                            duration: updated_duration,
-                                            start_secs: actual_start,
-                                            generation,
-                                            initial_volume: None,
-                                        },
-                                    ) {
-                                        if was_paused {
-                                            sink.pause();
-                                            let mut state = state_clone.lock();
-                                            state.is_playing = true;
-                                            state.is_paused = true;
-                                        }
-                                        current_sink = Some(sink);
-                                        set_active_counter(
-                                            &active_emitted_for_audio,
-                                            Arc::clone(&emitted_for_seek),
-                                        );
-                                        let _ = app_for_audio.emit(
-                                            "playback-seeked",
-                                            PlaybackPositionEvent {
+                                match prepare_source(
+                                    &file_path,
+                                    requested_start,
+                                    &state_clone,
+                                    &emitted_for_crossfade,
+                                ) {
+                                    Ok((source, duration, actual_start)) => {
+                                        let initial_volume = if should_fallback_to_play {
+                                            None
+                                        } else {
+                                            Some(0.0)
+                                        };
+                                        if let Some(new_sink) = play_with_source(
+                                            stream_handle,
+                                            source,
+                                            &state_clone,
+                                            PlaybackStart {
+                                                file_path: &file_path,
+                                                duration,
+                                                start_secs: actual_start,
                                                 generation,
-                                                position: actual_start,
+                                                initial_volume,
                                             },
-                                        );
-                                    } else {
+                                        ) {
+                                            if should_fallback_to_play {
+                                                if let Some(sink) = current_sink.take() {
+                                                    sink.stop();
+                                                }
+                                                current_sink = Some(new_sink);
+                                            } else if let Some(outgoing_sink) = current_sink.take()
+                                            {
+                                                current_sink = Some(new_sink);
+                                                crossfade_state = Some(CrossfadeState {
+                                                    outgoing_sink,
+                                                    start: Instant::now(),
+                                                    duration: Duration::from_millis(
+                                                        duration_ms.max(1),
+                                                    ),
+                                                    generation,
+                                                    incoming_path: file_path.clone(),
+                                                });
+                                                apply_crossfade_step(
+                                                    &mut crossfade_state,
+                                                    &state_clone,
+                                                    current_sink.as_ref(),
+                                                );
+                                            } else {
+                                                current_sink = Some(new_sink);
+                                            }
+
+                                            set_active_counter(
+                                                &active_emitted_for_audio,
+                                                Arc::clone(&emitted_for_crossfade),
+                                            );
+                                            volume_ramp = None;
+                                            emit_playback_transition(
+                                                &app_for_audio,
+                                                generation,
+                                                if should_fallback_to_play {
+                                                    PlaybackTransition::Playing
+                                                } else {
+                                                    PlaybackTransition::CrossfadeStarted
+                                                },
+                                                Some(file_path.clone()),
+                                                None,
+                                                true,
+                                            );
+                                        } else {
+                                            emit_playback_error(
+                                                &app_for_audio,
+                                                file_path.clone(),
+                                                generation,
+                                                "stream",
+                                                "Failed to initialize audio output stream",
+                                                true,
+                                            );
+                                        }
+                                    }
+                                    Err(err) => {
                                         emit_playback_error(
                                             &app_for_audio,
-                                            active_path.clone(),
+                                            file_path.clone(),
                                             generation,
-                                            "stream",
-                                            "Failed to resume audio stream after seek",
+                                            "decode",
+                                            err.clone(),
+                                            true,
+                                        );
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::DecodeFailed,
+                                            Some(file_path.clone()),
+                                            Some(err),
                                             true,
                                         );
                                     }
                                 }
-                                Err(err) => {
+                            }
+                            AudioCommand::Seek(position_secs) => {
+                                let generation = state_clone.lock().generation;
+                                *pending_gapless_path_thread.lock() = None;
+                                if let Some(active) = crossfade_state.take() {
+                                    active.outgoing_sink.stop();
+                                }
+                                let target_position = position_secs.max(0.0);
+                                let (active_path, was_paused, had_sink, duration) = {
+                                    let state = state_clone.lock();
+                                    (
+                                        state.current_file.clone().unwrap_or_default(),
+                                        state.is_paused,
+                                        current_sink.is_some(),
+                                        state.duration,
+                                    )
+                                };
+
+                                if active_path.is_empty() {
+                                    continue;
+                                }
+
+                                let normalized_position = if duration > 0.0 {
+                                    target_position.min(duration)
+                                } else {
+                                    target_position
+                                };
+
+                                if !had_sink {
+                                    {
+                                        let mut state = state_clone.lock();
+                                        state.start_position = normalized_position;
+                                        state.warned_near_end = false;
+                                    }
+                                    reset_active_counter(&active_emitted_for_audio);
+                                    let _ = app_for_audio.emit(
+                                        "playback-seeked",
+                                        PlaybackPositionEvent {
+                                            generation,
+                                            position: normalized_position,
+                                        },
+                                    );
+                                    continue;
+                                }
+
+                                if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
+                                    open_output_stream(preferred_device.as_deref())
+                                        .or_else(|_| open_output_stream(None))
+                                }) {
+                                    eprintln!("Audio output is not available: {}", error);
+                                }
+                                let Some((_, stream_handle)) = stream_bundle.as_ref() else {
                                     emit_playback_error(
                                         &app_for_audio,
-                                        active_path.clone(),
+                                        "",
                                         generation,
-                                        "seek",
-                                        format!("Failed to seek playback: {}", err),
-                                        true,
+                                        "stream",
+                                        "Audio output is not available",
+                                        false,
                                     );
+                                    continue;
+                                };
+
+                                if let Some(sink) = current_sink.take() {
+                                    sink.stop();
                                 }
-                            }
-                        }
-                        AudioCommand::Pause => {
-                            if let Some(ref sink) = current_sink {
-                                let mut state = state_clone.lock();
-                                if !state.is_paused {
-                                    sink.pause();
-                                    if let Some(ref active) = crossfade_state {
-                                        active.outgoing_sink.pause();
+
+                                let emitted_for_seek = Arc::new(AtomicU64::new(0));
+                                match prepare_source(
+                                    &active_path,
+                                    normalized_position,
+                                    &state_clone,
+                                    &emitted_for_seek,
+                                ) {
+                                    Ok((source, updated_duration, actual_start)) => {
+                                        if let Some(sink) = play_with_source(
+                                            stream_handle,
+                                            source,
+                                            &state_clone,
+                                            PlaybackStart {
+                                                file_path: &active_path,
+                                                duration: updated_duration,
+                                                start_secs: actual_start,
+                                                generation,
+                                                initial_volume: None,
+                                            },
+                                        ) {
+                                            if was_paused {
+                                                sink.pause();
+                                                let mut state = state_clone.lock();
+                                                state.is_playing = true;
+                                                state.is_paused = true;
+                                            }
+                                            current_sink = Some(sink);
+                                            set_active_counter(
+                                                &active_emitted_for_audio,
+                                                Arc::clone(&emitted_for_seek),
+                                            );
+                                            let _ = app_for_audio.emit(
+                                                "playback-seeked",
+                                                PlaybackPositionEvent {
+                                                    generation,
+                                                    position: actual_start,
+                                                },
+                                            );
+                                        } else {
+                                            emit_playback_error(
+                                                &app_for_audio,
+                                                active_path.clone(),
+                                                generation,
+                                                "stream",
+                                                "Failed to resume audio stream after seek",
+                                                true,
+                                            );
+                                        }
                                     }
-                                    state.is_paused = true;
-                                    emit_playback_transition(
-                                        &app_for_audio,
-                                        state.generation,
-                                        PlaybackTransition::Paused,
-                                        state.current_file.clone(),
-                                        None,
-                                        true,
-                                    );
-                                }
-                            }
-                        }
-                        AudioCommand::Resume => {
-                            if let Some(ref sink) = current_sink {
-                                let mut state = state_clone.lock();
-                                if state.is_paused {
-                                    sink.play();
-                                    if let Some(ref active) = crossfade_state {
-                                        active.outgoing_sink.play();
+                                    Err(err) => {
+                                        emit_playback_error(
+                                            &app_for_audio,
+                                            active_path.clone(),
+                                            generation,
+                                            "seek",
+                                            format!("Failed to seek playback: {}", err),
+                                            true,
+                                        );
                                     }
-                                    state.is_paused = false;
-                                    emit_playback_transition(
-                                        &app_for_audio,
-                                        state.generation,
-                                        PlaybackTransition::Playing,
-                                        state.current_file.clone(),
-                                        None,
-                                        true,
-                                    );
                                 }
                             }
-                        }
-                        AudioCommand::Stop => {
-                            *pending_gapless_path_thread.lock() = None;
-                            if let Some(sink) = current_sink.take() {
-                                sink.stop();
-                            }
-                            if let Some(active) = crossfade_state.take() {
-                                active.outgoing_sink.stop();
-                            }
-                            volume_ramp = None;
-                            let mut state = state_clone.lock();
-                            state.is_playing = false;
-                            state.start_position = 0.0;
-                            state.duration = 0.0;
-                            state.position_sample_rate = 0;
-                            state.position_channels = 0;
-                            state.current_file = None;
-                            state.is_paused = false;
-                            state.warned_near_end = false;
-                            reset_active_counter(&active_emitted_for_audio);
-                        }
-                        AudioCommand::SetVolume(volume) => {
-                            volume_ramp = None;
-                            let mut state = state_clone.lock();
-                            state.volume = volume;
-                            if crossfade_state.is_some() {
-                                if let Some(ref active) = crossfade_state {
-                                    apply_crossfade_mix(active, current_sink.as_ref(), volume);
+                            AudioCommand::Pause => {
+                                if let Some(ref sink) = current_sink {
+                                    // Emit after releasing the lock; the mixer and position threads
+                                    // must not wait on IPC.
+                                    let paused = {
+                                        let mut state = state_clone.lock();
+                                        (!state.is_paused).then(|| {
+                                            state.is_paused = true;
+                                            (state.generation, state.current_file.clone())
+                                        })
+                                    };
+                                    if let Some((generation, current_file)) = paused {
+                                        sink.pause();
+                                        if let Some(ref active) = crossfade_state {
+                                            active.outgoing_sink.pause();
+                                        }
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::Paused,
+                                            current_file,
+                                            None,
+                                            true,
+                                        );
+                                    }
                                 }
-                            } else if let Some(ref sink) = current_sink {
-                                sink.set_volume(volume);
                             }
-                        }
-                        AudioCommand::SetVolumeRamp {
-                            from,
-                            to,
-                            duration_ms,
-                        } => {
-                            let clamped_from = from.clamp(0.0, 1.0);
-                            let clamped_to = to.clamp(0.0, 1.0);
-                            if duration_ms == 0 {
+                            AudioCommand::Resume => {
+                                if let Some(ref sink) = current_sink {
+                                    let resumed = {
+                                        let mut state = state_clone.lock();
+                                        state.is_paused.then(|| {
+                                            state.is_paused = false;
+                                            (state.generation, state.current_file.clone())
+                                        })
+                                    };
+                                    if let Some((generation, current_file)) = resumed {
+                                        sink.play();
+                                        if let Some(ref active) = crossfade_state {
+                                            active.outgoing_sink.play();
+                                        }
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::Playing,
+                                            current_file,
+                                            None,
+                                            true,
+                                        );
+                                    }
+                                }
+                            }
+                            AudioCommand::Stop => {
+                                *pending_gapless_path_thread.lock() = None;
+                                if let Some(sink) = current_sink.take() {
+                                    sink.stop();
+                                }
+                                if let Some(active) = crossfade_state.take() {
+                                    active.outgoing_sink.stop();
+                                }
                                 volume_ramp = None;
                                 let mut state = state_clone.lock();
-                                state.volume = clamped_to;
+                                state.is_playing = false;
+                                state.start_position = 0.0;
+                                state.duration = 0.0;
+                                state.position_sample_rate = 0;
+                                state.position_channels = 0;
+                                state.current_file = None;
+                                state.is_paused = false;
+                                state.warned_near_end = false;
+                                reset_active_counter(&active_emitted_for_audio);
+                            }
+                            AudioCommand::SetVolume(volume) => {
+                                volume_ramp = None;
+                                let mut state = state_clone.lock();
+                                state.volume = volume;
                                 if crossfade_state.is_some() {
                                     if let Some(ref active) = crossfade_state {
-                                        apply_crossfade_mix(
-                                            active,
-                                            current_sink.as_ref(),
-                                            clamped_to,
-                                        );
+                                        apply_crossfade_mix(active, current_sink.as_ref(), volume);
                                     }
                                 } else if let Some(ref sink) = current_sink {
-                                    sink.set_volume(clamped_to);
+                                    sink.set_volume(volume);
                                 }
-                            } else {
-                                {
+                            }
+                            AudioCommand::SetVolumeRamp {
+                                from,
+                                to,
+                                duration_ms,
+                            } => {
+                                let clamped_from = from.clamp(0.0, 1.0);
+                                let clamped_to = to.clamp(0.0, 1.0);
+                                if duration_ms == 0 {
+                                    volume_ramp = None;
                                     let mut state = state_clone.lock();
-                                    state.volume = clamped_from;
-                                }
-                                if crossfade_state.is_some() {
-                                    if let Some(ref active) = crossfade_state {
-                                        apply_crossfade_mix(
-                                            active,
-                                            current_sink.as_ref(),
-                                            clamped_from,
-                                        );
+                                    state.volume = clamped_to;
+                                    if crossfade_state.is_some() {
+                                        if let Some(ref active) = crossfade_state {
+                                            apply_crossfade_mix(
+                                                active,
+                                                current_sink.as_ref(),
+                                                clamped_to,
+                                            );
+                                        }
+                                    } else if let Some(ref sink) = current_sink {
+                                        sink.set_volume(clamped_to);
                                     }
-                                } else if let Some(ref sink) = current_sink {
-                                    sink.set_volume(clamped_from);
+                                } else {
+                                    {
+                                        let mut state = state_clone.lock();
+                                        state.volume = clamped_from;
+                                    }
+                                    if crossfade_state.is_some() {
+                                        if let Some(ref active) = crossfade_state {
+                                            apply_crossfade_mix(
+                                                active,
+                                                current_sink.as_ref(),
+                                                clamped_from,
+                                            );
+                                        }
+                                    } else if let Some(ref sink) = current_sink {
+                                        sink.set_volume(clamped_from);
+                                    }
+                                    volume_ramp = Some(VolumeRampState {
+                                        from: clamped_from,
+                                        to: clamped_to,
+                                        start: Instant::now(),
+                                        duration: Duration::from_millis(duration_ms),
+                                    });
                                 }
-                                volume_ramp = Some(VolumeRampState {
-                                    from: clamped_from,
-                                    to: clamped_to,
-                                    start: Instant::now(),
-                                    duration: Duration::from_millis(duration_ms),
-                                });
                             }
-                        }
-                        AudioCommand::SetSpeed(speed) => {
-                            let mut state = state_clone.lock();
-                            state.speed = speed;
-                            if let Some(ref sink) = current_sink {
-                                sink.set_speed(speed);
-                            }
-                            if let Some(ref active) = crossfade_state {
-                                active.outgoing_sink.set_speed(speed);
-                            }
-                        }
-                        AudioCommand::SetCrossfade(seconds) => {
-                            let mut state = state_clone.lock();
-                            state.crossfade_secs = seconds.clamp(0.0, 12.0);
-                        }
-                        AudioCommand::SetBooster(level) => {
-                            let mut state = state_clone.lock();
-                            state.booster = level.clamp(1.0, 2.0);
-                        }
-                        AudioCommand::PreloadNext(maybe_source) => match maybe_source {
-                            None => {
-                                *pending_gapless_path_thread.lock() = None;
-                            }
-                            Some((path, _)) if path.is_empty() => {
-                                *pending_gapless_path_thread.lock() = None;
-                            }
-                            Some((path, next_generation)) => {
-                                let Some(sink) = current_sink.as_ref() else {
-                                    continue;
-                                };
-                                if sink.is_paused() {
-                                    continue;
+                            AudioCommand::SetSpeed(speed) => {
+                                let mut state = state_clone.lock();
+                                state.speed = speed;
+                                if let Some(ref sink) = current_sink {
+                                    sink.set_speed(speed);
                                 }
-                                if !state_clone.lock().is_playing {
-                                    continue;
+                                if let Some(ref active) = crossfade_state {
+                                    active.outgoing_sink.set_speed(speed);
                                 }
-                                {
-                                    let pending = pending_gapless_path_thread.lock();
-                                    if pending.as_ref() == Some(&path) {
+                            }
+                            AudioCommand::SetCrossfade(seconds) => {
+                                let mut state = state_clone.lock();
+                                state.crossfade_secs = seconds.clamp(0.0, 12.0);
+                            }
+                            AudioCommand::SetBooster(level) => {
+                                state_clone.lock().booster.set(level.clamp(1.0, 2.0));
+                            }
+                            AudioCommand::PreloadNext(maybe_source) => match maybe_source {
+                                None => {
+                                    *pending_gapless_path_thread.lock() = None;
+                                }
+                                Some((path, _)) if path.is_empty() => {
+                                    *pending_gapless_path_thread.lock() = None;
+                                }
+                                Some((path, next_generation)) => {
+                                    let Some(sink) = current_sink.as_ref() else {
+                                        continue;
+                                    };
+                                    if sink.is_paused() {
                                         continue;
                                     }
-                                }
-                                let out_path =
-                                    state_clone.lock().current_file.clone().unwrap_or_default();
-                                let outgoing_generation = state_clone.lock().generation;
-                                if out_path.is_empty() {
-                                    continue;
-                                }
-
-                                let emitted_for_next = Arc::new(AtomicU64::new(0));
-                                let prep =
-                                    prepare_source(&path, 0.0, &state_clone, &emitted_for_next);
-                                let Ok((source2, duration2, actual_start2)) = prep else {
-                                    eprintln!("Gapless preload failed to decode: {}", path);
-                                    continue;
-                                };
-
-                                let ch2 = source2.channels();
-                                let sr2 = source2.sample_rate();
-                                let app_emit = app_for_audio.clone();
-                                let state_emit = state_clone.clone();
-                                let active_slot = active_emitted_for_audio.clone();
-                                let pending_slot = pending_gapless_path_thread.clone();
-                                let out_clone = out_path.clone();
-                                let next_clone = path.clone();
-                                let cnt_next = Arc::clone(&emitted_for_next);
-
-                                let handoff = GaplessHandoffSource::new(source2, move || {
-                                    set_active_counter(&active_slot, Arc::clone(&cnt_next));
-                                    {
-                                        let mut s = state_emit.lock();
-                                        s.current_file = Some(next_clone.clone());
-                                        s.generation = next_generation;
-                                        s.duration = duration2;
-                                        s.start_position = actual_start2;
-                                        s.position_sample_rate = sr2;
-                                        s.position_channels = ch2;
-                                        s.warned_near_end = false;
+                                    if !state_clone.lock().is_playing {
+                                        continue;
                                     }
-                                    let payload = PlaybackEndedPayload {
-                                        path: Some(out_clone),
-                                        generation: outgoing_generation,
-                                        seamless: true,
-                                        next_generation: Some(next_generation),
-                                        next_path: Some(next_clone.clone()),
+                                    {
+                                        let pending = pending_gapless_path_thread.lock();
+                                        if pending.as_ref() == Some(&path) {
+                                            continue;
+                                        }
+                                    }
+                                    let out_path =
+                                        state_clone.lock().current_file.clone().unwrap_or_default();
+                                    let outgoing_generation = state_clone.lock().generation;
+                                    if out_path.is_empty() {
+                                        continue;
+                                    }
+
+                                    let emitted_for_next = Arc::new(AtomicU64::new(0));
+                                    let prep =
+                                        prepare_source(&path, 0.0, &state_clone, &emitted_for_next);
+                                    let Ok((source2, duration2, actual_start2)) = prep else {
+                                        eprintln!("Gapless preload failed to decode: {}", path);
+                                        continue;
                                     };
-                                    let _ = app_emit.emit("playback-ended", payload);
+
+                                    let ch2 = source2.channels();
+                                    let sr2 = source2.sample_rate();
+                                    let handoff_sender = loop_sender.clone();
+                                    let state_emit = state_clone.clone();
+                                    let active_slot = active_emitted_for_audio.clone();
+                                    let out_clone = out_path.clone();
+                                    let next_clone = path.clone();
+                                    let cnt_next = Arc::clone(&emitted_for_next);
+
+                                    let handoff = GaplessHandoffSource::new(source2, move || {
+                                        set_active_counter(&active_slot, Arc::clone(&cnt_next));
+                                        {
+                                            let mut s = state_emit.lock();
+                                            s.current_file = Some(next_clone.clone());
+                                            s.generation = next_generation;
+                                            s.duration = duration2;
+                                            s.start_position = actual_start2;
+                                            s.position_sample_rate = sr2;
+                                            s.position_channels = ch2;
+                                            s.warned_near_end = false;
+                                        }
+                                        let ended = PlaybackEndedPayload {
+                                            path: Some(out_clone),
+                                            generation: outgoing_generation,
+                                            seamless: true,
+                                            next_generation: Some(next_generation),
+                                            next_path: Some(next_clone.clone()),
+                                        };
+                                        // The audio thread emits after the commands already queued.
+                                        let _ = handoff_sender.send(
+                                            AudioCommand::GaplessHandoffStarted {
+                                                ended,
+                                                next_generation,
+                                                next_path: next_clone,
+                                            },
+                                        );
+                                    });
+
+                                    sink.append(handoff);
+                                    *pending_gapless_path_thread.lock() = Some(path);
+                                }
+                            },
+                            AudioCommand::SourceRenamed { old_path, new_path } => {
+                                let renamed_generation = {
+                                    let mut state = state_clone.lock();
+                                    (state.current_file.as_deref() == Some(old_path.as_str())).then(
+                                        || {
+                                            state.current_file = Some(new_path.clone());
+                                            state.generation
+                                        },
+                                    )
+                                };
+                                if let Some(generation) = renamed_generation {
                                     emit_playback_transition(
-                                        &app_emit,
-                                        next_generation,
-                                        PlaybackTransition::Playing,
-                                        Some(next_clone.clone()),
+                                        &app_for_audio,
+                                        generation,
+                                        PlaybackTransition::SourceRenamed,
+                                        Some(new_path),
                                         None,
                                         true,
                                     );
-                                    *pending_slot.lock() = None;
-                                });
-
-                                sink.append(handoff);
-                                *pending_gapless_path_thread.lock() = Some(path);
+                                }
                             }
-                        },
-                        AudioCommand::SourceRenamed { old_path, new_path } => {
-                            let mut state = state_clone.lock();
-                            if state.current_file.as_deref() == Some(old_path.as_str()) {
-                                state.current_file = Some(new_path.clone());
+                            AudioCommand::GaplessHandoffStarted {
+                                ended,
+                                next_generation,
+                                next_path,
+                            } => {
+                                let _ = app_for_audio.emit("playback-ended", ended);
                                 emit_playback_transition(
                                     &app_for_audio,
-                                    state.generation,
-                                    PlaybackTransition::SourceRenamed,
-                                    Some(new_path),
+                                    next_generation,
+                                    PlaybackTransition::Playing,
+                                    Some(next_path.clone()),
                                     None,
                                     true,
                                 );
+                                let mut pending = pending_gapless_path_thread.lock();
+                                if pending.as_deref() == Some(next_path.as_str()) {
+                                    *pending = None;
+                                }
                             }
-                        }
-                        AudioCommand::SetOutputDevice(device_id) => {
-                            // Remember the choice even if it cannot open now; on-demand reopening
-                            // falls back to the system default when it still fails.
-                            preferred_device = device_id.clone();
-                            let preferred = device_id.as_deref();
-                            match open_output_stream(preferred) {
-                                Ok(new_stream_bundle) => {
-                                    let (active_path, position, was_paused, had_playback) = {
-                                        let state = state_clone.lock();
-                                        let emitted = {
-                                            let counter = active_emitted_for_audio.lock().clone();
-                                            counter.load(Ordering::Relaxed)
+                            command @ (AudioCommand::SetOutputDevice(_)
+                            | AudioCommand::RecoverOutput) => {
+                                let recovering = matches!(command, AudioCommand::RecoverOutput);
+                                if let AudioCommand::SetOutputDevice(device_id) = command {
+                                    // Remember the choice even if it cannot open now; on-demand
+                                    // reopening falls back to the system default when it still fails.
+                                    preferred_device = device_id;
+                                }
+                                let preferred = preferred_device.as_deref();
+                                match open_output_stream(preferred) {
+                                    Ok(new_stream_bundle) => {
+                                        let (active_path, position, was_paused, had_playback) = {
+                                            let state = state_clone.lock();
+                                            let emitted = {
+                                                let counter =
+                                                    active_emitted_for_audio.lock().clone();
+                                                counter.load(Ordering::Relaxed)
+                                            };
+                                            (
+                                                state.current_file.clone(),
+                                                position_from_samples(&state, emitted),
+                                                state.is_paused,
+                                                state.is_playing,
+                                            )
                                         };
-                                        (
-                                            state.current_file.clone(),
-                                            position_from_samples(&state, emitted),
-                                            state.is_paused,
-                                            state.is_playing,
-                                        )
-                                    };
 
-                                    let replacement = if had_playback {
-                                        active_path.as_ref().and_then(|path| {
-                                            let emitted_for_replacement =
-                                                Arc::new(AtomicU64::new(0));
-                                            let (source, duration, actual_start) =
-                                                match prepare_source(
-                                                    path,
-                                                    position,
-                                                    &state_clone,
-                                                    &emitted_for_replacement,
-                                                ) {
-                                                    Ok(prepared) => prepared,
-                                                    Err(error) => {
-                                                        let (generation, _) =
-                                                            playback_identity(&state_clone);
-                                                        emit_playback_error(
-                                                            &app_for_audio,
-                                                            path,
-                                                            generation,
-                                                            "deviceSwitch",
-                                                            error.clone(),
-                                                            true,
-                                                        );
-                                                        emit_playback_transition(
+                                        let replacement = if had_playback {
+                                            active_path.as_ref().and_then(|path| {
+                                                let emitted_for_replacement =
+                                                    Arc::new(AtomicU64::new(0));
+                                                let (source, duration, actual_start) =
+                                                    match prepare_source(
+                                                        path,
+                                                        position,
+                                                        &state_clone,
+                                                        &emitted_for_replacement,
+                                                    ) {
+                                                        Ok(prepared) => prepared,
+                                                        Err(error) => {
+                                                            let (generation, _) =
+                                                                playback_identity(&state_clone);
+                                                            emit_playback_error(
+                                                                &app_for_audio,
+                                                                path,
+                                                                generation,
+                                                                "deviceSwitch",
+                                                                error.clone(),
+                                                                true,
+                                                            );
+                                                            emit_playback_transition(
                                                             &app_for_audio,
                                                             generation,
                                                             PlaybackTransition::DeviceSwitchFailed,
@@ -912,80 +1006,105 @@ impl AudioManager {
                                                             Some(error),
                                                             true,
                                                         );
-                                                        return None;
-                                                    }
-                                                };
-                                            let current_generation = state_clone.lock().generation;
-                                            let sink = play_with_source(
-                                                &new_stream_bundle.1,
-                                                source,
-                                                &state_clone,
-                                                PlaybackStart {
-                                                    file_path: path,
-                                                    duration,
-                                                    start_secs: actual_start,
-                                                    generation: current_generation,
-                                                    initial_volume: None,
-                                                },
-                                            )?;
-                                            if was_paused {
-                                                sink.pause();
-                                                let mut state = state_clone.lock();
-                                                state.is_paused = true;
-                                                state.is_playing = true;
+                                                            return None;
+                                                        }
+                                                    };
+                                                let current_generation =
+                                                    state_clone.lock().generation;
+                                                let sink = play_with_source(
+                                                    &new_stream_bundle.1,
+                                                    source,
+                                                    &state_clone,
+                                                    PlaybackStart {
+                                                        file_path: path,
+                                                        duration,
+                                                        start_secs: actual_start,
+                                                        generation: current_generation,
+                                                        initial_volume: None,
+                                                    },
+                                                )?;
+                                                if was_paused {
+                                                    sink.pause();
+                                                    let mut state = state_clone.lock();
+                                                    state.is_paused = true;
+                                                    state.is_playing = true;
+                                                }
+                                                Some((sink, emitted_for_replacement))
+                                            })
+                                        } else {
+                                            None
+                                        };
+
+                                        if had_playback && replacement.is_none() {
+                                            if recovering {
+                                                stop_after_failed_recovery(
+                                                    &state_clone,
+                                                    &pending_gapless_path_thread,
+                                                    &active_emitted_for_audio,
+                                                    &mut crossfade_state,
+                                                    &mut current_sink,
+                                                    &mut volume_ramp,
+                                                    &mut stream_bundle,
+                                                );
                                             }
-                                            Some((sink, emitted_for_replacement))
-                                        })
-                                    } else {
-                                        None
-                                    };
+                                            continue;
+                                        }
 
-                                    if had_playback && replacement.is_none() {
-                                        continue;
+                                        *pending_gapless_path_thread.lock() = None;
+                                        if let Some(active) = crossfade_state.take() {
+                                            active.outgoing_sink.stop();
+                                        }
+                                        if let Some(old_sink) = current_sink.take() {
+                                            old_sink.stop();
+                                        }
+                                        if let Some((new_sink, counter)) = replacement {
+                                            current_sink = Some(new_sink);
+                                            set_active_counter(
+                                                &active_emitted_for_audio,
+                                                Arc::clone(&counter),
+                                            );
+                                        } else {
+                                            reset_active_counter(&active_emitted_for_audio);
+                                        }
+                                        volume_ramp = None;
+                                        stream_bundle = Some(new_stream_bundle);
+                                        output_watch.rebaseline_default(Instant::now());
                                     }
-
-                                    *pending_gapless_path_thread.lock() = None;
-                                    if let Some(active) = crossfade_state.take() {
-                                        active.outgoing_sink.stop();
-                                    }
-                                    if let Some(old_sink) = current_sink.take() {
-                                        old_sink.stop();
-                                    }
-                                    if let Some((new_sink, counter)) = replacement {
-                                        current_sink = Some(new_sink);
-                                        set_active_counter(
-                                            &active_emitted_for_audio,
-                                            Arc::clone(&counter),
+                                    Err(e) => {
+                                        if recovering {
+                                            stop_after_failed_recovery(
+                                                &state_clone,
+                                                &pending_gapless_path_thread,
+                                                &active_emitted_for_audio,
+                                                &mut crossfade_state,
+                                                &mut current_sink,
+                                                &mut volume_ramp,
+                                                &mut stream_bundle,
+                                            );
+                                        }
+                                        let (generation, current_file) =
+                                            playback_identity(&state_clone);
+                                        emit_playback_error(
+                                            &app_for_audio,
+                                            "",
+                                            generation,
+                                            "deviceSwitch",
+                                            e.clone(),
+                                            true,
                                         );
-                                    } else {
-                                        reset_active_counter(&active_emitted_for_audio);
+                                        emit_playback_transition(
+                                            &app_for_audio,
+                                            generation,
+                                            PlaybackTransition::DeviceSwitchFailed,
+                                            current_file,
+                                            Some(e),
+                                            true,
+                                        );
                                     }
-                                    volume_ramp = None;
-                                    stream_bundle = Some(new_stream_bundle);
-                                }
-                                Err(e) => {
-                                    let (generation, current_file) =
-                                        playback_identity(&state_clone);
-                                    emit_playback_error(
-                                        &app_for_audio,
-                                        "",
-                                        generation,
-                                        "deviceSwitch",
-                                        e.clone(),
-                                        true,
-                                    );
-                                    emit_playback_transition(
-                                        &app_for_audio,
-                                        generation,
-                                        PlaybackTransition::DeviceSwitchFailed,
-                                        current_file,
-                                        Some(e),
-                                        true,
-                                    );
                                 }
                             }
                         }
-                    },
+                    }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         if crossfade_state
                             .as_ref()
@@ -1042,6 +1161,48 @@ impl AudioManager {
                                     true,
                                 );
                             }
+                        }
+
+                        // A removed device stops pulling samples, and an open stream does not
+                        // follow a new system default. Reopen output like a device switch,
+                        // which resumes the current track at its position.
+                        let now = Instant::now();
+                        let expecting_progress = current_sink
+                            .as_ref()
+                            .is_some_and(|sink| !sink.is_paused() && !sink.empty())
+                            && {
+                                let state = state_clone.lock();
+                                state.is_playing && !state.is_paused
+                            };
+                        let emitted = active_emitted_for_audio.lock().load(Ordering::Relaxed);
+                        let stalled =
+                            output_watch.observe_samples(emitted, expecting_progress, now);
+                        if stream_bundle.is_some() != had_stream {
+                            had_stream = stream_bundle.is_some();
+                            if had_stream {
+                                output_watch.rebaseline_default(now);
+                            }
+                        }
+                        // macOS default streams already follow the system default, and ALSA's
+                        // default name never changes, so only Windows polls.
+                        let follows_default = cfg!(target_os = "windows")
+                            && matches!(
+                                preferred_device.as_deref(),
+                                None | Some("") | Some("system")
+                            );
+                        let default_changed = follows_default
+                            && had_stream
+                            && output_watch.default_device_changed(now, default_output_device_name);
+                        if stalled || default_changed {
+                            eprintln!(
+                                "Audio output {}; reopening the output stream",
+                                if stalled {
+                                    "stopped advancing"
+                                } else {
+                                    "default device changed"
+                                }
+                            );
+                            let _ = loop_sender.send(AudioCommand::RecoverOutput);
                         }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {

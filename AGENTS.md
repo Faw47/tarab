@@ -23,7 +23,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 3. Desktop-originated actions (tray/app menu/media keys) should route through `desktop-control-action` to main window.
 4. Keep IPC payloads typed on both sides (avoid ad-hoc JSON blobs).
 5. All custom Rust commands are main-window-only at the invoke-handler boundary. Mini-player behavior must use typed snapshot/control events, not direct custom command calls.
-6. Frontend playback actions route through `PlaybackCoordinator` in `src/lib/playback-actions.ts`. Source-changing native commands return a monotonic generation. Renderer event handlers must reject events from older generations.
+6. Frontend playback actions route through `PlaybackCoordinator` in `src/lib/playback-actions.ts`. Source-changing native commands return a monotonic generation. Renderer event handlers must reject events from older generations. Commands that replace or stop the source (play, stop, adjacent track, editor preview) call `notePlaybackIntervention()`; a crossfade the renderer requested before the latest intervention is stale. Seek and device switches do not, because the backend applies them to the incoming crossfade source.
 
 ## Persistence
 
@@ -35,7 +35,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   legacy **`session.json`** using the Rust command `load_playback_session`.
 - Player-state writes use a monotonic revision and one serialized latest-wins queue. Do not save
   before hydration completes. Flush queued writes before a native quit.
-- **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend.
+- **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend. The audio thread reopens output the same way (`RecoverOutput`) when the sample counter stops for 2 s while playing (device removed) and, on Windows while following the system default, when the default device name changes. If that reopen fails, the backend stops playback and drops the stream, so the next Play opens a fresh one.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
 - **Library scans**: the renderer sends one `ScanReconcileRequest` after traversal. Rust applies it
   in one transaction and deletes rows only after complete traversal proves they are missing.

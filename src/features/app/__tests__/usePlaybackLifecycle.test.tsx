@@ -2,7 +2,10 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
+import type { Track } from '../../../types';
 import {
+  getActivePlaybackGeneration,
+  notePlaybackIntervention,
   resetPlaybackGenerationForTests,
   setActivePlaybackGeneration,
 } from '../playback-generation';
@@ -170,6 +173,199 @@ describe('usePlaybackLifecycle', () => {
 
     expect(playAdjacentTrackMock).not.toHaveBeenCalled();
     expect(dbUpdatePlayStatsMock).not.toHaveBeenCalled();
+  });
+
+  it('advances after a Repeat One crossfade that never reported completion', async () => {
+    // The backend drops the crossfade without crossfadeCompleted when the outgoing sink empties
+    // first; the incoming copy of the same file must still advance when it ends.
+    usePlayerStore.setState({ loopMode: 'one' });
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-transition')).toBe(true);
+    });
+
+    await listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-1.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+    expect(getActivePlaybackGeneration()).toBe(2);
+
+    await listeners.get('playback-ended')?.({
+      payload: { path: '/music/track-1.mp3', seamless: false, generation: 2 },
+    });
+
+    await waitFor(() => {
+      expect(playAdjacentTrackMock).toHaveBeenCalledWith(
+        'next',
+        expect.objectContaining({ automatic: true }),
+      );
+    });
+  });
+
+  it('ignores a crossfade start after the user changed playback', async () => {
+    let resolveCrossfade: (generation: number) => void = () => undefined;
+    crossfadeToTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveCrossfade = resolve;
+        }),
+    );
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-transition')).toBe(true);
+    });
+
+    void listeners.get('playback-near-end')?.({ payload: 0.3 });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalled();
+    });
+    // The user starts another track; the backend replaces the crossfade it was about to start.
+    notePlaybackIntervention();
+    setActivePlaybackGeneration(3);
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-2.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+    resolveCrossfade(2);
+
+    expect(usePlayerStore.getState().queueIndex).toBe(0);
+    expect(getActivePlaybackGeneration()).toBe(3);
+  });
+
+  describe('unplayable tracks during automatic advance', () => {
+    beforeEach(() => {
+      playAdjacentTrackMock.mockReset();
+    });
+
+    const endTrackOne = async () => {
+      render(<Harness />);
+      await waitFor(() => {
+        expect(listeners.has('playback-ended')).toBe(true);
+      });
+      await listeners.get('playback-ended')?.({
+        payload: { path: '/music/track-1.mp3', seamless: false, generation: 1 },
+      });
+    };
+
+    it('skips a track that cannot start and plays the one after it', async () => {
+      playAdjacentTrackMock
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          throw new Error('File not found');
+        })
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          setActivePlaybackGeneration(3);
+        });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining('Skipped "Track 2"'),
+        expect.anything(),
+      );
+    });
+
+    it('skips the entry it attempted under shuffle', async () => {
+      usePlayerStore.setState({ shuffleEnabled: true, shufflePass: [], shufflePriority: [] });
+      playAdjacentTrackMock
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+          throw new Error('File not found');
+        })
+        .mockImplementationOnce(async () => {
+          notePlaybackIntervention();
+        });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      const attempted = (
+        playAdjacentTrackMock.mock.calls[0] as unknown as [string, { entry: { track: Track } }]
+      )[1].entry.track;
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        `Skipped "${attempted.title}" because it could not be played`,
+        expect.anything(),
+      );
+      expect(usePlayerStore.getState().currentTrack?.id).toBe(attempted.id);
+    });
+
+    it('skips an automatically reached track that fails to decode', async () => {
+      playAdjacentTrackMock.mockImplementation(async () => {
+        notePlaybackIntervention();
+        const state = usePlayerStore.getState();
+        const next = state.previewNext();
+        if (next) state.activateTrackAtIndex(next.index);
+        setActivePlaybackGeneration(getActivePlaybackGeneration() + 1);
+      });
+
+      await endTrackOne();
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+      });
+      await listeners.get('playback-error')?.({
+        payload: {
+          generation: 2,
+          filePath: '/music/track-2.mp3',
+          stage: 'decode',
+          message: 'Unsupported format',
+          recoverable: false,
+        },
+      });
+
+      await waitFor(() => {
+        expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+      });
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
+    });
+
+    it('stops instead of cycling when every remaining track fails', async () => {
+      playAdjacentTrackMock.mockImplementation(async () => {
+        notePlaybackIntervention();
+        throw new Error('File not found');
+      });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(usePlayerStore.getState().isPlaying).toBe(false);
+      });
+      expect(playAdjacentTrackMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not skip when the user started other playback meanwhile', async () => {
+      playAdjacentTrackMock.mockImplementationOnce(async () => {
+        notePlaybackIntervention();
+        notePlaybackIntervention();
+        throw new Error('Superseded');
+      });
+
+      await endTrackOne();
+
+      await waitFor(() => {
+        expect(reportErrorMock).toHaveBeenCalledWith(
+          'Failed to play next track',
+          expect.anything(),
+        );
+      });
+      expect(playAdjacentTrackMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('preloads the next track for gapless when crossfade is disabled', async () => {
