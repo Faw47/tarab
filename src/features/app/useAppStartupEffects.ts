@@ -2,7 +2,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useEffect, useRef } from 'react';
 import type { NavView } from '../../components/navigation';
 import { recordPerfBudget } from '../../lib/performance';
-import { reportError } from '../../lib/report-error';
+import { logError, reportError } from '../../lib/report-error';
+import { desktopShouldStartMinimized } from '../../lib/tauri-commands';
+import { useSettingsStore } from '../../store/settings-store';
 
 type PreloadCallback = () => void;
 
@@ -59,6 +61,31 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
 
   useEffect(() => {
     const showWindow = async () => {
+      let startMinimized = false;
+      try {
+        startMinimized = await desktopShouldStartMinimized();
+      } catch (error) {
+        // If startup detection fails, show the window rather than strand the user.
+        logError('Failed to read startup window state', { source: 'app-startup', error });
+      }
+
+      if (startMinimized) {
+        // If the tray is disabled in persisted settings, keep a visible way to open Tarab.
+        if (!useSettingsStore.persist.hasHydrated()) {
+          await new Promise<void>((resolve) => {
+            const unsubscribe = useSettingsStore.persist.onFinishHydration(() => {
+              unsubscribe();
+              resolve();
+            });
+            if (useSettingsStore.persist.hasHydrated()) {
+              unsubscribe();
+              resolve();
+            }
+          });
+        }
+        if (useSettingsStore.getState().desktopStatusIconEnabled) return;
+      }
+
       await new Promise((res) => setTimeout(res, 100));
       await getCurrentWindow().show();
     };
