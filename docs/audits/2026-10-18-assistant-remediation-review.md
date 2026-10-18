@@ -42,13 +42,15 @@ An isolated local checkout is now available. The tested candidate set is `main` 
 
 - Independent review found that a queued second Next survived a newer Stop or Play. The correction tracks adjacent-request batches using the existing intervention epoch. Old requests cancel; an intentional fresh Next still executes.
 - Review also found that guarding only successful results left stale failures visible. Settled native results now reach a synchronous epoch check before committing state or throwing. Both success and rejection microtask gaps were reproduced as failing tests before correction.
-- #20 adds 13 cases beyond its previous head. The final renderer review found no unresolved blocker. Current-operation failures and uninterrupted rapid Next behavior remain covered.
+- #20 adds 14 cases beyond its previous head. The final renderer review found no unresolved blocker. Current-operation failures and uninterrupted rapid Next behavior remain covered.
 - #23 adds five lifecycle cases. All 13 startup tests pass, including stalled hydration, both tray settings, unmount and StrictMode. The bounded hydration listener lifetime after unmount is retained; no stale window show occurs.
 - #24 passed independent review. The actual capability and release guard reject missing/broadened Help permission, mini-player URL access and an initially visible main window. Native opener enforcement is still untested.
 - Combined candidate verification on Node 22.18.0 / pnpm 9.15.2 passes: 89 files, 384 tests, TypeScript, Biome, 116 IPC contracts, production build and bundle check, Storybook, Knip and release configuration. Nonfatal output includes the pre-existing confusing-void mock type warning, jsdom `window.scrollTo` warning and Vite chunk-size warnings; these were not hidden or waived test failures.
 - Local `cargo check --manifest-path src-tauri/Cargo.toml` could not run: Cargo is not installed. Cross-platform CI results must be read at each final candidate SHA. Actual desktop playback/startup/Help checks remain release gates.
 
 **Still unresolved:** native commands already in flight can execute outside a unified source order; editor preview ownership remains partial (LD-04). Nothing in this correction establishes complete playback coordination or current installer readiness.
+
+**Code merge record:** #24 (`6c14bd7`), #20 (`afe4559`) and #23 (`87a0c59`) each passed all five checks on their final heads and independent code review before merging. Source changes on `main` at `a3a8f5a` match the tested combined candidate for `src/`, `src-tauri/`, `scripts/`, package manifest and lockfile. Combined-main CI remains a separate check. Native desktop acceptance and release qualification remain open.
 
 ## Mandatory validation before release
 

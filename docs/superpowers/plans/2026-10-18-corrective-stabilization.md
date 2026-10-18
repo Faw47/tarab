@@ -49,7 +49,7 @@ The user has already authorized continuing the implementation and previously aut
 
 ## Observed evidence
 
-- #20 candidate `afe4559`: independent renderer G3 pass; 13 additional cases, with queued and stale-failure defects observed red before correction.
+- #20 candidate `afe4559`: independent renderer G3 pass; 14 additional cases, with queued and stale-failure defects observed red before correction.
 - #23 candidate `87a0c59`: five added lifecycle cases, 13 startup tests pass; native acceptance remains open.
 - Combined candidate tree: 384 tests/89 files and frontend, Storybook, Knip, release-config gates pass.
 - Four release-guard mutations rejected.

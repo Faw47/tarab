@@ -37,13 +37,15 @@ The July release-evidence file's local test counts and DMG proof **do not** vali
 
 The independently reviewed candidate set is #20 `afe4559`, #23 `87a0c59`, #24 `6c14bd7`, and this audit branch, integrated over `main` at `496fd54` in a separate local worktree. The combined frontend gate passes **384 tests in 89 files**, TypeScript, Biome, 116 IPC contracts, production build/bundle check, Storybook, Knip and release configuration. Four malformed Help/startup configuration mutations are correctly rejected.
 
-#20 now invalidates queued adjacent requests after newer source interventions and suppresses stale command errors at the synchronous commit boundary. Thirteen regressions were added; the independent reviewer found and rechecked the queued-request and rejection-settlement defects. #23 adds five hydration/unmount/StrictMode cases. #24's exact main-only Help capability passed code and mutation review. See the companion remediation review for evidence and nonfatal warning details.
+#20 now invalidates queued adjacent requests after newer source interventions and suppresses stale command errors at the synchronous commit boundary. Fourteen test cases were added; the independent reviewer found and rechecked the queued-request and rejection-settlement defects. #23 adds five hydration/unmount/StrictMode cases. #24's exact main-only Help capability passed code and mutation review. See the companion remediation review for evidence and nonfatal warning details.
 
 Local Rust verification was attempted and blocked by `cargo: command not found`. Neither native audio/OS tests nor signed package checks were performed. The composite `pnpm verify:release` is therefore **not passed**. Latest-head GitHub CI must complete before a code merge. Native acceptance remains outstanding even after merging code; no finding becomes FIXED_VERIFIED merely because its PR merges.
 
 QA-18 is a decision about generated IPC bindings and the original missing tests. The earlier plan's phrase "coverage requirement" did not accurately identify that decision. A numeric coverage threshold would be a separate release-engineering choice.
 
 The next implementation scope is security and data integrity: **SEC-05** must reject filesystem roots and the bare home directory in both grant creation and reauthorization, show the full import-folder path, and preserve exact-file Play once. **QA-29** must bound reads/writes, sync staged contents before replacement, and preserve recoverability if replacement fails, including Windows. **PB-20** must capture a fresh session before flushing through all native quit paths, without treating hide-to-tray as a quit. Existing broad grants or user files must not be silently revoked or rewritten while implementing those changes.
+
+**Code merge record:** #24 (`6c14bd7`), #20 (`afe4559`) and #23 (`87a0c59`) each passed all five checks on their final heads and independent code review before merging. Source changes on `main` at `a3a8f5a` match the tested combined candidate for `src/`, `src-tauri/`, `scripts/`, package manifest and lockfile. Combined-main CI remains a separate check. Native desktop acceptance and release qualification remain open.
 
 ## Priority and execution plan
 
