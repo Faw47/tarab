@@ -153,7 +153,8 @@ export const MiniPlayer = memo(
     );
 
     if (!currentTrack) return null;
-    if (miniPlayerCollapsed) return null; // Sidebar widget rendered in App.tsx instead
+    // The collapsed pill exists only in the liquid layout; neobrutalism always shows the bar.
+    if (miniPlayerCollapsed && !isNeobrutalism) return null;
 
     if (isNeobrutalism) {
       return (
