@@ -61,6 +61,8 @@ export function AppTransientSurfaces({
         document.querySelector<HTMLElement>('[data-collapse-player]')?.focus();
       });
       const handleKeyDown = (event: KeyboardEvent) => {
+        // A dialog above the full player (tag editor, confirmations) handles the key first.
+        if (event.defaultPrevented) return;
         if (event.key === 'Escape') {
           event.preventDefault();
           onCloseFullPlayer();
