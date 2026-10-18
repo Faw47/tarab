@@ -4,6 +4,7 @@ import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import {
   crossfadeToSource,
+  playAdjacentTrack,
   seekToPosition,
   startPlayback,
   stopCurrentPlayback,
@@ -77,5 +78,57 @@ describe('playback interventions', () => {
     await switchAudioOutputDevice('Speakers');
     await crossfadeToSource('/music/next.mp3', 4);
     expect(getPlaybackInterventionEpoch()).toBe(before + 2);
+  });
+});
+
+describe('adjacent track transitions (PB-28)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePlayerStore.setState(initialPlayerState, true);
+
+    const queue = [track('first'), track('second'), track('third')];
+    usePlayerStore.getState().setQueue(queue);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+  });
+
+  it('advances twice when Next is pressed before the first track finishes loading', async () => {
+    let finishFirst: () => void = () => undefined;
+    playTrackMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = () => resolve();
+        }),
+    );
+
+    const first = playAdjacentTrack('next');
+    const second = playAdjacentTrack('next');
+    await Promise.resolve();
+
+    expect(playTrackMock).toHaveBeenCalledTimes(1);
+    expect(playTrackMock).toHaveBeenCalledWith('/music/second.mp3');
+    expect(usePlayerStore.getState().queueIndex).toBe(0);
+
+    finishFirst();
+    await Promise.all([first, second]);
+
+    expect(playTrackMock.mock.calls.map(([path]) => path)).toEqual([
+      '/music/second.mp3',
+      '/music/third.mp3',
+    ]);
+    expect(usePlayerStore.getState().queueIndex).toBe(2);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('third');
+  });
+
+  it('still processes the next request after an adjacent playback failure', async () => {
+    playTrackMock.mockRejectedValueOnce(new Error('decoder unavailable'));
+
+    const first = playAdjacentTrack('next');
+    const second = playAdjacentTrack('next');
+
+    await expect(first).rejects.toThrow('decoder unavailable');
+    await expect(second).resolves.toMatchObject({ id: 'second' });
+    expect(playTrackMock).toHaveBeenCalledTimes(2);
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
 });
