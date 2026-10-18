@@ -16,6 +16,7 @@ const SmoothTimeContext = createContext<SmoothTimeContextValue>({
 export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
   const getTimeMs = useSmoothTime();
   const isPlaying = usePlayerStore((state) => state.isPlaying);
+  const currentTime = usePlayerStore((state) => state.currentTime);
   const [hasSubscribers, setHasSubscribers] = useState(false);
   const subscribersRef = useRef<Set<(timeSec: number) => void>>(new Set());
   const rafIdRef = useRef<number | null>(null);
@@ -63,7 +64,7 @@ export const SmoothTimeProvider = ({ children }: { children: ReactNode }) => {
         rafIdRef.current = null;
       }
     };
-  }, [getTimeMs, hasSubscribers, isPlaying]);
+  }, [getTimeMs, hasSubscribers, isPlaying, currentTime]);
 
   const value = useRef<SmoothTimeContextValue>({
     // Imperative readers do not need a subscription or a running frame loop.
