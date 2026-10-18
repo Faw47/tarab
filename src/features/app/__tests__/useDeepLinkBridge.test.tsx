@@ -48,12 +48,30 @@ describe('useDeepLinkBridge repeated opens (QA-13)', () => {
 
     const url = 'tarab://open/search?q=Fairuz';
     act(() => onLink?.(url));
-    now.mockReturnValue(3000);
+    // Even a rapid second click is intentional after startup (unlike a mirrored initial event).
+    now.mockReturnValue(1100);
     act(() => onLink?.(url));
 
     expect(onSearch).toHaveBeenCalledTimes(2);
     expect(onSearch).toHaveBeenNthCalledWith(1, 'Fairuz');
     expect(onSearch).toHaveBeenNthCalledWith(2, 'Fairuz');
+  });
+
+  it('deduplicates only one startup mirror, not every subsequent opening', async () => {
+    const url = 'tarab://open/search?q=Fairuz';
+    const onSearch = vi.fn();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    getInitialMock.mockResolvedValue([url]);
+    renderHook(() => useDeepLinkBridge({ onSearch }));
+    await waitFor(() => expect(onLink).not.toBeNull());
+
+    act(() => onLink?.(url)); // Native replay of getInitial()
+    act(() => onLink?.(url)); // New user click immediately afterward
+    expect(onSearch).toHaveBeenCalledTimes(2);
+
+    now.mockReturnValue(3000);
+    act(() => onLink?.(url));
+    expect(onSearch).toHaveBeenCalledTimes(3);
   });
 
   it('suppresses only an immediate duplicate initial-link event', async () => {
