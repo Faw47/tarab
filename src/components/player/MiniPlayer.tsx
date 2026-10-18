@@ -13,9 +13,9 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useSmoothTimeValue } from '../../contexts/smooth-time';
+import { useSmoothTimeSubscription, useSmoothTimeValue } from '../../contexts/smooth-time';
 import { useRenderLog } from '../../lib/performance';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
@@ -29,8 +29,17 @@ import { IconButton } from '../ui/IconButton';
 import { PlayerProgressBar, PlayerTimeDisplay } from './PlayerProgressBar';
 import { SleepTimerButton } from './SleepTimerButton';
 
-// Isolated Lyrics Component to prevent parent re-renders
-const MiniPlayerLyrics = memo(() => {
+/** Index of the line playing at `timeMs`, or -1 before the first line. */
+export function activeLyricIndex(lines: ReadonlyArray<{ startTime: number }>, timeMs: number) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (timeMs >= lines[i].startTime) return i;
+  }
+  return -1;
+}
+
+// Isolated Lyrics Component to prevent parent re-renders. It re-renders only when the active line
+// changes; reading the smooth-time value during render never updated it during playback.
+export const MiniPlayerLyrics = memo(() => {
   const { lyrics, isPlaying } = usePlayerStore(
     useShallow((s) => ({
       lyrics: s.lyrics,
@@ -38,17 +47,16 @@ const MiniPlayerLyrics = memo(() => {
     })),
   );
   const { timeSec } = useSmoothTimeValue();
+  const [lineIndex, setLineIndex] = useState(() =>
+    lyrics ? activeLyricIndex(lyrics.lines, timeSec * 1000) : -1,
+  );
 
-  const currentLyricLine = useMemo(() => {
-    if (!lyrics || !lyrics.lines.length) return null;
-    const timeMs = timeSec * 1000;
-    for (let i = lyrics.lines.length - 1; i >= 0; i--) {
-      if (timeMs >= lyrics.lines[i].startTime) {
-        return lyrics.lines[i].text;
-      }
-    }
-    return null;
-  }, [lyrics, timeSec]);
+  useSmoothTimeSubscription((nextTimeSec) => {
+    const next = lyrics ? activeLyricIndex(lyrics.lines, nextTimeSec * 1000) : -1;
+    setLineIndex((current) => (current === next ? current : next));
+  });
+
+  const currentLyricLine = lyrics?.lines[lineIndex]?.text ?? null;
 
   if (!currentLyricLine) return null;
 
