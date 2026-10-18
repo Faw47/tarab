@@ -13,7 +13,9 @@ use crate::database::SharedDatabase;
 use crate::file_ops::{
     ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
 };
-use crate::image_cache::{is_valid_thumbnail_size, ImageCache, SharedImageCache};
+use crate::image_cache::{
+    decode_untrusted_image, is_valid_thumbnail_size, ImageCache, SharedImageCache,
+};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TrackMetadata {
@@ -339,7 +341,7 @@ fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
 }
 
 fn extract_palette_from_bytes(bytes: &[u8]) -> Option<CoverArtPalette> {
-    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let image = decode_untrusted_image(bytes).ok()?.to_rgba8();
     let thumb = image::imageops::thumbnail(&image, 12, 12);
     let (width, height) = thumb.dimensions();
 
@@ -429,7 +431,7 @@ fn cached_blurhash(bytes: &[u8], compute: impl FnOnce(&[u8]) -> Option<String>) 
 
 fn generate_blurhash_from_bytes(bytes: &[u8]) -> Option<String> {
     cached_blurhash(bytes, |bytes| {
-        let img = image::load_from_memory(bytes).ok()?;
+        let img = decode_untrusted_image(bytes).ok()?;
         // Resize for faster processing
         let thumb = img.thumbnail(64, 64).to_rgba8();
         let (tw, th) = thumb.dimensions();

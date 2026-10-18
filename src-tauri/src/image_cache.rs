@@ -30,6 +30,39 @@ const MAX_SOURCE_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const MAX_SOURCE_IMAGE_PIXELS: u64 = 50_000_000;
 const MAX_SOURCE_IMAGE_DIMENSION: u32 = 16_384;
 
+/// Decodes cover art from an untrusted file. The byte size is capped, the dimensions are read from
+/// the header and checked before any pixel buffer is allocated, and the decode itself runs under
+/// `image::Limits`, so a small "decompression bomb" cannot force a large allocation.
+pub(crate) fn decode_untrusted_image(bytes: &[u8]) -> Result<DynamicImage, String> {
+    if bytes.is_empty() || bytes.len() > MAX_SOURCE_IMAGE_BYTES {
+        return Err("Cover image exceeds the encoded byte limit".to_string());
+    }
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to read image: {}", e))?;
+    let (width, height) = reader
+        .into_dimensions()
+        .map_err(|e| format!("Failed to read image dimensions: {}", e))?;
+    if width > MAX_SOURCE_IMAGE_DIMENSION
+        || height > MAX_SOURCE_IMAGE_DIMENSION
+        || u64::from(width).saturating_mul(u64::from(height)) > MAX_SOURCE_IMAGE_PIXELS
+    {
+        return Err("Cover image exceeds the decoded pixel limit".to_string());
+    }
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SOURCE_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_SOURCE_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_SOURCE_IMAGE_PIXELS * 4 + 16 * 1024 * 1024);
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to read image: {}", e))?;
+    reader.limits(limits);
+    reader
+        .decode()
+        .map_err(|e| format!("Failed to decode image: {}", e))
+}
+
 fn max_thumbnail_bytes(size: &str) -> usize {
     match size {
         "small" => 200_000,
@@ -152,17 +185,7 @@ impl ImageCache {
             return Ok(hash);
         }
 
-        // Decode image
-        let img = image::load_from_memory(image_data)
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
-        let width = u64::from(img.width());
-        let height = u64::from(img.height());
-        if img.width() > MAX_SOURCE_IMAGE_DIMENSION
-            || img.height() > MAX_SOURCE_IMAGE_DIMENSION
-            || width.saturating_mul(height) > MAX_SOURCE_IMAGE_PIXELS
-        {
-            return Err("Cover image exceeds the decoded pixel limit".to_string());
-        }
+        let img = decode_untrusted_image(image_data)?;
 
         // Crop to a square once at the largest size, then derive the smaller sizes from it instead
         // of resampling the full-resolution source three times.
@@ -587,6 +610,46 @@ mod tests {
             large.len()
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    /// A small valid PNG whose header is rewritten to claim the given dimensions.
+    fn png_claiming(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .expect("encode");
+        // IHDR data starts after the 8-byte signature, 4-byte length and 4-byte type.
+        bytes[16..20].copy_from_slice(&width.to_be_bytes());
+        bytes[20..24].copy_from_slice(&height.to_be_bytes());
+        let crc = crc32(&bytes[12..29]);
+        bytes[29..33].copy_from_slice(&crc.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn oversized_images_are_rejected_from_the_header_before_decoding() {
+        // Regression for SEC-02: limits were checked only after a full decode.
+        let bomb = png_claiming(10_000, 6_000);
+        assert_eq!(
+            decode_untrusted_image(&bomb).err().as_deref(),
+            Some("Cover image exceeds the decoded pixel limit")
+        );
+        assert!(decode_untrusted_image(&png_claiming(1, 1)).is_ok());
     }
 
     #[test]
