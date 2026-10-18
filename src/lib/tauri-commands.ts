@@ -19,6 +19,10 @@ import type {
   TrackMetadata,
 } from '../types';
 
+// App startup
+export const desktopShouldStartMinimized = (): Promise<boolean> =>
+  invoke('desktop_should_start_minimized');
+
 // Audio playback commands
 export const playTrack = async (filePath: string, startPos?: number): Promise<number> => {
   return invoke('play_track', { filePath, startPos });
