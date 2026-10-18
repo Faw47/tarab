@@ -140,6 +140,7 @@ impl Database {
         let mut added_count = 0;
         let mut updated_count = 0;
         let mut unchanged_count = 0;
+        let mut incoming_paths: HashSet<String> = HashSet::with_capacity(request.tracks.len());
         {
             let mut stmt = tx.prepare_cached(
                 r#"
@@ -171,6 +172,7 @@ impl Database {
             for track in &request.tracks {
                 let normalized_id = Self::normalize_path(&track.id);
                 let normalized_file_path = Self::normalize_path(&track.file_path);
+                incoming_paths.insert(normalized_file_path.clone());
                 match existing_by_path.get(&normalized_file_path) {
                     Some(existing) if Self::metadata_matches(existing, track) => {
                         unchanged_count += 1;
@@ -221,13 +223,7 @@ impl Database {
 
         let preserved_count = discovered
             .iter()
-            .filter(|path| {
-                existing_by_path.contains_key(*path)
-                    && !request
-                        .tracks
-                        .iter()
-                        .any(|track| Self::normalize_path(&track.file_path) == **path)
-            })
+            .filter(|path| existing_by_path.contains_key(*path) && !incoming_paths.contains(*path))
             .count();
         tx.commit()?;
 
@@ -417,10 +413,12 @@ impl Database {
     ) -> SqliteResult<Vec<DbTrack>> {
         let conn = self.conn.lock();
 
+        // Text columns sort case-insensitively, and `id` breaks ties so OFFSET pages never
+        // repeat or skip rows that share a sort key.
         let order_clause = match sort_by {
-            "title" => "title",
-            "artist" => "artist",
-            "album" => "album",
+            "title" => "title COLLATE NOCASE",
+            "artist" => "artist COLLATE NOCASE",
+            "album" => "album COLLATE NOCASE",
             "dateAdded" => "date_added",
             "playCount" => "play_count",
             "duration" => "duration",
@@ -433,8 +431,8 @@ impl Database {
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
                     track_number, disc_number, file_format, bitrate, sample_rate, file_size
-             FROM tracks ORDER BY {} {} LIMIT ?1 OFFSET ?2",
-            order_clause, order_dir
+             FROM tracks ORDER BY {} {}, id {} LIMIT ?1 OFFSET ?2",
+            order_clause, order_dir, order_dir
         );
 
         let mut stmt = conn.prepare(&query)?;

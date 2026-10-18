@@ -1,10 +1,13 @@
 import type { LibrarySearchScope } from '../../store/library-store';
+import type { SortBy } from '../../types';
 
 const root = ['library'] as const;
 
 export const libraryKeys = {
   all: root,
-  tracks: () => [...root, 'tracks'] as const,
+  /** Without `sortBy` this is the prefix of every sorted track list (use it to invalidate). */
+  tracks: (sortBy?: SortBy) =>
+    sortBy ? ([...root, 'tracks', sortBy] as const) : ([...root, 'tracks'] as const),
   stats: () => [...root, 'stats'] as const,
   albums: () => [...root, 'albums'] as const,
   artists: () => [...root, 'artists'] as const,

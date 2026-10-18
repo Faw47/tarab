@@ -43,7 +43,7 @@ const withLibraryData = (tracks: Track[]): Decorator => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   });
-  queryClient.setQueryData(libraryKeys.tracks(), tracks);
+  queryClient.setQueryData(libraryKeys.tracks('dateAdded'), tracks);
   queryClient.setQueryData(libraryKeys.trackCount(), tracks.length);
   queryClient.setQueryData(libraryKeys.stats(), {
     trackCount: tracks.length,

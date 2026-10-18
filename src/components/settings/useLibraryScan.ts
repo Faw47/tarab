@@ -19,6 +19,7 @@ import { notifications } from '../../platform/notifications';
 import { useLibraryStore } from '../../store/library-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
+import { collapseWatchScanTargets, resolveWatchScanTarget } from './library-watch-targets';
 
 /* ─── CONSTANTS ─────────────────────────────────────────────────────────── */
 
@@ -88,6 +89,10 @@ export interface FolderStatus {
 
 interface ScanFolderOptions {
   silent?: boolean;
+  /** Folder whose status row reflects this scan; defaults to the scanned folder. */
+  statusKey?: string;
+  /** Report failures to the user; watcher subfolder scans fall back to the root instead. */
+  reportErrors?: boolean;
 }
 
 /* ─── INTERNAL PURE FUNCTIONS ────────────────────────────────────────────── */
@@ -264,7 +269,7 @@ async function persistFolderTracks(
 export interface UseLibraryScanResult {
   isScanning: boolean;
   folderStatuses: Record<string, FolderStatus>;
-  scanFolder: (folderPath: string, options?: ScanFolderOptions) => Promise<void>;
+  scanFolder: (folderPath: string, options?: ScanFolderOptions) => Promise<FolderScanStatus>;
   rescanAll: () => Promise<void>;
   cancelScan: () => Promise<void>;
 }
@@ -291,18 +296,22 @@ export function useLibraryScan(): UseLibraryScanResult {
     autoWatchRef.current = autoWatch;
   }, [autoWatch]);
   const isMountedRef = useRef(true);
-  const watchQueueRef = useRef<Set<string>>(new Set());
+  // Folder to rescan -> the library root it belongs to.
+  const watchQueueRef = useRef<Map<string, string>>(new Map());
   const watchQueueProcessingRef = useRef(false);
   const watchDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Library root -> changed folders collected during the current debounce window.
+  const watchPendingTargetsRef = useRef<Map<string, Set<string>>>(new Map());
 
   const [folderStatuses, setFolderStatuses] = useState<Record<string, FolderStatus>>({});
 
   const scanFolder = useCallback(
-    async (folderPath: string, options?: ScanFolderOptions): Promise<void> => {
+    async (folderPath: string, options?: ScanFolderOptions): Promise<FolderScanStatus> => {
+      const statusKey = options?.statusKey ?? folderPath;
       scanCancelledRef.current = false;
       setIsScanning(true);
       setScanProgress(0);
-      setFolderStatuses((prev) => ({ ...prev, [folderPath]: { status: 'scanning' } }));
+      setFolderStatuses((prev) => ({ ...prev, [statusKey]: { status: 'scanning' } }));
 
       try {
         const scan = await scanSingleFolder({
@@ -318,12 +327,10 @@ export function useLibraryScan(): UseLibraryScanResult {
 
         const result = await persistFolderTracks(scan, queryClient);
 
+        const status: FolderScanStatus = result.status === 'complete' ? 'success' : 'partial';
         setFolderStatuses((prev) => ({
           ...prev,
-          [folderPath]: {
-            status: result.status === 'complete' ? 'success' : 'partial',
-            lastScanned: new Date(),
-          },
+          [statusKey]: { status, lastScanned: new Date() },
         }));
         setScanProgress(100);
         recordLibraryScan();
@@ -338,16 +345,18 @@ export function useLibraryScan(): UseLibraryScanResult {
             error: err,
           }),
         );
+        return status;
       } catch (e) {
         const cancelled = e instanceof Error && e.message.toLowerCase().includes('cancel');
-        reportError(`Failed to scan folder: ${folderPath}`, {
-          source: 'useLibraryScan',
-          error: e,
-        });
-        setFolderStatuses((prev) => ({
-          ...prev,
-          [folderPath]: { status: cancelled ? 'partial' : 'error' },
-        }));
+        if (options?.reportErrors !== false) {
+          reportError(`Failed to scan folder: ${folderPath}`, {
+            source: 'useLibraryScan',
+            error: e,
+          });
+        }
+        const status: FolderScanStatus = cancelled ? 'partial' : 'error';
+        setFolderStatuses((prev) => ({ ...prev, [statusKey]: { status } }));
+        return status;
       } finally {
         setIsScanning(false);
       }
@@ -444,6 +453,7 @@ export function useLibraryScan(): UseLibraryScanResult {
   const clearWatchDebounces = useCallback(() => {
     watchDebounceRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     watchDebounceRef.current.clear();
+    watchPendingTargetsRef.current.clear();
   }, []);
 
   const drainWatchQueue = useCallback(() => {
@@ -457,13 +467,23 @@ export function useLibraryScan(): UseLibraryScanResult {
             await sleep(WATCH_RETRY_MS);
             continue;
           }
-          const { value: nextFolder, done } = watchQueueRef.current.values().next();
+          const { value: next, done } = watchQueueRef.current.entries().next();
           if (done) {
             break;
           }
 
+          const [nextFolder, root] = next;
           watchQueueRef.current.delete(nextFolder);
-          await scanFolder(nextFolder, { silent: true });
+          const isRoot = nextFolder === root;
+          const status = await scanFolder(nextFolder, {
+            silent: true,
+            statusKey: root,
+            reportErrors: isRoot,
+          });
+          if (status === 'error' && !isRoot) {
+            // The changed folder may have been removed or renamed; reconcile the whole root.
+            watchQueueRef.current.set(root, root);
+          }
         }
       } finally {
         watchQueueProcessingRef.current = false;
@@ -474,40 +494,50 @@ export function useLibraryScan(): UseLibraryScanResult {
     })();
   }, [scanFolder]);
 
-  const queueWatchedFolderScan = useCallback(
-    (folderPath: string) => {
-      watchQueueRef.current.add(folderPath);
+  const queueWatchedFolderScans = useCallback(
+    (root: string, folders: string[]) => {
+      for (const folder of folders) {
+        watchQueueRef.current.set(folder, root);
+      }
       drainWatchQueue();
     },
     [drainWatchQueue],
   );
 
   const scheduleWatchedFolderScan = useCallback(
-    (folderPath: string) => {
-      const existingTimeout = watchDebounceRef.current.get(folderPath);
+    (root: string, target: string) => {
+      // Rescan only the folders that changed (PB-18): a whole-root rescan re-read every file in
+      // the library for each edit, including Tarab's own tag and lyrics writes.
+      const pending = watchPendingTargetsRef.current.get(root) ?? new Set<string>();
+      pending.add(target);
+      watchPendingTargetsRef.current.set(root, pending);
+
+      const existingTimeout = watchDebounceRef.current.get(root);
       if (existingTimeout) {
         clearTimeout(existingTimeout);
       }
 
       const timeoutId = setTimeout(() => {
-        watchDebounceRef.current.delete(folderPath);
+        watchDebounceRef.current.delete(root);
+        const targets = watchPendingTargetsRef.current.get(root) ?? new Set<string>();
+        watchPendingTargetsRef.current.delete(root);
         if (!autoWatchRef.current || !isMountedRef.current) {
           return;
         }
-        queueWatchedFolderScan(folderPath);
+        queueWatchedFolderScans(root, collapseWatchScanTargets(root, targets));
       }, 1100);
 
-      watchDebounceRef.current.set(folderPath, timeoutId);
+      watchDebounceRef.current.set(root, timeoutId);
     },
-    [queueWatchedFolderScan],
+    [queueWatchedFolderScans],
   );
 
   const handleWatchEvent = useCallback(
     (changedPath: string) => {
       if (!autoWatchRef.current) return;
-      const folderPath = libraryFolders.find((folder) => isSameOrSubPath(changedPath, folder));
-      if (!folderPath) return;
-      scheduleWatchedFolderScan(folderPath);
+      const resolved = resolveWatchScanTarget(changedPath, libraryFolders);
+      if (!resolved) return;
+      scheduleWatchedFolderScan(resolved.root, resolved.target);
     },
     [libraryFolders, scheduleWatchedFolderScan],
   );

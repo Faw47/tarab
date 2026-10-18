@@ -1273,6 +1273,77 @@ mod tests {
     }
 
     #[test]
+    fn paginated_tracks_sort_case_insensitively_with_a_stable_tiebreaker() {
+        // Regression for LD-02/LD-15: pages ordered by a non-unique column could repeat or skip
+        // rows at page boundaries, and BINARY ordering put "Zebra" before "apple".
+        let db = test_db();
+        let titles = ["beta", "Same", "Alpha", "same", "Same", "zebra", "Same"];
+        let tracks: Vec<DbTrack> = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                let mut track = sample_track(&format!("p{index}"));
+                track.title = title.to_string();
+                track
+            })
+            .collect();
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+
+        let mut seen = Vec::new();
+        for page in 0..4 {
+            let rows = db
+                .get_tracks_paginated(page * 2, 2, "title", "asc")
+                .expect("page");
+            seen.extend(rows.into_iter().map(|track| (track.title, track.id)));
+        }
+
+        let ids: std::collections::HashSet<&String> = seen.iter().map(|(_, id)| id).collect();
+        assert_eq!(seen.len(), titles.len(), "every row appears exactly once");
+        assert_eq!(ids.len(), titles.len());
+        let order: Vec<String> = seen.iter().map(|(title, _)| title.to_lowercase()).collect();
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(order, sorted, "titles are ordered case-insensitively");
+        assert_eq!(seen.first().map(|(title, _)| title.as_str()), Some("Alpha"));
+    }
+
+    #[test]
+    fn reconcile_folder_scan_rescan_of_large_folder_is_not_quadratic() {
+        // Regression for PB-04: a rescan sends every track again, and counting preserved rows
+        // used to scan the incoming list once per discovered path (O(n^2)) under the DB lock.
+        let db = test_db();
+        let tracks: Vec<DbTrack> = (0..20_000)
+            .map(|index| {
+                let mut track = sample_track(&format!("t{index}"));
+                track.id = format!("/tmp/big/{index}.mp3");
+                track.file_path = track.id.clone();
+                track
+            })
+            .collect();
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+        let discovered: Vec<String> = tracks.iter().map(|track| track.file_path.clone()).collect();
+
+        let started = std::time::Instant::now();
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/tmp/big".to_string(),
+                discovered_paths: discovered,
+                tracks,
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile scan");
+        let elapsed = started.elapsed();
+
+        assert_eq!(result.unchanged_count, 20_000);
+        assert_eq!(result.preserved_count, 0);
+        assert!(
+            elapsed < std::time::Duration::from_secs(8),
+            "reconcile of 20k tracks took {elapsed:?}"
+        );
+    }
+
+    #[test]
     fn reconcile_folder_scan_does_not_delete_rows_after_incomplete_traversal() {
         let db = test_db();
         let mut existing = sample_track("kept-after-failure");

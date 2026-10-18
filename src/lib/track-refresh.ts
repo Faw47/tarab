@@ -1,5 +1,6 @@
 import { getLibraryQueryClient } from '../features/library/queryClientBridge';
 import { libraryKeys } from '../features/library/queryKeys';
+import { getCachedLibraryTracks, updateCachedLibraryTracks } from '../features/library/trackCache';
 import { invalidateCoverArtCache } from '../hooks/useCoverArt';
 import { usePlayerStore } from '../store/player-store';
 import { useSettingsStore } from '../store/settings-store';
@@ -43,7 +44,7 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
   }
 
   const queryClient = getLibraryQueryClient();
-  const libraryTracks = queryClient?.getQueryData<Track[]>(libraryKeys.tracks()) ?? [];
+  const libraryTracks = queryClient ? getCachedLibraryTracks(queryClient) : [];
   const playerState = usePlayerStore.getState();
   const existingByPath = new Map<string, Track>();
   libraryTracks.forEach((track) => existingByPath.set(track.filePath, track));
@@ -82,9 +83,10 @@ export const refreshTracksByFilePaths = async (filePaths: string[]): Promise<voi
     updatedByPath.set(meta.file_path, updated);
   });
 
-  if (updatedByPath.size > 0 && libraryTracks.length > 0) {
-    const updatedTracks = libraryTracks.map((track) => updatedByPath.get(track.filePath) ?? track);
-    queryClient?.setQueryData(libraryKeys.tracks(), updatedTracks);
+  if (queryClient && updatedByPath.size > 0 && libraryTracks.length > 0) {
+    updateCachedLibraryTracks(queryClient, (tracks) =>
+      tracks.map((track) => updatedByPath.get(track.filePath) ?? track),
+    );
   }
 
   if (playerState.queue.length > 0) {

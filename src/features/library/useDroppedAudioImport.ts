@@ -13,6 +13,7 @@ import {
   scanLibraryParallel,
   syncLyricsIndex,
 } from '../../lib/tauri-commands';
+import { useLibraryStore } from '../../store/library-store';
 import type { Track } from '../../types';
 import { invalidateLibraryForMutation } from './mutations';
 import { libraryKeys } from './queryKeys';
@@ -201,7 +202,10 @@ export function useDroppedAudioImport({
                 sampleRate: meta.sample_rate ?? undefined,
                 fileSize: meta.file_size ?? undefined,
               }));
-              const existing = queryClient.getQueryData<Track[]>(libraryKeys.tracks()) ?? [];
+              const existing =
+                queryClient.getQueryData<Track[]>(
+                  libraryKeys.tracks(useLibraryStore.getState().sortBy),
+                ) ?? [];
               const merged = [...existing, ...newTracks];
               setTracks(merged);
               newlyAddedTracks.push(...newTracks);
