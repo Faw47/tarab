@@ -363,6 +363,7 @@ pub fn run() {
         desktop_integration::desktop_toggle_mini_window,
         desktop_integration::desktop_focus_main_window,
         desktop_integration::desktop_quit_application,
+        desktop_integration::desktop_should_start_minimized,
         desktop_integration::desktop_set_native_ui_state,
         desktop_integration::desktop_sync_media_session,
         library_watcher::watch_library_paths,
