@@ -4,7 +4,7 @@ import { getCurrentLineIndex, normalizeLyricsTiming, parseLyrics } from '../lyri
 describe('LRC timing and instrumental gaps (PB-27)', () => {
   it('supports hundredths, milliseconds, longer fractions and colon-form centiseconds', () => {
     const lyrics = parseLyrics(
-      '[00:10.5]Tenth\\n[00:11.50]Hundredth\\n[00:12.123]Millisecond\\n[00:13.1234]Long fraction\\n[00:14:25]Colon',
+      '[00:10.5]Tenth\n[00:11.50]Hundredth\n[00:12.123]Millisecond\n[00:13.1234]Long fraction\n[00:14:25]Colon',
     );
 
     expect(lyrics.lines.map((line) => line.startTime)).toEqual([
@@ -16,14 +16,14 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
   });
 
   it('advances lyrics for a positive LRC offset and delays them for a negative one', () => {
-    expect(parseLyrics('[offset:+250]\\n[00:10.00]Sooner').lines[0].startTime).toBe(9750);
-    expect(parseLyrics('[offset:-250]\\n[00:10.00]Later').lines[0].startTime).toBe(10250);
-    expect(parseLyrics('[offset:+500]\\n[00:00.10]Clamp').lines[0].startTime).toBe(0);
+    expect(parseLyrics('[offset:+250]\n[00:10.00]Sooner').lines[0].startTime).toBe(9750);
+    expect(parseLyrics('[offset:-250]\n[00:10.00]Later').lines[0].startTime).toBe(10250);
+    expect(parseLyrics('[offset:+500]\n[00:00.10]Clamp').lines[0].startTime).toBe(0);
   });
 
   it('applies the same offset to enhanced word timestamps', () => {
     const lyrics = parseLyrics(
-      '[offset:+250]\\n[00:10.00]<00:10.10>One <00:10:40>two',
+      '[offset:+250]\n[00:10.00]<00:10.10>One <00:10:40>two',
     );
 
     expect(lyrics.isEnhanced).toBe(true);
@@ -33,7 +33,7 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
   });
 
   it('preserves empty timed lines to clear lyrics during instrumental breaks', () => {
-    const lyrics = parseLyrics('[00:10.00]Verse\\n[00:15.00]\\n[00:18.00]Chorus');
+    const lyrics = parseLyrics('[00:10.00]Verse\n[00:15.00]\n[00:18.00]Chorus');
 
     expect(lyrics.lines).toHaveLength(3);
     expect(lyrics.lines[0].endTime).toBe(15000);
@@ -48,7 +48,7 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
   });
 
   it('retains repeated timestamps while ignoring metadata-only lines', () => {
-    const lyrics = parseLyrics('[ti:Song]\\n[00:01.00][00:03.00]Again');
+    const lyrics = parseLyrics('[ti:Song]\n[00:01.00][00:03.00]Again');
 
     expect(lyrics.lines.map((line) => line.startTime)).toEqual([1000, 3000]);
     expect(lyrics.lines.every((line) => line.text === 'Again')).toBe(true);
