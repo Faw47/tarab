@@ -46,14 +46,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 42 |
+| FIXED_VERIFIED | 46 |
 | ALREADY_RESOLVED | 0 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 10 |
-| DECISION_REQUIRED | 0 |
+| DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 107 |
+| PENDING | 102 |
 | **Total** | **160** |
 
 ## Findings
@@ -125,16 +125,16 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-27 | P2 | Album track rows: unlabeled "More" button, hover-only controls, wrong ARIA roles | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-28 | P2 | Neo theme forces black focus outlines and uses below-AA grey text | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-29 | P2 | framer-motion animations ignore Reduced Effects and OS Reduce Motion | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| LD-05 | P2 | 42 other synchronous commands run on the main thread, several with blocking I/O | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-16 | P2 | Persisted react-query cache has no filter or buster and keeps search keys and aggregates for 24 hours | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-17 | P2 | Every session save reads and rewrites the whole player store over IPC | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| LD-05 | P2 | 42 other synchronous commands run on the main thread, several with blocking I/O | FIXED_VERIFIED | G1 pass (unit) / G2 pass / G3 approve after 1 objection | Disk and device commands run on the blocking pool: device listing, grant list/health/revoke, folder picker and reconnect, session load/save, lyrics write, image read, waveform stats/clear, playlist bootstrap. Playback commands stay synchronous to keep their order. Review fix (a38126b): grants_version stops a slow refresh from restoring roots after a grant change; grant changes are serialized. Test for the version guard. | 27d9040, a38126b | #9 |
+| AR-16 | P2 | Persisted react-query cache has no filter or buster and keeps search keys and aggregates for 24 hours | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Only track count, stats, recently added, most played and the playlist list are persisted; the cache is busted by app version plus QUERY_CACHE_SCHEMA. Test query-persistence.test.ts. Trade-off: the first track page is no longer persisted, so the Library list fills after its IPC call on launch. | 57347c4 | #9 |
+| AR-17 | P2 | Every session save reads and rewrites the whole player store over IPC | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Queue IDs live in tarab-player-queue.dat and are written only when they change; position saves write only the small state; no read-before-write. Older inline-queue sessions migrate on the next save. Tests in player-state-store.test.ts fail before. Limitation: a crash between the queue and state writes can pair a new queue with the old current track. | 9cc7489 | #9 |
 | SEC-01 | P2 | Release builds abort on any panic while parsing untrusted media in-process | FIXED_VERIFIED | G1 pass (unit) / G2 pass / G3 approve after 1 objection | Release profile unwinds (check-release-config enforces it); parse_guard wraps per-file metadata, duration probes, image decodes, batch tag writes, batch cover-art reads, source preparation on the audio command thread, and packet reads/decodes in the playback source (cpal callback thread). spawn_blocking commands return a join error on panic. Limitation: no fuzzed fixtures reproduce a real parser panic; a panic elsewhere in a long-lived thread now ends that thread instead of the app. | c465217, 180259a | #8 |
 | SEC-02 | P2 | Image size limits are checked after decoding | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | decode_untrusted_image caps input bytes, reads dimensions from the header and rejects over-limit images before allocating, then decodes under image::Limits; used by thumbnails, palettes and blurhash (test: 1x1 PNG whose header claims 10000x6000). Limitation: the 50M-pixel cap still allows about 200 MB per decode (about 400 MB with the palette copy) on six threads; JPEG and WebP internal buffers are bounded only by the dimension caps. | 51a2a19 | #8 |
 | SEC-04 | P2 | Release signing secrets are readable by dependency install and build scripts | NATIVE_VALIDATION_REQUIRED | G1 pass (config check) / G2 pass / G3 approve | Signing secrets are step-scoped (credential check, certificate import, macOS notarization build); dependency install and native tests run before the certificate import; macOS deletes its keychain in an always() step. check-release-config rejects secrets in job/workflow env (block, inline or commented) and secrets written to GITHUB_ENV (mutation-tested). Needs a real release run to confirm signing and notarization. Remaining exposure documented: tauri build runs build scripts with notarization credentials present and the Developer ID key usable in an unlocked -A keychain. | ca83da9, 180259a | #8 |
 | QA-01 | P2 | Files moved to "Tarab Trash" cannot be found or purged after the undo dialog closes | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | list_trashed_files and purge_trashed_files commands; Settings > Storage > Removed Files lists title, path, size and date with Restore, Delete permanently and Empty Trash (confirmed). Rust tests for listing and purging (rejects path-like tokens), component tests, browser-checked in both themes. Not done: automatic expiry (product decision); entry folders without a record are not listed. | b62b746, 180259a | #8 |
 | QA-02 | P2 | Trash and move fail for libraries on a different volume from app data | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve after 1 objection | move_path renames, or on a cross-device error copies through a writable staged file, syncs, checks length, renames into place, applies the source permissions and removes the source (clearing read-only only to delete it). Move, Trash, Restore and their rollbacks use it. Tests inject a cross-device rename, including a read-only source. Limitations: Trash for a NAS library copies into app data on the system disk; timestamps are not preserved; no progress or cancel for large copies. | 332d602, 180259a | #8 |
-| QA-18 | P2 | Critical paths have no tests, and existing tests encode the wrong IPC payload | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| QA-31 | P2 | The IPC contract check validates names only | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| QA-18 | P2 | Critical paths have no tests, and existing tests encode the wrong IPC payload | DECISION_REQUIRED | G1 pass / G2 pass / G3 pending | Done: shared playback-event fixture checked by a Rust serialization test and used by the lifecycle tests; renderer no longer accepts bare-number near-end payloads (stale-generation test). Remaining needs a decision: generated TS bindings for all commands and events (tauri-specta or ts-rs, new dependencies and codegen), and the missing hook and command tests the audit lists. | 75e44ad | #9 |
+| QA-31 | P2 | The IPC contract check validates names only | FIXED_VERIFIED | G1 pass (mutation-tested) / G2 pass / G3 pending | check-ipc-contract also compares invoke argument keys with Rust parameters (camelCased, injected parameters skipped, Option optional) for all 115 calls; renamed or extra keys fail. | 75e44ad | #9 |
 | PB-21 | P3 | Playback speed changes pitch | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-23 | P3 | Pausing during a crossfade lets the fade finish while paused | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | PENDING | - | Audit confidence CONFIRMED. | - | - |
