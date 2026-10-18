@@ -23,6 +23,20 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
     expect(parseLyrics('[offset:+500]\n[00:00.10]Clamp').lines[0].startTime).toBe(0);
   });
 
+  it('applies the global offset even when the tag follows timed lyrics', () => {
+    const before = parseLyrics('[00:10.00]First\\n[offset:+500]\\n[00:12.00]Second');
+    const after = parseLyrics('[offset:+500]\\n[00:10.00]First\\n[00:12.00]Second');
+
+    expect(before.lines.map((line) => line.startTime)).toEqual([9500, 11500]);
+    expect(before.lines).toEqual(after.lines);
+  });
+
+  it('applies a late global offset to enhanced word tags too', () => {
+    const lyrics = parseLyrics('[00:10.00]<00:10.10>One <00:10.40>two\\n[offset:+250]');
+    expect(lyrics.lines[0].startTime).toBe(9750);
+    expect(lyrics.lines[0].words.map((word) => word.startTime)).toEqual([9850, 10150]);
+  });
+
   it('applies the same offset to enhanced word timestamps', () => {
     const lyrics = parseLyrics('[offset:+250]\n[00:10.00]<00:10.10>One <00:10:40>two');
 
