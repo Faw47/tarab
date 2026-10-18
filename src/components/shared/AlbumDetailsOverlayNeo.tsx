@@ -173,13 +173,19 @@ const TrackRow = memo(
         </div>
 
         <div role="gridcell" className="min-w-0">
-          <div className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2">
+          <div
+            dir="auto"
+            className="truncate font-black uppercase tracking-[0.05em] text-black flex items-center gap-2"
+          >
             {isCurrentTrack && isCurrentlyPlaying && (
               <div className="w-2 h-2 rounded-none bg-black animate-pulse shrink-0" />
             )}
             {track.title}
           </div>
-          <div className="truncate text-[12px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5">
+          <div
+            dir="auto"
+            className="truncate text-[12px] font-bold uppercase tracking-[0.1em] text-black/60 mt-0.5"
+          >
             {track.artist}
           </div>
         </div>

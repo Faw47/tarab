@@ -2553,6 +2553,11 @@ Bordered, shadowed, red icon square, red Level 3 label, gray secondary text, dan
 - [ ] Is there exactly one overflowing primary CTA per view?
 - [ ] Is the overflowing CTA breaking its container plane by at least 16px?
 
+### Shared surfaces
+- [ ] Shared components written for dark glass (the full player) use the neo skin: no cover blur or
+      pan backdrop, ink on paper, white panels with a 3px border and an 8px hard shadow, and lyric
+      colors from `--lyric-sung` / `--lyric-unsung` (see the full player block in `neobrutalism.css`).
+
 ### Accessibility
 - [ ] All text passes WCAG AA contrast ratio?
 - [ ] No body text in uppercase?

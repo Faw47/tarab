@@ -18,17 +18,16 @@ import { useCoverArt } from '../../hooks/useCoverArt';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
-import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
+import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
+import { NeoVolumeSegments } from '../player/NeoVolumeSegments';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import type { HomeViewProps } from './homeTypes';
 import { useHomeLibraryModel } from './useHomeLibraryModel';
-
-const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
 const BORDER = 'border-2 border-black';
 const SHADOW_COMP = 'shadow-[4px_4px_0_0_#000]';
@@ -72,29 +71,10 @@ function polaroidTapeRotation(i: number): string {
 }
 
 const NeoVolumeControl = memo(() => {
-  const { volume, setVolume } = usePlayerStore(
-    useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
-  );
+  const volume = usePlayerStore((s) => s.volume);
+  const muted = isMuted(volume);
   const [expanded, setExpanded] = useState(false);
-  const restoreRef = useRef(0.55);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (volume > 0.001) restoreRef.current = volume;
-  }, [volume]);
-
-  const commit = useCallback(
-    async (v: number) => {
-      const clamped = clamp01(v);
-      setVolume(clamped);
-      try {
-        await setAudioVolume(clamped);
-      } catch (e) {
-        reportError('Failed to set volume', { source: 'home-neo', error: e });
-      }
-    },
-    [setVolume],
-  );
 
   const onEnter = useCallback(() => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -113,7 +93,15 @@ const NeoVolumeControl = memo(() => {
   );
 
   return (
-    <div className="inline-flex items-center gap-2" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div
+      className="inline-flex items-center gap-2"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onEnter}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+      }}
+    >
       <button
         type="button"
         className={cn(
@@ -123,11 +111,11 @@ const NeoVolumeControl = memo(() => {
           PRESS_EFFECT,
           SHADOW_COMP,
         )}
-        onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
-        aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+        onClick={() => void toggleMute('home-neo')}
+        aria-label={muted ? 'Unmute' : 'Mute'}
         title="Volume"
       >
-        {volume <= 0.001 ? (
+        {muted ? (
           <VolumeX size={16} strokeWidth={STROKE} />
         ) : (
           <Volume2 size={16} strokeWidth={STROKE} />
@@ -141,28 +129,10 @@ const NeoVolumeControl = memo(() => {
         )}
       >
         <div className={cn(BORDER, SHADOW_COMP, 'bg-white px-2 py-1.5')}>
-          <div className="neo-volume-wrap">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const segmentValue = (i + 1) / 10;
-              const active = volume >= segmentValue - 0.05;
-              return (
-                <div
-                  key={i}
-                  role="button"
-                  tabIndex={0}
-                  className={cn('neo-volume-segment', active && 'active')}
-                  onClick={() => void commit(segmentValue)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      void commit(segmentValue);
-                    }
-                  }}
-                  aria-label={`Set volume to ${Math.round(segmentValue * 100)}%`}
-                />
-              );
-            })}
-          </div>
+          <NeoVolumeSegments
+            volume={volume}
+            onChange={(next) => void applyVolume(next, 'home-neo')}
+          />
         </div>
       </div>
     </div>
@@ -314,10 +284,16 @@ const NeoAlbumCard = memo(
             <Play size={18} fill="currentColor" strokeWidth={STROKE} />
           </button>
         </div>
-        <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
+        <p
+          dir="auto"
+          className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black"
+        >
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]">
+        <p
+          dir="auto"
+          className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]"
+        >
           {track.artist}
         </p>
       </div>
@@ -327,6 +303,7 @@ const NeoAlbumCard = memo(
 NeoAlbumCard.displayName = 'NeoAlbumCard';
 
 export const HomeViewNeo = memo(function HomeViewNeo({
+  onNavigateToLibrary,
   onNavigateToFolders,
   onOpenAlbumDetails,
   onOpenFullPlayer,
@@ -351,8 +328,9 @@ export const HomeViewNeo = memo(function HomeViewNeo({
       currentTrack?.coverArtHash,
     ) ?? null;
 
-  const { albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
+  const { libraryStats, albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
   const albums = allAlbums.slice(0, 24);
+  const hasStats = Boolean(libraryStats && libraryStats.trackCount > 0);
 
   if (isLibraryLoading) {
     return (
@@ -409,133 +387,165 @@ export const HomeViewNeo = memo(function HomeViewNeo({
       onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop > 20)}
     >
       <div className="mx-auto flex max-w-[1600px] flex-col gap-8 p-6 md:p-8 lg:p-10">
-        <section
-          className={cn(
-            BORDER,
-            SHADOW_PANEL,
-            'group relative flex flex-col items-stretch gap-6 overflow-visible bg-white p-6 lg:flex-row lg:gap-8',
-          )}
-        >
-          <HidingProgressBar accentColor="var(--signal-play)" />
+        {/* Like the liquid Home, the player hero appears only while something is loaded. */}
+        {currentTrack ? (
+          <section
+            className={cn(
+              BORDER,
+              SHADOW_PANEL,
+              'group relative flex flex-col items-stretch gap-6 overflow-visible bg-white p-6 lg:flex-row lg:gap-8',
+            )}
+          >
+            <HidingProgressBar accentColor="var(--signal-play)" />
 
-          <div className="mx-auto flex w-full max-w-[240px] shrink-0 flex-col gap-3 sm:max-w-[260px] lg:mx-0">
-            <div
-              className={cn(
-                BORDER,
-                SHADOW_COMP,
-                'relative aspect-square w-full overflow-hidden bg-[var(--neo-muted)]',
-              )}
-            >
-              {currentCoverUrl ? (
-                <img
-                  src={currentCoverUrl}
-                  alt="Now Playing"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <Disc3 size={88} strokeWidth={1} className="text-black/10" />
-                </div>
-              )}
-              <div className="absolute right-3 top-3">
-                <NowPlayingEqualizer isPlaying={isPlaying} />
-              </div>
-            </div>
-
-            <NeoLyricsConsole />
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col justify-between gap-4">
-            <div className="flex flex-col gap-3">
-              {currentTrack ? (
-                <>
-                  <h1 className="neo-type-level-1 break-words py-1 text-black">
-                    {currentTrack.title}
-                  </h1>
-                  <div className={cn(BORDER, SHADOW_COMP, 'self-start bg-[#FFE234] px-3 py-1.5')}>
-                    <span className="neo-type-level-2 text-black">{currentTrack.artist}</span>
+            <div className="mx-auto flex w-full max-w-[240px] shrink-0 flex-col gap-3 sm:max-w-[260px] lg:mx-0">
+              <div
+                className={cn(
+                  BORDER,
+                  SHADOW_COMP,
+                  'relative aspect-square w-full overflow-hidden bg-[var(--neo-muted)]',
+                )}
+              >
+                {currentCoverUrl ? (
+                  <img
+                    src={currentCoverUrl}
+                    alt="Now Playing"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center">
+                    <Disc3 size={88} strokeWidth={1} className="text-black/10" />
                   </div>
-                </>
-              ) : (
-                <div className="py-4">
-                  <h1 className="neo-type-level-1 text-black/20">Console Standby</h1>
+                )}
+                <div className="absolute right-3 top-3">
+                  <NowPlayingEqualizer isPlaying={isPlaying} />
                 </div>
-              )}
+              </div>
+
+              <NeoLyricsConsole />
             </div>
 
-            <div className="mt-2 lg:mt-0">
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-4 overflow-visible">
-                <div className="flex items-end gap-3 overflow-visible">
-                  <button
-                    type="button"
-                    onClick={() => playAdjacentTrack('previous')}
-                    className={cn(
-                      BORDER,
-                      'flex h-14 w-14 items-center justify-center bg-white',
-                      SNAP,
-                      PRESS_EFFECT,
-                      SHADOW_COMP,
-                    )}
-                    aria-label="Previous track"
-                  >
-                    <SkipBack size={24} fill="currentColor" strokeWidth={STROKE} />
-                  </button>
-                  <button
-                    type="button"
-                    className="neo-play-pause"
-                    onClick={() => toggleCurrentPlayback()}
-                    aria-label={isPlaying ? 'Pause' : 'Play'}
-                  >
-                    {isPlaying ? (
-                      <Pause className="h-7 w-7" fill="currentColor" strokeWidth={STROKE} />
-                    ) : (
-                      <Play className="ml-1 h-7 w-7" fill="currentColor" strokeWidth={STROKE} />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => playAdjacentTrack('next')}
-                    className={cn(
-                      BORDER,
-                      'flex h-14 w-14 items-center justify-center bg-white',
-                      SNAP,
-                      PRESS_EFFECT,
-                      SHADOW_COMP,
-                    )}
-                    aria-label="Next track"
-                  >
-                    <SkipForward size={24} fill="currentColor" strokeWidth={STROKE} />
-                  </button>
+            <div className="flex min-w-0 flex-1 flex-col justify-between gap-4">
+              <div className="flex flex-col gap-3">
+                <h1 dir="auto" className="neo-type-level-1 break-words py-1 text-black">
+                  {currentTrack.title}
+                </h1>
+                <div className={cn(BORDER, SHADOW_COMP, 'self-start bg-[#FFE234] px-3 py-1.5')}>
+                  <span dir="auto" className="neo-type-level-2 text-black">
+                    {currentTrack.artist}
+                  </span>
                 </div>
+              </div>
 
-                <div className="flex shrink-0 items-center justify-end gap-3">
-                  {onOpenFullPlayer && (
+              <div className="mt-2 lg:mt-0">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-4 overflow-visible">
+                  <div className="flex items-end gap-3 overflow-visible">
                     <button
                       type="button"
-                      onClick={onOpenFullPlayer}
+                      onClick={() =>
+                        playAdjacentTrack('previous').catch((error) =>
+                          reportError('Could not play the previous track', {
+                            source: 'home-neo',
+                            error,
+                          }),
+                        )
+                      }
                       className={cn(
                         BORDER,
-                        'flex h-10 w-10 items-center justify-center bg-white',
+                        'flex h-14 w-14 items-center justify-center bg-white',
                         SNAP,
                         PRESS_EFFECT,
                         SHADOW_COMP,
                       )}
-                      aria-label="Fullscreen"
-                      title="Fullscreen"
+                      aria-label="Previous track"
                     >
-                      <Maximize2 size={16} strokeWidth={STROKE} />
+                      <SkipBack size={24} fill="currentColor" strokeWidth={STROKE} />
                     </button>
-                  )}
-                  <NeoVolumeControl />
+                    <button
+                      type="button"
+                      className="neo-play-pause"
+                      onClick={() =>
+                        toggleCurrentPlayback().catch((error) =>
+                          reportError('Could not play or pause', { source: 'home-neo', error }),
+                        )
+                      }
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                    >
+                      {isPlaying ? (
+                        <Pause className="h-7 w-7" fill="currentColor" strokeWidth={STROKE} />
+                      ) : (
+                        <Play className="ml-1 h-7 w-7" fill="currentColor" strokeWidth={STROKE} />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        playAdjacentTrack('next').catch((error) =>
+                          reportError('Could not play the next track', {
+                            source: 'home-neo',
+                            error,
+                          }),
+                        )
+                      }
+                      className={cn(
+                        BORDER,
+                        'flex h-14 w-14 items-center justify-center bg-white',
+                        SNAP,
+                        PRESS_EFFECT,
+                        SHADOW_COMP,
+                      )}
+                      aria-label="Next track"
+                    >
+                      <SkipForward size={24} fill="currentColor" strokeWidth={STROKE} />
+                    </button>
+                  </div>
+
+                  <div className="flex shrink-0 items-center justify-end gap-3">
+                    {onOpenFullPlayer && (
+                      <button
+                        type="button"
+                        onClick={onOpenFullPlayer}
+                        className={cn(
+                          BORDER,
+                          'flex h-10 w-10 items-center justify-center bg-white',
+                          SNAP,
+                          PRESS_EFFECT,
+                          SHADOW_COMP,
+                        )}
+                        aria-label="Fullscreen"
+                        title="Fullscreen"
+                      >
+                        <Maximize2 size={16} strokeWidth={STROKE} />
+                      </button>
+                    )}
+                    <NeoVolumeControl />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
-        <section className="pb-20">
-          <div className="mb-8">
-            <NeoSectionHeader emoji="💿" label="ALBUMS" />
+        <section className={hasStats ? undefined : 'pb-20'}>
+          <div className="mb-8 flex items-end justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <NeoSectionHeader emoji="💿" label="ALBUMS" />
+            </div>
+            {allAlbums.length > 0 ? (
+              <button
+                type="button"
+                onClick={onNavigateToLibrary}
+                className={cn(
+                  BORDER,
+                  SHADOW_COMP,
+                  PRESS_EFFECT,
+                  SNAP,
+                  'mb-3 shrink-0 bg-white px-3 py-1.5 text-[12px] font-black uppercase tracking-[0.1em] text-black',
+                )}
+              >
+                View all{allAlbums.length > albums.length ? ` ${allAlbums.length}` : ''}
+              </button>
+            ) : null}
           </div>
 
           {albums.length > 0 ? (
@@ -585,6 +595,28 @@ export const HomeViewNeo = memo(function HomeViewNeo({
             </div>
           )}
         </section>
+
+        {hasStats && libraryStats ? (
+          <section aria-label="Library stats" className="pb-20">
+            <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {[
+                ['Tracks', libraryStats.trackCount],
+                ['Hours', Math.floor(libraryStats.totalDuration / 3600)],
+                ['Artists', libraryStats.artistCount],
+                ['Albums', libraryStats.albumCount || allAlbums.length],
+              ].map(([label, value]) => (
+                <div key={label} className={cn(BORDER, SHADOW_COMP, 'bg-white px-4 py-3')}>
+                  <dt className="text-[12px] font-black uppercase tracking-[0.12em] text-[#595959]">
+                    {label}
+                  </dt>
+                  <dd className="font-mono text-2xl font-black tabular-nums text-black">
+                    {Number(value).toLocaleString()}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
       </div>
     </div>
   );

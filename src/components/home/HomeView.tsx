@@ -85,6 +85,7 @@ export const HomeView = memo(
     isLibraryLoading = false,
     libraryError = null,
     onRetryLoad,
+    onScrollChange,
   }: HomeViewProps) => {
     useRenderLog('HomeView');
 
@@ -224,7 +225,11 @@ export const HomeView = memo(
     // -------------------------------------------------------------------------
 
     return (
-      <div className="h-full overflow-y-auto pb-32 custom-scrollbar relative">
+      <div
+        className="h-full overflow-y-auto pb-32 custom-scrollbar relative"
+        // The shell uses this for the header's scrolled state, as the neo Home already did.
+        onScroll={(event) => onScrollChange?.(event.currentTarget.scrollTop > 20)}
+      >
         {/* Full-viewport ambient: `LiquidHomeAmbientBackdrop` in App (under TopBar). */}
 
         <div className="max-w-7xl mx-auto px-6 py-8 relative z-10">
@@ -386,7 +391,7 @@ export const HomeView = memo(
                         style={{ color: heroAccent, opacity: 0.75 }}
                       >
                         <Headphones className="h-[11px] w-[11px] shrink-0" />
-                        <span className="text-[9.5px] font-bold uppercase tracking-[0.34em]">
+                        <span className="text-[12px] font-bold uppercase tracking-[0.3em]">
                           Now Playing
                         </span>
                         <div className="ml-1">
@@ -529,7 +534,6 @@ export const HomeView = memo(
                       albumTracks={albumTracksByKey.get(getAlbumKey(albums[0].track)) ?? []}
                       featured
                       interactiveSpotlight={interactiveOn}
-                      staggerIndex={0}
                       reducedEffects={reducedEffects}
                       onOpenAlbumDetails={onOpenAlbumDetails}
                       onPlayAlbum={playAlbum}
@@ -539,7 +543,7 @@ export const HomeView = memo(
 
                 {albums.length > 1 && (
                   <div className="min-h-0 min-w-0 grid grid-cols-4 gap-4">
-                    {albums.slice(1, 9).map(({ track, count }, idx) => (
+                    {albums.slice(1, 9).map(({ track, count }) => (
                       <AlbumSpotlightCard
                         key={getAlbumKey(track)}
                         track={track}
@@ -547,7 +551,6 @@ export const HomeView = memo(
                         albumTracks={albumTracksByKey.get(getAlbumKey(track)) ?? []}
                         featured={false}
                         interactiveSpotlight={interactiveOn}
-                        staggerIndex={idx + 1}
                         reducedEffects={reducedEffects}
                         onOpenAlbumDetails={onOpenAlbumDetails}
                         onPlayAlbum={playAlbum}
@@ -559,7 +562,7 @@ export const HomeView = memo(
 
               {/* Mobile layout */}
               <div className="grid grid-cols-2 gap-4 sm:hidden">
-                {albums.slice(0, 6).map(({ track, count }, idx) => (
+                {albums.slice(0, 6).map(({ track, count }) => (
                   <AlbumSpotlightCard
                     key={`${getAlbumKey(track)}-m`}
                     track={track}
@@ -567,7 +570,6 @@ export const HomeView = memo(
                     albumTracks={albumTracksByKey.get(getAlbumKey(track)) ?? []}
                     featured={false}
                     interactiveSpotlight={interactiveOn}
-                    staggerIndex={idx}
                     reducedEffects={reducedEffects}
                     onOpenAlbumDetails={onOpenAlbumDetails}
                     onPlayAlbum={playAlbum}
@@ -591,7 +593,6 @@ export const HomeView = memo(
                   label="Tracks"
                   iconColor="var(--hero-accent)"
                   glowColor="var(--hero-glow)"
-                  staggerIndex={0}
                   reducedEffects={reducedEffects}
                 />
                 <StatTile
@@ -600,7 +601,6 @@ export const HomeView = memo(
                   label="Hours"
                   iconColor="rgb(251,146,60)"
                   glowColor="rgba(251,146,60,0.6)"
-                  staggerIndex={1}
                   reducedEffects={reducedEffects}
                 />
                 <StatTile
@@ -609,7 +609,6 @@ export const HomeView = memo(
                   label="Artists"
                   iconColor="rgb(52,211,153)"
                   glowColor="rgba(52,211,153,0.6)"
-                  staggerIndex={2}
                   reducedEffects={reducedEffects}
                 />
                 <StatTile
@@ -618,7 +617,6 @@ export const HomeView = memo(
                   label="Albums"
                   iconColor="rgb(167,139,250)"
                   glowColor="rgba(167,139,250,0.6)"
-                  staggerIndex={3}
                   reducedEffects={reducedEffects}
                 />
               </div>
@@ -629,7 +627,7 @@ export const HomeView = memo(
             EMPTY LIBRARY STATE
         =============================================================== */}
           {tracks.length === 0 && (
-            <div className="text-center py-20 tarab-fade-up">
+            <div className={clsx('text-center py-20', !reducedEffects && 'tarab-fade-up')}>
               <div className="w-20 h-20 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] flex items-center justify-center mx-auto mb-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                 <Music2 className="w-9 h-9 text-white/20" />
               </div>

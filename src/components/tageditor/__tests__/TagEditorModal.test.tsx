@@ -158,3 +158,22 @@ describe('lyricsEquivalent', () => {
     expect(lyricsEquivalent('plain words', 'other words')).toBe(false);
   });
 });
+
+describe('LRC text view direction (FE-22 review)', () => {
+  it('keeps timestamped lines left to right', async () => {
+    const { LyricsEditor } = await import('../LyricsEditor');
+    render(
+      <LyricsEditor
+        trackPath="/music/a.flac"
+        lyricsContent="[00:12.00] يا حبيبي"
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        isSaving={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Text Editor' }));
+    const textarea = await screen.findByRole('textbox', { name: 'LRC lyric content' });
+    expect(textarea).toHaveAttribute('dir', 'ltr');
+    expect(textarea.style.unicodeBidi).toBe('isolate');
+  });
+});

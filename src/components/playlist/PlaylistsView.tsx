@@ -30,10 +30,27 @@ import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { dialog } from '../../platform/dialog';
 import { useNavigationIntentStore } from '../../store/navigation-intent-store';
 import { useSettingsStore } from '../../store/settings-store';
-import type { PlaylistEntry, Track } from '../../types';
+import type { PlaylistEntry, PlaylistType, Track } from '../../types';
+import { VirtualizedList } from '../shared/VirtualizedList';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PlaylistEditorDialog } from './PlaylistEditorDialog';
+
+const PLAYLIST_TYPE_LABELS: Record<PlaylistType, string> = {
+  Manual: 'Playlist',
+  Smart: 'Smart playlist',
+  FolderSync: 'Folder playlist',
+};
+
+/** Plain label for a playlist type (the raw values are internal names such as FolderSync). */
+export const playlistTypeLabel = (type: PlaylistType): string => PLAYLIST_TYPE_LABELS[type] ?? type;
+
+export const trackCountLabel = (count: number): string =>
+  `${count.toLocaleString()} ${count === 1 ? 'track' : 'tracks'}`;
+
+/** Above this many rows the tracklist is virtualized; a fixed row height keeps it simple. */
+export const VIRTUALIZE_ENTRIES_ABOVE = 150;
+const ENTRY_ROW_HEIGHT = 48;
 
 export function PlaylistsView() {
   const theme = useSettingsStore((state) => state.theme);
@@ -170,6 +187,100 @@ export function PlaylistsView() {
     }
   };
 
+  const playEntry = (entry: PlaylistEntry) => {
+    const index = playableTracks.findIndex((track) => track.id === entry.trackId);
+    const track = playableTracks[index];
+    if (!track) return;
+    void startPlayback(track, { queue: playableTracks, queueIndex: index }).catch((error) =>
+      reportError('Could not play the track', { source: 'playlists-view', error }),
+    );
+  };
+
+  const renderEntry = (entry: PlaylistEntry, as: 'li' | 'div', index = 0) => {
+    const Row = as;
+    // Virtualized rows are divs inside wrappers, so they carry listitem semantics and their place
+    // in the whole list (only a window of rows exists in the DOM).
+    const listItemProps =
+      as === 'div'
+        ? {
+            role: 'listitem' as const,
+            'aria-setsize': visibleEntries.length,
+            'aria-posinset': index + 1,
+          }
+        : {};
+    const name = entry.title ?? entry.trackId;
+    return (
+      <Row
+        key={`${entry.trackId}-${entry.position}`}
+        {...listItemProps}
+        className="flex h-12 items-center justify-between gap-3 border-b border-current/10 text-sm"
+      >
+        <label className="flex min-w-0 flex-1 items-center gap-3">
+          <input
+            type="checkbox"
+            checked={selectedTrackIds.has(entry.trackId)}
+            onChange={(event) => {
+              setSelectedTrackIds((current) => {
+                const next = new Set(current);
+                if (event.target.checked) next.add(entry.trackId);
+                else next.delete(entry.trackId);
+                return next;
+              });
+            }}
+            aria-label={`Select ${name}`}
+          />
+          <span className={entry.available ? 'truncate' : 'truncate opacity-55'}>
+            {/* bdi keeps each field's own direction, so an Arabic title next to Latin fields
+                stays in reading order (FE-22). */}
+            <bdi>{name}</bdi>
+            <bdi className="ml-2 opacity-60">{entry.artist ?? ''}</bdi>
+            {entry.album ? <bdi className="ml-2 opacity-60">{entry.album}</bdi> : null}
+          </span>
+        </label>
+        <span className="flex items-center gap-1">
+          {entry.available ? (
+            <button
+              type="button"
+              aria-label={`Play ${name}`}
+              onClick={() => playEntry(entry)}
+              className="rounded p-1 hover:bg-current/10"
+            >
+              <Play className="h-4 w-4" />
+            </button>
+          ) : null}
+          {!entry.available ? (
+            <>
+              <span className="mr-2 text-xs text-amber-400">Unavailable</span>
+              <Button
+                variant="secondary"
+                disabled={relinkingTrackId === entry.trackId}
+                onClick={() => void relinkEntry(entry)}
+              >
+                {relinkingTrackId === entry.trackId ? 'Relinking…' : 'Relink'}
+              </Button>
+            </>
+          ) : null}
+          <button
+            aria-label={`Move ${name} up`}
+            onClick={() => void moveEntry(entry.trackId, -1)}
+            disabled={entry.position === 0}
+            className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
+          <button
+            aria-label={`Move ${name} down`}
+            onClick={() => void moveEntry(entry.trackId, 1)}
+            disabled={entry.position === (detail.data?.entries.length ?? 0) - 1}
+            className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </span>
+      </Row>
+    );
+  };
+
   return (
     <main className="h-full overflow-y-auto px-6 pb-36 pt-8" aria-labelledby="playlists-title">
       <div className="mx-auto max-w-6xl">
@@ -255,7 +366,8 @@ export function PlaylistsView() {
                       {playlist.name}
                     </span>
                     <span className="mt-1 block text-xs opacity-70">
-                      {playlist.trackCount} tracks · {playlist.playlistType}
+                      {trackCountLabel(playlist.trackCount)} ·{' '}
+                      {playlistTypeLabel(playlist.playlistType)}
                       {playlist.missingCount > 0 ? ` · ${playlist.missingCount} unavailable` : ''}
                     </span>
                   </button>
@@ -263,7 +375,7 @@ export function PlaylistsView() {
               </section>
 
               <section
-                aria-live="polite"
+                aria-label="Playlist details"
                 className={`min-h-72 border p-5 ${
                   neo
                     ? 'border-black bg-white text-black'
@@ -396,69 +508,19 @@ export function PlaylistsView() {
                       <p className="rounded-lg border border-current/10 p-4 text-sm opacity-70">
                         No tracks match “{query}” in this playlist.
                       </p>
+                    ) : visibleEntries.length > VIRTUALIZE_ENTRIES_ABOVE ? (
+                      <VirtualizedList
+                        items={visibleEntries}
+                        itemHeight={ENTRY_ROW_HEIGHT}
+                        getItemKey={(entry) => `${entry.trackId}-${entry.position}`}
+                        containerProps={{ role: 'list', 'aria-label': 'Playlist tracks' }}
+                        className="overflow-y-auto"
+                        style={{ height: Math.min(visibleEntries.length * ENTRY_ROW_HEIGHT, 576) }}
+                        renderItem={(entry, index) => renderEntry(entry, 'div', index)}
+                      />
                     ) : (
-                      <ol className="space-y-1">
-                        {visibleEntries.map((entry) => (
-                          <li
-                            key={`${entry.trackId}-${entry.position}`}
-                            className="flex items-center justify-between gap-3 border-b border-current/10 py-2 text-sm"
-                          >
-                            <label className="flex min-w-0 flex-1 items-center gap-3">
-                              <input
-                                type="checkbox"
-                                checked={selectedTrackIds.has(entry.trackId)}
-                                onChange={(event) => {
-                                  setSelectedTrackIds((current) => {
-                                    const next = new Set(current);
-                                    if (event.target.checked) next.add(entry.trackId);
-                                    else next.delete(entry.trackId);
-                                    return next;
-                                  });
-                                }}
-                                aria-label={`Select ${entry.title ?? entry.trackId}`}
-                              />
-                              <span
-                                className={entry.available ? 'truncate' : 'truncate opacity-55'}
-                              >
-                                {entry.title ?? entry.trackId}
-                                <span className="ml-2 opacity-60">{entry.artist ?? ''}</span>
-                                {entry.album ? (
-                                  <span className="ml-2 opacity-60">{entry.album}</span>
-                                ) : null}
-                              </span>
-                            </label>
-                            <span className="flex items-center gap-1">
-                              {!entry.available ? (
-                                <>
-                                  <span className="mr-2 text-xs text-amber-400">Unavailable</span>
-                                  <Button
-                                    variant="secondary"
-                                    disabled={relinkingTrackId === entry.trackId}
-                                    onClick={() => void relinkEntry(entry)}
-                                  >
-                                    {relinkingTrackId === entry.trackId ? 'Relinking…' : 'Relink'}
-                                  </Button>
-                                </>
-                              ) : null}
-                              <button
-                                aria-label={`Move ${entry.title ?? entry.trackId} up`}
-                                onClick={() => void moveEntry(entry.trackId, -1)}
-                                disabled={entry.position === 0}
-                                className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
-                              >
-                                <ChevronUp className="h-4 w-4" />
-                              </button>
-                              <button
-                                aria-label={`Move ${entry.title ?? entry.trackId} down`}
-                                onClick={() => void moveEntry(entry.trackId, 1)}
-                                disabled={entry.position === detail.data.entries.length - 1}
-                                className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
-                              >
-                                <ChevronDown className="h-4 w-4" />
-                              </button>
-                            </span>
-                          </li>
-                        ))}
+                      <ol aria-label="Playlist tracks">
+                        {visibleEntries.map((entry) => renderEntry(entry, 'li'))}
                       </ol>
                     )}
                   </>

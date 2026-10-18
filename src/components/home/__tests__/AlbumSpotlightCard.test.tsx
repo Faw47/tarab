@@ -28,7 +28,6 @@ describe('AlbumSpotlightCard', () => {
         albumTracks={[track]}
         featured={false}
         interactiveSpotlight={false}
-        staggerIndex={0}
         reducedEffects
         onOpenAlbumDetails={onOpen}
         onPlayAlbum={onPlay}
@@ -44,5 +43,29 @@ describe('AlbumSpotlightCard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Maarifti Feek by Fairuz' }));
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the album title without hover and enters without a stagger delay', () => {
+    // Regression for FE-30: regular cards hid their title until hover, and cards staggered in.
+    const { container } = render(
+      <AlbumSpotlightCard
+        track={track}
+        count={1}
+        albumTracks={[track]}
+        featured={false}
+        interactiveSpotlight={false}
+        reducedEffects={false}
+        onPlayAlbum={vi.fn(async () => undefined)}
+      />,
+    );
+    const title = screen.getByText('Maarifti Feek');
+    let node: HTMLElement | null = title;
+    while (node && node !== container) {
+      expect(node.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
+      node = node.parentElement;
+    }
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>('[style]'))) {
+      expect(el.style.animationDelay).toBe('');
+    }
   });
 });

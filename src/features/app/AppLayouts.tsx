@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronLeft } from 'lucide-react';
 import { type CSSProperties, lazy, type ReactNode, type RefObject, Suspense } from 'react';
 import { type NavView, Sidebar } from '../../components/navigation';
 import { type ProcessingTask, TopBar } from '../../components/navigation/TopBar';
@@ -7,6 +8,7 @@ import { TopBarNeo } from '../../components/navigation/TopBarNeo';
 import { MiniPlayer } from '../../components/player/MiniPlayer';
 import { PillMiniPlayer } from '../../components/player/PillMiniPlayer';
 import { LiquidHomeAmbientBackdrop } from '../../components/shell/LiquidHomeAmbientBackdrop';
+import { Button } from '../../components/ui/button';
 import type { ReactivePalette } from '../../hooks/useReactivePalette';
 import { cn } from '../../lib/utils';
 import type { AppTheme, NavMode } from '../../store/settings-store';
@@ -122,7 +124,8 @@ export function AppLayouts({
         )}
       >
         {navMode === 'iconRail' && (
-          <aside className="w-20 border-r-3 border-black flex flex-col overflow-hidden shrink-0">
+          // Sidebar hides itself below md; the bordered wrapper must too, or it leaves an empty strip.
+          <aside className="hidden w-20 shrink-0 flex-col overflow-hidden border-r-3 border-black md:flex">
             <Sidebar
               navMode={navMode}
               currentView={currentView}
@@ -233,7 +236,41 @@ export function AppLayouts({
           theme={theme}
         />
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* relative: the album view's overlaid header and title strip span this column, not the rail. */}
+        <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* In icon-rail mode the top bar appears only while searching; this strip keeps a window
+              drag region and Back available the rest of the time (FE-08). */}
+          {navMode !== 'topNav' && !searchUiOpen && (
+            <div
+              data-tauri-drag-region
+              data-testid="rail-title-strip"
+              className={cn(
+                'z-50 flex shrink-0 items-center',
+                // Album view: only the slot the album's sticky header leaves for Back (px-6,
+                // 40 px, vertically centred in h-16/h-20), so the strip covers none of its
+                // controls or the scroll area.
+                isAlbumView ? 'absolute top-0 left-0 h-16 w-[4.5rem] md:h-20' : 'h-12 w-full pr-3',
+              )}
+              style={{ paddingLeft: isAlbumView ? 24 : Math.max(12, titlebarInsetLeft) }}
+            >
+              {canGoBack ? (
+                <Button
+                  onClick={onBack}
+                  className={cn(
+                    'rounded-full bg-black/20 shadow-md',
+                    isAlbumView ? 'h-10 w-10' : 'h-9 w-9',
+                  )}
+                  contentClassName="flex items-center justify-center p-0"
+                  aria-label="Go back"
+                  title="Back"
+                  reducedEffects={reducedEffects}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+              ) : null}
+            </div>
+          )}
+
           {(navMode === 'topNav' || searchUiOpen) && (
             <TopBar
               navMode={navMode}

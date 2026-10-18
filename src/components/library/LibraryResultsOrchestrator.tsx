@@ -178,16 +178,25 @@ const TrackTile = memo(function TrackTile({
             <Play className="h-3 w-3" fill="currentColor" strokeWidth={3} />
           </button>
         </div>
-        <div className="text-[12px] font-black uppercase tracking-tight truncate leading-tight">
+        <div
+          dir="auto"
+          className="text-[12px] font-black uppercase tracking-tight truncate leading-tight"
+        >
           {renderHighlightedText(track.title, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div
+          dir="auto"
+          className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight"
+        >
           {matchedLyricLine
             ? `“${matchedLyricLine}”`
             : renderHighlightedText(track.artist, searchQuery, highlightClass)}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1">
-          <span className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest">
+          <span
+            dir="auto"
+            className="max-w-full truncate border border-black/20 bg-[var(--neo-muted)] px-1 py-0.5 text-[12px] font-black uppercase tracking-widest"
+          >
             {renderHighlightedText(track.album, searchQuery, highlightClass)}
           </span>
           {isLyricsMatch && (
@@ -354,10 +363,16 @@ const AlbumTile = memo(function AlbumTile({
             {album.count} {album.count === 1 ? 'FILE' : 'FILES'}
           </div>
         </div>
-        <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
+        <div
+          dir="auto"
+          className="truncate text-[12px] font-black uppercase tracking-tight leading-tight"
+        >
           {renderHighlightedText(album.track.album, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div
+          dir="auto"
+          className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight"
+        >
           {renderHighlightedText(album.track.artist, searchQuery, highlightClass)}
         </div>
         {album.track.year && (
@@ -443,7 +458,7 @@ const AlbumTile = memo(function AlbumTile({
                 )}
               </p>
             </div>
-            <p className="text-white/58 text-[0.64rem] uppercase tracking-[0.09em] mt-1.5">
+            <p className="text-white/58 text-[0.75rem] uppercase tracking-[0.09em] mt-1.5">
               {album.count} {album.count === 1 ? 'track' : 'tracks'}
             </p>
           </div>
@@ -596,10 +611,16 @@ const ArtistTile = memo(function ArtistTile({
             </button>
           )}
         </div>
-        <div className="truncate text-[12px] font-black uppercase tracking-tight leading-tight">
+        <div
+          dir="auto"
+          className="truncate text-[12px] font-black uppercase tracking-tight leading-tight"
+        >
           {renderHighlightedText(artist.artist, searchQuery, highlightClass)}
         </div>
-        <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight">
+        <div
+          dir="auto"
+          className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight"
+        >
           {artist.count} {artist.count === 1 ? 'FILE' : 'FILES'}
         </div>
       </article>

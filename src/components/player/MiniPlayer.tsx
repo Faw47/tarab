@@ -13,19 +13,21 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSmoothTimeSubscription, useSmoothTimeValue } from '../../contexts/smooth-time';
+import { useDismissable } from '../../hooks/useDismissable';
 import { useRenderLog } from '../../lib/performance';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
-import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
+import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import { CoverArtImage } from '../shared/CoverArtImage';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { IconButton } from '../ui/IconButton';
+import { NeoVolumeSegments } from './NeoVolumeSegments';
 import { PlayerProgressBar, PlayerTimeDisplay } from './PlayerProgressBar';
 import { SleepTimerButton } from './SleepTimerButton';
 
@@ -95,13 +97,12 @@ export const MiniPlayer = memo(
     const currentTrack = usePlayerStore((s) => s.currentTrack);
     const { theme } = useSettingsStore(useShallow((s) => ({ theme: s.theme })));
     const isNeobrutalism = theme === 'neobrutalism';
-    const { isPlaying, volume, loopMode, cycleLoopMode, setVolume } = usePlayerStore(
+    const { isPlaying, volume, loopMode, cycleLoopMode } = usePlayerStore(
       useShallow((s) => ({
         isPlaying: s.isPlaying,
         volume: s.volume,
         loopMode: s.loopMode,
         cycleLoopMode: s.cycleLoopMode,
-        setVolume: s.setVolume,
       })),
     );
 
@@ -133,30 +134,21 @@ export const MiniPlayer = memo(
       );
     }, []);
 
-    const handleVolumeChange = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = parseFloat(e.target.value);
-        setVolume(val);
-        setAudioVolume(val).catch((error) =>
-          reportError('Failed to set the volume', { source: 'mini-player', error }),
-        );
-      },
-      [setVolume],
-    );
+    const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      void applyVolume(parseFloat(e.target.value), 'mini-player');
+    }, []);
+    const commitNeoVolume = useCallback((value: number) => {
+      void applyVolume(value, 'mini-player');
+    }, []);
+    const handleToggleMute = useCallback(() => {
+      void toggleMute('mini-player');
+    }, []);
 
     const [neoVolOpen, setNeoVolOpen] = useState(false);
-    const commitNeoVolume = useCallback(
-      async (val: number) => {
-        const v = Math.max(0, Math.min(1, val));
-        setVolume(v);
-        try {
-          await setAudioVolume(v);
-        } catch (e) {
-          reportError('Failed to set volume', { source: 'mini-player', error: e });
-        }
-      },
-      [setVolume],
-    );
+    const neoVolumeRef = useRef<HTMLDivElement>(null);
+    const neoVolumeToggleRef = useRef<HTMLButtonElement>(null);
+    // The neo volume popover closes on Escape and on a click outside it (FE-16).
+    useDismissable(neoVolOpen, neoVolumeRef, () => setNeoVolOpen(false), neoVolumeToggleRef);
 
     if (!currentTrack) return null;
     // The collapsed pill exists only in the liquid layout; neobrutalism always shows the bar.
@@ -188,10 +180,16 @@ export const MiniPlayer = memo(
               </button>
 
               <button onClick={onExpand} className="flex flex-col text-left truncate group flex-1">
-                <span className="font-black text-lg text-black uppercase tracking-widest truncate group-hover:underline decoration-2 underline-offset-4">
+                <span
+                  dir="auto"
+                  className="font-black text-lg text-black uppercase tracking-widest truncate group-hover:underline decoration-2 underline-offset-4"
+                >
                   {currentTrack.title}
                 </span>
-                <span className="font-bold text-xs text-black/70 uppercase tracking-[0.1em] truncate">
+                <span
+                  dir="auto"
+                  className="font-bold text-xs text-black/70 uppercase tracking-[0.1em] truncate"
+                >
                   {currentTrack.artist}
                 </span>
               </button>
@@ -254,17 +252,14 @@ export const MiniPlayer = memo(
                 {loopMode === 'one' ? 'LOOP: 1' : loopMode === 'all' ? 'LOOP: ALL' : 'LOOP: OFF'}
               </button>
 
-              <div className="flex items-center gap-2 relative">
+              <div ref={neoVolumeRef} className="flex items-center gap-2 relative">
                 <button
                   type="button"
                   className="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-black bg-white shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-[transform,box-shadow] duration-[var(--motion-fast)]"
-                  onClick={() => {
-                    if (volume <= 0.001) void commitNeoVolume(0.7);
-                    else void commitNeoVolume(0);
-                  }}
-                  aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+                  onClick={handleToggleMute}
+                  aria-label={isMuted(volume) ? 'Unmute' : 'Mute'}
                 >
-                  {volume <= 0.001 ? (
+                  {isMuted(volume) ? (
                     <VolumeX className="w-5 h-5 text-black" strokeWidth={2.5} />
                   ) : (
                     <Volume2 className="w-5 h-5 text-black" strokeWidth={2.5} />
@@ -276,6 +271,7 @@ export const MiniPlayer = memo(
                     'flex h-10 px-3 items-center justify-center border-2 border-black text-xs font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none hover:-translate-y-0.5 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]',
                     neoVolOpen ? 'bg-[var(--signal-active)] text-black' : 'bg-white text-black',
                   )}
+                  ref={neoVolumeToggleRef}
                   onClick={() => setNeoVolOpen((o) => !o)}
                   aria-expanded={neoVolOpen}
                   aria-label="Toggle volume segments"
@@ -288,31 +284,11 @@ export const MiniPlayer = memo(
                     <div className="text-black font-black uppercase text-xs border-b-2 border-black pb-1 tracking-widest">
                       Volume
                     </div>
-                    <div className="flex gap-1">
-                      {Array.from({ length: 10 }).map((_, i) => {
-                        const segmentValue = (i + 1) / 10;
-                        const active = volume >= segmentValue - 0.05;
-                        return (
-                          <div
-                            key={i}
-                            role="button"
-                            tabIndex={0}
-                            className={clsx(
-                              'w-6 h-8 border-2 border-black cursor-pointer hover:scale-105 hover:-translate-y-1 transition-transform',
-                              active ? 'bg-[var(--signal-secondary)]' : 'bg-gray-100',
-                            )}
-                            onClick={() => void commitNeoVolume(segmentValue)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                void commitNeoVolume(segmentValue);
-                              }
-                            }}
-                            aria-label={`Set volume to ${Math.round(segmentValue * 100)}%`}
-                          />
-                        );
-                      })}
-                    </div>
+                    <NeoVolumeSegments
+                      volume={volume}
+                      onChange={commitNeoVolume}
+                      variant="popover"
+                    />
                   </div>
                 )}
               </div>
@@ -553,17 +529,14 @@ export const MiniPlayer = memo(
             </div>
 
             {isNeobrutalism ? (
-              <div className="hidden sm:flex items-center gap-2 shrink-0">
+              <div ref={neoVolumeRef} className="hidden sm:flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-black bg-white shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
-                  onClick={() => {
-                    if (volume <= 0.001) void commitNeoVolume(0.7);
-                    else void commitNeoVolume(0);
-                  }}
-                  aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+                  onClick={handleToggleMute}
+                  aria-label={isMuted(volume) ? 'Unmute' : 'Mute'}
                 >
-                  {volume <= 0.001 ? (
+                  {isMuted(volume) ? (
                     <VolumeX className="w-4 h-4 text-black" strokeWidth={2.5} />
                   ) : (
                     <Volume2 className="w-4 h-4 text-black" strokeWidth={2.5} />
@@ -572,36 +545,14 @@ export const MiniPlayer = memo(
                 <button
                   type="button"
                   className="border-2 border-black bg-[var(--neo-panel)] px-2 py-1 text-xs font-black uppercase shadow-[4px_4px_0_0_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                  ref={neoVolumeToggleRef}
                   onClick={() => setNeoVolOpen((o) => !o)}
                   aria-expanded={neoVolOpen}
                   aria-label="Toggle volume segments"
                 >
                   Vol
                 </button>
-                {neoVolOpen && (
-                  <div className="neo-volume-wrap">
-                    {Array.from({ length: 10 }).map((_, i) => {
-                      const segmentValue = (i + 1) / 10;
-                      const active = volume >= segmentValue - 0.05;
-                      return (
-                        <div
-                          key={i}
-                          role="button"
-                          tabIndex={0}
-                          className={clsx('neo-volume-segment', active && 'active')}
-                          onClick={() => void commitNeoVolume(segmentValue)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              void commitNeoVolume(segmentValue);
-                            }
-                          }}
-                          aria-label={`Set volume to ${Math.round(segmentValue * 100)}%`}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
+                {neoVolOpen && <NeoVolumeSegments volume={volume} onChange={commitNeoVolume} />}
               </div>
             ) : (
               <div className="hidden lg:flex items-center gap-2 shrink-0 rounded-full border border-white/[0.08] bg-black/[0.15] px-2.5 py-1.5">
@@ -610,7 +561,11 @@ export const MiniPlayer = memo(
                   className="p-2 rounded-full text-text-secondary hover:text-white hover:bg-white/[0.08] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom]"
                   aria-label="Toggle volume"
                 >
-                  {volume > 0 ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  {isMuted(volume) ? (
+                    <VolumeX className="w-4 h-4" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
                 </IconButton>
 
                 {miniVolumeVisible && (

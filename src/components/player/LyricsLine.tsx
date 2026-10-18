@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { memo, useRef } from 'react';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
+import { textDirection } from '../../lib/text-direction';
 import type { LyricLine } from '../../types';
 
 interface GlowColors {
@@ -54,6 +55,9 @@ export const LyricsLine = memo(
         : lyricAlignment === 'right'
           ? 'text-right'
           : 'text-center';
+    // Arabic and Hebrew lines read right to left, so their words order and fill that way (FE-22).
+    const direction = textDirection(line.text) ?? 'ltr';
+    const fillOrigin = direction === 'rtl' ? 'right top' : 'left top';
 
     // Render
     return (
@@ -62,7 +66,13 @@ export const LyricsLine = memo(
         className={clsx(
           'transition-[color,opacity,transform] duration-[var(--motion-standard)] ease-out w-full py-2',
           textAlign,
-          isCurrent && 'scale-[1.02] origin-left',
+          isCurrent && 'scale-[1.02]',
+          isCurrent &&
+            (lyricAlignment === 'left'
+              ? 'origin-left'
+              : lyricAlignment === 'right'
+                ? 'origin-right'
+                : 'origin-center'),
           isNeighbor && 'scale-[1.0]',
         )}
         style={{
@@ -71,6 +81,7 @@ export const LyricsLine = memo(
           transform: 'translateZ(0)',
           willChange: isCurrent ? 'transform, opacity' : 'opacity',
         }}
+        dir={direction}
         role="button"
         tabIndex={0}
         aria-label={`Seek to ${line.text}`}
@@ -131,16 +142,19 @@ export const LyricsLine = memo(
                     ) : null}
                     <span
                       data-karaoke-word
+                      data-fill-from={direction === 'rtl' ? 'right' : 'left'}
                       data-word-start={word.startTime}
                       data-word-end={word.endTime}
                       onClick={(e) => onWordClick(word.startTime, e)}
                       className="relative inline cursor-pointer select-none px-[1px] mx-[-1px] rounded-sm box-decoration-clone"
                       style={{
                         pointerEvents: 'auto',
-                        backgroundImage: `linear-gradient(to right, ${glowColors.highlight}, ${glowColors.highlight}), linear-gradient(to right, ${unhighlightedColor}, ${unhighlightedColor})`,
+                        // Themes may override the sung and unsung colors (the neo skin uses ink on
+                        // paper, where white unsung text would vanish).
+                        backgroundImage: `linear-gradient(to right, var(--lyric-sung, ${glowColors.highlight}), var(--lyric-sung, ${glowColors.highlight})), linear-gradient(to right, var(--lyric-unsung, ${unhighlightedColor}), var(--lyric-unsung, ${unhighlightedColor}))`,
                         backgroundSize: '0% 100%, 100% 100%',
                         backgroundRepeat: 'no-repeat, no-repeat',
-                        backgroundPosition: 'left top, left top',
+                        backgroundPosition: `${fillOrigin}, ${fillOrigin}`,
                         WebkitBackgroundClip: 'text',
                         backgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',

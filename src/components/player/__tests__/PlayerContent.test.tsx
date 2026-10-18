@@ -78,4 +78,17 @@ describe('PlayerContent', () => {
     expect(screen.getByTestId('player-elapsed')).toHaveTextContent('1:01');
     expect(screen.getByTestId('player-duration')).toHaveTextContent('3:20');
   });
+
+  it.each([
+    true,
+    false,
+  ])('renders no blurred cover backdrop in neobrutalism (two-column: %s)', (fullscreenPlayerLayout) => {
+    // Regression for FE-17: the neo full player was dark blurred glass.
+    useSettingsStore.setState({ theme: 'neobrutalism', fullscreenPlayerLayout });
+    const { container } = renderPlayer();
+    const backdrop = container.querySelector('.-z-20');
+    expect(backdrop).toHaveAttribute('hidden');
+
+    useSettingsStore.setState({ theme: 'liquid-glass' });
+  });
 });

@@ -3,10 +3,10 @@ import { Mic2, Play, Volume2, VolumeX } from 'lucide-react';
 import type { CSSProperties, ElementType, PointerEvent as ReactPointerEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumArtist } from '../../lib/album-key';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
-import { reportError } from '../../lib/report-error';
-import { setVolume as setAudioVolume } from '../../lib/tauri-commands';
+import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
@@ -62,6 +62,7 @@ NowPlayingBars.displayName = 'NowPlayingBars';
 // ---------------------------------------------------------------------------
 
 export const CardLyricsDisplay = memo(() => {
+  const reducedEffects = useEffectiveReducedEffects();
   const { lyrics, isPlaying } = usePlayerStore(
     useShallow((s) => ({ lyrics: s.lyrics, isPlaying: s.isPlaying })),
   );
@@ -111,7 +112,12 @@ export const CardLyricsDisplay = memo(() => {
   if (!text) return null;
 
   return (
-    <div className="mt-3.5 flex items-start gap-2 w-full select-none tarab-fade-up">
+    <div
+      className={clsx(
+        'mt-3.5 flex items-start gap-2 w-full select-none',
+        !reducedEffects && 'tarab-fade-up',
+      )}
+    >
       <Mic2 className="w-3 h-3 mt-[5px] shrink-0 text-white/25" />
       <p
         className={clsx(
@@ -142,29 +148,10 @@ CardLyricsDisplay.displayName = 'CardLyricsDisplay';
 
 export const VolumeControl = memo(
   ({ accentColor = 'var(--hero-accent)' }: { accentColor?: string }) => {
-    const { volume, setVolume } = usePlayerStore(
-      useShallow((s) => ({ volume: s.volume, setVolume: s.setVolume })),
-    );
+    const volume = usePlayerStore((s) => s.volume);
+    const muted = isMuted(volume);
     const [expanded, setExpanded] = useState(false);
-    const restoreRef = useRef(0.55);
     const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    useEffect(() => {
-      if (volume > 0.001) restoreRef.current = volume;
-    }, [volume]);
-
-    const commit = useCallback(
-      async (v: number) => {
-        const clamped = clamp01(v);
-        setVolume(clamped);
-        try {
-          await setAudioVolume(clamped);
-        } catch (e) {
-          reportError('Could not set the volume', { source: 'home-volume', error: e });
-        }
-      },
-      [setVolume],
-    );
 
     const onEnter = useCallback(() => {
       if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -183,15 +170,24 @@ export const VolumeControl = memo(
     );
 
     return (
-      <div className="inline-flex items-center gap-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <div
+        className="inline-flex items-center gap-0"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        // The slider opens for keyboard focus too; it used to sit focusable at zero width.
+        onFocus={onEnter}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+        }}
+      >
         <Button
-          onClick={() => void commit(volume <= 0.001 ? Math.max(restoreRef.current, 0.5) : 0)}
+          onClick={() => void toggleMute('home-volume')}
           className="h-9 w-9 rounded-full inline-flex items-center justify-center bg-black/40 text-white/55 hover:text-white transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]"
-          aria-label={volume <= 0.001 ? 'Unmute' : 'Mute'}
+          aria-label={muted ? 'Unmute' : 'Mute'}
           title="Volume"
           accentColor={accentColor}
         >
-          {volume <= 0.001 ? (
+          {muted ? (
             <VolumeX className="h-[14px] w-[14px]" />
           ) : (
             <Volume2 className="h-[14px] w-[14px]" />
@@ -215,7 +211,7 @@ export const VolumeControl = memo(
             max={1}
             step={0.01}
             value={volume}
-            onChange={(e) => void commit(parseFloat(e.target.value))}
+            onChange={(e) => void applyVolume(parseFloat(e.target.value), 'home-volume')}
             className="h-1 w-[96px] cursor-pointer"
             style={
               {
@@ -263,12 +259,11 @@ interface StatTileProps {
   label: string;
   iconColor: string;
   glowColor: string;
-  staggerIndex: number;
   reducedEffects: boolean;
 }
 
 export const StatTile = memo(
-  ({ Icon, value, label, iconColor, glowColor, staggerIndex, reducedEffects }: StatTileProps) => (
+  ({ Icon, value, label, iconColor, glowColor, reducedEffects }: StatTileProps) => (
     <div
       className={clsx(
         'relative group flex items-center gap-4 p-5 rounded-[18px] overflow-hidden cursor-default isolate',
@@ -277,7 +272,6 @@ export const StatTile = memo(
         'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
         !reducedEffects && 'tarab-fade-up',
       )}
-      style={{ animationDelay: !reducedEffects ? `${staggerIndex * 75 + 50}ms` : undefined }}
     >
       {/* Background glow (appears on hover) */}
       <div
@@ -304,7 +298,7 @@ export const StatTile = memo(
         >
           {value.toLocaleString()}
         </p>
-        <p className="text-[9.5px] font-bold uppercase tracking-[0.24em] text-white/32 mt-[5px]">
+        <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-white/60 mt-[5px]">
           {label}
         </p>
       </div>
@@ -323,7 +317,6 @@ StatTile.displayName = 'StatTile';
 // AlbumSpotlightCard
 // Interactive cursor-tracked radial spotlight overlay.
 // Featured card takes full height of the left column.
-// staggerIndex drives the entrance animation delay.
 // ---------------------------------------------------------------------------
 
 interface AlbumSpotlightCardProps {
@@ -332,7 +325,6 @@ interface AlbumSpotlightCardProps {
   albumTracks: Track[];
   featured: boolean;
   interactiveSpotlight: boolean;
-  staggerIndex: number;
   reducedEffects: boolean;
   onOpenAlbumDetails?: (payload: {
     album: string;
@@ -350,7 +342,6 @@ export const AlbumSpotlightCard = memo(
     albumTracks,
     featured,
     interactiveSpotlight,
-    staggerIndex,
     reducedEffects,
     onOpenAlbumDetails,
     onPlayAlbum,
@@ -410,7 +401,6 @@ export const AlbumSpotlightCard = memo(
           featured ? 'h-full min-h-0 rounded-[22px]' : 'aspect-square rounded-[18px]',
           !reducedEffects && 'tarab-fade-up',
         )}
-        style={{ animationDelay: !reducedEffects ? `${staggerIndex * 50}ms` : undefined }}
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
       >
@@ -453,9 +443,8 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'absolute inset-0 transition-opacity duration-[var(--motion-emphasis)]',
-              featured
-                ? 'opacity-100'
-                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+              // Regular cards keep their title visible too (design language: no hover-only metadata).
+              'opacity-100',
             )}
             style={{
               background:
@@ -482,9 +471,7 @@ export const AlbumSpotlightCard = memo(
           <div
             className={clsx(
               'pointer-events-none absolute bottom-0 left-0 right-0 z-20 flex items-end justify-between gap-3 transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)]',
-              featured
-                ? 'p-4 opacity-100 translate-y-0'
-                : 'p-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0',
+              featured ? 'p-4' : 'p-3',
             )}
           >
             <div className="min-w-0 flex-1">
@@ -496,12 +483,7 @@ export const AlbumSpotlightCard = memo(
               >
                 {track.album}
               </p>
-              <p
-                className={clsx(
-                  'text-white/48 truncate mt-0.5',
-                  featured ? 'text-[0.75rem]' : 'text-[0.68rem]',
-                )}
-              >
+              <p className={clsx('text-white/48 truncate mt-0.5', 'text-[0.75rem]')}>
                 {track.artist}
               </p>
             </div>
@@ -518,7 +500,10 @@ export const AlbumSpotlightCard = memo(
                 'shadow-[0_4px_12px_rgba(0,0,0,0.20)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
                 'hover:scale-[1.08] active:scale-[0.95]',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',
-                featured ? 'w-11 h-11' : 'w-9 h-9',
+                // The title stays visible; Play on regular cards appears on hover or focus.
+                featured
+                  ? 'w-11 h-11'
+                  : 'w-9 h-9 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
               )}
               aria-label={`Play ${track.album}`}
             >

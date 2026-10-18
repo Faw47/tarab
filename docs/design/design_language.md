@@ -73,7 +73,17 @@ Contrast/readability rules:
 - Section labels over glass should not drop below `text-white/40`.
 - Decorative metadata can be dimmer, but actionable text should remain clearly legible.
 - Supporting text must be at least 12 px. Dense interactive labels should use 13 to 14 px when
-  the available surface permits it.
+  the available surface permits it. `src/test/text-size-floor.test.ts` enforces the floor in
+  components and stylesheets.
+
+Mixed-direction text:
+
+- Metadata and lyrics take their direction from their first strong letter (`unicode-bidi:
+  plaintext` on text blocks in `index.css`), so Arabic titles keep reading order and truncate at
+  their end, while keeping the parent's alignment so lists stay aligned.
+- Fields that join several values on one line isolate each with `<bdi>`.
+- LRC text stays left to right (timestamps lead each line).
+- Do not letter-space Arabic: neo metadata carries `dir="auto"`, and `:dir(rtl)` drops tracking.
 
 ---
 
