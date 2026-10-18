@@ -1,7 +1,7 @@
-import openerCapability from '../../../../src-tauri/capabilities/opener.json';
 import { QueryClient } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import openerCapability from '../../../../src-tauri/capabilities/opener.json';
 import { useNavigationIntentStore } from '../../../store/navigation-intent-store';
 import { useNativeMenuActions } from '../useNativeMenuActions';
 
@@ -103,7 +103,7 @@ describe('native menu actions', () => {
   });
 
   it('opens the README from the native Help menu', async () => {
-    // Regression for QA-10: Help was disabled on Windows and Linux.
+    // Regression for QA-10: the renderer action must call the scoped opener URL.
     render(<Harness />);
     await menuAction('help.help');
 
