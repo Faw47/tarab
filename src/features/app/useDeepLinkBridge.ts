@@ -42,12 +42,7 @@ interface UseDeepLinkBridgeOptions {
 export function useDeepLinkBridge({ onSearch }: UseDeepLinkBridgeOptions) {
   useAsyncCleanup(
     async () => {
-      let lastLink: { url: string; at: number } | null = null;
       const handleLink = (url: string) => {
-        // Suppress an initial/open event delivered twice, not intentional later opens.
-        const now = Date.now();
-        if (lastLink?.url === url && now - lastLink.at < 1000) return;
-        lastLink = { url, at: now };
         try {
           logger.info(DOMAIN, 'Handling deep link', { url });
           const intent = parseDeepLink(url);
@@ -75,8 +70,21 @@ export function useDeepLinkBridge({ onSearch }: UseDeepLinkBridgeOptions) {
         }
       };
       const initial = await deepLinks.getInitial();
-      initial.forEach(handleLink);
-      return deepLinks.listen(handleLink);
+      const startupMirrors = new Map<string, number>();
+      for (const url of new Set(initial)) {
+        handleLink(url);
+        // The native listener can replay a launch URL already returned by getInitial().
+        startupMirrors.set(url, Date.now() + 1000);
+      }
+      return deepLinks.listen((url) => {
+        const mirrorDeadline = startupMirrors.get(url);
+        if (mirrorDeadline !== undefined) {
+          startupMirrors.delete(url);
+          if (Date.now() < mirrorDeadline) return;
+        }
+        // A later click, even a rapid repeat, is a new user request.
+        handleLink(url);
+      });
     },
     [onSearch],
     (err) => logger.error(DOMAIN, 'Failed to setup deep link listener', err),
