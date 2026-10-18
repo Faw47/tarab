@@ -750,11 +750,15 @@
   text-shadow: none !important;
 }
 
-[data-theme="neobrutalism"] [data-full-player-dialog] :is([class*="text-white"], [class*="text-zinc-"], [class*="text-text-"]) {
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is([class*="text-white"], [class*="text-zinc-"], [class*="text-text-"]) {
   color: #000000 !important;
 }
 
-[data-theme="neobrutalism"] [data-full-player-dialog] :is(
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is(
     [class~="text-white/50"],
     [class~="text-white/55"],
     [class~="text-white/60"],
@@ -767,22 +771,24 @@
 }
 
 /* The compact card and translucent chips become white panels. */
-[data-theme="neobrutalism"] [data-full-player-dialog] :is([class~="bg-black/40"], [class~="bg-black/25"]) {
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is([class~="bg-black/40"], [class~="bg-black/25"]) {
   background: #ffffff !important;
   border: 3px solid #000000 !important;
   border-radius: 0 !important;
   box-shadow: 8px 8px 0 0 #000000 !important;
 }
 
-[data-theme="neobrutalism"] [data-full-player-dialog] :is(
-    [class~="bg-white/10"],
-    [class~="bg-white/15"],
-    [class~="bg-white/20"]
-  ) {
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is([class~="bg-white/10"], [class~="bg-white/15"], [class~="bg-white/20"]) {
   background: #ffffff !important;
 }
 
 /* Glows and soft shadows are not part of this language. */
-[data-theme="neobrutalism"] [data-full-player-dialog] :is([class*="shadow-white"], [class*="shadow-black"], [class*="shadow-2xl"]) {
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is([class*="shadow-white"], [class*="shadow-black"], [class*="shadow-2xl"]) {
   --tw-shadow-color: transparent !important;
 }
