@@ -125,7 +125,9 @@ export function useNativeMenuActions({
         return;
       }
       if (action === 'help.help') {
-        void openUrl('https://github.com/Faw47/tarab#readme');
+        void openUrl('https://github.com/Faw47/tarab#readme').catch((error) => {
+          reportError('Failed to open Tarab Help', { source: 'native-menu', error });
+        });
         return;
       }
       const viewByAction: Record<string, NavView> = {
