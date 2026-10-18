@@ -4,6 +4,9 @@ const packageJson = JSON.parse(await readFile(new URL('../package.json', import.
 const tauriConfig = JSON.parse(
   await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
 );
+const openerCapability = JSON.parse(
+  await readFile(new URL('../src-tauri/capabilities/opener.json', import.meta.url), 'utf8'),
+);
 const cargoManifest = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
 const releaseWorkflow = await readFile(
   new URL('../.github/workflows/release.yml', import.meta.url),
@@ -49,10 +52,26 @@ for (const extension of requiredAudioExtensions) {
 
 const mainWindow = (tauriConfig.app?.windows ?? []).find((window) => window.label === 'main');
 if (mainWindow?.visible !== false) {
-  errors.push(
+  failures.push(
     'The main window must start hidden so --minimized launches do not flash a visible window (QA-11).',
   );
 }
+// A menu button is not functional if the opener capability rejects its exact destination.
+const allowedHelpUrl = 'https://github.com/Faw47/tarab#readme';
+const openerUrlPermissions = openerCapability.permissions.filter(
+  (permission) =>
+    typeof permission === 'object' && permission.identifier === 'opener:allow-open-url',
+);
+if (
+  openerCapability.windows?.length !== 1 ||
+  openerCapability.windows[0] !== 'main' ||
+  openerUrlPermissions.length !== 1 ||
+  openerUrlPermissions[0].allow?.length !== 1 ||
+  openerUrlPermissions[0].allow[0]?.url !== allowedHelpUrl
+) {
+  failures.push('The main-window opener must allow exactly the Tarab Help README URL (QA-10).');
+}
+
 if (mainWindow?.backgroundThrottling !== 'disabled') {
   failures.push(
     'The main window must set backgroundThrottling to "disabled": it owns queue advance, media-key handling and tray quit while hidden.',

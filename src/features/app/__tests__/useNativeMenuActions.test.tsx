@@ -1,18 +1,19 @@
 import { QueryClient } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import openerCapability from '../../../../src-tauri/capabilities/opener.json';
 import { useNavigationIntentStore } from '../../../store/navigation-intent-store';
 import { useNativeMenuActions } from '../useNativeMenuActions';
 
-const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock } = vi.hoisted(
-  () => ({
+const { listeners, openAudioFilesMock, openUrlMock, refreshMock, toastErrorMock, reportErrorMock } =
+  vi.hoisted(() => ({
     listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
     openAudioFilesMock: vi.fn(),
     openUrlMock: vi.fn(async () => undefined),
     refreshMock: vi.fn(async () => undefined),
     toastErrorMock: vi.fn(),
-  }),
-);
+    reportErrorMock: vi.fn(),
+  }));
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => unknown) => {
@@ -26,7 +27,10 @@ vi.mock('../../../platform/dialog', () => ({ dialog: { openAudioFiles: openAudio
 vi.mock('../../../lib/track-refresh', () => ({ refreshTracksByFilePaths: refreshMock }));
 vi.mock('../../../lib/tauri-commands', () => ({ selectLibraryFolder: vi.fn(async () => null) }));
 vi.mock('../../../lib/playback-actions', () => ({ seekToPosition: vi.fn() }));
-vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn(), logError: vi.fn() }));
+vi.mock('../../../lib/report-error', () => ({
+  reportError: reportErrorMock,
+  logError: vi.fn(),
+}));
 vi.mock('../../../platform/tauri-zustand-storage', () => ({
   createTauriZustandStorage: () => ({
     getItem: async () => null,
@@ -60,6 +64,8 @@ async function menuAction(action: string) {
 describe('native menu actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    openUrlMock.mockReset();
+    openUrlMock.mockResolvedValue(undefined);
     listeners.clear();
     useNavigationIntentStore.setState({
       libraryFacet: null,
@@ -78,12 +84,38 @@ describe('native menu actions', () => {
     expect(useNavigationIntentStore.getState().consumeLibraryFacet()).toBeNull();
   });
 
+  it('authorizes only the project Help URL from the main window', () => {
+    expect(openerCapability.windows).toEqual(['main']);
+    const urlPermission = openerCapability.permissions.find(
+      (permission) =>
+        typeof permission === 'object' && permission.identifier === 'opener:allow-open-url',
+    );
+    expect(urlPermission).toEqual({
+      identifier: 'opener:allow-open-url',
+      allow: [{ url: 'https://github.com/Faw47/tarab#readme' }],
+    });
+  });
+
   it('opens the README from the native Help menu', async () => {
-    // Regression for QA-10: Help was disabled on Windows and Linux.
+    // Regression for QA-10: the renderer action must call the scoped opener URL.
     render(<Harness />);
     await menuAction('help.help');
 
     expect(openUrlMock).toHaveBeenCalledWith('https://github.com/Faw47/tarab#readme');
+  });
+
+  it('reports a denied Help URL instead of silently ignoring the failure', async () => {
+    const error = new Error('URL is not allowed by opener scope');
+    openUrlMock.mockRejectedValueOnce(error);
+    render(<Harness />);
+    await menuAction('help.help');
+
+    await waitFor(() => {
+      expect(reportErrorMock).toHaveBeenCalledWith('Failed to open Tarab Help', {
+        source: 'native-menu',
+        error,
+      });
+    });
   });
 
   it('asks the playlists view to open the create dialog', async () => {
