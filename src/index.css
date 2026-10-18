@@ -1033,8 +1033,12 @@ input[type="range"]::-moz-range-thumb {
     transform: translateY(0);
   }
 }
-.tarab-fade-up {
-  animation: tarab-fade-up 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+/* Gated here as well as in components: this unlayered rule comes after the reduced-motion block,
+   so without the media query it would win by source order and run the fade anyway. */
+@media (prefers-reduced-motion: no-preference) {
+  .tarab-fade-up {
+    animation: tarab-fade-up 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 /* 3-D cover tilt */

@@ -196,12 +196,23 @@ export function PlaylistsView() {
     );
   };
 
-  const renderEntry = (entry: PlaylistEntry, as: 'li' | 'div') => {
+  const renderEntry = (entry: PlaylistEntry, as: 'li' | 'div', index = 0) => {
     const Row = as;
+    // Virtualized rows are divs inside wrappers, so they carry listitem semantics and their place
+    // in the whole list (only a window of rows exists in the DOM).
+    const listItemProps =
+      as === 'div'
+        ? {
+            role: 'listitem' as const,
+            'aria-setsize': visibleEntries.length,
+            'aria-posinset': index + 1,
+          }
+        : {};
     const name = entry.title ?? entry.trackId;
     return (
       <Row
         key={`${entry.trackId}-${entry.position}`}
+        {...listItemProps}
         className="flex h-12 items-center justify-between gap-3 border-b border-current/10 text-sm"
       >
         <label className="flex min-w-0 flex-1 items-center gap-3">
@@ -505,7 +516,7 @@ export function PlaylistsView() {
                         containerProps={{ role: 'list', 'aria-label': 'Playlist tracks' }}
                         className="overflow-y-auto"
                         style={{ height: Math.min(visibleEntries.length * ENTRY_ROW_HEIGHT, 576) }}
-                        renderItem={(entry) => renderEntry(entry, 'div')}
+                        renderItem={(entry, index) => renderEntry(entry, 'div', index)}
                       />
                     ) : (
                       <ol aria-label="Playlist tracks">

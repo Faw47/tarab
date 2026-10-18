@@ -16,18 +16,19 @@ function files(dir: string, ext: RegExp): string[] {
 describe('12 px text floor (FE-30)', () => {
   it('has no Tailwind text size below 12 px in components', () => {
     const offenders = files(SRC, /\.tsx$/).flatMap((path) =>
-      [...readFileSync(path, 'utf8').matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)]
-        .filter((match) => Number(match[1]) < 12)
+      [...readFileSync(path, 'utf8').matchAll(/text-\[(\d*\.?\d+)(px|r?em)\]/g)]
+        .filter((match) => Number(match[1]) * (match[2] === 'px' ? 1 : 16) < 12)
         .map((match) => `${path}: ${match[0]}`),
     );
     expect(offenders).toEqual([]);
   });
 
-  it('has no rem font size below 0.75rem in the library stylesheet', () => {
-    const css = readFileSync(join(SRC, 'components/library/library-view.css'), 'utf8');
-    const small = [...css.matchAll(/font-size:\s*(\d*\.\d+)rem/g)].filter(
-      (match) => Number(match[1]) < 0.75,
+  it('has no font size below 12 px in any stylesheet', () => {
+    const offenders = files(SRC, /\.css$/).flatMap((path) =>
+      [...readFileSync(path, 'utf8').matchAll(/font-size:\s*(\d*\.?\d+)(px|r?em)\b/g)]
+        .filter((match) => Number(match[1]) * (match[2] === 'px' ? 1 : 16) < 12)
+        .map((match) => `${path}: ${match[0]}`),
     );
-    expect(small.map((match) => match[0])).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 });

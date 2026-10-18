@@ -627,7 +627,7 @@ export const HomeView = memo(
             EMPTY LIBRARY STATE
         =============================================================== */}
           {tracks.length === 0 && (
-            <div className="text-center py-20 tarab-fade-up">
+            <div className={clsx('text-center py-20', !reducedEffects && 'tarab-fade-up')}>
               <div className="w-20 h-20 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] flex items-center justify-center mx-auto mb-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                 <Music2 className="w-9 h-9 text-white/20" />
               </div>

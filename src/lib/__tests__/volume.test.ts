@@ -55,4 +55,11 @@ describe('volume (FE-16)', () => {
       error: expect.any(Error),
     });
   });
+
+  it('does not unmute to the near-silent levels a drag to zero passes through', async () => {
+    await applyVolume(0.6);
+    for (const level of [0.3, 0.09, 0.04, 0.01, 0]) await applyVolume(level);
+    await toggleMute();
+    expect(usePlayerStore.getState().volume).toBe(0.3);
+  });
 });

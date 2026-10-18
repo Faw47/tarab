@@ -97,6 +97,20 @@ describe('PlaylistsView (FE-26)', () => {
   });
 
   it('virtualizes long playlists', () => {
+    // jsdom has no layout; give the scroll container a size so the virtualizer renders a window.
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 800,
+      height: 576,
+      top: 0,
+      left: 0,
+      bottom: 576,
+      right: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(576);
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
     setPlaylist(
       Array.from({ length: 2000 }, (_, n) => entry(n)),
       'Manual',
@@ -104,6 +118,15 @@ describe('PlaylistsView (FE-26)', () => {
     render(<PlaylistsView />);
     fireEvent.click(screen.getByRole('button', { name: /Road trip/ }));
     const list = screen.getByRole('list', { name: 'Playlist tracks' });
-    expect(within(list).queryAllByRole('checkbox').length).toBeLessThan(200);
+    const rendered = within(list).queryAllByRole('checkbox').length;
+    expect(rendered).toBeGreaterThan(0);
+    expect(rendered).toBeLessThan(200);
+    const items = within(list).getAllByRole('listitem');
+    expect(items.length).toBeGreaterThan(0);
+    expect(items[0]).toHaveAttribute('aria-setsize', '2000');
+    expect(items[0]).toHaveAttribute('aria-posinset', '1');
+    rect.mockRestore();
+    height.mockRestore();
+    width.mockRestore();
   });
 });

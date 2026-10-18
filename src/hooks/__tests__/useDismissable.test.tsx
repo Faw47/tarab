@@ -24,8 +24,11 @@ function Popover() {
 describe('useDismissable (FE-16)', () => {
   it('closes on Escape, marks it handled and returns focus', () => {
     render(<Popover />);
+    screen.getByRole('button', { name: 'Vol' }).focus();
     // fireEvent returns false when a listener called preventDefault.
-    const notHandled = fireEvent.keyDown(document.body, { key: 'Escape' });
+    const notHandled = fireEvent.keyDown(screen.getByRole('button', { name: 'Vol' }), {
+      key: 'Escape',
+    });
     expect(notHandled).toBe(false);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByRole('button', { name: 'Vol' })).toHaveFocus();
@@ -37,5 +40,22 @@ describe('useDismissable (FE-16)', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.pointerDown(screen.getByText('outside'));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('leaves Escape to a focused dialog above the popover', () => {
+    render(
+      <>
+        <Popover />
+        <div role="dialog" aria-modal="true" aria-label="Command palette">
+          <input aria-label="Search commands" />
+        </div>
+      </>,
+    );
+    const search = screen.getByRole('textbox', { name: 'Search commands' });
+    search.focus();
+    const notHandled = fireEvent.keyDown(search, { key: 'Escape' });
+    expect(notHandled).toBe(true);
+    expect(screen.getByText('segments')).toBeInTheDocument();
+    expect(search).toHaveFocus();
   });
 });

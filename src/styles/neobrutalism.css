@@ -339,7 +339,7 @@
   border: 2px solid #000000;
   background: var(--signal-active);
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -389,7 +389,7 @@
   transform: translateX(-50%);
   background: #000000;
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 2px 6px;
   border: 2px solid #000000;
@@ -425,7 +425,7 @@
   border: 2px solid #000000;
   overflow: hidden;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
   user-select: none;
@@ -499,7 +499,7 @@
 
 [data-theme="neobrutalism"] .neo-danger-zone-label {
   color: var(--signal-danger);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -509,7 +509,7 @@
   border: 2px solid #000000;
   box-shadow: 4px 4px 0px 0px #000000;
   color: #ffffff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -527,7 +527,7 @@
   box-shadow: 2px 2px 0px 0px #000000;
   background: #ffffff;
   padding: 5px 12px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -791,4 +791,32 @@
   [data-full-player-dialog]
   :is([class*="shadow-white"], [class*="shadow-black"], [class*="shadow-2xl"]) {
   --tw-shadow-color: transparent !important;
+}
+
+/* On states (shuffle, repeat) were a lighter translucent fill plus a white ring and glow dot, which
+   all turn white on white here; they use the lime active fill and an ink dot instead. */
+[data-theme="neobrutalism"] [data-full-player-dialog] [class~="ring-white/50"] {
+  /* Lime green: the spec's "currently active" color (--signal-active is the yellow one). */
+  background: var(--signal-play) !important;
+}
+
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  [class*="shadow-[0_0_8px_2px_rgba(255,255,255"] {
+  background: #000000 !important;
+  box-shadow: none !important;
+}
+
+/* Dark scrims (the card's lyrics overlay) become paper so ink lyrics stay readable. */
+[data-theme="neobrutalism"]
+  [data-full-player-dialog]
+  :is([class~="bg-black/50"], [class~="bg-black/60"], [class~="bg-black/70"]) {
+  background: #ffffff !important;
+}
+
+/* Arabic and other cursive scripts must not be letter-spaced: spacing breaks their joining in
+   engines that apply it (WebKit). Neo metadata carries dir="auto", so RTL titles resolve to
+   :dir(rtl) here and drop the wide label tracking (FE-22). */
+[data-theme="neobrutalism"] [dir="auto"]:dir(rtl) {
+  letter-spacing: normal !important;
 }

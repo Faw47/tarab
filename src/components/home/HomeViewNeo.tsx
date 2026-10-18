@@ -284,10 +284,16 @@ const NeoAlbumCard = memo(
             <Play size={18} fill="currentColor" strokeWidth={STROKE} />
           </button>
         </div>
-        <p className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black">
+        <p
+          dir="auto"
+          className="truncate text-center text-[12px] font-black uppercase tracking-[0.1em] text-black"
+        >
           {track.album}
         </p>
-        <p className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]">
+        <p
+          dir="auto"
+          className="mt-1 truncate text-center text-[12px] font-bold uppercase tracking-[0.15em] text-[#595959]"
+        >
           {track.artist}
         </p>
       </div>
@@ -324,6 +330,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
 
   const { libraryStats, albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
   const albums = allAlbums.slice(0, 24);
+  const hasStats = Boolean(libraryStats && libraryStats.trackCount > 0);
 
   if (isLibraryLoading) {
     return (
@@ -420,11 +427,13 @@ export const HomeViewNeo = memo(function HomeViewNeo({
 
             <div className="flex min-w-0 flex-1 flex-col justify-between gap-4">
               <div className="flex flex-col gap-3">
-                <h1 className="neo-type-level-1 break-words py-1 text-black">
+                <h1 dir="auto" className="neo-type-level-1 break-words py-1 text-black">
                   {currentTrack.title}
                 </h1>
                 <div className={cn(BORDER, SHADOW_COMP, 'self-start bg-[#FFE234] px-3 py-1.5')}>
-                  <span className="neo-type-level-2 text-black">{currentTrack.artist}</span>
+                  <span dir="auto" className="neo-type-level-2 text-black">
+                    {currentTrack.artist}
+                  </span>
                 </div>
               </div>
 
@@ -517,7 +526,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
           </section>
         ) : null}
 
-        <section className="pb-20">
+        <section className={hasStats ? undefined : 'pb-20'}>
           <div className="mb-8 flex items-end justify-between gap-4">
             <div className="min-w-0 flex-1">
               <NeoSectionHeader emoji="💿" label="ALBUMS" />
@@ -587,8 +596,8 @@ export const HomeViewNeo = memo(function HomeViewNeo({
           )}
         </section>
 
-        {libraryStats && libraryStats.trackCount > 0 ? (
-          <section aria-label="Library stats" className="-mt-12 pb-20">
+        {hasStats && libraryStats ? (
+          <section aria-label="Library stats" className="pb-20">
             <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {[
                 ['Tracks', libraryStats.trackCount],

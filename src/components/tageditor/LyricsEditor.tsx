@@ -848,6 +848,11 @@ export const LyricsEditor = memo(
               placeholder={`[00:12.00] Start typing synced lyrics here\n[00:15.50] Each line begins with a timestamp\n[00:19.00] Format: [MM:SS.CS] text`}
               className="w-full panel rounded-xl px-4 py-3 text-text-primary font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[400px]"
               aria-label="LRC lyric content"
+              // LRC lines start with a timestamp; keep every line left to right so the timestamp
+              // stays at the start even when the lyric is Arabic (the global per-line bidi rule
+              // would otherwise flip those lines).
+              dir="ltr"
+              style={{ unicodeBidi: 'isolate' }}
             />
             <p className="text-xs text-text-muted">
               LRC format: [MM:SS.CS] text — CS = centiseconds (00–99), MS = milliseconds (000–999)

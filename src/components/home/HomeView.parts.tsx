@@ -3,6 +3,7 @@ import { Mic2, Play, Volume2, VolumeX } from 'lucide-react';
 import type { CSSProperties, ElementType, PointerEvent as ReactPointerEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumArtist } from '../../lib/album-key';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
@@ -61,6 +62,7 @@ NowPlayingBars.displayName = 'NowPlayingBars';
 // ---------------------------------------------------------------------------
 
 export const CardLyricsDisplay = memo(() => {
+  const reducedEffects = useEffectiveReducedEffects();
   const { lyrics, isPlaying } = usePlayerStore(
     useShallow((s) => ({ lyrics: s.lyrics, isPlaying: s.isPlaying })),
   );
@@ -110,7 +112,12 @@ export const CardLyricsDisplay = memo(() => {
   if (!text) return null;
 
   return (
-    <div className="mt-3.5 flex items-start gap-2 w-full select-none tarab-fade-up">
+    <div
+      className={clsx(
+        'mt-3.5 flex items-start gap-2 w-full select-none',
+        !reducedEffects && 'tarab-fade-up',
+      )}
+    >
       <Mic2 className="w-3 h-3 mt-[5px] shrink-0 text-white/25" />
       <p
         className={clsx(
@@ -476,12 +483,7 @@ export const AlbumSpotlightCard = memo(
               >
                 {track.album}
               </p>
-              <p
-                className={clsx(
-                  'text-white/48 truncate mt-0.5',
-                  featured ? 'text-[0.75rem]' : 'text-[0.68rem]',
-                )}
-              >
+              <p className={clsx('text-white/48 truncate mt-0.5', 'text-[0.75rem]')}>
                 {track.artist}
               </p>
             </div>

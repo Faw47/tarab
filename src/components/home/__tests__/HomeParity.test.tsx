@@ -70,6 +70,8 @@ describe('Home parity between themes (FE-18)', () => {
       'ghost',
       'bg-transparent',
     );
+    // FE-22: neo metadata resolves its own direction, so RTL titles drop the label tracking.
+    expect(screen.getByText('Album 0')).toHaveAttribute('dir', 'auto');
   });
 
   it('neo Home offers View all and library stats', () => {

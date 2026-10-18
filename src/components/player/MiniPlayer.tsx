@@ -180,10 +180,16 @@ export const MiniPlayer = memo(
               </button>
 
               <button onClick={onExpand} className="flex flex-col text-left truncate group flex-1">
-                <span className="font-black text-lg text-black uppercase tracking-widest truncate group-hover:underline decoration-2 underline-offset-4">
+                <span
+                  dir="auto"
+                  className="font-black text-lg text-black uppercase tracking-widest truncate group-hover:underline decoration-2 underline-offset-4"
+                >
                   {currentTrack.title}
                 </span>
-                <span className="font-bold text-xs text-black/70 uppercase tracking-[0.1em] truncate">
+                <span
+                  dir="auto"
+                  className="font-bold text-xs text-black/70 uppercase tracking-[0.1em] truncate"
+                >
                   {currentTrack.artist}
                 </span>
               </button>

@@ -245,15 +245,21 @@ export function AppLayouts({
               data-tauri-drag-region
               data-testid="rail-title-strip"
               className={cn(
-                'z-50 flex h-12 w-full shrink-0 items-center pr-3',
-                isAlbumView && 'absolute top-0 left-0 right-0',
+                'z-50 flex shrink-0 items-center',
+                // Album view: only the slot the album's sticky header leaves for Back (px-6,
+                // 40 px, vertically centred in h-16/h-20), so the strip covers none of its
+                // controls or the scroll area.
+                isAlbumView ? 'absolute top-0 left-0 h-16 w-[4.5rem] md:h-20' : 'h-12 w-full pr-3',
               )}
-              style={{ paddingLeft: Math.max(12, titlebarInsetLeft) }}
+              style={{ paddingLeft: isAlbumView ? 24 : Math.max(12, titlebarInsetLeft) }}
             >
               {canGoBack ? (
                 <Button
                   onClick={onBack}
-                  className="h-9 w-9 rounded-full bg-black/20 shadow-md"
+                  className={cn(
+                    'rounded-full bg-black/20 shadow-md',
+                    isAlbumView ? 'h-10 w-10' : 'h-9 w-9',
+                  )}
                   contentClassName="flex items-center justify-center p-0"
                   aria-label="Go back"
                   title="Back"

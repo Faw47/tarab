@@ -130,6 +130,9 @@ describe('icon-rail title strip (FE-08)', () => {
     );
     const strip = screen.getByTestId('rail-title-strip');
     expect(strip).toHaveAttribute('data-tauri-drag-region');
+    // In the album view it is limited to the Back slot, clear of the sticky header's controls.
+    expect(strip.className).toContain('w-[4.5rem]');
+    expect(strip.className).not.toContain('w-full');
     screen.getByRole('button', { name: 'Go back' }).click();
     expect(onBack).toHaveBeenCalledTimes(1);
   });
