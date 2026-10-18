@@ -111,13 +111,17 @@ const SidebarNavButton = memo(function SidebarNavButton({
     if (segment === 'libraryBrowse') return onLibrarySurface && !searchUiOpen;
     return currentView === view;
   }, [previewActive, segment, onLibrarySurface, searchUiOpen, currentView, view]);
-  const handleClick = useCallback(() => {
-    if (suppressNextTabClickRef?.current) {
-      suppressNextTabClickRef.current = false;
-      return;
-    }
-    onNavigate(view);
-  }, [onNavigate, view, suppressNextTabClickRef]);
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      // Only a pointer click (detail > 0) can follow a drag; Enter and Space always navigate.
+      if (suppressNextTabClickRef?.current && event.detail > 0) {
+        suppressNextTabClickRef.current = false;
+        return;
+      }
+      onNavigate(view);
+    },
+    [onNavigate, view, suppressNextTabClickRef],
+  );
   const glassVars = useMemo(() => getIconNavButtonVars(active), [active]);
 
   if (theme === 'neobrutalism') {

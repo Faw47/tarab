@@ -124,8 +124,9 @@ export const SlidingTabGroup = memo(function SlidingTabGroup({
             key={tab.view}
             type="button"
             aria-current={isActive ? 'page' : undefined}
-            onClick={() => {
-              if (suppressNextTabClickRef.current) {
+            onClick={(event) => {
+              // Only a pointer click (detail > 0) can follow a drag; Enter and Space always navigate.
+              if (suppressNextTabClickRef.current && event.detail > 0) {
                 suppressNextTabClickRef.current = false;
                 return;
               }

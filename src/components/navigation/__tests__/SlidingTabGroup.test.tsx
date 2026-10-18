@@ -53,6 +53,14 @@ describe('SlidingTabGroup', () => {
     fireEvent.click(screen.getByRole('button', { name: /Library/ }));
 
     expect(onNavigate).toHaveBeenLastCalledWith('library');
+
+    // Keyboard activation (click with detail 0) is never swallowed, even with a stale flag.
+    rerender(<SlidingTabGroup tabs={tabs} currentView="home" onNavigate={onNavigate} />);
+    fireEvent.pointerDown(nav, { button: 0, pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerUp(nav, { button: 0, pointerId: 1, clientX: 5, clientY: 5 });
+    onNavigate.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Library/ }), { detail: 0 });
+    expect(onNavigate).toHaveBeenCalledWith('library');
     Reflect.deleteProperty(HTMLElement.prototype, 'setPointerCapture');
     vi.unstubAllGlobals();
   });

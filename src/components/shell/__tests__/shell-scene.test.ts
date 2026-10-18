@@ -10,9 +10,14 @@ describe('liquid shell scene setup', () => {
   });
 
   it('passes palette colors to the shaders without linearizing them', () => {
-    const color = shaderColor('rgba(128, 64, 32, 0.5)');
+    const color = shaderColor('rgb(128, 64, 32)');
     expect(color.r).toBeCloseTo(128 / 255, 3);
     expect(color.g).toBeCloseTo(64 / 255, 3);
     expect(color.b).toBeCloseTo(32 / 255, 3);
+  });
+
+  it('scales a translucent palette color by its alpha', () => {
+    expect(shaderColor('rgba(128, 64, 32, 0.5)').r).toBeCloseTo(64 / 255, 3);
+    expect(shaderColor('#ff0000').r).toBe(1);
   });
 });

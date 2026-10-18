@@ -10,10 +10,17 @@ import {
 /**
  * A CSS color as raw RGB for the shell shaders. Their output is written to the canvas without a
  * color-space conversion, so the CSS values pass through as they are instead of being linearized
- * (which made the palette several times darker). Alpha in rgba() strings is not used.
+ * (which made the palette several times darker). The alpha of an rgba() color scales it, since the
+ * shaders add the colors and overlapping blobs would otherwise clip toward white.
  */
 export function shaderColor(css: string): THREE.Color {
-  return new THREE.Color().setStyle(css, THREE.LinearSRGBColorSpace);
+  const color = new THREE.Color().setStyle(css, THREE.LinearSRGBColorSpace);
+  const parts = /^rgba?\((.*)\)$/i
+    .exec(css.trim())?.[1]
+    .split(/[\s,/]+/)
+    .filter(Boolean);
+  const alpha = parts?.length === 4 ? Number.parseFloat(parts[3]) : Number.NaN;
+  return Number.isFinite(alpha) ? color.multiplyScalar(alpha) : color;
 }
 
 export type LiquidBgColors = Record<'b1' | 'b2' | 'b3' | 'b4' | 'b5', string>;

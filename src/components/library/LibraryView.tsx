@@ -371,7 +371,8 @@ export const LibraryCommandDeck = memo(function LibraryCommandDeck({
                   aria-selected={isActive}
                   className={cn('library-v2-tab', isActive && 'is-active')}
                   onClick={(e) => {
-                    if (suppressNextTabClickRef.current) {
+                    // Only a pointer click (detail > 0) can follow a drag.
+                    if (suppressNextTabClickRef.current && e.detail > 0) {
                       suppressNextTabClickRef.current = false;
                       e.preventDefault();
                       e.stopPropagation();
