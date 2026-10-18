@@ -267,20 +267,18 @@ const NeoAlbumCard = memo(
       <div
         className={cn(
           NEO_POLAROID_CARD,
-          'flex aspect-[4/5] flex-col',
+          'group relative flex aspect-[4/5] flex-col',
           polaroidRotation(index),
           isPlayingAlbum && NEO_POLAROID_PLAYING,
         )}
-        onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}
-        role="button"
-        tabIndex={0}
       >
+        {/* Open and Play are sibling buttons, so Enter on Play plays instead of opening. */}
+        <button
+          type="button"
+          className="absolute inset-0 z-10 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-black"
+          onClick={open}
+          aria-label={`Open ${track.album} by ${track.artist}`}
+        />
         <div
           className={cn(NEO_TAPE, polaroidTapeRotation(index))}
           style={TAPE_STYLE}
@@ -304,7 +302,7 @@ const NeoAlbumCard = memo(
               SNAP,
               PRESS_EFFECT,
               'shadow-[3px_3px_0_0_#000] hover:bg-[var(--signal-active)]',
-              'opacity-0 group-hover:opacity-100',
+              'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
             )}
             onClick={(e) => {
               e.stopPropagation();

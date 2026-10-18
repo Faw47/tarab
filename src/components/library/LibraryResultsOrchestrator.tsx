@@ -113,6 +113,8 @@ const TrackTile = memo(function TrackTile({
         }}
         onDragStart={(event) => onDragStart(event, track)}
         onKeyDown={(event) => {
+          // Keys aimed at an inner control (Play) belong to that control.
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             const multi = event.metaKey || event.ctrlKey || event.shiftKey;
@@ -197,6 +199,8 @@ const TrackTile = memo(function TrackTile({
       }}
       onDragStart={(event) => onDragStart(event, track)}
       onKeyDown={(event) => {
+        // Keys aimed at an inner control (Play) belong to that control.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onPlayTrack(track);
@@ -297,6 +301,8 @@ const AlbumTile = memo(function AlbumTile({
         )}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
+          // Keys aimed at an inner control (Play) belong to that control.
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(album.track);
@@ -365,6 +371,8 @@ const AlbumTile = memo(function AlbumTile({
         )}
         onClick={() => onOpen(album.track)}
         onKeyDown={(event) => {
+          // Keys aimed at an inner control (Play) belong to that control.
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(album.track);
@@ -392,21 +400,20 @@ const AlbumTile = memo(function AlbumTile({
             />
             <button
               type="button"
-              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100"
+              className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity duration-[var(--motion-standard)] group-hover:opacity-100 focus-visible:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 onPlay(album.track);
               }}
               aria-label={`Play ${album.track.album}`}
             >
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-11 h-11 rounded-full bg-white text-black shadow-[0_6px_22_rgba(0,0,0,0.42)] transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-emphasis)] hover:scale-[1.12] active:scale-[0.92] pointer-events-none"
-                tabIndex={-1}
+              {/* Decorative: a <Button> here nested a button inside this button. */}
+              <span
+                aria-hidden="true"
+                className="flex w-11 h-11 items-center justify-center rounded-full bg-white text-black shadow-[0_6px_22px_rgba(0,0,0,0.42)] transition-transform duration-[var(--motion-emphasis)] hover:scale-[1.12] active:scale-[0.92]"
               >
                 <Play className="w-4 h-4 ml-0.5" fill="currentColor" />
-              </Button>
+              </span>
             </button>
           </div>
 
@@ -449,6 +456,8 @@ const AlbumTile = memo(function AlbumTile({
       )}
       onClick={() => onOpen(album.track)}
       onKeyDown={(event) => {
+        // Keys aimed at an inner control (Play) belong to that control.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen(album.track);
@@ -539,6 +548,8 @@ const ArtistTile = memo(function ArtistTile({
         )}
         onClick={() => onOpen(artist.artist)}
         onKeyDown={(event) => {
+          // Keys aimed at an inner control (Play) belong to that control.
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onOpen(artist.artist);
@@ -609,6 +620,8 @@ const ArtistTile = memo(function ArtistTile({
       className="library-v2-track-tile"
       onClick={() => onOpen(artist.artist)}
       onKeyDown={(event) => {
+        // Keys aimed at an inner control (Play) belong to that control.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen(artist.artist);
