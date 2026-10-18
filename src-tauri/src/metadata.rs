@@ -13,7 +13,7 @@ use crate::database::SharedDatabase;
 use crate::file_ops::{
     ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
 };
-use crate::image_cache::{is_valid_thumbnail_size, SharedImageCache};
+use crate::image_cache::{is_valid_thumbnail_size, ImageCache, SharedImageCache};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TrackMetadata {
@@ -406,13 +406,35 @@ fn extract_palette_from_bytes(bytes: &[u8]) -> Option<CoverArtPalette> {
     })
 }
 
-fn generate_blurhash_from_bytes(bytes: &[u8]) -> Option<String> {
-    let img = image::load_from_memory(bytes).ok()?;
-    // Resize for faster processing
-    let thumb = img.thumbnail(64, 64).to_rgba8();
-    let (tw, th) = thumb.dimensions();
+/// Blurhashes computed this session, keyed by artwork hash. Tracks of one album share the same
+/// embedded picture, so a scan decodes each distinct artwork once instead of once per track.
+const BLURHASH_CACHE_LIMIT: usize = 4096;
+static BLURHASH_CACHE: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<String, Option<String>>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
-    blurhash::encode(4, 3, tw, th, &thumb.into_raw()).ok()
+fn cached_blurhash(bytes: &[u8], compute: impl FnOnce(&[u8]) -> Option<String>) -> Option<String> {
+    let key = ImageCache::hash_image_data(bytes);
+    if let Some(found) = BLURHASH_CACHE.lock().get(&key) {
+        return found.clone();
+    }
+    let blurhash = compute(bytes);
+    let mut cache = BLURHASH_CACHE.lock();
+    if cache.len() >= BLURHASH_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(key, blurhash.clone());
+    blurhash
+}
+
+fn generate_blurhash_from_bytes(bytes: &[u8]) -> Option<String> {
+    cached_blurhash(bytes, |bytes| {
+        let img = image::load_from_memory(bytes).ok()?;
+        // Resize for faster processing
+        let thumb = img.thumbnail(64, 64).to_rgba8();
+        let (tw, th) = thumb.dimensions();
+        blurhash::encode(4, 3, tw, th, &thumb.into_raw()).ok()
+    })
 }
 
 fn ensure_metadata_path_allowed(
@@ -800,6 +822,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-metadata-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn blurhash_is_computed_once_per_distinct_artwork() {
+        // Regression for AR-08: every track decoded its full-resolution artwork for a blurhash.
+        let artwork = b"tarab-blurhash-cache-test-artwork".to_vec();
+        let mut computed = 0;
+        for _ in 0..3 {
+            let result = cached_blurhash(&artwork, |_| {
+                computed += 1;
+                Some("LKO2?U%2Tw=w".to_string())
+            });
+            assert_eq!(result.as_deref(), Some("LKO2?U%2Tw=w"));
+        }
+        assert_eq!(computed, 1);
     }
 
     #[test]

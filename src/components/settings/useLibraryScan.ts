@@ -114,6 +114,8 @@ interface ScanSingleFolderOptions {
 interface ScanSingleFolderResult {
   folderPath: string;
   discoveredPaths: string[];
+  /** False when the walk skipped unreadable entries; reconcile then keeps rows it did not see. */
+  traversalComplete: boolean;
   tracks: Track[];
   metadataErrors: {
     path: string | null;
@@ -136,17 +138,27 @@ async function scanSingleFolder({
   onProgress,
   isCancelled,
 }: ScanSingleFolderOptions): Promise<ScanSingleFolderResult> {
-  const filePaths = await scanLibrary(folderPath, followSymlinks);
+  const scan = await scanLibrary(folderPath, followSymlinks);
+  const filePaths = scan.paths;
   if (isCancelled()) throw new Error('Library scan cancelled');
   onProgress(0.1);
+
+  const traversalComplete = scan.traversalErrors.length === 0 && scan.skippedErrorCount === 0;
+  const traversalErrors = scan.traversalErrors.map((error) => ({
+    path: error.path,
+    code: 'traversalIncomplete',
+    message: error.message,
+    recoverable: true,
+  }));
 
   if (filePaths.length === 0) {
     onProgress(1);
     return {
       folderPath,
       discoveredPaths: [],
+      traversalComplete,
       tracks: [],
-      metadataErrors: [],
+      metadataErrors: traversalErrors,
     };
   }
 
@@ -221,8 +233,9 @@ async function scanSingleFolder({
   return {
     folderPath,
     discoveredPaths: filePaths,
+    traversalComplete,
     tracks,
-    metadataErrors,
+    metadataErrors: [...traversalErrors, ...metadataErrors],
   };
 }
 
@@ -233,7 +246,7 @@ async function persistFolderTracks(
   const result = await dbReconcileFolderScan({
     folderPath: scan.folderPath,
     discoveredPaths: scan.discoveredPaths,
-    traversalComplete: true,
+    traversalComplete: scan.traversalComplete,
     errors: scan.metadataErrors,
     tracks: scan.tracks.map((t) => ({
       id: t.id,

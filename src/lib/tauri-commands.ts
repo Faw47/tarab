@@ -215,8 +215,17 @@ export const revokeLibraryGrant = async (grantId: string): Promise<void> => {
   return invoke('revoke_library_grant', { grantId });
 };
 
-export const watchLibraryPaths = async (paths: string[]): Promise<void> => {
-  return invoke('watch_library_paths', { paths });
+let watchRequests: Promise<unknown> = Promise.resolve();
+
+/**
+ * Replaces the native watch set. Calls run one at a time in call order: the native command is
+ * async, so a cleanup `[]` and the next folder list sent back to back could otherwise apply in
+ * either order and leave watching off.
+ */
+export const watchLibraryPaths = (paths: string[]): Promise<void> => {
+  const request = watchRequests.then(() => invoke<void>('watch_library_paths', { paths }));
+  watchRequests = request.catch(() => undefined);
+  return request;
 };
 
 // Library commands
@@ -225,14 +234,29 @@ interface LibraryScanPathChunk {
   paths: string[];
 }
 
+/** An entry the native walk could not read; the scan skipped it and continued. */
+export interface ScanTraversalError {
+  path: string | null;
+  message: string;
+}
+
+export interface LibraryScanResult {
+  paths: string[];
+  traversalErrors: ScanTraversalError[];
+  /** Traversal errors beyond the reported ones. */
+  skippedErrorCount: number;
+}
+
 interface LibraryScanStreamSummary {
   scanId: string;
   pathCount: number;
+  traversalErrors: ScanTraversalError[];
+  skippedErrorCount: number;
 }
 
 const streamLibraryScan = async (
   runScan: (scanId: string) => Promise<LibraryScanStreamSummary>,
-): Promise<string[]> => {
+): Promise<LibraryScanResult> => {
   const scanId = crypto.randomUUID();
   const paths: string[] = [];
   let expectedCount: number | null = null;
@@ -260,13 +284,20 @@ const streamLibraryScan = async (
     if (summary.pathCount !== paths.length) {
       throw new Error('Library scan stream did not deliver the expected number of paths.');
     }
-    return paths;
+    return {
+      paths,
+      traversalErrors: summary.traversalErrors ?? [],
+      skippedErrorCount: summary.skippedErrorCount ?? 0,
+    };
   } finally {
     unlisten();
   }
 };
 
-export const scanLibrary = async (folderPath: string, followLinks?: boolean): Promise<string[]> =>
+export const scanLibrary = async (
+  folderPath: string,
+  followLinks?: boolean,
+): Promise<LibraryScanResult> =>
   streamLibraryScan((scanId) =>
     invoke('scan_library', {
       scanId,
@@ -282,7 +313,7 @@ export const cancelLibraryScan = async (): Promise<void> => {
 export const scanLibraryParallel = async (
   folderPath: string,
   followLinks?: boolean,
-): Promise<string[]> =>
+): Promise<LibraryScanResult> =>
   streamLibraryScan((scanId) =>
     invoke('scan_library_parallel', {
       scanId,

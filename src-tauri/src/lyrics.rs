@@ -240,7 +240,9 @@ fn write_lyrics_for_track_checked(
     } else {
         crate::file_ops::ensure_target_path_allowed(&lrc_path, roots, "write lyrics sidecar")?;
     }
-    std::fs::write(&lrc_path, content).map_err(|e| format!("Failed to write lyrics: {}", e))
+    crate::file_ops::replace_file_atomically(&lrc_path, false, |staged| {
+        std::fs::write(staged, content).map_err(|e| format!("Failed to write lyrics: {}", e))
+    })
 }
 
 /// Normalize path separators for the current platform
@@ -255,8 +257,19 @@ fn normalize_path_separators(path: &str) -> String {
     }
 }
 
+/// True for a regular, non-symlink sidecar file inside the library roots. Checks metadata only;
+/// the caller reads the content once, and only when the index entry changed.
+fn is_allowed_sidecar(path: &Path, roots: &[PathBuf]) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+        !metadata.file_type().is_symlink()
+            && metadata.is_file()
+            && metadata.len() > 0
+            && metadata.len() <= MAX_LYRICS_SIDECAR_BYTES
+    }) && ensure_existing_path_allowed(path, roots, "index lyrics sidecar").is_ok()
+}
+
 /// Helper function to find .lrc file for a track
-/// Handles Windows path normalization and tries multiple locations
+/// Handles Windows path normalization and tries the canonical and the original path
 fn find_lyrics_file(track_path: &str, roots: &[PathBuf]) -> Option<PathBuf> {
     // Normalize path separators for the current platform
     let normalized_path = normalize_path_separators(track_path);
@@ -265,44 +278,17 @@ fn find_lyrics_file(track_path: &str, roots: &[PathBuf]) -> Option<PathBuf> {
     // Try to get canonical path, but don't fail if it doesn't exist
     let base_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
-    // Try .lrc file with the base path
-    let lrc_path = base_path.with_extension("lrc");
-    if read_allowed_sidecar(&lrc_path, roots).is_some() {
-        return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
+    for lrc_path in [base_path.with_extension("lrc"), path.with_extension("lrc")] {
+        if is_allowed_sidecar(&lrc_path, roots) {
+            return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
+        }
     }
 
-    // Also try with the original (non-canonicalized) path
-    let lrc_path_original = path.with_extension("lrc");
-    if read_allowed_sidecar(&lrc_path_original, roots).is_some() {
-        return ensure_existing_path_allowed(&lrc_path_original, roots, "index lyrics sidecar")
-            .ok();
-    }
-
-    // Try .txt file
+    // A .txt sidecar counts only when it looks like timed lyrics.
     let txt_path = base_path.with_extension("txt");
     if let Some(content) = read_allowed_sidecar(&txt_path, roots) {
         if content.contains('[') && content.contains(']') {
             return ensure_existing_path_allowed(&txt_path, roots, "index lyrics sidecar").ok();
-        }
-    }
-
-    // Try filename.lrc (same name, different extension) with canonicalized path
-    if let Some(stem) = base_path.file_stem() {
-        if let Some(parent) = base_path.parent() {
-            let lrc_path = parent.join(format!("{}.lrc", stem.to_string_lossy()));
-            if read_allowed_sidecar(&lrc_path, roots).is_some() {
-                return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
-            }
-        }
-    }
-
-    // Try filename.lrc with original path
-    if let Some(stem) = path.file_stem() {
-        if let Some(parent) = path.parent() {
-            let lrc_path = parent.join(format!("{}.lrc", stem.to_string_lossy()));
-            if read_allowed_sidecar(&lrc_path, roots).is_some() {
-                return ensure_existing_path_allowed(&lrc_path, roots, "index lyrics sidecar").ok();
-            }
         }
     }
 
@@ -468,15 +454,16 @@ fn sync_lyrics_index_blocking(
     let mut upserts: Vec<LyricsIndexEntry> = Vec::new();
     let mut deletes: Vec<String> = Vec::new();
     let mut track_ids = HashSet::new();
-    let mut offset = 0;
+    let mut after_id: Option<String> = None;
 
     loop {
         let tracks = db
-            .get_track_paths_page(offset, TRACK_PAGE_SIZE)
+            .get_track_paths_after(after_id.as_deref(), TRACK_PAGE_SIZE)
             .map_err(|e| format!("Failed to get tracks for lyrics sync: {}", e))?;
-        if tracks.is_empty() {
+        let Some(last) = tracks.last() else {
             break;
-        }
+        };
+        after_id = Some(last.id.clone());
 
         for TrackPathRow { id, file_path } in tracks {
             track_ids.insert(id.clone());
@@ -529,8 +516,6 @@ fn sync_lyrics_index_blocking(
                 }
             }
         }
-
-        offset += TRACK_PAGE_SIZE;
     }
 
     for orphan in existing_by_track.keys() {

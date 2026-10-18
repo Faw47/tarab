@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) const TRACK_PATHS_FIRST_SQL: &str =
+    "SELECT id, file_path FROM tracks ORDER BY id ASC LIMIT ?1";
+pub(super) const TRACK_PATHS_AFTER_SQL: &str =
+    "SELECT id, file_path FROM tracks WHERE id > ?1 ORDER BY id ASC LIMIT ?2";
+
 impl Database {
     pub fn upsert_tracks_batch(&self, tracks: &[DbTrack]) -> SqliteResult<usize> {
         let mut conn = self.conn.lock();
@@ -460,21 +465,30 @@ impl Database {
         Ok(tracks)
     }
 
-    pub fn get_track_paths_page(&self, offset: u32, limit: u32) -> SqliteResult<Vec<TrackPathRow>> {
+    /// Returns up to `limit` tracks with an id after `after_id`, in primary-key order. Keyset
+    /// paging walks the primary key index; OFFSET paging re-sorted the table for every page.
+    pub fn get_track_paths_after(
+        &self,
+        after_id: Option<&str>,
+        limit: u32,
+    ) -> SqliteResult<Vec<TrackPathRow>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, file_path FROM tracks ORDER BY id COLLATE NOCASE ASC LIMIT ?1 OFFSET ?2",
-        )?;
-        let tracks = stmt
-            .query_map(params![limit, offset], |row| {
-                Ok(TrackPathRow {
-                    id: row.get(0)?,
-                    file_path: row.get(1)?,
-                })
-            })?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(tracks)
+        let map_row = |row: &rusqlite::Row<'_>| {
+            Ok(TrackPathRow {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+            })
+        };
+        match after_id {
+            Some(after_id) => conn
+                .prepare(TRACK_PATHS_AFTER_SQL)?
+                .query_map(params![after_id, limit], map_row)?
+                .collect(),
+            None => conn
+                .prepare(TRACK_PATHS_FIRST_SQL)?
+                .query_map(params![limit], map_row)?
+                .collect(),
+        }
     }
 
     pub fn get_tracks_by_ids(&self, ids: &[String]) -> SqliteResult<Vec<DbTrack>> {

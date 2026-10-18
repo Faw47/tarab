@@ -135,9 +135,9 @@ export function useDroppedAudioImport({
 
             let filePaths: string[] = [];
             try {
-              filePaths = await scanLibraryParallel(dir, followSymlinks);
+              filePaths = (await scanLibraryParallel(dir, followSymlinks)).paths;
             } catch {
-              filePaths = await scanLibrary(dir, followSymlinks);
+              filePaths = (await scanLibrary(dir, followSymlinks)).paths;
             }
             const normalizedFilePaths = filePaths.map((p) => normalizePath(p));
             updateDirProgress(0.1);

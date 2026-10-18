@@ -142,7 +142,10 @@ pub fn run() {
                     Ok(Some(bytes)) => {
                         let content_length = bytes.len().to_string();
                         http::Response::builder()
-                            .header(http::header::CONTENT_TYPE, "image/webp")
+                            .header(
+                                http::header::CONTENT_TYPE,
+                                image_cache::THUMBNAIL_CONTENT_TYPE,
+                            )
                             .header(http::header::CONTENT_LENGTH, content_length)
                             .header("Access-Control-Allow-Origin", "*")
                             .header(

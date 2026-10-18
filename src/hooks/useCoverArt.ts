@@ -137,7 +137,7 @@ const bytesToBlobUrl = (
   }
   const body = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return {
-    url: URL.createObjectURL(new Blob([body], { type: 'image/webp' })),
+    url: URL.createObjectURL(new Blob([body], { type: 'image/jpeg' })),
     byteLength: body.byteLength,
   };
 };
