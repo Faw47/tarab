@@ -91,6 +91,15 @@ for (const actionReference of remoteActionReferences) {
   }
 }
 
+// Release builds must unwind: parse_guard catches parser panics on malformed media files, which
+// panic = "abort" would turn into a crash on every scan of that folder.
+const releaseProfile = cargoManifest.split(/^\[profile\.release\]\s*$/m)[1]?.split(/^\[/m)[0] ?? '';
+if (/^\s*panic\s*=\s*"abort"/m.test(releaseProfile)) {
+  failures.push(
+    'The release profile must not set panic = "abort" (see src-tauri/src/parse_guard.rs).',
+  );
+}
+
 // Signing secrets must be scoped to the steps that use them. A job-level (or workflow-level) env
 // exposes them to dependency install and build scripts in every later step.
 let envIndent = null;

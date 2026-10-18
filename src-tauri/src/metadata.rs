@@ -125,6 +125,12 @@ fn run_with_pool<T: Send>(pool: Option<&ThreadPool>, job: impl FnOnce() -> T + S
 /// Estimated duration from the file's audio properties (for example the bitrate of an MP3 with no
 /// frame count). Used by playback when the decoder cannot report the length.
 pub fn probe_duration_secs(file_path: &str) -> Option<f64> {
+    crate::parse_guard::guard(file_path, || probe_duration_secs_unguarded(file_path))
+        .ok()
+        .flatten()
+}
+
+fn probe_duration_secs_unguarded(file_path: &str) -> Option<f64> {
     let options = lofty::config::ParseOptions::new()
         .read_tags(false)
         .read_cover_art(false);
@@ -149,6 +155,13 @@ fn first_picture(file: &TaggedFile) -> Option<&Picture> {
 }
 
 fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
+    crate::parse_guard::guard(file_path, || extract_metadata_fast_unguarded(file_path))
+        .map_err(|error| eprintln!("{}", error))
+        .ok()
+        .flatten()
+}
+
+fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
     let path = Path::new(file_path);
 
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
@@ -246,6 +259,13 @@ fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
 
 // Full metadata extraction with cover art
 fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
+    crate::parse_guard::guard(file_path, || extract_metadata_with_art_unguarded(file_path))
+        .map_err(|error| eprintln!("{}", error))
+        .ok()
+        .flatten()
+}
+
+fn extract_metadata_with_art_unguarded(file_path: &str) -> Option<TrackMetadataWithArt> {
     let path = Path::new(file_path);
 
     let tagged_file = Probe::open(path).ok()?.read().ok()?;

@@ -83,7 +83,8 @@ windows = { version = "0.58", features = [
 tauri-plugin-media = { path = "vendor/tauri-plugin-media" }
 
 [profile.release]
-panic = "abort"
+# Unwind so a parser panic on one malformed media file can be caught (see parse_guard.rs).
+panic = "unwind"
 codegen-units = 1
 lto = true
 opt-level = 3

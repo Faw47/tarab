@@ -11,6 +11,7 @@ mod lyrics;
 #[cfg(target_os = "macos")]
 mod macos_menu;
 mod metadata;
+mod parse_guard;
 mod playlist;
 mod session;
 mod startup_failure;

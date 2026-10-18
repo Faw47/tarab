@@ -119,6 +119,10 @@ Release rule: main-window code may call these as needed; mini-player code should
 
 The arm64 Linux and Windows labels are standard GitHub-hosted runner labels. Review the current GitHub-hosted runner reference before each release because GitHub can change images, labels, and installed tools.
 
+### Untrusted media parsing
+
+Release builds use `panic = "unwind"` (enforced by `check-release-config`). Per-file metadata, tag, cover-art, waveform and decoder work runs through `parse_guard::guard` or a `spawn_blocking` task, so a parser panic on a malformed file fails that file instead of aborting the app. A panic elsewhere in a long-lived thread (for example the audio thread outside a guarded parse) now ends only that thread instead of the process.
+
 ### Required release secrets
 
 - Apple: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, and `KEYCHAIN_PASSWORD`.

@@ -34,6 +34,10 @@ const MAX_SOURCE_IMAGE_DIMENSION: u32 = 16_384;
 /// the header and checked before any pixel buffer is allocated, and the decode itself runs under
 /// `image::Limits`, so a small "decompression bomb" cannot force a large allocation.
 pub(crate) fn decode_untrusted_image(bytes: &[u8]) -> Result<DynamicImage, String> {
+    crate::parse_guard::guard("cover art", || decode_untrusted_image_unguarded(bytes))?
+}
+
+fn decode_untrusted_image_unguarded(bytes: &[u8]) -> Result<DynamicImage, String> {
     if bytes.is_empty() || bytes.len() > MAX_SOURCE_IMAGE_BYTES {
         return Err("Cover image exceeds the encoded byte limit".to_string());
     }
