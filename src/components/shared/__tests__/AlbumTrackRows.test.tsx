@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ComponentType } from 'react';
+import { type ComponentType, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '../../../types';
 import { AlbumDetailsOverlay, type AlbumDetailsOverlayProps } from '../AlbumDetailsOverlay';
@@ -47,6 +47,71 @@ describe.each([
   ['liquid', AlbumDetailsOverlay as ComponentType<AlbumDetailsOverlayProps>],
   ['neo', AlbumDetailsOverlayNeo as ComponentType<AlbumDetailsOverlayProps>],
 ])('%s album tracklist (FE-27)', (_name, Overlay) => {
+  it('opens optional details on a plain click and gives them a playback action', () => {
+    const onOpenTrackDetails = vi.fn();
+    const onPlayTrack = vi.fn();
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onOpenTrackDetails, onPlayTrack, onTrackSelect });
+    fireEvent.click(within(screen.getByRole('grid')).getAllByRole('row')[1]);
+    expect(onOpenTrackDetails).toHaveBeenCalledExactlyOnceWith(tracks[0], expect.any(Function));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+    onOpenTrackDetails.mock.calls[0][1]();
+    expect(onPlayTrack).toHaveBeenCalledExactlyOnceWith(tracks[0]);
+  });
+
+  it('selects on plain click during selection mode instead of opening details', () => {
+    const onOpenTrackDetails = vi.fn();
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onOpenTrackDetails, onTrackSelect, selectedTrackIds: ['t1'] });
+    fireEvent.click(within(screen.getByRole('grid')).getAllByRole('row')[2]);
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[1], true);
+    expect(onOpenTrackDetails).not.toHaveBeenCalled();
+  });
+
+  it.each(['ctrlKey', 'metaKey', 'shiftKey'])('uses %s for selection instead of details', (key) => {
+    const onOpenTrackDetails = vi.fn();
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onOpenTrackDetails, onTrackSelect });
+    fireEvent.click(within(screen.getByRole('grid')).getAllByRole('row')[2], { [key]: true });
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[1], true);
+    expect(onOpenTrackDetails).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'Enter',
+    'doubleClick',
+  ])('routes current-track %s through the parent playback action', (input) => {
+    const onPlayTrack = vi.fn();
+    renderOverlay(Overlay, { currentlyPlayingId: 't1', isPlaying: true, onPlayTrack });
+    const row = within(screen.getByRole('grid')).getAllByRole('row')[1];
+    if (input === 'Enter') fireEvent.keyDown(row, { key: 'Enter' });
+    else fireEvent.doubleClick(row);
+    expect(onPlayTrack).toHaveBeenCalledExactlyOnceWith(tracks[0]);
+  });
+
+  it('Space selects in selection mode without playing', () => {
+    const onPlayTrack = vi.fn();
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onPlayTrack, onTrackSelect, selectedTrackIds: ['t1'] });
+    fireEvent.keyDown(within(screen.getByRole('grid')).getAllByRole('row')[2], { key: ' ' });
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[1], true);
+    expect(onPlayTrack).not.toHaveBeenCalled();
+  });
+
+  it('Space requests playback when selection mode is off', () => {
+    const onPlayTrack = vi.fn();
+    renderOverlay(Overlay, { onPlayTrack });
+    fireEvent.keyDown(within(screen.getByRole('grid')).getAllByRole('row')[2], { key: ' ' });
+    expect(onPlayTrack).toHaveBeenCalledExactlyOnceWith(tracks[1]);
+  });
+
+  it('does not play when double-clicking a nested selection control', () => {
+    const onPlayTrack = vi.fn();
+    renderOverlay(Overlay, { onPlayTrack, selectedTrackIds: ['t1'] });
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Deselect Song 1' }));
+    expect(onPlayTrack).not.toHaveBeenCalled();
+  });
+
   it('is a grid, so aria-selected on its rows is valid', () => {
     renderOverlay(Overlay, { selectedTrackIds: ['t2'] });
     const grid = screen.getByRole('grid', { name: 'Album tracklist' });
@@ -138,6 +203,75 @@ describe.each([
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
   const firstRow = () => within(screen.getByRole('grid')).getAllByRole('row')[1];
+
+  it('consumes the release click after a completed hold without opening details', () => {
+    const onTrackSelect = vi.fn();
+    const onOpenTrackDetails = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect, onOpenTrackDetails });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.mouseUp(firstRow());
+    fireEvent.click(firstRow());
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[0], false);
+    expect(onOpenTrackDetails).not.toHaveBeenCalled();
+  });
+
+  it('consumes compatibility mouse events after a completed touch hold', () => {
+    const onTrackSelect = vi.fn();
+    const onOpenTrackDetails = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect, onOpenTrackDetails });
+    fireEvent.pointerDown(firstRow(), { pointerType: 'touch' });
+    fireEvent.touchStart(firstRow());
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.touchEnd(firstRow());
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    fireEvent.mouseUp(firstRow());
+    fireEvent.click(firstRow());
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[0], false);
+    expect(onOpenTrackDetails).not.toHaveBeenCalled();
+  });
+
+  it('keeps parent-owned selection after touch compatibility events', () => {
+    const ControlledOverlay = (props: AlbumDetailsOverlayProps) => {
+      const [selected, setSelected] = useState<string[]>([]);
+      return (
+        <Overlay
+          {...props}
+          selectedTrackIds={selected}
+          onTrackSelect={(track, multi) => {
+            setSelected((ids) =>
+              multi && ids.includes(track.id)
+                ? ids.filter((id) => id !== track.id)
+                : [...(multi ? ids : []), track.id],
+            );
+          }}
+        />
+      );
+    };
+    renderOverlay(ControlledOverlay);
+    fireEvent.pointerDown(firstRow(), { pointerType: 'touch' });
+    fireEvent.touchStart(firstRow());
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.touchEnd(firstRow());
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    fireEvent.mouseUp(firstRow());
+    fireEvent.click(firstRow());
+    expect(firstRow()).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('allows a fresh mouse gesture after a touch hold without a compatibility click', () => {
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect });
+    fireEvent.touchStart(firstRow());
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.touchEnd(firstRow());
+    fireEvent.pointerDown(firstRow(), { pointerType: 'mouse' });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    fireEvent.mouseUp(firstRow());
+    fireEvent.click(firstRow());
+    expect(onTrackSelect).toHaveBeenNthCalledWith(1, tracks[0], false);
+    expect(onTrackSelect).toHaveBeenNthCalledWith(2, tracks[0], true);
+  });
 
   it.each(['mouse', 'touch'])('selects once after a 500 ms %s hold without playing', (input) => {
     const onTrackSelect = vi.fn();

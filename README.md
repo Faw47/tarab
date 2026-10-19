@@ -144,6 +144,10 @@ Neobrutalism rebuilds the interface with:
 
 Both systems preserve the same library, playback, lyric, and editing features.
 
+Home transport and statistics behavior and album row interactions share controllers across themes.
+Album Enter or double-click requests playback; Space selects while in selection mode and plays
+otherwise. A completed hold selects once, including on touch devices that emit mouse events.
+
 Tarab also respects the operating system’s reduced-motion preference and includes a Reduced Effects setting.
 The system preference always wins. The Background setting also stops animated and cover-driven
 background layers instead of only hiding their controls.

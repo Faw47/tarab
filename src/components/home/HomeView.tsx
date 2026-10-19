@@ -42,15 +42,13 @@ import {
   SkipForward,
   Users,
 } from 'lucide-react';
-import { memo, useCallback, useMemo } from 'react';
+import { memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumKey } from '../../lib/album-key';
 import { useRenderLog } from '../../lib/performance';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
 
 import { usePlayerStore } from '../../store/player-store';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
@@ -66,7 +64,7 @@ import {
 } from './HomeView.parts';
 import { useAnimatedCounter, useCoverTilt, useFinePointer } from './home-hooks';
 import type { HomeViewProps } from './homeTypes';
-import { useHomeLibraryModel } from './useHomeLibraryModel';
+import { useHomeController } from './useHomeController';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -105,57 +103,26 @@ export const HomeView = memo(
     const heroAccent = 'var(--hero-accent)';
     const heroGlow = 'var(--hero-glow)';
 
-    const { tracks, libraryStats, albumTracksByKey, albums, playAlbum } = useHomeLibraryModel();
+    const {
+      tracks,
+      albumTracksByKey,
+      albums,
+      playAlbum,
+      stats,
+      hasStats,
+      handleTogglePlay,
+      handlePrevious,
+      handleNext,
+    } = useHomeController(Boolean(currentTrack), 'home-view');
     const reducedEffects = useEffectiveReducedEffects();
     const hasFinePointer = useFinePointer();
     const interactiveOn = !reducedEffects && hasFinePointer;
     const coverTilt = useCoverTilt(interactiveOn);
 
-    const stats = useMemo(() => {
-      if (libraryStats)
-        return {
-          totalTracks: libraryStats.trackCount,
-          totalHours: Math.floor(libraryStats.totalDuration / 3600),
-          uniqueArtists: libraryStats.artistCount,
-          albumCount: libraryStats.albumCount || albums.length,
-        };
-      return {
-        totalTracks: tracks.length,
-        totalHours: Math.floor(tracks.reduce((a, t) => a + t.duration, 0) / 3600),
-        uniqueArtists: new Set(tracks.map((t) => t.artist)).size,
-        albumCount: albums.length,
-      };
-    }, [libraryStats, tracks, albums.length]);
-
     const animTracks = useAnimatedCounter(stats.totalTracks, 1500, reducedEffects);
     const animHours = useAnimatedCounter(stats.totalHours, 1500, reducedEffects);
     const animArtists = useAnimatedCounter(stats.uniqueArtists, 1500, reducedEffects);
     const animAlbums = useAnimatedCounter(stats.albumCount, 1500, reducedEffects);
-
-    const handleTogglePlay = useCallback(async () => {
-      if (!currentTrack) return;
-      try {
-        await toggleCurrentPlayback();
-      } catch (e) {
-        reportError('Could not play or pause', { source: 'home-view', error: e });
-      }
-    }, [currentTrack]);
-
-    const handlePrevious = useCallback(async () => {
-      try {
-        await playAdjacentTrack('previous');
-      } catch (e) {
-        reportError('Could not play the previous track', { source: 'home-view', error: e });
-      }
-    }, []);
-
-    const handleNext = useCallback(async () => {
-      try {
-        await playAdjacentTrack('next');
-      } catch (e) {
-        reportError('Could not play the next track', { source: 'home-view', error: e });
-      }
-    }, []);
 
     // -------------------------------------------------------------------------
     // Loading skeleton
@@ -584,8 +551,8 @@ export const HomeView = memo(
             4 StatTile components in a 2x2 mobile / 4x1 desktop grid.
             Blends v1's icon-card richness with v2's minimal elegance.
         =============================================================== */}
-          {tracks.length > 0 && (
-            <section className="mb-10">
+          {hasStats && (
+            <section aria-label="Library stats" className="mb-10">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatTile
                   Icon={TrackIcon}

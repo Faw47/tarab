@@ -300,7 +300,9 @@ Dynamic metadata and the neo search input use `dir="auto"`. Queue artist and alb
 
 ### Album hold-selection parity
 
-Both album skins share one 500 ms primary-mouse/touch hold controller. A completed hold activates selection without requesting playback. Release, row leave, touch movement/cancellation and context menu opening cancel pending work. Nested buttons retain their own actions. Leaving the album or replacing its tracks cancels the old timer. Existing click, double-click and keyboard activation behavior remains unchanged by this focused correction.
+Both album skins use one interaction controller and one 500 ms primary-mouse/touch hold timer. A completed hold activates selection without requesting playback and consumes its release click, including touch compatibility mouse events. A fresh physical pointer gesture resets that suppression. Release, row leave, touch movement/cancellation and context menu opening cancel pending work. Nested buttons retain their own actions. Leaving the album or replacing its tracks cancels the old timer.
+
+Idle plain clicks invoke optional track details when a caller supplies them; the current app does not supply that callback. Otherwise plain clicks select a row. Modifier clicks and clicks during selection mode toggle selection. Enter/double click requests parent-owned playback even for the current track. Space selects during selection mode and requests playback otherwise. Home skins share statistics fallback and transport error handling. Real platform WebView input and audible behavior still require native acceptance.
 
 ### Timed instrumental gaps
 

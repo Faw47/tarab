@@ -18,7 +18,6 @@ import {
 import {
   memo,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -28,14 +27,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { formatTime } from '../../lib/format-time';
-import { toggleCurrentPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import type { AlbumDetailsOverlayProps } from './AlbumDetailsOverlay';
-import { moveTrackRowFocus, useTrackRowTabStop } from './album-track-rows';
-import { useAlbumTrackLongPress } from './useAlbumTrackLongPress';
-import { useAlbumTrackSelection } from './useAlbumTrackSelection';
+import { type AlbumTrackController, useAlbumTrackController } from './useAlbumTrackController';
 
 // ---------------------------------------------------------------------------
 // Unified Design Constants
@@ -80,9 +75,6 @@ const extensionFromPath = (filePath: string): string => {
   return base.slice(dot + 1).toUpperCase();
 };
 
-const isMultiSelectKey = (event: ReactMouseEvent | ReactKeyboardEvent): boolean =>
-  event.shiftKey || event.metaKey || event.ctrlKey;
-
 // ---------------------------------------------------------------------------
 // Subcomponents
 // ---------------------------------------------------------------------------
@@ -96,13 +88,9 @@ const TrackRow = memo(
     isCurrentlyPlaying,
     selectionActive,
     onTrackSelect,
-    onTrackContextMenu,
-    handleRowActivate,
-    handleTrackKeyDown,
+    controller,
     trackGridClass,
     isTabStop,
-    onRowFocus,
-    longPress,
   }: {
     track: Track;
     index: number;
@@ -111,13 +99,9 @@ const TrackRow = memo(
     isCurrentlyPlaying: boolean;
     selectionActive: boolean;
     onTrackSelect?: (track: Track, isMulti: boolean) => void;
-    onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
-    handleRowActivate: (track: Track) => void;
-    handleTrackKeyDown: (track: Track, e: ReactKeyboardEvent<HTMLDivElement>) => void;
+    controller: AlbumTrackController;
     trackGridClass: string;
     isTabStop: boolean;
-    onRowFocus: (id: string) => void;
-    longPress: ReturnType<typeof useAlbumTrackLongPress>;
   }) => {
     const rowPlaying = isCurrentTrack && isCurrentlyPlaying;
     const rowSelectedOnly = isSelected && !rowPlaying;
@@ -125,29 +109,8 @@ const TrackRow = memo(
     return (
       <div
         role="row"
-        tabIndex={isTabStop ? 0 : -1}
+        {...controller.rowProps(track)}
         aria-selected={selectionActive ? isSelected : undefined}
-        onFocus={() => onRowFocus(track.id)}
-        onClick={(event) => {
-          onTrackSelect?.(track, isMultiSelectKey(event));
-        }}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          handleRowActivate(track);
-        }}
-        onKeyDown={(event) => handleTrackKeyDown(track, event)}
-        onMouseDown={(event) => longPress.startLongPress(track, event)}
-        onMouseUp={longPress.cancelLongPress}
-        onMouseLeave={longPress.cancelLongPress}
-        onTouchStart={(event) => longPress.startLongPress(track, event)}
-        onTouchEnd={longPress.cancelLongPress}
-        onTouchMove={longPress.cancelLongPress}
-        onTouchCancel={longPress.cancelLongPress}
-        onContextMenu={(event) => {
-          longPress.cancelLongPress();
-          event.preventDefault();
-          onTrackContextMenu?.(event, track);
-        }}
         className={cn(
           trackGridClass,
           'cursor-pointer px-4 py-3 text-sm outline-none transition-none md:px-6 md:py-4',
@@ -221,6 +184,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
   tracks,
   onPlayAlbum,
   onPlayTrack,
+  onOpenTrackDetails,
   onTrackContextMenu,
   selectedTrackIds = [],
   onTrackSelect,
@@ -263,6 +227,16 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
   const coverFormatSticker = firstTrack?.filePath ? extensionFromPath(firstTrack.filePath) : 'FILE';
   const coverMetaSticker = firstTrack?.fileFormat?.trim() || null;
 
+  const controller = useAlbumTrackController({
+    tracks,
+    selectedTrackIds,
+    onClearSelection,
+    onSelectAll,
+    onPlayTrack,
+    onOpenTrackDetails,
+    onTrackContextMenu,
+    onTrackSelect,
+  });
   const {
     selectedSet,
     selectedTracks,
@@ -274,18 +248,8 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     activateSelection,
     clearSelection,
     handleSelectAll,
-  } = useAlbumTrackSelection({
-    tracks,
-    selectedTrackIds,
-    onClearSelection,
-    onSelectAll,
-  });
-  const longPress = useAlbumTrackLongPress(tracks, (track) => {
-    activateSelection();
-    onTrackSelect?.(track, false);
-  });
-  const trackIds = useMemo(() => tracks.map((track) => track.id), [tracks]);
-  const { tabStopId, onRowFocus } = useTrackRowTabStop(trackIds);
+    tabStopId,
+  } = controller;
   const canPlayAlbum = Boolean(onPlayAlbum && tracks.length > 0);
   const canShuffleAlbum = Boolean(onShuffleAlbum && tracks.length > 0);
 
@@ -339,46 +303,6 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     setPlaylistPickerIds(targetTracks.map((track) => track.id));
     setMenuOpen(false);
   }, [onAddToPlaylist, targetTracks]);
-
-  const handleRowActivate = useCallback(
-    (track: Track) => {
-      if (currentlyPlayingId === track.id) {
-        void toggleCurrentPlayback().catch((error) => {
-          reportError('Could not play or pause the track', {
-            source: 'album-details-overlay-neo',
-            error,
-          });
-        });
-        return;
-      }
-      onPlayTrack?.(track);
-    },
-    [currentlyPlayingId, onPlayTrack],
-  );
-
-  const handleTrackKeyDown = useCallback(
-    (track: Track, event: ReactKeyboardEvent<HTMLDivElement>) => {
-      // Keys pressed on the row's own buttons belong to those buttons.
-      if (event.target !== event.currentTarget) return;
-      if (moveTrackRowFocus(event)) return;
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        handleRowActivate(track);
-        return;
-      }
-
-      if (event.key === ' ' || event.key === 'Spacebar') {
-        event.preventDefault();
-        if (selectionActive) {
-          activateSelection();
-          onTrackSelect?.(track, true);
-          return;
-        }
-        handleRowActivate(track);
-      }
-    },
-    [handleRowActivate, onTrackSelect, selectionActive],
-  );
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-transparent text-black animate-neo-slide-up">
@@ -719,13 +643,9 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                         isCurrentlyPlaying={isCurrentlyPlaying ?? false}
                         selectionActive={selectionActive}
                         onTrackSelect={onTrackSelect}
-                        onTrackContextMenu={onTrackContextMenu}
-                        handleRowActivate={handleRowActivate}
-                        handleTrackKeyDown={handleTrackKeyDown}
+                        controller={controller}
                         trackGridClass={TRACK_GRID}
                         isTabStop={tabStopId === track.id}
-                        onRowFocus={onRowFocus}
-                        longPress={longPress}
                       />
                     ))}
                   </div>

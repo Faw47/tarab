@@ -1,15 +1,19 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
+import { useSettingsStore } from '../../../store/settings-store';
 import type { Track } from '../../../types';
 import { HomeView } from '../HomeView';
 import { HomeViewNeo } from '../HomeViewNeo';
 
-const { playAdjacentTrackMock, reportErrorMock, model } = vi.hoisted(() => ({
-  playAdjacentTrackMock: vi.fn(async () => undefined),
-  reportErrorMock: vi.fn(),
-  model: { albums: [] as unknown[], libraryStats: null as unknown },
-}));
+const { playAdjacentTrackMock, toggleCurrentPlaybackMock, reportErrorMock, model } = vi.hoisted(
+  () => ({
+    playAdjacentTrackMock: vi.fn(async () => undefined),
+    toggleCurrentPlaybackMock: vi.fn(async () => undefined),
+    reportErrorMock: vi.fn(),
+    model: { albums: [] as unknown[], tracks: [] as Track[], libraryStats: null as unknown },
+  }),
+);
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
@@ -17,14 +21,14 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('../../../lib/playback-actions', () => ({
   playAdjacentTrack: playAdjacentTrackMock,
-  toggleCurrentPlayback: vi.fn(async () => undefined),
+  toggleCurrentPlayback: toggleCurrentPlaybackMock,
   startPlayback: vi.fn(async () => 1),
 }));
 vi.mock('../../../lib/report-error', () => ({ reportError: reportErrorMock, logError: vi.fn() }));
 vi.mock('../../../hooks/useCoverArt', () => ({ useCoverArt: () => null }));
 vi.mock('../useHomeLibraryModel', () => ({
   useHomeLibraryModel: () => ({
-    tracks: [],
+    tracks: model.tracks,
     libraryStats: model.libraryStats,
     albumTracksByKey: new Map(),
     albums: model.albums,
@@ -55,7 +59,9 @@ describe('Home parity between themes (FE-18)', () => {
     vi.clearAllMocks();
     model.albums = Array.from({ length: 30 }, (_, n) => ({ track: track(n), count: 1 }));
     model.libraryStats = { trackCount: 30, totalDuration: 7200, artistCount: 1, albumCount: 30 };
+    model.tracks = [];
     usePlayerStore.setState({ currentTrack: null, isPlaying: false });
+    useSettingsStore.setState({ reducedEffects: true });
   });
 
   it('keeps the focused neo volume slider visible after the pointer leaves', () => {
@@ -125,5 +131,61 @@ describe('Home parity between themes (FE-18)', () => {
     scroller.scrollTop = 120;
     fireEvent.scroll(scroller);
     expect(p.onScrollChange).toHaveBeenCalledWith(true);
+  });
+
+  it.each([
+    HomeView,
+    HomeViewNeo,
+  ])('shows stats from loaded tracks before aggregates arrive (%#)', (Home) => {
+    model.libraryStats = null;
+    model.tracks = [track(1), track(2)];
+    render(<Home {...props()} />);
+    const stats = screen.getByRole('region', { name: 'Library stats' });
+    expect(stats).toHaveTextContent('Tracks');
+    expect(stats).toHaveTextContent('Artists');
+    expect(within(stats).getByText('2')).toBeInTheDocument();
+  });
+
+  describe.each([
+    ['liquid', HomeView, 'home-view'],
+    ['neo', HomeViewNeo, 'home-neo'],
+  ] as const)('%s shared Home controller', (_theme, Home, source) => {
+    it.each([
+      ['Previous track', 'Could not play the previous track', 'previous'],
+      ['Next track', 'Could not play the next track', 'next'],
+      ['Pause', 'Could not play or pause', 'toggle'],
+    ])('reports a rejected %s action once', async (label, message, action) => {
+      usePlayerStore.setState({ currentTrack: track(1), isPlaying: true });
+      const failure = new Error('output unavailable');
+      if (action === 'toggle') toggleCurrentPlaybackMock.mockRejectedValueOnce(failure);
+      else playAdjacentTrackMock.mockRejectedValueOnce(failure);
+      render(<Home {...props()} />);
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() =>
+        expect(reportErrorMock).toHaveBeenCalledExactlyOnceWith(message, {
+          source,
+          error: failure,
+        }),
+      );
+      if (action === 'toggle') expect(toggleCurrentPlaybackMock).toHaveBeenCalledTimes(1);
+      else expect(playAdjacentTrackMock).toHaveBeenCalledExactlyOnceWith(action);
+    });
+
+    it('hides stats and playback controls while loading', () => {
+      usePlayerStore.setState({ currentTrack: track(1) });
+      render(<Home {...props()} isLibraryLoading />);
+      expect(screen.getByRole('status', { name: 'Loading home' })).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Library stats' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Next track' })).toBeNull();
+    });
+
+    it('does not invent stats for an empty library', () => {
+      model.tracks = [];
+      model.albums = [];
+      model.libraryStats = null;
+      render(<Home {...props()} />);
+      expect(screen.queryByRole('region', { name: 'Library stats' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Next track' })).toBeNull();
+    });
   });
 });

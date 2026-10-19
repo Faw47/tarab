@@ -35,9 +35,7 @@ import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import { Button } from '../ui/button';
 import { QueueIcon as ListMusic, TrackIcon } from '../ui/Icons';
 import { cn, GlassCard } from '../ui/liquid-glass';
-import { moveTrackRowFocus, useTrackRowTabStop } from './album-track-rows';
-import { useAlbumTrackLongPress } from './useAlbumTrackLongPress';
-import { useAlbumTrackSelection } from './useAlbumTrackSelection';
+import { type AlbumTrackController, useAlbumTrackController } from './useAlbumTrackController';
 
 // ============================================================================
 // CONSTANTS & ANIMATIONS
@@ -403,14 +401,11 @@ const TrackRow = memo(
     reducedEffects,
     albumInk,
     onTrackSelect,
-    onPlayTrack,
-    onOpenTrackDetails,
     onTrackContextMenu,
-    longPress,
+    controller,
     inkTextColor,
     trackGridClass,
     isTabStop,
-    onRowFocus,
   }: {
     track: Track;
     idx: number;
@@ -421,55 +416,19 @@ const TrackRow = memo(
     reducedEffects: boolean;
     albumInk: string;
     onTrackSelect?: (track: Track, isMulti: boolean) => void;
-    onPlayTrack?: (track: Track) => void;
-    onOpenTrackDetails?: (track: Track, onPlay?: () => Promise<void> | void) => void;
     onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
-    longPress: ReturnType<typeof useAlbumTrackLongPress>;
+    controller: AlbumTrackController;
     inkTextColor: string;
     trackGridClass: string;
     isTabStop: boolean;
-    onRowFocus: (id: string) => void;
   }) => {
     const innerTabIndex = isTabStop ? 0 : -1;
     return (
       <div
         role="row"
-        tabIndex={innerTabIndex}
+        {...controller.rowProps(track)}
         aria-selected={selectionActive ? isSelected : undefined}
-        onFocus={() => onRowFocus(track.id)}
         aria-label={`${track.title} by ${track.artist}${isPlayingNow ? ', now playing' : ''}`}
-        onClick={(e) => {
-          if (e.shiftKey || e.metaKey || e.ctrlKey) {
-            onTrackSelect?.(track, true);
-          } else if (onOpenTrackDetails) {
-            onOpenTrackDetails?.(track, () => onPlayTrack?.(track));
-          }
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onPlayTrack?.(track);
-        }}
-        onMouseDown={(event) => longPress.startLongPress(track, event)}
-        onMouseUp={longPress.cancelLongPress}
-        onMouseLeave={longPress.cancelLongPress}
-        onTouchStart={(event) => longPress.startLongPress(track, event)}
-        onTouchEnd={longPress.cancelLongPress}
-        onTouchMove={longPress.cancelLongPress}
-        onTouchCancel={longPress.cancelLongPress}
-        onKeyDown={(e) => {
-          // Keys pressed on the row's own buttons belong to those buttons.
-          if (e.target !== e.currentTarget) return;
-          if (moveTrackRowFocus(e)) return;
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            onPlayTrack?.(track);
-          }
-        }}
-        onContextMenu={(e) => {
-          longPress.cancelLongPress();
-          e.preventDefault();
-          onTrackContextMenu?.(e, track);
-        }}
         className={cn(
           trackGridClass,
           'px-4 sm:px-6 py-3 group relative cursor-pointer',
@@ -547,7 +506,7 @@ const TrackRow = memo(
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onPlayTrack?.(track);
+                    void controller.activateTrack(track);
                   }}
                   aria-label={`Play ${track.title}`}
                   tabIndex={innerTabIndex}
@@ -657,6 +616,16 @@ export const AlbumDetailsOverlay = memo(
     );
 
     const initialCover = coverArt ?? hookResolvedCoverArt ?? undefined;
+    const controller = useAlbumTrackController({
+      tracks,
+      selectedTrackIds,
+      onClearSelection,
+      onSelectAll,
+      onPlayTrack,
+      onOpenTrackDetails,
+      onTrackContextMenu,
+      onTrackSelect,
+    });
     const {
       resolvedSrc: heroArt,
       error: heroArtError,
@@ -695,14 +664,8 @@ export const AlbumDetailsOverlay = memo(
       activateSelection,
       clearSelection,
       handleSelectAll,
-    } = useAlbumTrackSelection({
-      tracks,
-      selectedTrackIds,
-      onClearSelection,
-      onSelectAll,
-    });
-    const trackIds = useMemo(() => tracks.map((track) => track.id), [tracks]);
-    const { tabStopId, onRowFocus } = useTrackRowTabStop(trackIds);
+      tabStopId,
+    } = controller;
     useEffect(() => {
       const id = 'adl-overlay-kf';
       if (document.getElementById(id)) return;
@@ -823,11 +786,6 @@ export const AlbumDetailsOverlay = memo(
       if (menuOpen) document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [menuOpen]);
-
-    const longPress = useAlbumTrackLongPress(tracks, (track) => {
-      activateSelection();
-      onTrackSelect?.(track, false);
-    });
 
     const handleAddToQueueAction = useCallback(() => {
       if (targetTracks.length > 0 && onAddToQueue) {
@@ -1193,14 +1151,11 @@ export const AlbumDetailsOverlay = memo(
                         reducedEffects={reducedEffects}
                         albumInk={albumInk}
                         onTrackSelect={onTrackSelect}
-                        onPlayTrack={onPlayTrack}
-                        onOpenTrackDetails={onOpenTrackDetails}
                         onTrackContextMenu={onTrackContextMenu}
-                        longPress={longPress}
+                        controller={controller}
                         inkTextColor={inkTextColor}
                         trackGridClass={TRACK_GRID}
                         isTabStop={tabStopId === track.id}
-                        onRowFocus={onRowFocus}
                       />
                     ))
                   )}
