@@ -189,3 +189,7 @@ persisted session, which can lose the latest position. Forced termination is not
 Native acceptance: seek then immediately quit through every supported OS path, restart and verify
 position, queue, speed and view. Cover hidden tray, pending writes, full disk, startup before
 hydration, a stalled renderer and OS logout. Frontend mocks do not establish native acceptance.
+
+## Frontend acceptance continuation
+
+The focused Home volume controls must remain visible after pointer leave. Verify audible volume/mute restoration across surfaces. In platform WebViews, check mixed Arabic/Latin library, album, player and queue text, including Latin-leading Arabic and karaoke fill. Verify liquid rail window dragging and Back without obstructing album controls, playlist virtual scrolling/row play, neo full-player appearance and reduced motion. Cloud renderer tests do not replace these checks.

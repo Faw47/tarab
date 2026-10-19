@@ -32,7 +32,7 @@ No merge or release is authorized by these verification results. Release verdict
 | Release configuration | Passed |
 | Permission mutations | 12 forbidden variants across opener, core and core-mini rejected |
 | Independent review | Both substantiated findings corrected; final re-review has no objections |
-| New branch Windows/macOS/Linux CI | Pending publication and latest-head execution |
+| New branch Windows/macOS/Linux CI | All five jobs passed at 5f844a8 in PR #27, run 39193327400 |
 | Native launch | Binary built; GTK initialization failed in displayless container |
 | Native file-manager / live LRCLIB integration | Not performed |
 
@@ -45,3 +45,5 @@ correction and pass afterward. No live LRCLIB HTTP request was required or perfo
 The independent reviewer confirmed the shared native gate, local-first ordering, main-window
 boundary and renderer-path-free folder action. Native desktop acceptance remains necessary;
 unit/compiler checks do not establish supported-OS file-manager behavior.
+
+Published draft: [#27](https://github.com/Faw47/tarab/pull/27), head `5f844a8e987019651628daf51fff6e58adc6e5e4`. SEC-06/07 are NATIVE_VALIDATION_REQUIRED after successful cross-platform CI and independent review; no native file-manager or live LRCLIB acceptance is claimed.

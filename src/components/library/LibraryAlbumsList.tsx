@@ -79,6 +79,7 @@ const AlbumRow = memo(function AlbumRow({
           </div>
           <div className="min-w-0 pr-2">
             <div
+              dir="auto"
               className={cn(
                 'truncate',
                 isNeo
@@ -89,6 +90,7 @@ const AlbumRow = memo(function AlbumRow({
               {renderHighlightedText(album.track.album, searchQuery, highlightClass)}
             </div>
             <div
+              dir="auto"
               className={cn(
                 'truncate mt-0.5',
                 isNeo
@@ -103,6 +105,7 @@ const AlbumRow = memo(function AlbumRow({
 
         <div className="min-w-0 pr-4 py-2 flex flex-col justify-center">
           <div
+            dir="auto"
             className={cn(
               'truncate',
               isNeo

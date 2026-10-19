@@ -382,7 +382,10 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
               <p className="text-[12px] font-black uppercase tracking-[0.16em] text-black/60">
                 Library Archive
               </p>
-              <h2 className="truncate text-sm md:text-base font-black uppercase tracking-[0.08em] text-black">
+              <h2
+                dir="auto"
+                className="truncate text-sm md:text-base font-black uppercase tracking-[0.08em] text-black"
+              >
                 {album}
               </h2>
             </div>
@@ -448,12 +451,18 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                 <p className="text-[12px] font-black uppercase tracking-[0.18em] text-[#595959]">
                   Album Release
                 </p>
-                <h1 className="mt-2 text-3xl md:text-5xl font-black uppercase leading-tight tracking-tight text-black break-words">
+                <h1
+                  dir="auto"
+                  className="mt-2 text-3xl md:text-5xl font-black uppercase leading-tight tracking-tight text-black break-words"
+                >
                   {album}
                 </h1>
 
                 <div className="mt-4 inline-flex self-start bg-black px-3 py-1.5 shadow-[3px_3px_0_0_var(--signal-play)]">
-                  <p className="text-sm md:text-base font-black uppercase tracking-[0.05em] text-[var(--signal-play)]">
+                  <p
+                    dir="auto"
+                    className="text-sm md:text-base font-black uppercase tracking-[0.05em] text-[var(--signal-play)]"
+                  >
                     {artist}
                   </p>
                 </div>

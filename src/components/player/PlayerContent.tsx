@@ -379,17 +379,21 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
             <div className="w-full max-w-md text-center space-y-2">
               <div className="flex items-center justify-center gap-2">
                 <TrackIcon className="w-4 h-4 text-white/60" />
-                <h1 className="text-2xl md:text-3xl font-bold text-white truncate">
+                <h1 dir="auto" className="text-2xl md:text-3xl font-bold text-white truncate">
                   {currentTrack.title}
                 </h1>
               </div>
               <div className="flex items-center justify-center gap-2 text-zinc-300">
                 <User className="w-3.5 h-3.5" />
-                <p className="text-lg text-zinc-300 truncate">{currentTrack.artist}</p>
+                <p dir="auto" className="text-lg text-zinc-300 truncate">
+                  {currentTrack.artist}
+                </p>
               </div>
               <div className="flex items-center justify-center gap-2 text-zinc-400">
                 <VinylIcon className="w-3.5 h-3.5" />
-                <p className="text-sm text-zinc-400 truncate">{currentTrack.album}</p>
+                <p dir="auto" className="text-sm text-zinc-400 truncate">
+                  {currentTrack.album}
+                </p>
               </div>
             </div>
 
@@ -800,14 +804,20 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
               </div>
 
               <div className="space-y-1">
-                <h1 className="text-3xl md:text-5xl font-bold text-white truncate leading-tight tracking-tight">
+                <h1
+                  dir="auto"
+                  className="text-3xl md:text-5xl font-bold text-white truncate leading-tight tracking-tight"
+                >
                   {currentTrack.title}
                 </h1>
                 <div className="flex flex-col">
-                  <p className="text-lg md:text-xl text-text-secondary truncate font-medium">
+                  <p
+                    dir="auto"
+                    className="text-lg md:text-xl text-text-secondary truncate font-medium"
+                  >
                     {currentTrack.artist}
                   </p>
-                  <p className="text-xs md:text-sm text-white/50 truncate mt-0.5">
+                  <p dir="auto" className="text-xs md:text-sm text-white/50 truncate mt-0.5">
                     {currentTrack.album}
                   </p>
                 </div>

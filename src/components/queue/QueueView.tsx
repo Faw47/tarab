@@ -334,11 +334,18 @@ export const QueueView = memo(
                     <p className="text-[12px] font-black uppercase tracking-[0.14em] text-[var(--signal-danger)]">
                       Now playing
                     </p>
-                    <p className="mt-1 truncate text-lg font-black uppercase tracking-tight text-black">
+                    <p
+                      dir="auto"
+                      className="mt-1 truncate text-lg font-black uppercase tracking-tight text-black"
+                    >
                       {nowPlayingTrack.title}
                     </p>
-                    <p className="truncate text-xs font-bold uppercase tracking-[0.08em] text-black/60">
-                      {nowPlayingTrack.artist} • {nowPlayingTrack.album}
+                    <p
+                      dir="auto"
+                      className="truncate text-xs font-bold uppercase tracking-[0.08em] text-black/60"
+                    >
+                      <bdi dir="auto">{nowPlayingTrack.artist}</bdi> •{' '}
+                      <bdi dir="auto">{nowPlayingTrack.album}</bdi>
                     </p>
                   </div>
                   <button
@@ -554,11 +561,12 @@ export const QueueView = memo(
                           : `${queue.length} tracks`}
                       </span>
                     </div>
-                    <p className="truncate text-lg font-bold text-white tracking-tight">
+                    <p dir="auto" className="truncate text-lg font-bold text-white tracking-tight">
                       {nowPlayingTrack.title}
                     </p>
-                    <p className="truncate text-sm font-medium text-white/60 mt-0.5">
-                      {nowPlayingTrack.artist} • {nowPlayingTrack.album}
+                    <p dir="auto" className="truncate text-sm font-medium text-white/60 mt-0.5">
+                      <bdi dir="auto">{nowPlayingTrack.artist}</bdi> •{' '}
+                      <bdi dir="auto">{nowPlayingTrack.album}</bdi>
                     </p>
                   </div>
 
@@ -842,6 +850,7 @@ const QueueRowBase = memo(
 
       <div className="min-w-0 flex-1">
         <p
+          dir="auto"
           className={clsx(
             'truncate text-[15px]',
             isNeobrutalism
@@ -852,6 +861,7 @@ const QueueRowBase = memo(
           {track.title}
         </p>
         <p
+          dir="auto"
           className={clsx(
             'truncate text-[13px] mt-0.5',
             isNeobrutalism
@@ -859,7 +869,7 @@ const QueueRowBase = memo(
               : 'font-medium text-white/60',
           )}
         >
-          {track.artist} • {track.album}
+          <bdi dir="auto">{track.artist}</bdi> • <bdi dir="auto">{track.album}</bdi>
         </p>
       </div>
 
@@ -989,6 +999,7 @@ const HistoryRow = memo(
         )}
       >
         <p
+          dir="auto"
           className={clsx(
             'truncate text-[14px]',
             isNeobrutalism
@@ -999,6 +1010,7 @@ const HistoryRow = memo(
           {track.title}
         </p>
         <p
+          dir="auto"
           className={clsx(
             'truncate text-[12px] mt-0.5',
             isNeobrutalism

@@ -83,7 +83,7 @@ Mixed-direction text:
   their end, while keeping the parent's alignment so lists stay aligned.
 - Fields that join several values on one line isolate each with `<bdi>`.
 - LRC text stays left to right (timestamps lead each line).
-- Do not letter-space Arabic: neo metadata carries `dir="auto"`, and `:dir(rtl)` drops tracking.
+- Do not letter-space Arabic: neo metadata carries `dir="auto"` and uses normal spacing regardless of its first strong character, including Latin-leading Arabic.
 
 ---
 
@@ -291,3 +291,9 @@ If existing UI conflicts with these standards, align visuals while preserving pr
 ### Lyrics privacy and repair actions
 
 Online lyrics remain opt-in. The settings explanation names the title, artist, album and duration sent to LRCLIB. Native saved consent gates online lookup; local sidecar lyrics work independently. Playlist repair opens only the app-owned data folder through a parameterless native action. Ordinary file reveal retains native library-grant checks.
+
+### Focused volume and mixed-script metadata
+
+Home volume controls remain expanded while keyboard focus stays inside. Pointer leave alone must not hide a focused slider; leaving the control with keyboard focus allows the existing delayed collapse.
+
+Dynamic metadata and the neo search input use `dir="auto"`. Queue artist and album values use separate `bdi` elements. Neo dynamic text uses normal letter spacing independently of its first strong character: `Live أهواك` starts LTR yet still contains Arabic glyphs. Static UI labels retain their tracking. Verify Arabic shaping, punctuation, truncation and lyric fill on supported platform WebViews.

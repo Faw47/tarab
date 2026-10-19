@@ -85,6 +85,9 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 
 ## When Editing UI
 
+- Do not hide Home volume sliders while focus remains inside their wrapper. Track focus separately from pointer hover.
+- Dynamic neo metadata/search text uses `dir="auto"` and normal letter spacing even for Latin-leading Arabic. Isolate queue artist and album values separately; keep label tracking on static UI copy.
+
 - Follow `docs/design/design_language.md` for spacing, motion, contrast, and glass behavior in standard themes.
 - Follow `docs/design/neobrutalism_design.md` for the Neobrutalism theme to maintain strict high-contrast and mechanical standards.
 - For dynamic accent foreground colors, guard readability with luminance logic.
