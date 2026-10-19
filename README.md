@@ -295,6 +295,7 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * WebGL visual effects
 * Reduced Effects setting
 * operating-system reduced-motion support
+* album-row hold selection in both themes (hold for 500 ms; moving a touch or opening a context menu cancels a pending hold)
 * right-to-left metadata and lyrics, isolated queue values, and normal dynamic text spacing for mixed-script labels; karaoke fills from the right
 * one volume level shared by every volume control and the M shortcut; Home controls stay visible while focused
 * luminance-aware foreground colors

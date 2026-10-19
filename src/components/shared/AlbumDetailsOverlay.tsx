@@ -36,6 +36,7 @@ import { Button } from '../ui/button';
 import { QueueIcon as ListMusic, TrackIcon } from '../ui/Icons';
 import { cn, GlassCard } from '../ui/liquid-glass';
 import { moveTrackRowFocus, useTrackRowTabStop } from './album-track-rows';
+import { useAlbumTrackLongPress } from './useAlbumTrackLongPress';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ============================================================================
@@ -130,32 +131,6 @@ function getRelativeLuminance(color: string): number {
   luminanceCache.set(color, L);
   return L;
 }
-
-function useLongPress(callback: () => void, delay = 500) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onStart = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      callback();
-      timerRef.current = null;
-    }, delay);
-  };
-  const onEnd = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-  return {
-    onMouseDown: onStart,
-    onMouseUp: onEnd,
-    onMouseLeave: onEnd,
-    onTouchStart: onStart,
-    onTouchEnd: onEnd,
-  };
-}
-
-type LongPressHandlers = ReturnType<typeof useLongPress>;
 
 // ============================================================================
 // TYPES
@@ -431,8 +406,7 @@ const TrackRow = memo(
     onPlayTrack,
     onOpenTrackDetails,
     onTrackContextMenu,
-    longPressHandlers,
-    longPressTrackRef,
+    longPress,
     inkTextColor,
     trackGridClass,
     isTabStop,
@@ -450,8 +424,7 @@ const TrackRow = memo(
     onPlayTrack?: (track: Track) => void;
     onOpenTrackDetails?: (track: Track, onPlay?: () => Promise<void> | void) => void;
     onTrackContextMenu?: (e: React.MouseEvent, track: Track) => void;
-    longPressHandlers: LongPressHandlers;
-    longPressTrackRef: React.MutableRefObject<Track | null>;
+    longPress: ReturnType<typeof useAlbumTrackLongPress>;
     inkTextColor: string;
     trackGridClass: string;
     isTabStop: boolean;
@@ -476,17 +449,13 @@ const TrackRow = memo(
           e.stopPropagation();
           onPlayTrack?.(track);
         }}
-        onMouseDown={() => {
-          longPressTrackRef.current = track;
-          longPressHandlers.onMouseDown();
-        }}
-        onMouseUp={longPressHandlers.onMouseUp}
-        onMouseLeave={longPressHandlers.onMouseLeave}
-        onTouchStart={() => {
-          longPressTrackRef.current = track;
-          longPressHandlers.onTouchStart();
-        }}
-        onTouchEnd={longPressHandlers.onTouchEnd}
+        onMouseDown={(event) => longPress.startLongPress(track, event)}
+        onMouseUp={longPress.cancelLongPress}
+        onMouseLeave={longPress.cancelLongPress}
+        onTouchStart={(event) => longPress.startLongPress(track, event)}
+        onTouchEnd={longPress.cancelLongPress}
+        onTouchMove={longPress.cancelLongPress}
+        onTouchCancel={longPress.cancelLongPress}
         onKeyDown={(e) => {
           // Keys pressed on the row's own buttons belong to those buttons.
           if (e.target !== e.currentTarget) return;
@@ -497,6 +466,7 @@ const TrackRow = memo(
           }
         }}
         onContextMenu={(e) => {
+          longPress.cancelLongPress();
           e.preventDefault();
           onTrackContextMenu?.(e, track);
         }}
@@ -854,13 +824,9 @@ export const AlbumDetailsOverlay = memo(
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [menuOpen]);
 
-    const longPressTrackRef = useRef<Track | null>(null);
-    const longPressHandlers = useLongPress(() => {
-      const track = longPressTrackRef.current;
-      if (track) {
-        activateSelection();
-        onTrackSelect?.(track, false);
-      }
+    const longPress = useAlbumTrackLongPress(tracks, (track) => {
+      activateSelection();
+      onTrackSelect?.(track, false);
     });
 
     const handleAddToQueueAction = useCallback(() => {
@@ -1230,8 +1196,7 @@ export const AlbumDetailsOverlay = memo(
                         onPlayTrack={onPlayTrack}
                         onOpenTrackDetails={onOpenTrackDetails}
                         onTrackContextMenu={onTrackContextMenu}
-                        longPressHandlers={longPressHandlers}
-                        longPressTrackRef={longPressTrackRef}
+                        longPress={longPress}
                         inkTextColor={inkTextColor}
                         trackGridClass={TRACK_GRID}
                         isTabStop={tabStopId === track.id}
