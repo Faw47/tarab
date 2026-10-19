@@ -16,8 +16,6 @@ import { cn } from '@/lib/utils';
 
 import { useCoverArt } from '../../hooks/useCoverArt';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
-import { reportError } from '../../lib/report-error';
 import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 
 import { usePlayerStore } from '../../store/player-store';
@@ -27,7 +25,7 @@ import { CoverArtImage } from '../shared/CoverArtImage';
 import { HidingProgressBar } from '../shared/HidingProgressBar';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 import type { HomeViewProps } from './homeTypes';
-import { useHomeLibraryModel } from './useHomeLibraryModel';
+import { useHomeController } from './useHomeController';
 
 const BORDER = 'border-2 border-black';
 const SHADOW_COMP = 'shadow-[4px_4px_0_0_#000]';
@@ -338,9 +336,17 @@ export const HomeViewNeo = memo(function HomeViewNeo({
       currentTrack?.coverArtHash,
     ) ?? null;
 
-  const { libraryStats, albumTracksByKey, albums: allAlbums, playAlbum } = useHomeLibraryModel();
+  const {
+    stats,
+    hasStats,
+    albumTracksByKey,
+    albums: allAlbums,
+    playAlbum,
+    handlePrevious,
+    handleNext,
+    handleTogglePlay,
+  } = useHomeController(Boolean(currentTrack), 'home-neo');
   const albums = allAlbums.slice(0, 24);
-  const hasStats = Boolean(libraryStats && libraryStats.trackCount > 0);
 
   if (isLibraryLoading) {
     return (
@@ -452,14 +458,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   <div className="flex items-end gap-3 overflow-visible">
                     <button
                       type="button"
-                      onClick={() =>
-                        playAdjacentTrack('previous').catch((error) =>
-                          reportError('Could not play the previous track', {
-                            source: 'home-neo',
-                            error,
-                          }),
-                        )
-                      }
+                      onClick={handlePrevious}
                       className={cn(
                         BORDER,
                         'flex h-14 w-14 items-center justify-center bg-white',
@@ -474,11 +473,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                     <button
                       type="button"
                       className="neo-play-pause"
-                      onClick={() =>
-                        toggleCurrentPlayback().catch((error) =>
-                          reportError('Could not play or pause', { source: 'home-neo', error }),
-                        )
-                      }
+                      onClick={handleTogglePlay}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
                       {isPlaying ? (
@@ -489,14 +484,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
-                        playAdjacentTrack('next').catch((error) =>
-                          reportError('Could not play the next track', {
-                            source: 'home-neo',
-                            error,
-                          }),
-                        )
-                      }
+                      onClick={handleNext}
                       className={cn(
                         BORDER,
                         'flex h-14 w-14 items-center justify-center bg-white',
@@ -606,14 +594,14 @@ export const HomeViewNeo = memo(function HomeViewNeo({
           )}
         </section>
 
-        {hasStats && libraryStats ? (
+        {hasStats ? (
           <section aria-label="Library stats" className="pb-20">
             <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {[
-                ['Tracks', libraryStats.trackCount],
-                ['Hours', Math.floor(libraryStats.totalDuration / 3600)],
-                ['Artists', libraryStats.artistCount],
-                ['Albums', libraryStats.albumCount || allAlbums.length],
+                ['Tracks', stats.totalTracks],
+                ['Hours', stats.totalHours],
+                ['Artists', stats.uniqueArtists],
+                ['Albums', stats.albumCount],
               ].map(([label, value]) => (
                 <div key={label} className={cn(BORDER, SHADOW_COMP, 'bg-white px-4 py-3')}>
                   <dt className="text-[12px] font-black uppercase tracking-[0.12em] text-[#595959]">
