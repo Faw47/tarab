@@ -10,6 +10,7 @@ import {
 } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import {
+  desktopCancelQuit,
   desktopFocusMainWindow,
   desktopQuitApplication,
   desktopSetNativeUiState,
@@ -42,7 +43,12 @@ const MEDIA_ARTWORK_CACHE_LIMIT = 200;
  * Canonical desktop bridge owner for main window integration.
  * Handles native sync, snapshot bridge, and control intents.
  */
-export function useDesktopIntegration() {
+export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
+  const flushSessionSaveRef = useRef(flushSessionSave);
+  flushSessionSaveRef.current = flushSessionSave;
+  const quitInFlightRef = useRef(false);
+  const quitSaveFailedRef = useRef(false);
+  const retryQuitRef = useRef(false);
   const [startupReady, setStartupReady] = useState(false);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
@@ -63,6 +69,44 @@ export function useDesktopIntegration() {
   // only update playback state, so artwork is not re-sent and re-decoded every two seconds.
   const lastMediaMetadataKeyRef = useRef<string | null>(null);
   const mediaSyncSequenceRef = useRef(0);
+
+  const quitApplication = useCallback(async function quitApplication(): Promise<void> {
+    if (quitInFlightRef.current) {
+      // A new native request after cancellation has its own timeout. Replay it after
+      // failure cleanup rather than leaving that timer without a renderer response.
+      if (quitSaveFailedRef.current) retryQuitRef.current = true;
+      return;
+    }
+    quitInFlightRef.current = true;
+    quitSaveFailedRef.current = false;
+    try {
+      await flushSessionSaveRef.current();
+      await flushPlayerStateWrites();
+      await desktopQuitApplication();
+    } catch (error) {
+      quitSaveFailedRef.current = true;
+      await desktopCancelQuit().catch((cancelError) => {
+        logError('Failed to cancel native quit', {
+          source: 'desktop-bridge',
+          error: cancelError,
+        });
+      });
+      void desktopFocusMainWindow().catch((focusError) => {
+        logError('Failed to show save error', { source: 'desktop-bridge', error: focusError });
+      });
+      reportError('Could not save the playback session. Try quitting again.', {
+        source: 'desktop-bridge',
+        error,
+      });
+    } finally {
+      quitInFlightRef.current = false;
+      quitSaveFailedRef.current = false;
+      if (retryQuitRef.current) {
+        retryQuitRef.current = false;
+        await quitApplication();
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setStartupReady(true), 800);
@@ -303,6 +347,7 @@ export function useDesktopIntegration() {
           const now = Date.now();
           const previous = lastActionRef.current;
           if (
+            event.payload !== 'quit' &&
             previous &&
             previous.action === event.payload &&
             now - previous.at < DESKTOP_ACTION_DEDUP_WINDOW_MS
@@ -347,11 +392,7 @@ export function useDesktopIntegration() {
               }
               return;
             case 'quit':
-              try {
-                await flushPlayerStateWrites();
-              } finally {
-                await desktopQuitApplication();
-              }
+              await quitApplication();
               return;
             default:
               return;
@@ -365,7 +406,7 @@ export function useDesktopIntegration() {
         }
       })();
     },
-    [miniWindowEnabled],
+    [miniWindowEnabled, quitApplication],
     (error) =>
       logError('Failed to setup desktop action listener', { source: 'desktop-bridge', error }),
   );
@@ -388,17 +429,8 @@ export function useDesktopIntegration() {
 
   useTauriEvent<void>(
     'menu-quit',
-    () => {
-      void flushPlayerStateWrites()
-        .finally(desktopQuitApplication)
-        .catch((error) => {
-          reportError('Failed to quit from menu', {
-            source: 'desktop-bridge',
-            error,
-          });
-        });
-    },
-    [],
+    () => void quitApplication(),
+    [quitApplication],
     (error) => logError('Failed to setup menu-quit listener', { source: 'desktop-bridge', error }),
   );
 }

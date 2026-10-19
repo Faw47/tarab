@@ -312,6 +312,7 @@ pub fn desktop_focus_main_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn desktop_quit_application(app: AppHandle) -> Result<(), String> {
+    crate::shutdown::approve_exit(&app);
     app.exit(0);
     Ok(())
 }
@@ -738,7 +739,11 @@ fn desktop_action_for_media_event(event: &MediaControlEventType) -> Option<Deskt
 }
 
 fn emit_desktop_control_action<R: Runtime>(app: &AppHandle<R>, action: DesktopControlAction) {
-    let _ = app.emit_to(MAIN_WINDOW_LABEL, EVENT_DESKTOP_CONTROL_ACTION, action);
+    if matches!(action, DesktopControlAction::Quit) {
+        crate::shutdown::request_quit(app);
+    } else {
+        let _ = app.emit_to(MAIN_WINDOW_LABEL, EVENT_DESKTOP_CONTROL_ACTION, action);
+    }
 }
 
 fn native_menu_action_for_menu_id(id: &str) -> Option<&'static str> {

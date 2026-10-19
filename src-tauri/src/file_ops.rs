@@ -539,11 +539,7 @@ fn reauthorize_library_grant_blocking(
     let selected = selected
         .into_path()
         .map_err(|e| format!("Selected folder path is invalid: {}", e))?;
-    let canonical = fs::canonicalize(&selected)
-        .map_err(|e| format!("Failed to resolve selected library folder: {}", e))?;
-    if !canonical.is_dir() {
-        return Err("Selected library path is not a folder".to_string());
-    }
+    let canonical = resolve_library_folder(&selected)?;
 
     #[cfg(windows)]
     let canonical_string = canonical.to_string_lossy().replace('\\', "/");
@@ -621,14 +617,41 @@ fn covering_grant<'a>(
         .find(|grant| grant_is_active(grant) && canonical.starts_with(grant_resolved_path(grant)))
 }
 
+/// New grants must never cover a whole filesystem or the user's entire home directory.
+/// Existing grants remain readable until the user reconnects or revokes them.
+fn validate_library_grant_scope(canonical: &Path, home: &Path) -> Result<(), String> {
+    if !canonical.is_absolute() || canonical.parent().is_none() {
+        return Err("Select a music folder, not a filesystem root".to_string());
+    }
+    if canonical == home {
+        return Err(
+            "Select a music folder inside your home directory, not the home directory itself"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn resolve_library_folder(path: &Path) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|e| format!("Failed to resolve selected library folder: {}", e))?;
+    if !canonical.is_dir() {
+        return Err("Selected library path is not a folder".to_string());
+    }
+    let home = dirs::home_dir()
+        .ok_or_else(|| "Cannot verify the home directory for this library grant".to_string())?;
+    let home = fs::canonicalize(home)
+        .map_err(|e| format!("Failed to resolve the home directory: {}", e))?;
+    validate_library_grant_scope(&canonical, &home)?;
+    Ok(canonical)
+}
+
 pub(crate) fn grant_library_path(
     app: &AppHandle,
     roots_state: &SharedLibraryRoots,
     canonical: PathBuf,
 ) -> Result<LibraryGrantSummary, String> {
-    if !canonical.is_dir() {
-        return Err("Selected library path is not a folder".to_string());
-    }
+    let canonical = resolve_library_folder(&canonical)?;
     #[cfg(windows)]
     let canonical_string = canonical.to_string_lossy().replace('\\', "/");
     #[cfg(not(windows))]
@@ -1522,6 +1545,44 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn new_grants_reject_root_and_home_but_allow_music_subfolders() {
+        let home =
+            fs::canonicalize(dirs::home_dir().expect("home directory")).expect("resolve home");
+        let root = home.ancestors().last().expect("filesystem root");
+        assert!(validate_library_grant_scope(root, &home).is_err());
+        assert!(validate_library_grant_scope(&home, &home).is_err());
+        assert!(validate_library_grant_scope(&home.join("Music"), &home).is_ok());
+        assert!(resolve_library_folder(&home).is_err());
+        assert!(resolve_library_folder(root).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_grants_reject_a_symlink_alias_of_home() {
+        use std::os::unix::fs::symlink;
+
+        let directory = temp_dir("home-alias");
+        let alias = directory.join("home");
+        symlink(dirs::home_dir().expect("home directory"), &alias).expect("create alias");
+        assert!(resolve_library_folder(&alias).is_err());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn new_grants_reject_drive_and_unc_share_roots() {
+        let home = Path::new(r"C:\Users\Listener");
+        for root in [
+            r"C:\",
+            r"\\?\C:\",
+            r"\\server\share\",
+            r"\\?\UNC\server\share\",
+        ] {
+            assert!(validate_library_grant_scope(Path::new(root), home).is_err());
+        }
     }
 
     #[test]

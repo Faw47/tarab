@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { NavView } from '../components/navigation';
 import { isPlayerStateHydrated, savePlayerStateToStore } from '../features/app/player-state-store';
 import { getAlbumKeyFromParts } from '../lib/album-key';
@@ -55,16 +55,23 @@ export function useSessionPersistence(
     };
   }, [currentView, albumDetails?.album, albumDetails?.artist]);
 
+  const cancelScheduledSave = useCallback(() => {
+    if (sessionSaveTimeoutRef.current !== null) {
+      clearTimeout(sessionSaveTimeoutRef.current);
+      sessionSaveTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelScheduledSave, [cancelScheduledSave]);
+
   const flushSessionSave = useCallback(async () => {
+    cancelScheduledSave();
+    if (!isPlayerStateHydrated()) return;
     const payload = buildSessionPayload();
+    await savePlayerStateToStore(payload);
     lastSessionSaveRef.current = Date.now();
     lastSavedPositionRef.current = payload.currentTime;
-    try {
-      await savePlayerStateToStore(payload);
-    } catch (err) {
-      console.error('Failed to save playback session:', err);
-    }
-  }, [buildSessionPayload]);
+  }, [buildSessionPayload, cancelScheduledSave]);
 
   const scheduleSessionSave = useCallback(
     (immediate = false) => {
@@ -74,7 +81,9 @@ export function useSessionPersistence(
           clearTimeout(sessionSaveTimeoutRef.current);
           sessionSaveTimeoutRef.current = null;
         }
-        flushSessionSave();
+        void flushSessionSave().catch((error) => {
+          console.error('Failed to save playback session:', error);
+        });
         return;
       }
       if (sessionSaveTimeoutRef.current) return;
@@ -83,7 +92,9 @@ export function useSessionPersistence(
       const delay = elapsed >= 5000 ? 0 : 5000 - elapsed;
       sessionSaveTimeoutRef.current = setTimeout(() => {
         sessionSaveTimeoutRef.current = null;
-        flushSessionSave();
+        void flushSessionSave().catch((error) => {
+          console.error('Failed to save playback session:', error);
+        });
       }, delay);
     },
     [flushSessionSave],

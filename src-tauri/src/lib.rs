@@ -14,6 +14,7 @@ mod metadata;
 mod parse_guard;
 mod playlist;
 mod session;
+mod shutdown;
 mod startup_failure;
 mod tageditor;
 #[cfg(target_os = "windows")]
@@ -258,6 +259,7 @@ pub fn run() {
         fixed_store::fixed_store_get,
         fixed_store::fixed_store_set,
         fixed_store::fixed_store_remove,
+        shutdown::desktop_cancel_quit,
         // Metadata commands
         metadata::get_track_metadata,
         metadata::get_cover_art,
@@ -374,6 +376,7 @@ pub fn run() {
     ];
 
     let app = builder
+        .manage(shutdown::QuitState::default())
         .setup(move |app| {
             let setup_start = Instant::now();
             // Create audio manager with app handle for events
@@ -467,9 +470,13 @@ pub fn run() {
             }
 
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if desktop_integration::should_hide_main_window_on_close(window.app_handle()) {
+                if !shutdown::exit_approved(window.app_handle()) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if desktop_integration::should_hide_main_window_on_close(window.app_handle()) {
+                        let _ = window.hide();
+                    } else {
+                        shutdown::request_quit(window.app_handle());
+                    }
                 }
             }
         })
@@ -489,6 +496,12 @@ pub fn run() {
 
     match app {
         Ok(app) => app.run(|_app_handle, _event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
+                if !shutdown::exit_approved(_app_handle) {
+                    api.prevent_exit();
+                    shutdown::request_quit(_app_handle);
+                }
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
                 if let Some(intents) =

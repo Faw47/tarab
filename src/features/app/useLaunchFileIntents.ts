@@ -92,6 +92,7 @@ export function useLaunchFileIntents({
       setResolving(true);
       try {
         const resolved = await resolveLaunchFileIntent(current.id, action);
+        finishCurrent();
         if (!resolved) return;
         if (resolved.libraryGrant) {
           const grants = await listLibraryGrants();
@@ -105,7 +106,6 @@ export function useLaunchFileIntents({
       } finally {
         resolvingRef.current = false;
         setResolving(false);
-        finishCurrent();
       }
     },
     [current, finishCurrent, scanFolder, setLibraryFolders],
@@ -116,7 +116,7 @@ export function useLaunchFileIntents({
     return {
       title: 'Open audio file',
       message: `How should Tarab open “${current.displayName}”?`,
-      detail: `Folder: ${current.folderName}`,
+      detail: `Import folder gives Tarab ongoing access to audio files in this folder and its subfolders: ${current.folderPath}`,
       confirmLabel: 'Play once',
       secondaryLabel: 'Import folder',
       cancelLabel: 'Cancel',

@@ -143,7 +143,7 @@ pub fn build_menu(app: &App<Wry>) -> tauri::Result<DesktopMenuHandles> {
     app.on_menu_event(move |app, event| {
         let id = event.id().as_ref();
         if id == "quit" {
-            let _ = app.emit_to("main", "menu-quit", ());
+            crate::shutdown::request_quit(app);
         } else if let Some(action) = id.strip_prefix("playback.") {
             let payload = match action {
                 "toggle" => "toggle-play",
