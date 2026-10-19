@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { normalizeLyricsTiming, parseLyrics } from '../../lib/lyrics-parser';
 import { reportError } from '../../lib/report-error';
 import { getLyricsForTrack } from '../../lib/tauri-commands';
+import { flushSettingsWrites } from '../../platform/tauri-zustand-storage';
 import { usePlayerStore } from '../../store/player-store';
 
 export function useCurrentTrackLyrics(autoLyrics: boolean) {
@@ -17,6 +18,10 @@ export function useCurrentTrackLyrics(autoLyrics: boolean) {
       }
 
       try {
+        if (autoLyrics) {
+          await flushSettingsWrites();
+          if (cancelled) return;
+        }
         const lyricsContent = await getLyricsForTrack(
           currentTrack.filePath,
           autoLyrics,

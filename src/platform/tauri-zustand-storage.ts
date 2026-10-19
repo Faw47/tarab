@@ -3,6 +3,23 @@ import { fixedStoreGet, fixedStoreRemove, fixedStoreSet } from '../lib/tauri-com
 import { logger } from './logger';
 
 const DOMAIN = 'TauriZustandStorage';
+const pendingWrites = new Set<Promise<void>>();
+
+async function trackSettingsWrite(write: Promise<void>): Promise<void> {
+  pendingWrites.add(write);
+  try {
+    await write;
+  } finally {
+    pendingWrites.delete(write);
+  }
+}
+
+/** Wait until consent changes, including writes queued during the drain, reach native storage. */
+export async function flushSettingsWrites(): Promise<void> {
+  while (pendingWrites.size > 0) {
+    await Promise.allSettled([...pendingWrites]);
+  }
+}
 
 /**
  * Custom Zustand storage implementation that uses Tauri's persistent store plugin.
@@ -21,14 +38,14 @@ export const createTauriZustandStorage = (_storePath: 'settings.json'): StateSto
   },
   setItem: async (name: string, value: string): Promise<void> => {
     try {
-      await fixedStoreSet('settings', name, JSON.parse(value));
+      await trackSettingsWrite(fixedStoreSet('settings', name, JSON.parse(value)));
     } catch (err) {
       logger.error(DOMAIN, `Failed to set item "${name}"`, err);
     }
   },
   removeItem: async (name: string): Promise<void> => {
     try {
-      await fixedStoreRemove('settings', name);
+      await trackSettingsWrite(fixedStoreRemove('settings', name));
     } catch (err) {
       logger.error(DOMAIN, `Failed to remove item "${name}"`, err);
     }

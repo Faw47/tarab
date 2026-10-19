@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const tauriConfig = JSON.parse(
@@ -70,6 +70,26 @@ if (
   openerUrlPermissions[0].allow[0]?.url !== allowedHelpUrl
 ) {
   failures.push('The main-window opener must allow exactly the Tarab Help README URL (QA-10).');
+}
+
+const capabilityDirectory = new URL('../src-tauri/capabilities/', import.meta.url);
+for (const filename of await readdir(capabilityDirectory)) {
+  if (!filename.endsWith('.json')) continue;
+  const capability = JSON.parse(await readFile(new URL(filename, capabilityDirectory), 'utf8'));
+  if (
+    capability.permissions.some((permission) => {
+      const id = typeof permission === 'string' ? permission : permission.identifier;
+      return (
+        id === 'opener:allow-reveal-item-in-dir' ||
+        id === 'opener:allow-open-path' ||
+        id === 'opener:default'
+      );
+    })
+  ) {
+    failures.push(
+      `File reveal and folder opening must use scoped native commands (SEC-06): ${filename}.`,
+    );
+  }
 }
 
 if (mainWindow?.backgroundThrottling !== 'disabled') {

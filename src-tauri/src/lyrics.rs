@@ -1,5 +1,6 @@
 use crate::database::{LyricsIndexEntry, SharedDatabase, TrackPathRow};
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
+use crate::fixed_store::{auto_lyrics_enabled, SharedFixedStore};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -63,13 +64,22 @@ fn load_local_lyrics_for_track(track_path: &str, roots: &[PathBuf]) -> Option<St
     None
 }
 
-/// LRCLIB fallback. Call only after local lyrics are confirmed empty.
+fn format_lrclib_error(context: &str, error: reqwest::Error) -> String {
+    format!("{context}: {}", error.without_url())
+}
+
+/// LRCLIB fallback. Native persisted consent gates every request.
 pub async fn fetch_lrclib(
     artist: &str,
     title: &str,
     album: &str,
     duration_secs: f64,
+    settings_state: &SharedFixedStore,
 ) -> Result<Option<String>, String> {
+    if !auto_lyrics_enabled(settings_state).await? {
+        return Ok(None);
+    }
+
     if [artist, title, album]
         .iter()
         .any(|value| value.chars().count() > MAX_LRCLIB_FIELD_CHARS)
@@ -83,7 +93,7 @@ pub async fn fetch_lrclib(
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| format!("Failed to create lyrics client: {}", e))?;
+        .map_err(|e| format_lrclib_error("Failed to create lyrics client", e))?;
 
     let duration_str = if duration_secs.is_finite() && duration_secs > 0.0 {
         Some(((duration_secs.round() as i64).max(1)).to_string())
@@ -104,7 +114,7 @@ pub async fn fetch_lrclib(
     let mut resp = req
         .send()
         .await
-        .map_err(|e| format!("Lyrics request failed: {}", e))?;
+        .map_err(|e| format_lrclib_error("Lyrics request failed", e))?;
     let response_url = resp.url();
     if response_url.scheme() != "https"
         || response_url.host_str() != Some("lrclib.net")
@@ -133,7 +143,7 @@ pub async fn fetch_lrclib(
     while let Some(chunk) = resp
         .chunk()
         .await
-        .map_err(|e| format!("Failed to read lyrics response: {}", e))?
+        .map_err(|e| format_lrclib_error("Failed to read lyrics response", e))?
     {
         let next_len = body
             .len()
@@ -177,6 +187,8 @@ pub struct LyricsSearchResult {
 }
 
 /// Resolves lyrics: **local sidecars first**; LRCLIB only when local is empty and `auto_lyrics` is true.
+// Keep the existing IPC fields stable; both authority states are injected by Tauri.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn get_lyrics_for_track(
     track_path: String,
@@ -186,6 +198,7 @@ pub async fn get_lyrics_for_track(
     album: String,
     duration: f64,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
+    settings_state: State<'_, SharedFixedStore>,
 ) -> Result<Option<String>, String> {
     let path = std::path::Path::new(&track_path);
     let roots = roots_state.read().roots.clone();
@@ -197,7 +210,7 @@ pub async fn get_lyrics_for_track(
         return Ok(Some(local));
     }
     if auto_lyrics {
-        return fetch_lrclib(&artist, &title, &album, duration).await;
+        return fetch_lrclib(&artist, &title, &album, duration, settings_state.inner()).await;
     }
     Ok(None)
 }
@@ -209,9 +222,10 @@ pub async fn fetch_lrclib_lyrics(
     title: String,
     album: String,
     duration: f64,
+    settings_state: State<'_, SharedFixedStore>,
 ) -> Result<Option<String>, String> {
     let _ = file_path;
-    fetch_lrclib(&artist, &title, &album, duration).await
+    fetch_lrclib(&artist, &title, &album, duration, settings_state.inner()).await
 }
 
 /// Writes the sidecar through a staged copy and fsync, so it runs off the main thread.
@@ -554,6 +568,24 @@ fn sync_lyrics_index_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lyrics_request_errors_omit_urls_and_track_metadata() {
+        let error = reqwest::Client::new().get("http://[").build()
+            .expect_err("invalid URL")
+            .with_url(reqwest::Url::parse("https://lrclib.net/api/get?artist_name=PRIVATE_ARTIST&track_name=PRIVATE_TITLE").unwrap());
+        let message = format_lrclib_error("Lyrics request failed", error);
+        assert!(message.starts_with("Lyrics request failed:"));
+        for private in [
+            "lrclib.net",
+            "artist_name",
+            "PRIVATE_ARTIST",
+            "PRIVATE_TITLE",
+        ] {
+            assert!(!message.contains(private), "metadata leaked: {message}");
+        }
+    }
+
     use crate::database::{Database, DbTrack};
     use std::fs;
     use std::sync::Arc;

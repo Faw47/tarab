@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 61 |
+| FIXED_VERIFIED | 62 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 10 |
+| NATIVE_VALIDATION_REQUIRED | 12 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 86 |
+| PENDING | 83 |
 | **Total** | **160** |
 
 ## Findings
@@ -148,7 +148,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | LD-04 | P3 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | PENDING | partial G1 pass / G2 frontend pass / G3 renderer pass | Monotonic generations merged in #19. Corrective #20 at afe4559 guards stale success/failure at the synchronous UI boundary and invalidates queued adjacent requests after newer Play/Stop/preview. Fourteen added test cases; independent review found the queued-intent and rejection-settlement gaps, both reproduced red and corrected. Native commands already in flight and editor-preview state ownership remain unresolved. | 145d037, 0e2da73, afe4559 | #19, #20 |
 | PB-28 | P3 | Two quick Next presses advance only one track | PENDING | G1 pass / G2 frontend pass / G3 renderer pass | Adjacent commands remain sequential, including after current-operation failure. #20 at afe4559 additionally cancels older queued requests after a direct source intervention and permits a fresh Next after Stop. Combined corrective tree: 384 tests across 89 files, 116 IPC contracts, build, Storybook and Knip pass. Independent reviewer found no unresolved renderer blocker after correction. Latest-head platform CI and real rapid-Next/Stop/audio agreement remain acceptance evidence to record. | 9c1f4a2, b168b99, afe4559 | #17, #20 |
 | PB-29 | P3 | Removing the playing track from the queue makes Next skip a track | PENDING | G1 tests added / G2 CI pass / G3 - | Queue cursor after removing the playing entry and duplicate queue IDs fixed with 4 regression tests in #12; GitHub CI passed on PR head. Independent review and native playback behavior remain unrecorded. | 5b64a2a, 7978ea1 | #12 |
-| PB-20 | P3 | Quit and window close do not save the latest state | PENDING | G1 renderer PASS / G2 Linux PASS, platforms pending / G3 reviewed, objections corrected | Fresh capture, debounce cancellation and native quit handshake; failure/retry and latest navigation covered. Tray hiding preserved. Ten-second renderer fallback. Native desktop acceptance and Windows/macOS CI pending. | 96296c9 (local) | - |
+| PB-20 | P3 | Quit and window close do not save the latest state | NATIVE_VALIDATION_REQUIRED | G1 renderer PASS / G2 all platforms PASS / G3 PASS | Fresh capture, debounce cancellation and native quit handshake; failure/retry and latest navigation covered. Final callback correction independently re-reviewed (18 tests). Tray hiding preserved; ten-second renderer fallback. Native close/quit/tray/logout acceptance remains. | 96296c9 | [#26](https://github.com/Faw47/tarab/pull/26) |
 | PB-30 | P3 | In development builds, session restore never completes and saving never starts | FIXED_VERIFIED | PASS / PASS / PASS | StrictMode test hydrates after the fix (failed before); a completed restore never re-runs (test). | 3356937 | #2 |
 | PB-16 | P3 | Playlist reorder resets every entry's added date and rewrites the whole list from client state | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-17 | P3 | Playlist mutation IDs never protect an actual retry | PENDING | - | Audit confidence CONFIRMED. | - | - |
@@ -196,9 +196,9 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-22 | P3 | `rubato` dependency unused; sample-rate conversion uses rodio's linear converter | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-37 | P3 | Minor reliability items | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-03 | P3 | Waveform generator sizes a buffer from an unvalidated sample rate | PENDING | G1 tests added / G2 - / G3 - | Validates decoder-provided sample rate (1–384000 Hz) and channel count (1–8) before allocating waveform chunks; uses checked allocation arithmetic and at least one interleaved frame per chunk. Rust regression tests cover zero/oversized rates, invalid channel counts, stereo output and the maximum allocation. Cross-platform CI and independent review pending. | f28b588 | #18 |
-| SEC-05 | P3 | Library grants accept `/` or the home folder; "Import folder" grants the launched file's parent with only a base-name prompt | PENDING | G1 source trace + Linux/renderer tests / G2 Linux PASS, platforms pending / G3 reviewed | Canonical root/home guard before grant mutation or rebase; complete scope prompt; rejected import retains Play once. Existing grants intact. Windows drive/UNC and desktop acceptance pending. | 96296c9 (local) | - |
-| SEC-06 | P3 | `opener:allow-reveal-item-in-dir` has no path scope | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| SEC-07 | P3 | The online-lyrics opt-in is enforced only in the renderer, and request errors carry metadata | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| SEC-05 | P3 | Library grants accept `/` or the home folder; "Import folder" grants the launched file's parent with only a base-name prompt | NATIVE_VALIDATION_REQUIRED | G1 source trace + native/renderer tests / G2 all platforms PASS / G3 PASS | Canonical root/home guard before grant mutation or rebase; complete scope prompt; rejected import retains Play once. Existing grants intact. Windows drive/UNC tests passed in CI; native picker/file-open acceptance remains. | 96296c9 | [#26](https://github.com/Faw47/tarab/pull/26) |
+| SEC-06 | P3 | `opener:allow-reveal-item-in-dir` has no path scope | PENDING | G1 routing RED to GREEN + 12 permission mutations / G2 Linux PASS, CI pending / G3 PASS | Renderer reveal permission removed; ordinary reveal keeps native grants. Parameterless playlist repair opens only native-derived app data. Guard checks all capability JSONs. Native file-manager acceptance pending. See privacy verification. | privacy candidate | - |
+| SEC-07 | P3 | The online-lyrics opt-in is enforced only in the renderer, and request errors carry metadata | PENDING | G1 URL/backup/wait/cancel regressions PASS / G2 Linux PASS, CI pending / G3 PASS | Shared native primary-settings boolean gate, fail closed without stale-backup consent; local lyrics independent. Pending settings saves drain before lookup; reqwest errors omit URLs. Live integration pending. See privacy verification. | privacy candidate | - |
 | SEC-08 | P3 | The mini window may emit any event name to the main window | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-09 | P3 | Linux media plugin writes artwork to a fixed `/tmp` path following symlinks | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-11 | P3 | `desktop_sync_media_session` takes untyped JSON, logs the raw payload on failure and reports success | FIXED_VERIFIED | PASS / PASS / PASS | Typed command parameter; Rust tests: object position rejected, renderer shape accepted, oversized artwork ignored. Raw payload no longer logged. Reviewer confirmed lowercase repeat-mode casing matches. | 0414e58 | #2 |
@@ -212,7 +212,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | SEC-19 | P3 | No navigation guard on the webviews | PENDING | - | Audit confidence SUBJECTIVE. | - | - |
 | QA-12 | P3 | Tag editor cover picker only accepts images inside a library root, and writes WebP covers with a JPEG MIME type | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | QA-17 | P3 | A delete test exercises a test-only helper instead of the shipped command path | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| QA-29 | P3 | `fixed_store` writes without fsync and has no size limit | PENDING | G1 six native regressions RED to GREEN / G2 Linux PASS, platforms pending / G3 reviewed | 64 MiB actual-read/encoded-write cap; exclusive synced staging; original kept until replace; legacy missing-primary backup recovery. Eight Linux store tests pass. Windows locked-target test pending; directory sync best-effort. | 96296c9 (local) | - |
+| QA-29 | P3 | `fixed_store` writes without fsync and has no size limit | FIXED_VERIFIED | G1 six native regressions RED to GREEN / G2 all platforms PASS / G3 PASS | 64 MiB actual-read/encoded-write cap; exclusive synced staging; original kept until replace; legacy missing-primary backup recovery. Windows locked-target and all platform CI passed at 0d5184c. Independent final scoped review clean; directory sync best-effort. | 96296c9 | [#26](https://github.com/Faw47/tarab/pull/26) |
 | QA-19 | P3 | No coverage thresholds; coverage not run in CI; Linux release jobs run no Rust tests | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | QA-20 | P3 | CI has no Rust cache, runs a redundant `cargo check`, and installs the legacy appindicator package | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | QA-21 | P3 | Release re-runs use `gh release upload --clobber` | PENDING | - | Audit confidence CONFIRMED. | - | - |

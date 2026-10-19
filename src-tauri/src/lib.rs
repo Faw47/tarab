@@ -292,6 +292,7 @@ pub fn run() {
         playlist::remove_missing_from_playlist,
         playlist::reset_playlists_data,
         playlist::get_playlists_data_path,
+        playlist::reveal_playlists_data_folder,
         // Tag editor commands
         tageditor::read_full_tags,
         tageditor::write_tags,

@@ -10,7 +10,7 @@ The current 1.0.0 proof matrix is in `docs/release-evidence-1.0.0.md`.
 | --- | --- | --- | --- |
 | `core-main` | `main` | Main-window event listen/unlisten/emit-to routing, startup show, Windows window controls, and liquid-glass support/effect access. | Main only. Avoid `core:default` and `core:event:default`; add exact core permissions when a reviewed renderer API needs them. |
 | `core-mini` | `mini-player` | Snapshot/control events plus mini-window drag and minimize. | Mini only. No app/menu/tray/image/path/webview defaults and no direct backend/library ownership. |
-| `opener` | `main` | Reveal files in the system file manager; open the Tarab Help README link. | Main only: reveal-item plus an exact URL scope for `https://github.com/Faw47/tarab#readme`. Do not grant generic open-url/open-path access or mini-player URL access. |
+| `opener` | `main` | Open the Tarab Help README link. | Exact URL scope for `https://github.com/Faw47/tarab#readme` only. No renderer reveal/open-path/default permission. Native track reveal checks grants; playlist repair opens a native-derived app-data folder without accepting a path. |
 | `dialog` | `main` | Native open dialogs for library grants, playlist folders, audio, and image selection. | Main only and `dialog:allow-open` only. Library authority is created by the Rust picker command, not by a renderer path. |
 | `store` | none | Renderer store access is disabled. | Fixed main-window Rust commands own `settings.json` and `tarab-player.dat`. Mini gets snapshots from main, not persistent ownership. |
 | `deep-link` | `main` | Rust reads cold-start URLs and forwards running-instance events. | Main only with empty plugin command permissions. The custom startup command returns only URLs registered for the `tarab` scheme. |
@@ -34,9 +34,9 @@ The current invoke handler exposes these groups from `src-tauri/src/lib.rs`:
 - Audio: playback, seek, volume, speed, crossfade, booster, output devices, gapless preload.
 - Library and metadata: bounded scan-path streaming, transactional reconciliation, batch metadata,
   cover art, palettes, and image data. Scan path chunks go only to the main window.
-- Lyrics: read/fetch/write/search/sync.
+- Lyrics: read/fetch/write/search/sync. Both online entry points require the persisted native opt-in; missing or invalid consent blocks HTTP. Request errors strip metadata-bearing URLs.
 - Playlists: read/create/update/delete/pin/add/remove/reorder/sync/repair/data-path. Folder playlist
-  creation, edits, and sync require an active native library grant.
+  creation, edits, and sync require an active native library grant. Repair folder access uses a parameterless native command.
 - Tag editor: read/write/batch-write/remove cover art.
 - Database: track pagination/search/stats/play stats/ratings/delete/path updates/folder deletes/smart shuffle.
 - Image cache and waveform cache: generate/read/stats/clear/cancel.
