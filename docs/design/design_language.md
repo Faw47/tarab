@@ -301,3 +301,7 @@ Dynamic metadata and the neo search input use `dir="auto"`. Queue artist and alb
 ### Album hold-selection parity
 
 Both album skins share one 500 ms primary-mouse/touch hold controller. A completed hold activates selection without requesting playback. Release, row leave, touch movement/cancellation and context menu opening cancel pending work. Nested buttons retain their own actions. Leaving the album or replacing its tracks cancels the old timer. Existing click, double-click and keyboard activation behavior remains unchanged by this focused correction.
+
+### Timed instrumental gaps
+
+Standard and enhanced empty LRC markers clear the current lyric interval. Word-only enhanced markers also carry timing even when they contain no sung words. Preserve those empty lines through normalization and global offsets without fabricating a karaoke word. Native appearance and audio synchronization remain separate acceptance checks.

@@ -67,4 +67,37 @@ describe('LRC timing and instrumental gaps (PB-27)', () => {
     expect(lyrics.lines.map((line) => line.startTime)).toEqual([1000, 3000]);
     expect(lyrics.lines.every((line) => line.text === 'Again')).toBe(true);
   });
+
+  it.each([
+    '[00:15.00]<00:15.00>',
+    '<00:15.00>',
+  ])('keeps the enhanced instrumental marker %s', (marker) => {
+    const lyrics = parseLyrics(`[00:10.00]<00:10.00>Verse\n${marker}\n[00:18.00]<00:18.00>Chorus`);
+    expect(lyrics.isEnhanced).toBe(true);
+    expect(lyrics.lines).toHaveLength(3);
+    expect(lyrics.lines[1]).toMatchObject({
+      text: '',
+      startTime: 15000,
+      endTime: 18000,
+      words: [],
+    });
+    expect(getCurrentLineIndex(lyrics, 16000)).toBe(1);
+    const normalized = normalizeLyricsTiming(lyrics);
+    expect(normalized.lines[1].text).toBe('');
+    expect(normalized.lines[1].words).toEqual([]);
+    expect(normalized.lines[1].runs).toEqual([]);
+    expect(getCurrentLineIndex(normalized, 16000)).toBe(1);
+  });
+
+  it('applies late global offsets to whitespace-only enhanced gaps', () => {
+    const lyrics = parseLyrics('[00:10.00]Verse\n<00:15.00>  \n[00:18.00]Chorus\n[offset:+250]');
+    expect(lyrics.lines.map((line) => line.startTime)).toEqual([9750, 14750, 17750]);
+    expect(lyrics.lines[1].words).toEqual([]);
+  });
+
+  it('retains repeated enhanced blank markers without inventing empty words', () => {
+    const lyrics = parseLyrics('[00:10.00]Verse\n[00:15.00][00:17.00]<00:00.00>\n[00:18.00]Chorus');
+    expect(lyrics.lines.map((line) => line.startTime)).toEqual([10000, 15000, 17000, 18000]);
+    expect(lyrics.lines.slice(1, 3).map((line) => line.words)).toEqual([[], []]);
+  });
 });

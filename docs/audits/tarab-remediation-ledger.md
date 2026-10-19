@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 62 |
+| FIXED_VERIFIED | 64 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 20 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 75 |
+| PENDING | 73 |
 | **Total** | **160** |
 
 ## Findings
@@ -153,7 +153,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-16 | P3 | Playlist reorder resets every entry's added date and rewrites the whole list from client state | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-17 | P3 | Playlist mutation IDs never protect an actual retry | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | DUPLICATE | - | Merged into AR-05 by the audit; see AR-05. The mini progress bar still jumps every 2 s (no interpolation), not addressed. | - | - |
-| PB-27 | P3 | LRC parser edge cases | PENDING | G1 parser regressions / G2 merged PR CI pass / G3 - | Merged #11 preserves LRC fractions, signed offsets and instrumental markers; #22 corrects the global offset irrespective of tag position, including enhanced timestamps. Combined corrective frontend suite passes. Dedicated independent parser review and native lyrics acceptance remain unrecorded. | 727485a, dde89c2, 496fd54 | #11, #22 |
+| PB-27 | P3 | LRC parser edge cases | FIXED_VERIFIED | G1 four enhanced-gap regressions RED to GREEN / G2 frontend PASS / G3 PASS | Offset/fraction/plain-gap fixes reconciled; enhanced empty and word-only markers now retained through offsets, repeated tags, normalization and current-line resolution. Independent regression comparison clean. Native lyric appearance/audio are separate, unclaimed checks. | 727485a, dde89c2, 496fd54 + lyrics continuation | #11, #22; lyrics continuation |
 | PB-33 | P3 | Folder reconcile prefix match is case-insensitive | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | AR-21 | P3 | Schema and index issues | PENDING | - | Audit confidence CONFIRMED. | - | - |
@@ -184,7 +184,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-46 | P3 | Two settings behave inconsistently with their defaults or lifecycle | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-37 | P3 | Collapsed pill player is not keyboard-operable and is mispositioned | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | FE-41 | P3 | Virtualized lists lack list semantics; queue drag-and-drop sees only rendered rows | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | PENDING | G1 tests added / G2 - / G3 - | The provider requested RAF continuously while paused or without subscribers. It now runs only while playing with listeners, publishes once on pause, and lets imperative readers compute time on demand. Five tests cover the loop lifecycle. CI and independent review pending. | 13ff91c, a21e4bf | #14 |
+| FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | FIXED_VERIFIED | G1 six old-provider failures, restored GREEN / G2 frontend and baseline CI PASS / G3 PASS | Existing provider requires playback plus subscribers, emits once on pause/seek, and cancels on pause/final unsubscribe/unmount. Fresh independent lifecycle review clean. Scope is deterministic scheduling, not visibility throttling or audio/visual smoothness. | 13ff91c, a21e4bf; evidence continuation | #14; lyrics continuation |
 | AR-20 | P3 | A single `Mutex<Connection>` serializes every read behind long write transactions | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-31 | P3 | Redundant UI dependencies | PENDING | - | Audit confidence CONFIRMED. | - | - |

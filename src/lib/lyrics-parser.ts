@@ -57,14 +57,20 @@ export const parseLyrics = (content: string): ParsedLyrics => {
 
     if (wordTimeMatches.length > 0) {
       const { words: rawWords, text } = parseEnhancedLine(contentWithoutLineTags);
-      if (rawWords.length === 0) continue;
+      if (rawWords.length === 0 && text) continue;
       isEnhanced = true;
 
+      // Empty enhanced markers still delimit instrumental gaps. Keep their real
+      // timestamps without inventing an empty karaoke word.
+      const wordTimesRaw =
+        rawWords.length > 0
+          ? rawWords.map((word) => word.time)
+          : wordTimeMatches.map((match) => parseLrcTime(match[1]));
       const lineTimesRaw =
         lineTimeMatches.length > 0
           ? lineTimeMatches.map((m) => parseLrcTime(m[1]))
-          : [Math.min(...rawWords.map((w) => w.time))];
-      const maxWordRaw = Math.max(...rawWords.map((w) => w.time));
+          : [Math.min(...wordTimesRaw)];
+      const maxWordRaw = Math.max(...wordTimesRaw);
 
       lineTimesRaw.forEach((lineStartRaw) => {
         const isRelative = lineTimeMatches.length > 0 && maxWordRaw < lineStartRaw - 50;
