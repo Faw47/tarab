@@ -747,6 +747,7 @@ export interface LaunchFileIntent {
   id: string;
   displayName: string;
   folderName: string;
+  folderPath: string;
 }
 
 export interface ResolvedLaunchFileIntent {
@@ -956,6 +957,10 @@ export const desktopToggleMiniWindow = async (): Promise<void> => {
 
 export const desktopFocusMainWindow = async (): Promise<void> => {
   return invoke('desktop_focus_main_window');
+};
+
+export const desktopCancelQuit = async (): Promise<void> => {
+  return invoke('desktop_cancel_quit');
 };
 
 export const desktopQuitApplication = async (): Promise<void> => {

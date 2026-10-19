@@ -45,6 +45,14 @@ QA-18 is a decision about generated IPC bindings and the original missing tests.
 
 The next implementation scope is security and data integrity: **SEC-05** must reject filesystem roots and the bare home directory in both grant creation and reauthorization, show the full import-folder path, and preserve exact-file Play once. **QA-29** must bound reads/writes, sync staged contents before replacement, and preserve recoverability if replacement fails, including Windows. **PB-20** must capture a fresh session before flushing through all native quit paths, without treating hide-to-tray as a quit. Existing broad grants or user files must not be silently revoked or rewritten while implementing those changes.
 
+**Local candidate:** this scope is implemented on `chatgpt/remediation-security-data`
+(implementation `96296c9`). Fresh recovery checks pass 397 frontend tests, 150 Linux Rust
+tests, compiler/lint/build/release guards and independent review with reported objections corrected
+by regression tests. See [the verification record](2026-10-18-security-data-verification.md).
+The user approved publication; the source is now published with an identical tested tree.
+Windows/macOS CI and desktop acceptance remain open. All three ledger entries stay PENDING, and the outstanding total remains 97.
+The earlier missing-Cargo statement describes the previous phase; pinned Rust is now available.
+
 **Code merge record:** #24 (`6c14bd7`), #20 (`afe4559`) and #23 (`87a0c59`) each passed all five checks on their final heads and independent code review before merging. Source changes on `main` at `a3a8f5a` match the tested combined candidate for `src/`, `src-tauri/`, `scripts/`, package manifest and lockfile. Combined-main CI remains a separate check. Native desktop acceptance and release qualification remain open.
 
 ## Priority and execution plan

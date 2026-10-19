@@ -37,7 +37,16 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   path. On first load, if that key is empty, the app migrates from
   legacy **`session.json`** using the Rust command `load_playback_session`.
 - Player-state writes use a monotonic revision and one serialized latest-wins queue. Do not save
-  before hydration completes. Flush queued writes before a native quit.
+  before hydration completes. On quit, call the session hook's fresh save, then drain queued writes
+  before `desktop_quit_application`. An explicit save failure cancels native quit and shows the
+  main window for retry. `shutdown.rs` keeps the renderer alive for native exits and real window
+  closes; hide-to-tray is not a quit. A stalled renderer has a ten-second native exit fallback.
+  Retried requests must use the latest session-save callback, including navigation and album state.
+- Fixed stores cap reads and serialized writes at 64 MiB, use the shared synced atomic replacement
+  helper, and read a legacy Windows `.bak` only when the primary is missing.
+- New library selections and reauthorization reject filesystem roots and the bare home directory
+  after canonicalization. Existing grants remain intact. File-open consent shows the full parent
+  path; a rejected Import folder must leave Play once available.
 - **Audio output**: the setting `outputDevice` in `settings-store` is applied to the engine with `set_audio_output_device` (see `list_audio_output_devices` / `enumerate_output_devices` in `audio.rs`). Switching device stops the current stream on the backend. The audio thread reopens output the same way (`RecoverOutput`) when the sample counter stops for 2 s while playing (device removed) and, on Windows while following the system default, when the default device name changes. If that reopen fails, the backend stops playback and drops the stream, so the next Play opens a fresh one.
 - **Gapless**: when `gapless` is on and `crossfadeSeconds` is 0, `playback-near-end` triggers `preload_next_track`, which appends the next decoded source to the current `rodio::Sink`. The backend emits `playback-ended` with `{ seamless: true }` on the first sample of the follow-on track; `usePlaybackLifecycle` advances the queue without calling `play_track` again.
 - **Library scans**: the renderer sends one `ScanReconcileRequest` after traversal. Rust applies it

@@ -1,5 +1,7 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NavView } from '../../../components/navigation';
+import { useSessionPersistence } from '../../../hooks/useSessionPersistence';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
 import type { DesktopControlAction } from '../../../types';
@@ -10,6 +12,7 @@ import {
   EVENT_DESKTOP_SNAPSHOT_REQUEST,
   MINI_WINDOW_LABEL,
 } from '../desktop-events';
+import { markPlayerStateHydrated } from '../player-state-store';
 import { useDesktopIntegration } from '../useDesktopIntegration';
 
 const {
@@ -20,6 +23,8 @@ const {
   desktopSyncMediaSessionMock,
   desktopFocusMainWindowMock,
   desktopQuitApplicationMock,
+  desktopCancelQuitMock,
+  fixedStoreSetMock,
   desktopToggleMiniWindowMock,
   desktopCloseMiniWindowMock,
   getCoverArtDataMock,
@@ -43,8 +48,12 @@ const {
     ),
     desktopSetNativeUiStateMock: vi.fn(async () => undefined),
     desktopSyncMediaSessionMock: vi.fn(async (_payload: unknown) => true),
-    desktopFocusMainWindowMock: vi.fn(async () => undefined),
+    desktopFocusMainWindowMock: vi.fn(async (): Promise<void> => undefined),
     desktopQuitApplicationMock: vi.fn(async () => undefined),
+    desktopCancelQuitMock: vi.fn(async (): Promise<void> => undefined),
+    fixedStoreSetMock: vi.fn(
+      async (_store: string, _key: string, _value: unknown): Promise<void> => undefined,
+    ),
     desktopToggleMiniWindowMock: vi.fn(async () => undefined),
     desktopCloseMiniWindowMock: vi.fn(async () => undefined),
     getCoverArtDataMock: vi.fn(async () => null),
@@ -74,6 +83,10 @@ vi.mock('../../../lib/tauri-commands', () => ({
   desktopSyncMediaSession: desktopSyncMediaSessionMock,
   desktopFocusMainWindow: desktopFocusMainWindowMock,
   desktopQuitApplication: desktopQuitApplicationMock,
+  desktopCancelQuit: desktopCancelQuitMock,
+  fixedStoreSet: fixedStoreSetMock,
+  fixedStoreGet: vi.fn(async () => null),
+  loadPlaybackSession: vi.fn(async () => null),
   desktopToggleMiniWindow: desktopToggleMiniWindowMock,
   desktopCloseMiniWindow: desktopCloseMiniWindowMock,
   getCoverArtData: getCoverArtDataMock,
@@ -95,8 +108,15 @@ vi.mock('../../../lib/report-error', () => ({
 const initialPlayerState = usePlayerStore.getState();
 const initialSettingsState = useSettingsStore.getState();
 
-function Harness() {
-  useDesktopIntegration();
+function Harness({
+  view = 'home',
+  albumDetails = null,
+}: {
+  view?: NavView;
+  albumDetails?: { album: string; artist: string } | null;
+}) {
+  const { flushSessionSave } = useSessionPersistence(view, albumDetails);
+  useDesktopIntegration(flushSessionSave);
   return null;
 }
 
@@ -114,6 +134,7 @@ async function emitDesktopSeek(positionSecs: number) {
 
 describe('useDesktopIntegration', () => {
   beforeEach(() => {
+    markPlayerStateHydrated();
     listeners.clear();
     vi.clearAllMocks();
 
@@ -336,6 +357,119 @@ describe('useDesktopIntegration', () => {
       (call) => (call as unknown as [Record<string, unknown>])[0],
     );
     expect(payloads.at(-1)).toMatchObject({ title: 'Song', metadataUnchanged: false });
+  });
+
+  it('captures fresh playback state and waits for its write before native quit', async () => {
+    let finishWrite: () => void = () => undefined;
+    fixedStoreSetMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        }),
+    );
+    render(<Harness />);
+    await waitFor(() => expect(listeners.has('menu-quit')).toBe(true));
+    usePlayerStore.setState({ currentTime: 42, volume: 0.3 });
+    await act(async () => listeners.get('menu-quit')?.({ payload: undefined }));
+    expect(fixedStoreSetMock).toHaveBeenCalled();
+    expect(desktopQuitApplicationMock).not.toHaveBeenCalled();
+    await act(async () => finishWrite());
+    await waitFor(() => expect(desktopQuitApplicationMock).toHaveBeenCalledTimes(1));
+    expect(fixedStoreSetMock).toHaveBeenCalledWith(
+      'player',
+      'player-state',
+      expect.objectContaining({ currentTime: 42, volume: 0.3, lastView: 'home' }),
+    );
+  });
+
+  it('saves once when menu and desktop quit signals overlap', async () => {
+    let finishWrite: () => void = () => undefined;
+    fixedStoreSetMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        }),
+    );
+    render(<Harness />);
+    await waitFor(() => expect(listeners.has('menu-quit')).toBe(true));
+    await act(async () => {
+      listeners.get('menu-quit')?.({ payload: undefined });
+      await emitDesktopAction('quit');
+    });
+    await act(async () => finishWrite());
+    await waitFor(() => expect(desktopQuitApplicationMock).toHaveBeenCalledTimes(1));
+    expect(fixedStoreSetMock.mock.calls.filter(([store]) => store === 'player')).toHaveLength(1);
+  });
+
+  it('keeps the app open after a failed save and lets the next quit retry', async () => {
+    fixedStoreSetMock.mockRejectedValueOnce(new Error('disk full'));
+    render(<Harness />);
+    await waitFor(() => expect(listeners.has('menu-quit')).toBe(true));
+    await act(async () => listeners.get('menu-quit')?.({ payload: undefined }));
+    await waitFor(() => expect(desktopCancelQuitMock).toHaveBeenCalledTimes(1));
+    expect(desktopQuitApplicationMock).not.toHaveBeenCalled();
+    expect(desktopFocusMainWindowMock).toHaveBeenCalled();
+    await act(async () => listeners.get('menu-quit')?.({ payload: undefined }));
+    await waitFor(() => expect(desktopQuitApplicationMock).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    'cancellation',
+    'focus',
+  ] as const)('retries a quit received while failed-save %s is pending', async (pendingOperation) => {
+    let finishOperation: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      finishOperation = resolve;
+    });
+    const operation =
+      pendingOperation === 'cancellation' ? desktopCancelQuitMock : desktopFocusMainWindowMock;
+    operation.mockImplementationOnce(() => pending);
+    fixedStoreSetMock.mockRejectedValueOnce(new Error('disk full'));
+    render(<Harness />);
+    await waitFor(() => expect(listeners.has('menu-quit')).toBe(true));
+    await act(async () => listeners.get('menu-quit')?.({ payload: undefined }));
+    await waitFor(() => expect(operation).toHaveBeenCalled());
+    await act(async () => {
+      usePlayerStore.setState({ currentTime: 58 });
+      await emitDesktopAction('quit');
+      finishOperation();
+    });
+    await waitFor(() => expect(desktopQuitApplicationMock).toHaveBeenCalledTimes(1));
+    expect(fixedStoreSetMock).toHaveBeenCalledWith(
+      'player',
+      'player-state',
+      expect.objectContaining({ currentTime: 58 }),
+    );
+  });
+
+  it('uses the latest navigation when replaying a quit after failed-save cancellation', async () => {
+    let finishCancellation: () => void = () => undefined;
+    desktopCancelQuitMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCancellation = resolve;
+        }),
+    );
+    fixedStoreSetMock.mockRejectedValueOnce(new Error('disk full'));
+    const { rerender } = render(<Harness />);
+    await waitFor(() => expect(listeners.has('menu-quit')).toBe(true));
+    await act(async () => listeners.get('menu-quit')?.({ payload: undefined }));
+    await waitFor(() => expect(desktopCancelQuitMock).toHaveBeenCalled());
+    rerender(<Harness view="album" albumDetails={{ album: 'New album', artist: 'New artist' }} />);
+    await act(async () => {
+      await emitDesktopAction('quit');
+      finishCancellation();
+    });
+    await waitFor(() => expect(desktopQuitApplicationMock).toHaveBeenCalledTimes(1));
+    expect(fixedStoreSetMock).toHaveBeenLastCalledWith(
+      'player',
+      'player-state',
+      expect.objectContaining({
+        lastView: 'album',
+        lastOpenedAlbum: 'New album',
+        lastOpenedArtist: 'New artist',
+      }),
+    );
   });
 
   it('routes desktop control actions to playback handlers', async () => {

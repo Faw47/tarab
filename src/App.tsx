@@ -72,7 +72,6 @@ const App = () => {
   useRenderLog('App');
   // Setup lifecycle listeners
   useSingleInstanceBridge();
-  useDesktopIntegration();
 
   // Navigation
   const {
@@ -317,8 +316,10 @@ const App = () => {
 
   usePlayerSessionRestore({ replaceView });
 
-  const { scheduleSessionSave, lastSavedPositionRef, lastSessionSaveRef } =
+  const { scheduleSessionSave, flushSessionSave, lastSavedPositionRef, lastSessionSaveRef } =
     useAppSessionPersistence({ currentView, albumDetails });
+
+  useDesktopIntegration(flushSessionSave);
 
   useCurrentTrackLyrics(autoLyrics);
   usePlaybackPositionEvents({

@@ -1,11 +1,16 @@
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
 use std::fs;
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
 
 use crate::database::get_app_data_dir;
+use crate::file_ops::replace_file_atomically;
+
+// Large enough for long-path queues, while bounding disk reads and encoded writes.
+const MAX_FIXED_STORE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub type SharedFixedStore = Arc<Mutex<()>>;
 
@@ -24,12 +29,57 @@ fn store_path(store: &str) -> Result<PathBuf, String> {
     Ok(get_app_data_dir()?.join(name))
 }
 
+fn read_store_file(path: &Path) -> Result<Option<Map<String, Value>>, String> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Failed to read store: {}", error)),
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Failed to inspect store: {}", error))?;
+    if !metadata.is_file() || metadata.len() > MAX_FIXED_STORE_BYTES {
+        return Err("Store is not a regular file or exceeds the size limit".to_string());
+    }
+    let mut bytes = Vec::new();
+    // Bound the actual read as well: the file can grow after metadata was checked.
+    file.take(MAX_FIXED_STORE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Failed to read store: {}", error))?;
+    if bytes.len() as u64 > MAX_FIXED_STORE_BYTES {
+        return Err("Store exceeds the size limit".to_string());
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("Failed to parse store: {}", error))
+}
+
 fn read_store(path: &Path) -> Result<Map<String, Value>, String> {
-    match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice::<Map<String, Value>>(&bytes)
-            .map_err(|error| format!("Failed to parse store: {}", error)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
-        Err(error) => Err(format!("Failed to read store: {}", error)),
+    if let Some(values) = read_store_file(path)? {
+        return Ok(values);
+    }
+    // Older Windows builds moved the primary to .bak before replacement. A crash in
+    // that gap must not turn a recoverable session into an empty store.
+    Ok(read_store_file(&path.with_extension("bak"))?.unwrap_or_default())
+}
+
+struct StoreWriter {
+    file: fs::File,
+    written: u64,
+}
+
+impl Write for StoreWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > MAX_FIXED_STORE_BYTES - self.written {
+            return Err(std::io::Error::other("Store exceeds the size limit"));
+        }
+        let written = self.file.write(bytes)?;
+        self.written += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
     }
 }
 
@@ -39,33 +89,22 @@ fn write_store(path: &Path, values: &Map<String, Value>) -> Result<(), String> {
         .ok_or_else(|| "Store path has no parent".to_string())?;
     fs::create_dir_all(parent)
         .map_err(|error| format!("Failed to create store folder: {}", error))?;
-    let temporary = path.with_extension("tmp");
-    let bytes =
-        serde_json::to_vec(values).map_err(|error| format!("Failed to encode store: {}", error))?;
-    fs::write(&temporary, bytes).map_err(|error| format!("Failed to write store: {}", error))?;
-    #[cfg(not(windows))]
-    {
-        fs::rename(&temporary, path).map_err(|error| format!("Failed to replace store: {}", error))
-    }
-    #[cfg(windows)]
-    {
-        let backup = path.with_extension("bak");
-        if path.exists() {
-            let _ = fs::remove_file(&backup);
-            fs::rename(path, &backup)
-                .map_err(|error| format!("Failed to prepare store replacement: {}", error))?;
-        }
-        match fs::rename(&temporary, path) {
-            Ok(()) => {
-                let _ = fs::remove_file(backup);
-                Ok(())
-            }
-            Err(error) => {
-                let _ = fs::rename(&backup, path);
-                Err(format!("Failed to replace store: {}", error))
-            }
-        }
-    }
+    replace_file_atomically(path, false, |temporary| {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temporary)
+            .map_err(|error| format!("Failed to stage store: {}", error))?;
+        let mut writer = BufWriter::new(StoreWriter { file, written: 0 });
+        serde_json::to_writer(&mut writer, values)
+            .map_err(|error| format!("Failed to encode store: {}", error))?;
+        writer
+            .flush()
+            .map_err(|error| format!("Failed to write store: {}", error))?;
+        // The shared replacement helper syncs this staged file before renaming over the
+        // original on every platform. The original never moves out of the way first.
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -124,6 +163,135 @@ pub async fn fixed_store_remove(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tarab-store-{}-{}", name, nonce));
+        fs::create_dir_all(&root).expect("create directory");
+        root
+    }
+
+    #[test]
+    fn oversized_read_is_rejected_before_parsing() {
+        let root = temp_root("oversize-read");
+        let path = root.join("settings.json");
+        // Whitespace is valid after JSON, so the old unbounded reader accepts this file.
+        let mut bytes = b"{}".to_vec();
+        bytes.resize(64 * 1024 * 1024 + 1, b' ');
+        fs::write(&path, bytes).expect("write oversized store");
+        assert!(read_store(&path).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn oversized_write_keeps_the_previous_store() {
+        let root = temp_root("oversize-write");
+        let path = root.join("settings.json");
+        let original = Map::from_iter([("theme".to_string(), Value::from("dark"))]);
+        write_store(&path, &original).expect("write original");
+        let too_large = Map::from_iter([(
+            "large".to_string(),
+            Value::from("x".repeat(64 * 1024 * 1024)),
+        )]);
+        assert!(write_store(&path, &too_large).is_err());
+        assert_eq!(read_store(&path).expect("read previous"), original);
+        assert_eq!(fs::read_dir(&root).expect("list directory").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_primary_recovers_the_legacy_windows_backup() {
+        let root = temp_root("backup");
+        let path = root.join("tarab-player.dat");
+        fs::write(path.with_extension("bak"), br#"{"position":42}"#).expect("write backup");
+        assert_eq!(read_store(&path).expect("recover backup")["position"], 42);
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacement_failure_preserves_the_target_and_cleans_staging() {
+        let root = temp_root("replace-failure");
+        let path = root.join("settings.json");
+        fs::create_dir(&path).expect("create conflicting directory");
+        fs::write(path.join("keep"), b"original").expect("write original");
+        assert!(write_store(&path, &Map::new()).is_err());
+        assert_eq!(
+            fs::read(path.join("keep")).expect("read original"),
+            b"original"
+        );
+        assert_eq!(fs::read_dir(&root).expect("list directory").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn overwrite_replaces_an_existing_regular_store() {
+        let root = temp_root("overwrite");
+        let path = root.join("settings.json");
+        let original = Map::from_iter([("theme".to_string(), Value::from("dark"))]);
+        let updated = Map::from_iter([("theme".to_string(), Value::from("light"))]);
+        write_store(&path, &original).expect("write original");
+        write_store(&path, &updated).expect("replace original");
+        assert_eq!(read_store(&path).expect("read replacement"), updated);
+        assert_eq!(fs::read_dir(&root).expect("list directory").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn encoded_size_limit_counts_json_escaping() {
+        let root = temp_root("escaped-size");
+        let path = root.join("settings.json");
+        let original = Map::from_iter([("theme".to_string(), Value::from("dark"))]);
+        write_store(&path, &original).expect("write original");
+        // Each NUL requires six encoded bytes, so a smaller raw value exceeds the limit.
+        let values = Map::from_iter([(
+            "large".to_string(),
+            Value::from("\0".repeat((MAX_FIXED_STORE_BYTES / 6 + 1) as usize)),
+        )]);
+        assert!(write_store(&path, &values).is_err());
+        assert_eq!(read_store(&path).expect("read original"), original);
+        assert_eq!(fs::read_dir(&root).expect("list directory").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn primary_precedes_backup_and_corruption_is_reported() {
+        let root = temp_root("primary");
+        let path = root.join("settings.json");
+        fs::write(path.with_extension("bak"), br#"{"theme":"old"}"#).expect("backup");
+        fs::write(&path, br#"{"theme":"new"}"#).expect("primary");
+        assert_eq!(read_store(&path).expect("prefer primary")["theme"], "new");
+        fs::write(&path, b"broken").expect("corrupt primary");
+        assert!(read_store(&path).is_err());
+        fs::remove_file(&path).expect("remove primary");
+        fs::write(path.with_extension("bak"), b"broken").expect("corrupt backup");
+        assert!(read_store(&path).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_regular_store_survives_replacement_failure() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = temp_root("locked");
+        let path = root.join("settings.json");
+        let original = Map::from_iter([("theme".to_string(), Value::from("dark"))]);
+        write_store(&path, &original).expect("write original");
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .expect("lock original");
+        assert!(write_store(&path, &Map::new()).is_err());
+        drop(lock);
+        assert_eq!(read_store(&path).expect("read original"), original);
+        assert_eq!(fs::read_dir(&root).expect("list directory").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn fixed_store_round_trip_uses_atomic_file() {

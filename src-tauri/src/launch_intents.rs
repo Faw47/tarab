@@ -26,6 +26,7 @@ pub struct FileIntentSummary {
     pub id: String,
     pub display_name: String,
     pub folder_name: String,
+    pub folder_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +98,11 @@ fn summarize(intent: &PendingFileIntent) -> FileIntentSummary {
         id: intent.id.clone(),
         display_name,
         folder_name,
+        folder_path: intent
+            .path
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     }
 }
 
