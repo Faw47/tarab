@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use tauri_plugin_opener::OpenerExt;
 use walkdir::WalkDir;
 
 const UNSUPPORTED_GENRE_RULE_MESSAGE: &str =
@@ -1299,6 +1300,23 @@ fn reset_playlists_data_blocking(
         },
     );
     Ok(())
+}
+
+/// The renderer can request this one app-owned folder, never supply an arbitrary path.
+#[tauri::command]
+pub async fn reveal_playlists_data_folder(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let directory = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        app.opener()
+            .open_path(directory.to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|error| format!("Failed to open playlists data folder: {error}"))
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
 }
 
 #[tauri::command]

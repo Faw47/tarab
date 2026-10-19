@@ -597,6 +597,10 @@ export const getPlaylistsDataPath = async (): Promise<string> => {
   return invoke('get_playlists_data_path');
 };
 
+export const revealPlaylistsDataFolder = async (): Promise<void> => {
+  return invoke('reveal_playlists_data_folder');
+};
+
 // Tag editor commands
 export const readFullTags = async (filePath: string): Promise<TagInfo> => {
   return invoke('read_full_tags', { filePath });

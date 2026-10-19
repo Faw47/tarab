@@ -332,7 +332,7 @@ Local data includes:
 
 Offline playback and library management make no network requests.
 
-Optional LRCLIB lookup sends track metadata to LRCLIB only after you enable that feature.
+Optional LRCLIB lookup sends the track title, artist, album and duration to LRCLIB after you enable it. The native backend checks the saved opt-in before every request. Missing or invalid settings block online lookup; local sidecar lyrics remain available. Request errors omit the URL carrying those metadata fields.
 
 The native Rust backend controls access to music folders. Renderer code cannot grant itself access to arbitrary paths.
 

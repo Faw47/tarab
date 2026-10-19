@@ -63,6 +63,28 @@ fn read_store(path: &Path) -> Result<Map<String, Value>, String> {
     Ok(read_store_file(&path.with_extension("bak"))?.unwrap_or_default())
 }
 
+fn read_auto_lyrics_setting(path: &Path) -> Result<bool, String> {
+    // Recovery data must never resurrect stale permission to transmit track metadata.
+    let values = read_store_file(path)?.unwrap_or_default();
+    Ok(values
+        .get("tarab-settings")
+        .and_then(|value| value.get("state"))
+        .and_then(|value| value.get("autoLyrics"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false))
+}
+
+/// Read native persisted consent under the same lock as settings writes.
+pub(crate) async fn auto_lyrics_enabled(state: &SharedFixedStore) -> Result<bool, String> {
+    let state = state.clone();
+    spawn_blocking(move || {
+        let _guard = state.lock();
+        read_auto_lyrics_setting(&store_path("settings")?)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 struct StoreWriter {
     file: fs::File,
     written: u64,
@@ -172,6 +194,49 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tarab-store-{}-{}", name, nonce));
         fs::create_dir_all(&root).expect("create directory");
         root
+    }
+
+    #[test]
+    fn missing_primary_settings_does_not_restore_backup_consent() {
+        let root = temp_root("stale-lyrics-consent");
+        let path = root.join("settings.json");
+        let settings = Map::from_iter([(
+            "tarab-settings".into(),
+            serde_json::json!({"state": {"autoLyrics": true}}),
+        )]);
+        write_store(&path.with_extension("bak"), &settings).expect("stale enabled backup");
+        assert!(!read_auto_lyrics_setting(&path).expect("missing primary fails closed"));
+        assert_eq!(
+            read_store(&path).expect("ordinary recovery remains"),
+            settings
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn online_lyrics_requires_a_persisted_boolean_opt_in() {
+        let root = temp_root("lyrics-consent");
+        let path = root.join("settings.json");
+        assert!(!read_auto_lyrics_setting(&path).expect("missing settings"));
+        for (value, enabled) in [
+            (serde_json::json!({}), false),
+            (serde_json::json!({"autoLyrics": true}), false),
+            (serde_json::json!({"state": {"autoLyrics": true}}), true),
+            (serde_json::json!({"state": {"autoLyrics": false}}), false),
+            (serde_json::json!({"state": {"autoLyrics": "true"}}), false),
+            (serde_json::json!({"state": {"autoLyrics": 1}}), false),
+            (serde_json::json!({"state": {"autoLyrics": null}}), false),
+        ] {
+            write_store(&path, &Map::from_iter([("tarab-settings".into(), value)]))
+                .expect("settings fixture");
+            assert_eq!(
+                read_auto_lyrics_setting(&path).expect("read consent"),
+                enabled
+            );
+        }
+        fs::write(&path, b"broken").expect("corrupt settings");
+        assert!(read_auto_lyrics_setting(&path).is_err());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

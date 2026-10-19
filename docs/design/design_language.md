@@ -287,3 +287,7 @@ Empty states:
 Before making UI/styling decisions in TARAB, follow this spec’s numeric scales and behavior rules.
 If existing UI conflicts with these standards, align visuals while preserving product behavior.
 ```
+
+### Lyrics privacy and repair actions
+
+Online lyrics remain opt-in. The settings explanation names the title, artist, album and duration sent to LRCLIB. Native saved consent gates online lookup; local sidecar lyrics work independently. Playlist repair opens only the app-owned data folder through a parameterless native action. Ordinary file reveal retains native library-grant checks.

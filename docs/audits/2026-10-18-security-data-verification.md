@@ -4,8 +4,9 @@ Base: `f9058f82a49b357ccc186972ab98c58b8a6024ec`.
 Implementation: `96296c900c46982de565eb9f789cfdb89f02886b`.
 Branch: `chatgpt/remediation-security-data`, published after explicit approval.
 
-SEC-05, QA-29 and PB-20 are implemented in this candidate. Their ledger entries remain PENDING
-until cross-platform checks and relevant desktop acceptance pass. The release verdict is NO-GO.
+SEC-05, QA-29 and PB-20 are implemented in this candidate. Cross-platform CI and final scoped
+independent review passed. QA-29 is FIXED_VERIFIED; SEC-05 and PB-20 are NATIVE_VALIDATION_REQUIRED
+until relevant desktop acceptance passes. The release verdict is NO-GO.
 The source branch is published; nothing has been merged or released.
 
 ## Changes
@@ -34,7 +35,7 @@ The source branch is published; nothing has been merged or released.
 | Storybook and Knip | Passed |
 | Release configuration | Passed |
 | Pinned Rust 1.92 fmt/check/all-target/all-feature strict Clippy | Passed |
-| Windows/macOS CI | Pending on the published PR head |
+| Windows/macOS/Linux CI | All five jobs passed on published PR #26 head 0d5184c (run 39192445772) |
 | Desktop/audio/close/quit/tray/logout acceptance | Not performed |
 | Signed installers, clean install, upgrade and release assets | Not performed |
 
@@ -47,7 +48,7 @@ The unchanged original fixed-store implementation was combined temporarily with 
 and restored in a finally block. Six tests fail against it: oversized read/write, encoded escaping
 expansion, missing-primary backup recovery, corrupt missing-primary backup handling, and cleanup
 after replacement failure. All eight Linux fixed-store tests pass on the fixed implementation.
-Windows additionally has a gated locked-regular-file replacement test.
+Windows additionally has a gated locked-regular-file replacement test, now passed in PR #26 CI.
 
 Grant consent and session-lifecycle tests cover full path, rejected-import Play once, cancellation,
 fresh position, pending writes, duplicate quit, save failure/retry, hydration, timer cancellation
@@ -58,8 +59,8 @@ Independent review found an Important cancel/retry race. Its correction is prese
 focus does not block cleanup, and requests arriving during failed-save cancellation are replayed.
 Two regressions cover cancellation and focus delays. Recovery review found no blocking source
 omissions, but identified stale navigation in recursive retry. A further test failed before the
-latest-callback ref and passed afterward. The full suite passed after that correction; no fresh
-independent re-review of the final ref-only correction is claimed.
+latest-callback ref and passed afterward. The full suite passed after that correction. A final independent re-review of the callback
+correction found no blocking issue and reran all 18 desktop-integration tests successfully.
 
 ## Recovery evidence
 
@@ -104,3 +105,10 @@ GitHub noreply identity. The earlier approval block is resolved.
 Create the draft PR against main and run final-head CI on all three platforms. Do not merge based only on Linux results. After qualification, continue with
 SEC-06 scoped file reveal, SEC-07 native online-lyrics consent/privacy, the remaining security/data
 rows and native playback-command coordination. None of those later items is claimed implemented.
+
+## Published CI update
+
+PR [#26](https://github.com/Faw47/tarab/pull/26) is a draft. Run
+[39192445772](https://github.com/Faw47/tarab/actions/runs/39192445772) passed JavaScript, dependency audit
+and Rust on Windows, macOS and Linux for head `0d5184c`. Desktop acceptance remains open; no merge or
+release has occurred.
