@@ -204,6 +204,12 @@ Startup accessibility:
 - A minimized login launch stays hidden only when settings load and the status icon is available and enabled.
 - If the status icon is disabled or unavailable, or settings hydration stalls for three seconds, show the main window. Effect teardown must not trigger a delayed window show.
 
+Quit and folder consent:
+
+- A real quit saves the current session before exiting; a failed save shows the main window for retry.
+- Closing to the status icon keeps the player running.
+- File-open import prompts show the complete folder path and explain access to subfolders. A rejected folder import keeps Play once and Cancel available.
+
 Mini window:
 
 - Always-on-top compact surface

@@ -338,9 +338,11 @@ The native Rust backend controls access to music folders. Renderer code cannot g
 
 File-association requests use bounded choices:
 
-* **Play once**
-* **Import folder**
-* **Cancel**
+* **Play once** opens just that file without adding a folder grant.
+* **Import folder** shows the full folder path and grants ongoing access to its audio files and subfolders. New grants cannot cover a filesystem root or your entire home directory.
+* **Cancel** leaves the file unopened.
+
+On quit, Tarab saves the current playback session before exiting. If a save fails, the window stays open so you can retry. Closing to the status icon keeps playback running. If the application stops responding during quit, it exits after ten seconds using the last saved session.
 
 Tarab does not require an account and includes no analytics or crash-reporting client.
 

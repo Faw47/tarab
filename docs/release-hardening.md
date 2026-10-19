@@ -167,3 +167,25 @@ Signing secrets are set only in the `env` of the steps that use them, and `check
 13. Confirm that CI compiles and tests the Rust backend on Linux, macOS, and Windows.
 
 The release-configuration check verifies version alignment, the static `tarab` desktop URL scheme, all supported audio file associations, the no-updater policy, the restricted production CSP, and immutable release-workflow action references. A macOS bundle must also contain `CFBundleURLTypes`; configuration source alone is not sufficient proof.
+
+## Pending security and session remediation acceptance (2026-10-18)
+
+SEC-05: native grant creation and reauthorization reject canonical filesystem roots and the bare
+home folder before mutating grants or indexed paths. Existing broad grants are not revoked.
+Native acceptance must cover POSIX aliases, Windows drive/UNC roots, a normal Music folder,
+rejected import followed by Play once, and disconnected sources.
+
+QA-29: fixed-store reads and streaming serialized writes are capped at 64 MiB. Staged files are
+created exclusively and synced by the existing replacement helper before rename. The original
+never moves away first, including on Windows. A missing primary can read the legacy Windows
+`.bak`; malformed primaries report errors. Verify disk-full, read-only and locked-target behavior.
+Directory sync is best-effort; power-loss durability is not guaranteed on every filesystem.
+
+PB-20: quit captures a fresh hydrated session, cancels its debounce and waits for writes.
+Main-window close (unless hiding to tray), native menu/tray Quit and ExitRequested use a bounded
+request/save/approve handshake. Save failures cancel quit and show the main window; retries use
+the latest view and album state. An unavailable renderer exits after ten seconds using the last
+persisted session, which can lose the latest position. Forced termination is not a graceful quit.
+Native acceptance: seek then immediately quit through every supported OS path, restart and verify
+position, queue, speed and view. Cover hidden tray, pending writes, full disk, startup before
+hydration, a stalled renderer and OS logout. Frontend mocks do not establish native acceptance.
