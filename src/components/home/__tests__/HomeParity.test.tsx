@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import type { Track } from '../../../types';
@@ -56,6 +56,27 @@ describe('Home parity between themes (FE-18)', () => {
     model.albums = Array.from({ length: 30 }, (_, n) => ({ track: track(n), count: 1 }));
     model.libraryStats = { trackCount: 30, totalDuration: 7200, artistCount: 1, albumCount: 30 };
     usePlayerStore.setState({ currentTrack: null, isPlaying: false });
+  });
+
+  it('keeps the focused neo volume slider visible after the pointer leaves', () => {
+    vi.useFakeTimers();
+    try {
+      usePlayerStore.setState({ currentTrack: track(1) });
+      render(<HomeViewNeo {...props()} />);
+      const slider = screen.getByRole('slider', { name: 'Volume' });
+      const wrapper = screen.getByRole('button', { name: /mute/i }).parentElement as HTMLElement;
+      const sliding = slider.closest('.overflow-hidden');
+      act(() => slider.focus());
+      fireEvent.mouseLeave(wrapper);
+      act(() => vi.advanceTimersByTime(350));
+      expect(slider).toHaveFocus();
+      expect(sliding).toHaveClass('w-auto', 'opacity-100');
+      fireEvent.blur(slider, { relatedTarget: document.body });
+      act(() => vi.advanceTimersByTime(350));
+      expect(sliding).toHaveClass('w-0', 'opacity-0');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('neo Home hides the player hero while nothing is loaded, like liquid', () => {

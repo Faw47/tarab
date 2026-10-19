@@ -399,6 +399,7 @@ export const TopBarNeo = memo(function TopBarNeo({
             </div>
 
             <input
+              dir="auto"
               ref={searchInputRef}
               id={SEARCH_INPUT_ID}
               type="text"

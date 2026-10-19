@@ -74,6 +74,7 @@ const NeoVolumeControl = memo(() => {
   const volume = usePlayerStore((s) => s.volume);
   const muted = isMuted(volume);
   const [expanded, setExpanded] = useState(false);
+  const focusWithin = useRef(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onEnter = useCallback(() => {
@@ -82,7 +83,10 @@ const NeoVolumeControl = memo(() => {
   }, []);
 
   const onLeave = useCallback(() => {
-    leaveTimer.current = setTimeout(() => setExpanded(false), 300);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      if (!focusWithin.current) setExpanded(false);
+    }, 300);
   }, []);
 
   useEffect(
@@ -97,9 +101,15 @@ const NeoVolumeControl = memo(() => {
       className="inline-flex items-center gap-2"
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      onFocus={onEnter}
+      onFocus={() => {
+        focusWithin.current = true;
+        onEnter();
+      }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          focusWithin.current = false;
+          onLeave();
+        }
       }}
     >
       <button

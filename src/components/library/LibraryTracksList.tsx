@@ -202,6 +202,7 @@ const TrackRow = memo(function TrackRow({
           <div className="min-w-0 pr-2">
             <div className="flex items-center gap-2">
               <span
+                dir="auto"
                 className={cn(
                   'truncate',
                   isNeo
@@ -226,6 +227,7 @@ const TrackRow = memo(function TrackRow({
               )}
             </div>
             <div
+              dir="auto"
               className={cn(
                 'truncate mt-0.5',
                 isNeo
@@ -246,6 +248,7 @@ const TrackRow = memo(function TrackRow({
 
         <div className="min-w-0 pr-4 py-1.5 flex flex-col justify-center">
           <div
+            dir="auto"
             className={cn(
               'truncate',
               isNeo
@@ -256,6 +259,7 @@ const TrackRow = memo(function TrackRow({
             {renderHighlightedText(track.album, searchQuery, highlightClass)}
           </div>
           <div
+            dir="auto"
             className={cn(
               'truncate',
               isNeo

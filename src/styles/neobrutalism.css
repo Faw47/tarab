@@ -814,9 +814,9 @@
   background: #ffffff !important;
 }
 
-/* Arabic and other cursive scripts must not be letter-spaced: spacing breaks their joining in
-   engines that apply it (WebKit). Neo metadata carries dir="auto", so RTL titles resolve to
-   :dir(rtl) here and drop the wide label tracking (FE-22). */
-[data-theme="neobrutalism"] [dir="auto"]:dir(rtl) {
+/* Dynamic metadata and queries can mix scripts, including Latin-leading Arabic text.
+   Label tracking must not reach Arabic glyphs even when dir="auto" resolves LTR.
+   Static UI labels keep the neo tracking; dynamic text uses normal spacing (FE-22). */
+[data-theme="neobrutalism"] [dir="auto"] {
   letter-spacing: normal !important;
 }

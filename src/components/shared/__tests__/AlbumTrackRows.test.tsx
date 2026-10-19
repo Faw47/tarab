@@ -110,3 +110,16 @@ describe('liquid album track row controls (FE-27)', () => {
     expect(screen.getByRole('row', { name: 'Song 1 by Artist, now playing' })).toBeInTheDocument();
   });
 });
+
+describe('neo album metadata direction (FE-22)', () => {
+  it('isolates sticky and hero album headings and the artist', () => {
+    renderOverlay(AlbumDetailsOverlayNeo as ComponentType<AlbumDetailsOverlayProps>, {
+      album: 'ألبوم 2026 (Live)',
+      artist: 'فيروز',
+    });
+    for (const heading of screen.getAllByRole('heading', { name: 'ألبوم 2026 (Live)' })) {
+      expect(heading).toHaveAttribute('dir', 'auto');
+    }
+    expect(screen.getByText('فيروز')).toHaveAttribute('dir', 'auto');
+  });
+});

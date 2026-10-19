@@ -105,6 +105,7 @@ const ArtistRow = memo(function ArtistRow({
           )}
           <div className="min-w-0 pr-2">
             <div
+              dir="auto"
               className={cn(
                 'truncate',
                 isNeo

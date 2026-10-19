@@ -34,9 +34,26 @@ function renderPlayer() {
   );
 }
 
+const initialSettings = useSettingsStore.getState();
+
 describe('PlayerContent', () => {
   beforeEach(() => {
+    useSettingsStore.setState(initialSettings);
     usePlayerStore.setState({ currentTrack: track, duration: 200, isPlaying: false });
+  });
+
+  it.each([
+    true,
+    false,
+  ])('isolates mixed Arabic metadata in either layout (%s)', (fullscreenPlayerLayout) => {
+    useSettingsStore.setState({ theme: 'neobrutalism', fullscreenPlayerLayout });
+    const arabic = { ...track, title: 'أغنية 2026 (Live)', artist: 'فيروز', album: 'ألبوم 2026' };
+    usePlayerStore.setState({ currentTrack: arabic });
+    renderPlayer();
+    expect(screen.getByRole('heading', { name: arabic.title })).toHaveAttribute('dir', 'auto');
+    expect(screen.getByText(arabic.artist)).toHaveAttribute('dir', 'auto');
+    expect(screen.getByText(arabic.album)).toHaveAttribute('dir', 'auto');
+    useSettingsStore.setState({ theme: 'liquid-glass' });
   });
 
   it('keeps the transport and progress when cover art is hidden', () => {

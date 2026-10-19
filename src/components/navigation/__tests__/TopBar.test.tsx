@@ -1,6 +1,7 @@
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TopBar } from '../TopBar';
+import { TopBarNeo } from '../TopBarNeo';
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
@@ -36,5 +37,22 @@ describe('TopBar search', () => {
     });
 
     expect(document.activeElement?.id).toBe('global-library-search');
+  });
+});
+
+describe('neo search metadata direction (FE-22)', () => {
+  it('lets the search input resolve Arabic query direction', () => {
+    render(
+      <TopBarNeo
+        navMode="topNav"
+        currentView="home"
+        onNavigate={vi.fn()}
+        searchQuery="فيروز (Live)"
+        onSearchChange={vi.fn()}
+        isScanning={false}
+        scanProgress={0}
+      />,
+    );
+    expect(screen.getByRole('textbox', { name: 'Search library' })).toHaveAttribute('dir', 'auto');
   });
 });

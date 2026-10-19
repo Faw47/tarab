@@ -295,8 +295,8 @@ Audio file associations and `tarab://` links can send tracks or library searches
 * WebGL visual effects
 * Reduced Effects setting
 * operating-system reduced-motion support
-* right-to-left metadata and lyrics (Arabic titles keep reading order; karaoke fills from the right)
-* one volume level shared by every volume control and the M shortcut
+* right-to-left metadata and lyrics, isolated queue values, and normal dynamic text spacing for mixed-script labels; karaoke fills from the right
+* one volume level shared by every volume control and the M shortcut; Home controls stay visible while focused
 * luminance-aware foreground colors
 * high-contrast interaction states
 
