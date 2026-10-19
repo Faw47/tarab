@@ -47,7 +47,7 @@ the two residual corrections. This evidence supports code remediation, not nativ
 | Storybook / Knip / release configuration | Passed |
 | Rust | Unchanged subtree; PR #27 passed tests/check/strict Clippy on Windows, macOS and Linux |
 | Independent review | Final FE-16 and FE-22 corrections approved; no unresolved source objection |
-| Follow-up latest-head CI | Requires the new published draft's run |
+| Follow-up latest-head CI | All five jobs passed on PR #28 head 6707606, run 39194273197 |
 | Browser validation | Blocked: originating browser context is unavailable |
 | Native desktop/audio/WebView acceptance | Not performed |
 

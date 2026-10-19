@@ -85,6 +85,8 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 
 ## When Editing UI
 
+- Album row hold selection uses `useAlbumTrackLongPress` in both themes: 500 ms primary mouse/touch hold, cancellation on release/leave/touch move/cancel/context menu and component/album replacement. Nested controls and secondary mouse buttons must not start it.
+
 - Do not hide Home volume sliders while focus remains inside their wrapper. Track focus separately from pointer hover.
 - Dynamic neo metadata/search text uses `dir="auto"` and normal letter spacing even for Latin-leading Arabic. Isolate queue artist and album values separately; keep label tracking on static UI copy.
 

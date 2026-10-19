@@ -297,3 +297,7 @@ Online lyrics remain opt-in. The settings explanation names the title, artist, a
 Home volume controls remain expanded while keyboard focus stays inside. Pointer leave alone must not hide a focused slider; leaving the control with keyboard focus allows the existing delayed collapse.
 
 Dynamic metadata and the neo search input use `dir="auto"`. Queue artist and album values use separate `bdi` elements. Neo dynamic text uses normal letter spacing independently of its first strong character: `Live أهواك` starts LTR yet still contains Arabic glyphs. Static UI labels retain their tracking. Verify Arabic shaping, punctuation, truncation and lyric fill on supported platform WebViews.
+
+### Album hold-selection parity
+
+Both album skins share one 500 ms primary-mouse/touch hold controller. A completed hold activates selection without requesting playback. Release, row leave, touch movement/cancellation and context menu opening cancel pending work. Nested buttons retain their own actions. Leaving the album or replacing its tracks cancels the old timer. Existing click, double-click and keyboard activation behavior remains unchanged by this focused correction.

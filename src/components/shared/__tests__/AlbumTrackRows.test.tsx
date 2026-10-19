@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentType } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '../../../types';
 import { AlbumDetailsOverlay, type AlbumDetailsOverlayProps } from '../AlbumDetailsOverlay';
 import { AlbumDetailsOverlayNeo } from '../AlbumDetailsOverlayNeo';
@@ -29,11 +29,18 @@ function renderOverlay(
   Overlay: ComponentType<AlbumDetailsOverlayProps>,
   props: Partial<AlbumDetailsOverlayProps> = {},
 ) {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <Overlay album="Album" artist="Artist" tracks={tracks} onClose={vi.fn()} {...props} />
-    </QueryClientProvider>,
+  const client = new QueryClient();
+  const wrap = (nextProps: Partial<AlbumDetailsOverlayProps>) => (
+    <QueryClientProvider client={client}>
+      <Overlay album="Album" artist="Artist" tracks={tracks} onClose={vi.fn()} {...nextProps} />
+    </QueryClientProvider>
   );
+  const result = render(wrap(props));
+  return {
+    ...result,
+    rerenderOverlay: (nextProps: Partial<AlbumDetailsOverlayProps>) =>
+      result.rerender(wrap(nextProps)),
+  };
 }
 
 describe.each([
@@ -121,5 +128,121 @@ describe('neo album metadata direction (FE-22)', () => {
       expect(heading).toHaveAttribute('dir', 'auto');
     }
     expect(screen.getByText('فيروز')).toHaveAttribute('dir', 'auto');
+  });
+});
+
+describe.each([
+  ['liquid', AlbumDetailsOverlay as ComponentType<AlbumDetailsOverlayProps>],
+  ['neo', AlbumDetailsOverlayNeo as ComponentType<AlbumDetailsOverlayProps>],
+])('%s album hold selection (FE-18)', (_name, Overlay) => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const firstRow = () => within(screen.getByRole('grid')).getAllByRole('row')[1];
+
+  it.each(['mouse', 'touch'])('selects once after a 500 ms %s hold without playing', (input) => {
+    const onTrackSelect = vi.fn();
+    const onPlayTrack = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect, onPlayTrack });
+    if (input === 'mouse') fireEvent.mouseDown(firstRow(), { button: 0 });
+    else fireEvent.touchStart(firstRow());
+    act(() => vi.advanceTimersByTime(499));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[0], false);
+    expect(screen.getByRole('button', { name: 'Select Song 1' })).toBeInTheDocument();
+    if (input === 'mouse') fireEvent.mouseUp(firstRow());
+    else fireEvent.touchEnd(firstRow());
+    act(() => vi.advanceTimersByTime(1000));
+    expect(onTrackSelect).toHaveBeenCalledTimes(1);
+    expect(onPlayTrack).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'mouseUp',
+    'mouseLeave',
+    'touchEnd',
+    'touchMove',
+    'touchCancel',
+  ])('cancels on %s', (end) => {
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect });
+    if (end.startsWith('touch')) fireEvent.touchStart(firstRow());
+    else fireEvent.mouseDown(firstRow(), { button: 0 });
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent[end as 'mouseUp' | 'mouseLeave' | 'touchEnd' | 'touchMove' | 'touchCancel'](
+      firstRow(),
+    );
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a secondary mouse press as selection', () => {
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect });
+    fireEvent.mouseDown(firstRow(), { button: 2 });
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+  });
+
+  it('does not select while holding a row checkbox', () => {
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect, selectedTrackIds: ['t1'] });
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Deselect Song 1' }), { button: 0 });
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+  });
+
+  it('cancels a hold when the album tracks are replaced', () => {
+    const onTrackSelect = vi.fn();
+    const { rerenderOverlay } = renderOverlay(Overlay, { onTrackSelect });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    act(() => vi.advanceTimersByTime(300));
+    rerenderOverlay({ onTrackSelect, tracks: [makeTrack(4)] });
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).not.toHaveBeenCalled();
+  });
+
+  it('uses the latest selection callback during a hold', () => {
+    const first = vi.fn();
+    const latest = vi.fn();
+    const { rerenderOverlay } = renderOverlay(Overlay, { onTrackSelect: first });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    act(() => vi.advanceTimersByTime(300));
+    rerenderOverlay({ onTrackSelect: latest });
+    act(() => vi.advanceTimersByTime(200));
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledExactlyOnceWith(tracks[0], false);
+  });
+
+  it('keeps only the newest pending row hold', () => {
+    const onTrackSelect = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect });
+    const rows = within(screen.getByRole('grid')).getAllByRole('row');
+    fireEvent.mouseDown(rows[1], { button: 0 });
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.mouseDown(rows[2], { button: 0 });
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).toHaveBeenCalledExactlyOnceWith(tracks[1], false);
+  });
+
+  it('cancels selection when a context menu opens during the hold', () => {
+    const onTrackSelect = vi.fn();
+    const onTrackContextMenu = vi.fn();
+    renderOverlay(Overlay, { onTrackSelect, onTrackContextMenu });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.contextMenu(firstRow());
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackContextMenu).toHaveBeenCalledOnce();
+    expect(onTrackSelect).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending hold on unmount', () => {
+    const onTrackSelect = vi.fn();
+    const { unmount } = renderOverlay(Overlay, { onTrackSelect });
+    fireEvent.mouseDown(firstRow(), { button: 0 });
+    unmount();
+    act(() => vi.advanceTimersByTime(500));
+    expect(onTrackSelect).not.toHaveBeenCalled();
   });
 });

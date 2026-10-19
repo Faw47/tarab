@@ -34,6 +34,7 @@ import type { Track } from '../../types';
 import { PlaylistPickerDialog } from '../playlist/PlaylistPickerDialog';
 import type { AlbumDetailsOverlayProps } from './AlbumDetailsOverlay';
 import { moveTrackRowFocus, useTrackRowTabStop } from './album-track-rows';
+import { useAlbumTrackLongPress } from './useAlbumTrackLongPress';
 import { useAlbumTrackSelection } from './useAlbumTrackSelection';
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,7 @@ const TrackRow = memo(
     trackGridClass,
     isTabStop,
     onRowFocus,
+    longPress,
   }: {
     track: Track;
     index: number;
@@ -115,6 +117,7 @@ const TrackRow = memo(
     trackGridClass: string;
     isTabStop: boolean;
     onRowFocus: (id: string) => void;
+    longPress: ReturnType<typeof useAlbumTrackLongPress>;
   }) => {
     const rowPlaying = isCurrentTrack && isCurrentlyPlaying;
     const rowSelectedOnly = isSelected && !rowPlaying;
@@ -133,7 +136,15 @@ const TrackRow = memo(
           handleRowActivate(track);
         }}
         onKeyDown={(event) => handleTrackKeyDown(track, event)}
+        onMouseDown={(event) => longPress.startLongPress(track, event)}
+        onMouseUp={longPress.cancelLongPress}
+        onMouseLeave={longPress.cancelLongPress}
+        onTouchStart={(event) => longPress.startLongPress(track, event)}
+        onTouchEnd={longPress.cancelLongPress}
+        onTouchMove={longPress.cancelLongPress}
+        onTouchCancel={longPress.cancelLongPress}
         onContextMenu={(event) => {
+          longPress.cancelLongPress();
           event.preventDefault();
           onTrackContextMenu?.(event, track);
         }}
@@ -268,6 +279,10 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
     selectedTrackIds,
     onClearSelection,
     onSelectAll,
+  });
+  const longPress = useAlbumTrackLongPress(tracks, (track) => {
+    activateSelection();
+    onTrackSelect?.(track, false);
   });
   const trackIds = useMemo(() => tracks.map((track) => track.id), [tracks]);
   const { tabStopId, onRowFocus } = useTrackRowTabStop(trackIds);
@@ -710,6 +725,7 @@ export const AlbumDetailsOverlayNeo = memo(function AlbumDetailsOverlayNeo({
                         trackGridClass={TRACK_GRID}
                         isTabStop={tabStopId === track.id}
                         onRowFocus={onRowFocus}
+                        longPress={longPress}
                       />
                     ))}
                   </div>
