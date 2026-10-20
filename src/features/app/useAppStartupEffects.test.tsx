@@ -83,4 +83,37 @@ describe('app autostart lifecycle', () => {
     act(() => finishHydration?.());
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
   });
+  it('keeps a user toggle made while the initial OS read is pending', async () => {
+    let finish: (enabled: boolean) => void = () => undefined;
+    vi.mocked(isEnabled).mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    mount();
+    await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(1));
+    act(() => useSettingsStore.getState().setAutostartEnabled(true));
+    await act(async () => finish(false));
+    await waitFor(() => expect(enable).toHaveBeenCalledTimes(1));
+    expect(useSettingsStore.getState().autostartEnabled).toBe(true);
+  });
+
+  it('keeps a user toggle made while a focus refresh is pending', async () => {
+    mount();
+    await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
+    let finish: (enabled: boolean) => void = () => undefined;
+    vi.mocked(isEnabled).mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(2));
+    act(() => useSettingsStore.getState().setAutostartEnabled(false));
+    await act(async () => finish(true));
+    await waitFor(() => expect(disable).toHaveBeenCalledTimes(1));
+    expect(useSettingsStore.getState().autostartEnabled).toBe(false);
+  });
 });
