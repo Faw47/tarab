@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../lib/tauri-commands', () => ({
   dbGetExistingPaths: vi.fn(),
@@ -11,7 +13,8 @@ vi.mock('../../../lib/tauri-commands', () => ({
   syncLyricsIndex: vi.fn(),
 }));
 
-import { mergeDroppedLibraryFolders } from '../useDroppedAudioImport';
+import { scanLibraryParallel } from '../../../lib/tauri-commands';
+import { mergeDroppedLibraryFolders, useDroppedAudioImport } from '../useDroppedAudioImport';
 
 describe('mergeDroppedLibraryFolders', () => {
   it('adds dropped folders that are not already watched', () => {
@@ -35,5 +38,45 @@ describe('mergeDroppedLibraryFolders', () => {
 
   it('normalizes separators and trailing slashes before adding folders', () => {
     expect(mergeDroppedLibraryFolders([], ['C:\\Music\\Jazz\\'])).toEqual(['C:/Music/Jazz']);
+  });
+});
+
+describe('dropped audio formats', () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it.each(['aiff', 'alac', 'wma', 'opus'])('ignores unsupported .%s drops', async (extension) => {
+    vi.mocked(scanLibraryParallel).mockResolvedValue({
+      paths: [],
+      traversalErrors: [],
+      skippedErrorCount: 0,
+    });
+    const setIsScanning = vi.fn();
+    renderHook(() =>
+      useDroppedAudioImport({
+        downloadArtwork: false,
+        followSymlinks: false,
+        libraryFolders: ['/Music'],
+        queryClient: new QueryClient(),
+        setIsScanning,
+        setScanProgress: vi.fn(),
+        setTrackCount: vi.fn(),
+        setTracks: vi.fn(),
+        startProcessing: vi.fn(() => 'import'),
+        updateProcessing: vi.fn(),
+        finishProcessing: vi.fn(),
+      }),
+    );
+    const event = new Event('drop', { cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { files: [{ path: `/Music/track.${extension}` }] },
+    });
+    await act(async () => {
+      window.dispatchEvent(event);
+    });
+    expect(setIsScanning).not.toHaveBeenCalled();
+    expect(scanLibraryParallel).not.toHaveBeenCalled();
   });
 });
