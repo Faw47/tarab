@@ -371,6 +371,94 @@ mod tests {
         dir
     }
 
+    fn test_generator(root: &std::path::Path) -> WaveformGenerator {
+        let mut generator = WaveformGenerator::new();
+        generator.cache_dir = root.join("cache");
+        fs::create_dir_all(&generator.cache_dir).unwrap();
+        generator
+    }
+
+    fn write_wav(path: &std::path::Path, sample: i16, count: u32) {
+        let length = count * 2;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + length).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&100_u32.to_le_bytes());
+        bytes.extend_from_slice(&200_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&length.to_le_bytes());
+        for _ in 0..count {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn source_edits_invalidate_memory_and_disk_waveforms() {
+        let root = temp_dir("source-edit");
+        let track = root.join("track.wav");
+        let file_path = track.to_string_lossy();
+        let generator = test_generator(&root);
+        write_wav(&track, 0, 100);
+        let old = generator.generate(&file_path).unwrap();
+        assert!(old.peaks.iter().all(|peak| *peak == 0.0));
+        write_wav(&track, 1000, 200);
+        assert!(!generator.has_waveform(&file_path));
+        let current = generator.generate(&file_path).unwrap();
+        assert!(current.peaks.iter().all(|peak| *peak == 1.0));
+        drop(generator);
+        let restarted = test_generator(&root);
+        write_wav(&track, 0, 300);
+        assert!(!restarted.has_waveform(&file_path));
+        assert!(restarted.generate(&file_path).unwrap().peaks.iter().all(|peak| *peak == 0.0));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn waveform_generation_bounds_existing_disk_entries() {
+        let root = temp_dir("disk-bound");
+        let generator = test_generator(&root);
+        let shard = generator.cache_dir.join("aa");
+        fs::create_dir_all(&shard).unwrap();
+        for index in 0..1001 {
+            fs::write(shard.join(format!("{}.wf", index)), b"{}").unwrap();
+        }
+        let track = root.join("track.wav");
+        write_wav(&track, 1000, 100);
+        generator.generate(&track.to_string_lossy()).unwrap();
+        assert!(generator.get_stats().disk_count <= 1000);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn oversized_waveform_cache_is_rejected_before_parsing() {
+        let root = temp_dir("oversized-cache");
+        let generator = test_generator(&root);
+        let path = root.join("oversized.wf");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(2 * 1024 * 1024).unwrap();
+        let error = generator.load_from_cache(&path).unwrap_err();
+        assert!(error.contains("size limit"), "{}", error);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cancelling_idle_paths_does_not_accumulate_requests() {
+        let root = temp_dir("idle-cancel");
+        let generator = test_generator(&root);
+        for index in 0..1001 {
+            generator.cancel(&format!("missing-{}", index));
+        }
+        assert!(generator.cancel_requests.read().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn waveform_chunk_size_bounds_decoder_metadata() {
         // Regression for SEC-03: untrusted decoder metadata must not cause huge allocations.

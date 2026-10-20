@@ -616,6 +616,53 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn protocol_reads_share_the_memory_cache() {
+        let root = temp_dir("protocol-memory");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        let bytes = cache.get_thumbnail_bytes(&hash, "small").unwrap().unwrap();
+        assert!(!bytes.is_empty());
+        assert!(cache.memory_cache.read().contains_key(&format!("{}_small", hash)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn size_limit_overflow_does_not_evict_entries() {
+        let root = temp_dir("limit-overflow");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        assert_eq!(cache.enforce_size_limit(Some(u64::MAX)).unwrap(), 0);
+        assert!(cache.has_thumbnail(&hash));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn eviction_keeps_thumbnail_groups_complete() {
+        let root = temp_dir("group-eviction");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        let large = cache.get_thumbnail_path(&hash, "large");
+        fs::File::options().write(true).open(&large).unwrap().set_len(2 * 1024 * 1024).unwrap();
+        cache.enforce_size_limit(Some(1)).unwrap();
+        assert!(THUMBNAIL_SIZES.iter().all(|(_, size)| !cache.get_thumbnail_path(&hash, size).exists()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn generation_enforces_the_native_limit_without_a_renderer_request() {
+        let root = temp_dir("native-limit");
+        let cache = test_cache(root.clone());
+        cache.enforce_size_limit(Some(1)).unwrap();
+        let old = cache.get_thumbnail_path(&"a".repeat(64), "large");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::File::create(&old).unwrap().set_len(2 * 1024 * 1024).unwrap();
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        assert!(cache.get_stats().total_size_bytes <= 1024 * 1024);
+        assert!(cache.has_thumbnail(&hash));
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn crc32(bytes: &[u8]) -> u32 {
         let mut crc = 0xFFFF_FFFFu32;
         for byte in bytes {
