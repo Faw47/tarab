@@ -695,4 +695,124 @@ mod tests {
 
         assert_eq!(pulled, Ok(1000));
     }
+
+    /// Deterministic demux output with a real PCM decoder. The default track is deliberately
+    /// second and nonzero, so filtering cannot assume the first track or track zero.
+    struct InterleavedReader {
+        inner: Box<dyn FormatReader>,
+        tracks: Vec<symphonia::core::formats::Track>,
+        packets: std::collections::VecDeque<Packet>,
+    }
+
+    impl FormatReader for InterleavedReader {
+        fn try_new(
+            _: MediaSourceStream,
+            _: &FormatOptions,
+        ) -> symphonia::core::errors::Result<Self> {
+            unreachable!("constructed from a real WAV reader")
+        }
+
+        fn cues(&self) -> &[symphonia::core::formats::Cue] {
+            self.inner.cues()
+        }
+
+        fn metadata(&mut self) -> symphonia::core::meta::Metadata<'_> {
+            self.inner.metadata()
+        }
+
+        fn seek(
+            &mut self,
+            mode: SeekMode,
+            to: SeekTo,
+        ) -> symphonia::core::errors::Result<symphonia::core::formats::SeekedTo> {
+            self.inner.seek(mode, to)
+        }
+
+        fn tracks(&self) -> &[symphonia::core::formats::Track] {
+            &self.tracks
+        }
+
+        fn default_track(&self) -> Option<&symphonia::core::formats::Track> {
+            self.tracks.get(1)
+        }
+
+        fn next_packet(&mut self) -> symphonia::core::errors::Result<Packet> {
+            self.packets.pop_front().ok_or_else(|| {
+                symphonia::core::errors::Error::IoError(std::io::Error::from(
+                    std::io::ErrorKind::UnexpectedEof,
+                ))
+            })
+        }
+
+        fn into_inner(self: Box<Self>) -> MediaSourceStream {
+            self.inner.into_inner()
+        }
+    }
+
+    fn pcm_packet(track_id: u32, value: i16) -> Packet {
+        let mut data = Vec::new();
+        data.extend_from_slice(&value.to_le_bytes());
+        data.extend_from_slice(&(-value).to_le_bytes());
+        Packet::new_from_slice(track_id, 0, 1, &data)
+    }
+
+    fn interleaved_source(packets: Vec<Packet>) -> SymphoniaSource {
+        let path = write_temp_wav("interleaved-reader", 1);
+        let (format, decoder, _) =
+            open_decoder_for_file(path.to_str().expect("utf-8 path")).expect("open PCM decoder");
+        let mut selected = format.default_track().expect("WAV track").clone();
+        selected.id = 7;
+        let mut other = selected.clone();
+        other.id = 99;
+        let reader = InterleavedReader {
+            inner: format,
+            tracks: vec![other, selected],
+            packets: packets.into(),
+        };
+        let source = SymphoniaSource::new(
+            decoder,
+            Box::new(reader),
+            PlaybackState::default().booster,
+            Arc::new(AtomicU64::new(0)),
+            path.to_string_lossy().into_owned(),
+        )
+        .expect("source");
+        let _ = std::fs::remove_file(path);
+        source
+    }
+
+    #[test]
+    fn refill_outputs_only_the_selected_tracks_samples() {
+        let source = interleaved_source(vec![
+            pcm_packet(99, 30000),
+            pcm_packet(7, 1000),
+            pcm_packet(99, 20000),
+            pcm_packet(7, 2000),
+        ]);
+        let samples: Vec<f32> = source.collect();
+        assert_eq!(
+            samples,
+            vec![1000.0, -1000.0, 2000.0, -2000.0]
+                .into_iter()
+                .map(|sample| sample / 32768.0)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn foreign_packets_do_not_exhaust_the_decode_error_budget() {
+        let mut packets = vec![Packet::new_from_slice(99, 0, 1, &[0]); 65];
+        packets.push(pcm_packet(7, 1000));
+        let source = interleaved_source(packets);
+        assert_eq!(source.count(), 2);
+    }
+
+    #[test]
+    fn foreign_pending_packet_does_not_consume_the_seek_skip() {
+        let mut source = interleaved_source(vec![pcm_packet(7, 1000), pcm_packet(7, 2000)]);
+        source.pending_packet = Some(pcm_packet(99, 30000));
+        source.skip_samples = 2;
+        let samples: Vec<f32> = source.collect();
+        assert_eq!(samples, vec![2000.0 / 32768.0, -2000.0 / 32768.0]);
+    }
 }
