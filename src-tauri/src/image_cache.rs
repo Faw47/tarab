@@ -652,6 +652,12 @@ mod tests {
             .unwrap()
             .set_len(2 * 1024 * 1024)
             .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&large)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1000))
+            .unwrap();
         cache.enforce_size_limit(Some(1)).unwrap();
         assert!(THUMBNAIL_SIZES
             .iter()

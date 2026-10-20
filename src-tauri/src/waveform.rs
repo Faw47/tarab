@@ -441,6 +441,49 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+
+    #[test]
+    fn same_length_source_edit_invalidates_the_waveform() {
+        let root = temp_dir("mtime-edit");
+        let track = root.join("track.wav");
+        write_wav(&track, 0, 100);
+        let file = fs::File::options().write(true).open(&track).unwrap();
+        file.set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1000))
+            .unwrap();
+        let generator = test_generator(&root);
+        generator.generate(&track.to_string_lossy()).unwrap();
+        write_wav(&track, 1000, 100);
+        file.set_modified(UNIX_EPOCH + std::time::Duration::from_secs(2000))
+            .unwrap();
+        assert!(!generator.has_waveform(&track.to_string_lossy()));
+        assert!(generator
+            .generate(&track.to_string_lossy())
+            .unwrap()
+            .peaks
+            .iter()
+            .all(|peak| *peak == 1.0));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn waveform_generation_bounds_disk_bytes() {
+        let root = temp_dir("disk-byte-bound");
+        let generator = test_generator(&root);
+        let shard = generator.cache_dir.join("aa");
+        fs::create_dir_all(&shard).unwrap();
+        for index in 0..2 {
+            fs::File::create(shard.join(format!("{}.wf", index)))
+                .unwrap()
+                .set_len(40 * 1024 * 1024)
+                .unwrap();
+        }
+        let track = root.join("track.wav");
+        write_wav(&track, 1000, 100);
+        generator.generate(&track.to_string_lossy()).unwrap();
+        assert!(generator.get_stats().total_size_bytes <= 64 * 1024 * 1024);
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn oversized_waveform_cache_is_rejected_before_parsing() {
         let root = temp_dir("oversized-cache");
