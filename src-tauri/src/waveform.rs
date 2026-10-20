@@ -416,7 +416,12 @@ mod tests {
         let restarted = test_generator(&root);
         write_wav(&track, 0, 300);
         assert!(!restarted.has_waveform(&file_path));
-        assert!(restarted.generate(&file_path).unwrap().peaks.iter().all(|peak| *peak == 0.0));
+        assert!(restarted
+            .generate(&file_path)
+            .unwrap()
+            .peaks
+            .iter()
+            .all(|peak| *peak == 0.0));
         let _ = fs::remove_dir_all(root);
     }
 

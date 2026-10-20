@@ -623,7 +623,10 @@ mod tests {
         let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
         let bytes = cache.get_thumbnail_bytes(&hash, "small").unwrap().unwrap();
         assert!(!bytes.is_empty());
-        assert!(cache.memory_cache.read().contains_key(&format!("{}_small", hash)));
+        assert!(cache
+            .memory_cache
+            .read()
+            .contains_key(&format!("{}_small", hash)));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -643,9 +646,16 @@ mod tests {
         let cache = test_cache(root.clone());
         let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
         let large = cache.get_thumbnail_path(&hash, "large");
-        fs::File::options().write(true).open(&large).unwrap().set_len(2 * 1024 * 1024).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&large)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
         cache.enforce_size_limit(Some(1)).unwrap();
-        assert!(THUMBNAIL_SIZES.iter().all(|(_, size)| !cache.get_thumbnail_path(&hash, size).exists()));
+        assert!(THUMBNAIL_SIZES
+            .iter()
+            .all(|(_, size)| !cache.get_thumbnail_path(&hash, size).exists()));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -656,7 +666,10 @@ mod tests {
         cache.enforce_size_limit(Some(1)).unwrap();
         let old = cache.get_thumbnail_path(&"a".repeat(64), "large");
         fs::create_dir_all(old.parent().unwrap()).unwrap();
-        fs::File::create(&old).unwrap().set_len(2 * 1024 * 1024).unwrap();
+        fs::File::create(&old)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
         let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
         assert!(cache.get_stats().total_size_bytes <= 1024 * 1024);
         assert!(cache.has_thumbnail(&hash));
