@@ -15,6 +15,8 @@ const reportErrorMock = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.hoisted(() => vi.fn());
 const hydrationListeners = vi.hoisted(() => new Set<() => void>());
 
+vi.mock('../useAutostartIntegration', () => ({ useAutostartIntegration: vi.fn() }));
+
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: showMock }),
 }));

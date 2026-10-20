@@ -6,6 +6,8 @@ import { logError, reportError } from '../../lib/report-error';
 import { desktopShouldStartMinimized } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 
+import { useAutostartIntegration } from './useAutostartIntegration';
+
 const SETTINGS_HYDRATION_TIMEOUT_MS = 3000;
 
 type PreloadCallback = () => void;
@@ -16,6 +18,7 @@ interface UseAppStartupEffectsOptions {
 }
 
 export function useAppStartupEffects({ currentView, preloadModules }: UseAppStartupEffectsOptions) {
+  useAutostartIntegration();
   const startupLoggedRef = useRef(false);
   const firstLibraryRenderRef = useRef(false);
 
