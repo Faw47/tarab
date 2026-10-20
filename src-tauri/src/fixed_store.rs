@@ -63,6 +63,23 @@ fn read_store(path: &Path) -> Result<Map<String, Value>, String> {
     Ok(read_store_file(&path.with_extension("bak"))?.unwrap_or_default())
 }
 
+fn read_image_cache_limit_mb(path: &Path) -> Result<Option<u64>, String> {
+    let values = read_store(path)?;
+    Ok(values
+        .get("tarab-settings")
+        .and_then(|value| value.get("state"))
+        .and_then(|value| value.get("cacheSizeLimitMb"))
+        .and_then(Value::as_u64)
+        .map(|limit| limit.clamp(50, 1000)))
+}
+
+/// Startup reads this before the renderer or native settings writers are created.
+pub(crate) fn image_cache_limit_mb() -> Option<u64> {
+    read_image_cache_limit_mb(&store_path("settings").ok()?)
+        .ok()
+        .flatten()
+}
+
 fn read_auto_lyrics_setting(path: &Path) -> Result<bool, String> {
     // Recovery data must never resurrect stale permission to transmit track metadata.
     let values = read_store_file(path)?.unwrap_or_default();
@@ -194,6 +211,24 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tarab-store-{}-{}", name, nonce));
         fs::create_dir_all(&root).expect("create directory");
         root
+    }
+
+    #[test]
+    fn image_cache_startup_policy_reads_the_persisted_setting_and_bounds_it() {
+        let root = temp_root("image-cache-policy");
+        let path = root.join("settings.json");
+        assert_eq!(read_image_cache_limit_mb(&path).unwrap(), None);
+        for (saved, expected) in [(75, 75), (0, 50), (5000, 1000)] {
+            let values = serde_json::json!({
+                "tarab-settings": { "state": { "cacheSizeLimitMb": saved } }
+            });
+            fs::write(&path, serde_json::to_vec(&values).unwrap()).unwrap();
+            assert_eq!(read_image_cache_limit_mb(&path).unwrap(), Some(expected));
+        }
+        fs::write(&path, br#"{"tarab-settings":{"state":{"cacheSizeLimitMb":"bad"}}}"#)
+            .unwrap();
+        assert_eq!(read_image_cache_limit_mb(&path).unwrap(), None);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
