@@ -47,7 +47,18 @@ describe('dropped audio formats', () => {
     vi.clearAllMocks();
   });
 
-  it.each(['aiff', 'alac', 'wma', 'opus'])('ignores unsupported .%s drops', async (extension) => {
+  it.each([
+    ['aiff', false],
+    ['alac', false],
+    ['wma', false],
+    ['opus', false],
+    ['mp3', true],
+    ['flac', true],
+    ['wav', true],
+    ['ogg', true],
+    ['m4a', true],
+    ['aac', true],
+  ])('imports .%s only when playback supports its suffix', async (extension, supported) => {
     vi.mocked(scanLibraryParallel).mockResolvedValue({
       paths: [],
       traversalErrors: [],
@@ -76,7 +87,13 @@ describe('dropped audio formats', () => {
     await act(async () => {
       window.dispatchEvent(event);
     });
-    expect(setIsScanning).not.toHaveBeenCalled();
-    expect(scanLibraryParallel).not.toHaveBeenCalled();
+    if (supported) {
+      expect(scanLibraryParallel).toHaveBeenCalledExactlyOnceWith('/Music', false);
+      expect(setIsScanning).toHaveBeenNthCalledWith(1, true);
+      expect(setIsScanning).toHaveBeenLastCalledWith(false);
+    } else {
+      expect(setIsScanning).not.toHaveBeenCalled();
+      expect(scanLibraryParallel).not.toHaveBeenCalled();
+    }
   });
 });
