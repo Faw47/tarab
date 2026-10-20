@@ -13,7 +13,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
   syncLyricsIndex: vi.fn(),
 }));
 
-import { scanLibraryParallel } from '../../../lib/tauri-commands';
+import { dbGetExistingPaths, scanLibraryParallel } from '../../../lib/tauri-commands';
 import { mergeDroppedLibraryFolders, useDroppedAudioImport } from '../useDroppedAudioImport';
 
 describe('mergeDroppedLibraryFolders', () => {
@@ -64,6 +64,7 @@ describe('dropped audio formats', () => {
       traversalErrors: [],
       skippedErrorCount: 0,
     });
+    vi.mocked(dbGetExistingPaths).mockResolvedValue([]);
     const setIsScanning = vi.fn();
     renderHook(() =>
       useDroppedAudioImport({
