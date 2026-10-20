@@ -354,9 +354,13 @@ Tarab does not require an account and includes no analytics or crash-reporting c
 
 ## Supported audio files
 
-Tarab scans the following formats:
+Tarab scans the following file suffixes:
 
-`MP3` · `FLAC` · `WAV` · `OGG` · `M4A` · `AAC` · `AIFF` · `ALAC` · `WMA`
+`MP3` · `FLAC` · `WAV` · `OGG` · `M4A` · `AAC`
+
+M4A and OGG are containers; playback depends on their audio codec. The current build does not
+support AIFF, Apple Lossless (ALAC), WMA, or Opus playback. Scanning does not yet validate the
+codec inside every candidate file.
 
 Actual decoding and metadata support depend on Tarab’s Rust audio and metadata libraries.
 

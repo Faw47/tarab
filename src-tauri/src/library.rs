@@ -9,9 +9,8 @@ use walkdir::WalkDir;
 
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
-pub const SUPPORTED_EXTENSIONS: [&str; 9] = [
-    "mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "alac", "wma",
-];
+// Keep aligned with the enabled Symphonia codecs/containers and bundle associations.
+pub const SUPPORTED_EXTENSIONS: [&str; 6] = ["mp3", "flac", "wav", "ogg", "m4a", "aac"];
 const MAX_SCAN_DEPTH: usize = 64;
 const MAX_SCAN_ENTRIES: usize = 1_000_000;
 const MAX_SCAN_AUDIO_BYTES: u64 = 10 * 1024 * 1024 * 1024 * 1024;

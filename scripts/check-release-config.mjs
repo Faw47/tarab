@@ -20,7 +20,7 @@ const deepLinkSchemes = tauriConfig.plugins?.['deep-link']?.desktop?.schemes;
 const fileAssociationExtensions = new Set(
   (tauriConfig.bundle?.fileAssociations ?? []).flatMap((association) => association.ext ?? []),
 );
-const requiredAudioExtensions = ['mp3', 'flac', 'aiff', 'wav', 'ogg', 'm4a', 'aac', 'alac', 'wma'];
+const requiredAudioExtensions = ['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac'];
 
 if (expectedVersion !== tauriConfig.version || expectedVersion !== cargoVersion) {
   failures.push(

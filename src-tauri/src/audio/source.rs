@@ -270,6 +270,7 @@ pub(super) fn play_with_source(
 }
 
 pub(super) struct SymphoniaSource {
+    track_id: u32,
     decoder: Box<dyn SymphoniaDecoder>,
     format: Box<dyn FormatReader>,
     booster: BoosterGain,
@@ -295,10 +296,12 @@ impl SymphoniaSource {
         emitted_samples: Arc<AtomicU64>,
         file_path: String,
     ) -> Option<Self> {
+        let track_id = format.default_track()?.id;
         let channels = decoder.codec_params().channels?.count() as u16;
         let sample_rate = decoder.codec_params().sample_rate?;
 
         Some(Self {
+            track_id,
             decoder,
             format,
             booster,
@@ -340,6 +343,11 @@ impl SymphoniaSource {
                     }
                 }
             };
+
+            // Other streams share the container, but not this decoder or its retry budget.
+            if packet.track_id() != self.track_id {
+                continue;
+            }
 
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
