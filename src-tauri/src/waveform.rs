@@ -441,7 +441,6 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-
     #[test]
     fn same_length_source_edit_invalidates_the_waveform() {
         let root = temp_dir("mtime-edit");
