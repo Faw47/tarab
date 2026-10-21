@@ -75,10 +75,7 @@ describe('app autostart lifecycle', () => {
   it('refreshes external changes on window focus without reverting the OS', async () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
-    vi.mocked(autostartApi.isEnabled).mockImplementation(async () => {
-      autostartCalls.isEnabled += 1;
-      return false;
-    });
+    readOs = async () => false;
     act(() => window.dispatchEvent(new Event('focus')));
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(false));
     expect(autostartCalls.enable).toBe(0);
@@ -103,6 +100,7 @@ describe('app autostart lifecycle', () => {
   });
 
   it('keeps a user toggle made while the initial OS read is pending', async () => {
+    expect(useSettingsStore.persist.hasHydrated()).toBe(true);
     let finish: (enabled: boolean) => void = () => undefined;
     readOs = () =>
       new Promise<boolean>((resolve) => {
@@ -117,6 +115,7 @@ describe('app autostart lifecycle', () => {
   });
 
   it('keeps a user toggle made while a focus refresh is pending', async () => {
+    expect(useSettingsStore.persist.hasHydrated()).toBe(true);
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
     let finish: (enabled: boolean) => void = () => undefined;
