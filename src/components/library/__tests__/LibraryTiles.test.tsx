@@ -134,7 +134,6 @@ describe('overlay buttons in neobrutalism', () => {
   });
 });
 
-
 describe('library count copy (LD-11)', () => {
   it('labels neo album and artist counts as tracks', () => {
     const onOpen = vi.fn();

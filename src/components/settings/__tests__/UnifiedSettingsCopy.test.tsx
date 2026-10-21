@@ -112,7 +112,10 @@ vi.mock('../../../features/settings/components/SettingsForms', () => ({
   DesktopIntegrationForm: () => null,
   PlaybackSettingsForm: () => null,
 }));
-vi.mock('../CacheSettings', () => ({ CacheSettings: () => null, RemovedFilesSettings: () => null }));
+vi.mock('../CacheSettings', () => ({
+  CacheSettings: () => null,
+  RemovedFilesSettings: () => null,
+}));
 vi.mock('../sections/FullscreenPlayerSection', () => ({ FullscreenPlayerSection: () => null }));
 vi.mock('../sections/LibraryAutomationSection', () => ({ LibraryAutomationSection: () => null }));
 vi.mock('../sections/MiniPlayerSection', () => ({ MiniPlayerSection: () => null }));
