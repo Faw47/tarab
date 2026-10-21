@@ -10,9 +10,10 @@ import {
 } from '../library-watch-targets';
 import { useLibraryScan } from '../useLibraryScan';
 
-const { listeners, scanLibraryMock, reconcileMock } = vi.hoisted(() => ({
+const { listeners, scanLibraryMock, batchMetadataMock, reconcileMock } = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
   scanLibraryMock: vi.fn(),
+  batchMetadataMock: vi.fn(),
   reconcileMock: vi.fn(),
 }));
 
@@ -39,7 +40,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
   cancelLibraryScan: vi.fn(async () => undefined),
   dbReconcileFolderScan: reconcileMock,
   generateCoverArtHashes: vi.fn(async () => []),
-  getBatchMetadata: vi.fn(async () => []),
+  getBatchMetadata: batchMetadataMock,
   scanLibrary: scanLibraryMock,
   syncLyricsIndex: vi.fn(async () => 0),
   watchLibraryPaths: vi.fn(async () => undefined),
@@ -105,8 +106,10 @@ describe('useLibraryScan watcher', () => {
     vi.useFakeTimers();
     listeners.clear();
     scanLibraryMock.mockReset();
+    batchMetadataMock.mockReset();
     reconcileMock.mockReset();
     scanLibraryMock.mockResolvedValue({ paths: [], traversalErrors: [], skippedErrorCount: 0 });
+    batchMetadataMock.mockResolvedValue([]);
     reconcileMock.mockImplementation(async (request: { folderPath: string }) =>
       reconcileResult(request.folderPath),
     );
@@ -160,6 +163,49 @@ describe('useLibraryScan watcher', () => {
     expect(callbackError).toBeUndefined();
     expect(scanLibraryMock).toHaveBeenCalledTimes(1);
     expect(scanLibraryMock.mock.calls[0][0]).toBe('/var/music/Artist/Album');
+  });
+
+  it('persists genres from scanned metadata into the database payload', async () => {
+    const filePath = '/music/Artist/Album/01.flac';
+    scanLibraryMock.mockResolvedValueOnce({
+      paths: [filePath],
+      traversalErrors: [],
+      skippedErrorCount: 0,
+    });
+    batchMetadataMock.mockResolvedValueOnce([
+      {
+        file_path: filePath,
+        title: 'Song',
+        artist: 'Artist',
+        album_artist: 'Album Artist',
+        album: 'Album',
+        genre: 'Classical',
+        year: 2024,
+        track_number: 1,
+        disc_number: 1,
+        duration_secs: 180,
+        has_cover_art: false,
+        blurhash: null,
+        file_format: 'FLAC',
+        bitrate: null,
+        sample_rate: null,
+        file_size: 1024,
+      },
+    ]);
+
+    const { result } = renderHook(() => useLibraryScan(), { wrapper });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    await act(async () => {
+      await result.current.scanFolder('/music', { silent: true });
+    });
+
+    expect(reconcileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tracks: [expect.objectContaining({ id: filePath, genre: 'Classical' })],
+      }),
+    );
   });
 
   it('falls back to the library root when the changed folder cannot be scanned', async () => {

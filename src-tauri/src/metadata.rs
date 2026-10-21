@@ -23,6 +23,7 @@ pub struct TrackMetadata {
     pub artist: String,
     pub album_artist: Option<String>,
     pub album: String,
+    pub genre: Option<String>,
     pub year: Option<i32>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
@@ -174,6 +175,9 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
     let tag = tagged_file
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
+    let genre = tag
+        .and_then(|tag| tag.genre().map(|value| value.to_string()))
+        .filter(|genre| !genre.trim().is_empty());
 
     let (title, artist, album_artist, album, year, track_number, disc_number) =
         if let Some(tag) = tag {
@@ -242,6 +246,7 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
         artist,
         album_artist,
         album,
+        genre,
         year,
         track_number,
         disc_number,
@@ -852,6 +857,54 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-metadata-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    fn minimal_wav() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&38_u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&16_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn fast_metadata_includes_genre_from_audio_tags() {
+        let dir = temp_dir("genre");
+        let file_path = dir.join("genre.wav");
+        fs::write(&file_path, minimal_wav()).expect("write wave");
+
+        let mut tagged_file = Probe::open(&file_path)
+            .expect("open wave")
+            .read()
+            .expect("read wave");
+        let tag_type = tagged_file.primary_tag_type();
+        if tagged_file.tag(tag_type).is_none() {
+            tagged_file.insert_tag(lofty::tag::Tag::new(tag_type));
+        }
+        tagged_file
+            .tag_mut(tag_type)
+            .expect("primary tag")
+            .set_genre("Classical".to_string());
+        tagged_file
+            .save_to_path(&file_path, lofty::config::WriteOptions::default())
+            .expect("write tagged wave");
+
+        let metadata =
+            extract_metadata_fast_unguarded(&file_path.to_string_lossy()).expect("read metadata");
+        let encoded = serde_json::to_value(metadata).expect("serialize metadata");
+        assert_eq!(encoded.get("genre"), Some(&serde_json::json!("Classical")));
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

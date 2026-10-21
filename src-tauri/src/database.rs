@@ -14,7 +14,7 @@ mod migrations;
 mod playlists;
 mod tracks;
 
-const CURRENT_SCHEMA_VERSION: i32 = 11;
+const CURRENT_SCHEMA_VERSION: i32 = 12;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
@@ -46,6 +46,8 @@ pub struct DbTrack {
     pub artist: String,
     pub album_artist: Option<String>,
     pub album: String,
+    #[serde(default)]
+    pub genre: Option<String>,
     pub year: Option<i32>,
     pub duration: f64,
     pub file_path: String,
@@ -295,7 +297,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks 
              WHERE date_added >= ?1 
              ORDER BY date_added DESC 
@@ -314,7 +316,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks 
              WHERE play_count > 0
              ORDER BY play_count DESC 
@@ -1027,6 +1029,7 @@ mod tests {
             artist: "Artist".to_string(),
             album_artist: None,
             album: "Album".to_string(),
+            genre: None,
             year: None,
             duration: 1.0,
             file_path: outside_file.to_string_lossy().to_string(),
@@ -1062,6 +1065,7 @@ mod tests {
             artist: "Artist".to_string(),
             album_artist: None,
             album: "Album".to_string(),
+            genre: None,
             year: Some(2020),
             duration: 180.0,
             file_path: format!("/tmp/{}.mp3", id),
@@ -1079,6 +1083,60 @@ mod tests {
             sample_rate: None,
             file_size: None,
         }
+    }
+
+    #[test]
+    fn schema_migration_adds_genre_for_existing_tracks() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (11);
+             CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 file_path TEXT NOT NULL
+             );
+             INSERT INTO tracks (id, title, file_path)
+                 VALUES ('legacy-track', 'Legacy track', '/music/legacy.mp3');
+             CREATE TABLE lyrics_fts (content TEXT);",
+        )
+        .expect("create schema-v11 database");
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
+
+        db.run_migrations().expect("apply pending migrations");
+
+        let conn = db.conn.lock();
+        let (title, genre): (String, Option<String>) = conn
+            .query_row(
+                "SELECT title, genre FROM tracks WHERE id = 'legacy-track'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated track");
+        assert_eq!(title, "Legacy track");
+        assert_eq!(genre, None);
+
+        let version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("read schema version");
+        assert_eq!(version, 12);
+    }
+
+    #[test]
+    fn db_track_json_round_trips_genre() {
+        let mut encoded = serde_json::to_value(sample_track("genre-json")).expect("encode track");
+        encoded["genre"] = serde_json::json!("Classical");
+
+        let decoded: DbTrack = serde_json::from_value(encoded).expect("decode track with genre");
+
+        assert_eq!(
+            serde_json::to_value(decoded).expect("encode decoded track")["genre"],
+            "Classical"
+        );
     }
 
     #[test]

@@ -700,6 +700,7 @@ mod tests {
             artist: "Artist".to_string(),
             album_artist: None,
             album: "Album".to_string(),
+            genre: None,
             year: Some(2024),
             duration: 180.0,
             file_path,
