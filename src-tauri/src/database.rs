@@ -1,9 +1,11 @@
 use parking_lot::Mutex;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result as SqliteResult};
+use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::async_runtime::spawn_blocking;
 
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
@@ -18,6 +20,8 @@ const CURRENT_SCHEMA_VERSION: i32 = 12;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
+const READ_CONNECTION_POOL_SIZE: usize = 3;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const APP_STORAGE_DIRECTORY: &str = "com.fawaz.tarab";
 const LEGACY_STORAGE_DIRECTORY: &str = "music-player";
@@ -236,9 +240,28 @@ pub struct TrackPathRow {
 
 pub struct Database {
     conn: Mutex<Connection>,
+    readers: Vec<Mutex<Connection>>,
+    next_reader: AtomicUsize,
 }
 
 impl Database {
+    fn reader_conn(&self) -> parking_lot::MutexGuard<'_, Connection> {
+        if self.readers.is_empty() {
+            return self.conn.lock();
+        }
+
+        let pool_size = self.readers.len();
+        let start = self.next_reader.fetch_add(1, Ordering::Relaxed) % pool_size;
+        for offset in 0..pool_size {
+            let index = (start + offset) % pool_size;
+            if let Some(connection) = self.readers[index].try_lock() {
+                return connection;
+            }
+        }
+
+        self.readers[start].lock()
+    }
+
     fn normalize_path(path: &str) -> String {
         #[cfg(windows)]
         {
@@ -264,17 +287,28 @@ impl Database {
         }
 
         let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
 
         // Enable WAL mode for better concurrent performance
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
 
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        let db = Self {
+        let mut db = Self {
             conn: Mutex::new(conn),
+            readers: Vec::with_capacity(READ_CONNECTION_POOL_SIZE),
+            next_reader: AtomicUsize::new(0),
         };
 
         db.run_migrations()?;
         db.ensure_path_cleanup_once()?;
+        db.conn.lock().execute_batch("PRAGMA optimize;")?;
+
+        for _ in 0..READ_CONNECTION_POOL_SIZE {
+            let reader = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            reader.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+            reader.execute_batch("PRAGMA foreign_keys = ON; PRAGMA query_only = ON;")?;
+            db.readers.push(Mutex::new(reader));
+        }
 
         Ok(db)
     }
@@ -285,13 +319,15 @@ impl Database {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: AtomicUsize::new(0),
         };
         db.run_migrations()?;
         Ok(db)
     }
 
     pub fn get_recently_added(&self, days: i32, limit: u32) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let cutoff = now_millis_i64_or_default() - (days as i64 * 24 * 60 * 60 * 1000);
 
         let mut stmt = conn.prepare(
@@ -312,7 +348,7 @@ impl Database {
     }
 
     pub fn get_most_played(&self, limit: u32) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
@@ -334,7 +370,7 @@ impl Database {
         &self,
         ids: &[String],
     ) -> SqliteResult<Vec<DbShuffleQueueTrack>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut by_id = std::collections::HashMap::with_capacity(ids.len());
 
         for chunk in ids.chunks(900) {
@@ -367,7 +403,7 @@ impl Database {
         smart_shuffle: bool,
     ) -> SqliteResult<Vec<DbShuffleQueueTrack>> {
         let tracks = {
-            let conn = self.conn.lock();
+            let conn = self.reader_conn();
             let query = if smart_shuffle {
                 "SELECT id, duration FROM tracks ORDER BY id"
             } else {
@@ -417,7 +453,7 @@ impl Database {
         let now = now_unix_secs_i64();
         let seven_days_secs: i64 = 7 * 24 * 3600;
         let weighted: Vec<(String, String, f64)> = {
-            let conn = self.conn.lock();
+            let conn = self.reader_conn();
             let mut candidates = Vec::new();
             for chunk in normalized_ids.chunks(900) {
                 let placeholders = (0..chunk.len())
@@ -540,7 +576,7 @@ impl Database {
     // ========== Stats ==========
 
     pub fn get_library_stats(&self) -> SqliteResult<LibraryStats> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
 
         let (track_count, total_duration, artist_count, album_count, total_plays) = conn
             .query_row(
@@ -1303,6 +1339,8 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
         let db = Database {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: AtomicUsize::new(0),
         };
         db.run_migrations().expect("run_migrations");
         db
@@ -1350,6 +1388,36 @@ mod tests {
             finished_without_writer,
             "library reads should use a read connection instead of waiting for the writer mutex"
         );
+    }
+
+    #[test]
+    fn database_read_pool_uses_query_only_connections() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let base_dir =
+            std::env::temp_dir().join(format!("tarab-ar20-read-only-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&base_dir).expect("create database directory");
+        let database = Database::new(base_dir.join("library.db")).expect("create test database");
+
+        assert_eq!(database.readers.len(), READ_CONNECTION_POOL_SIZE);
+        for reader in &database.readers {
+            let reader = reader.lock();
+            let query_only = reader
+                .query_row("PRAGMA query_only", [], |row| row.get::<_, i64>(0))
+                .expect("read query_only setting");
+            assert_eq!(query_only, 1);
+            assert!(
+                reader
+                    .execute_batch("CREATE TABLE ar20_write_probe (id INTEGER);")
+                    .is_err(),
+                "read pool connections must reject writes"
+            );
+        }
+
+        drop(database);
+        let _ = std::fs::remove_dir_all(&base_dir);
     }
 
     #[test]
@@ -1737,6 +1805,8 @@ mod tests {
         .expect("create schema-v11 database");
         let db = Database {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: AtomicUsize::new(0),
         };
 
         db.run_migrations().expect("apply pending migrations");
@@ -2659,6 +2729,8 @@ mod tests {
 
         let db = Database {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: AtomicUsize::new(0),
         };
         {
             let conn = db.conn.lock();
