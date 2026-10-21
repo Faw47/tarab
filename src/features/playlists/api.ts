@@ -69,14 +69,18 @@ export async function setPlaylistPinned(playlistId: string, isPinned: boolean) {
 export async function addTracksToPlaylist(
   playlistId: string,
   trackIds: string[],
-  mutationId?: string,
+  mutationId: string,
 ) {
   const raw = await tauriAddTracksToPlaylist(playlistId, trackIds, mutationId);
   return PlaylistMutationResultSchema.parse(raw);
 }
 
-export async function removeTracksFromPlaylist(playlistId: string, trackIds: string[]) {
-  const raw = await tauriRemoveTracksFromPlaylist(playlistId, trackIds);
+export async function removeTracksFromPlaylist(
+  playlistId: string,
+  trackIds: string[],
+  mutationId: string,
+) {
+  const raw = await tauriRemoveTracksFromPlaylist(playlistId, trackIds, mutationId);
   return PlaylistMutationResultSchema.parse(raw);
 }
 
@@ -93,7 +97,7 @@ export async function reorderPlaylistTracks(
   playlistId: string,
   trackIds: string[],
   expectedTrackIds: string[],
-  mutationId?: string,
+  mutationId: string,
 ) {
   const raw = await tauriReorderPlaylistTracks(playlistId, trackIds, expectedTrackIds, mutationId);
   return PlaylistMutationResultSchema.parse(raw);

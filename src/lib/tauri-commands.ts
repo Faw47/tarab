@@ -554,7 +554,7 @@ export const deletePlaylist = async (playlistId: string): Promise<void> => {
 export const addTracksToPlaylist = async (
   playlistId: string,
   trackIds: string[],
-  mutationId: string = crypto.randomUUID(),
+  mutationId: string,
 ): Promise<PlaylistDetail> => {
   return invoke('add_tracks_to_playlist', { playlistId, trackIds, mutationId });
 };
@@ -562,8 +562,9 @@ export const addTracksToPlaylist = async (
 export const removeTracksFromPlaylist = async (
   playlistId: string,
   trackIds: string[],
+  mutationId: string,
 ): Promise<PlaylistDetail> => {
-  return invoke('remove_tracks_from_playlist', { playlistId, trackIds });
+  return invoke('remove_tracks_from_playlist', { playlistId, trackIds, mutationId });
 };
 
 export const relinkPlaylistTrack = async (
@@ -578,7 +579,7 @@ export const reorderPlaylistTracks = async (
   playlistId: string,
   trackIds: string[],
   expectedTrackIds: string[],
-  mutationId: string = crypto.randomUUID(),
+  mutationId: string,
 ): Promise<PlaylistDetail> => {
   return invoke('reorder_playlist_tracks', { playlistId, trackIds, expectedTrackIds, mutationId });
 };

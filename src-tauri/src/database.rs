@@ -14,7 +14,8 @@ mod migrations;
 mod playlists;
 mod tracks;
 
-const CURRENT_SCHEMA_VERSION: i32 = 8;
+const CURRENT_SCHEMA_VERSION: i32 = 9;
+const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
 

@@ -63,8 +63,12 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
 - **Recoverable file removal**: normal disk removal uses app-owned recoverable Trash with one
   persistent token per successful file. Restore must validate the token and original target,
   restore the database snapshot, and retain the recovery record after any partial failure.
-- **Playlist retries**: add and reorder commands require a mutation ID. Repeated IDs must return
-  the cached `PlaylistDetail` without applying the database mutation again.
+- **Playlist retries**: add, reorder, and remove commands require a mutation ID created once per
+  user action and reused for retries. The backend stores serialized results in SQLite for 30 days,
+  keyed by operation, playlist, ID, and the ordered mutation payload using SHA-256 over
+  length-prefixed values. A same-ID/same-payload retry returns the original `PlaylistDetail`
+  without reapplying the mutation; a changed payload is a separate mutation. Expired results are
+  pruned as mutations run.
 
 ## Desktop Integration Notes
 

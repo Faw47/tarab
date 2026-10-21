@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BackendSmartPlaylistRule, PlaylistType } from '../../types';
 import {
@@ -13,6 +14,13 @@ import {
   updatePlaylist,
 } from './api';
 import { playlistKeys } from './queryKeys';
+
+export function invalidatePlaylistMutationQueries(queryClient: QueryClient, playlistId: string) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: playlistKeys.lists() }),
+    queryClient.invalidateQueries({ queryKey: playlistKeys.detail(playlistId) }),
+  ]);
+}
 
 export function useCreatePlaylistMutation() {
   const queryClient = useQueryClient();
@@ -77,12 +85,19 @@ export function useAddTracksMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
-      addTracksToPlaylist(playlistId, trackIds),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
-      queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
-    },
+    mutationFn: ({
+      playlistId,
+      trackIds,
+      mutationId,
+    }: {
+      playlistId: string;
+      trackIds: string[];
+      mutationId: string;
+    }) => addTracksToPlaylist(playlistId, trackIds, mutationId),
+    onSuccess: (_data, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
+    onError: (_error, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
   });
 }
 
@@ -90,12 +105,19 @@ export function useRemoveTracksMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
-      removeTracksFromPlaylist(playlistId, trackIds),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
-      queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
-    },
+    mutationFn: ({
+      playlistId,
+      trackIds,
+      mutationId,
+    }: {
+      playlistId: string;
+      trackIds: string[];
+      mutationId: string;
+    }) => removeTracksFromPlaylist(playlistId, trackIds, mutationId),
+    onSuccess: (_data, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
+    onError: (_error, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
   });
 }
 
@@ -127,19 +149,17 @@ export function useReorderPlaylistTracksMutation() {
       playlistId,
       trackIds,
       expectedTrackIds,
+      mutationId,
     }: {
       playlistId: string;
       trackIds: string[];
       expectedTrackIds: string[];
-    }) => reorderPlaylistTracks(playlistId, trackIds, expectedTrackIds),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
-      queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
-    },
-    onError: (_error, variables) => {
-      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: playlistKeys.detail(variables.playlistId) });
-    },
+      mutationId: string;
+    }) => reorderPlaylistTracks(playlistId, trackIds, expectedTrackIds, mutationId),
+    onSuccess: (_data, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
+    onError: (_error, variables) =>
+      invalidatePlaylistMutationQueries(queryClient, variables.playlistId),
   });
 }
 

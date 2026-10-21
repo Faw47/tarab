@@ -46,8 +46,12 @@ impl Database {
             self.apply_migration_tx(&mut conn, 7, |tx| self.migrate_v7(tx))?;
         }
 
+        if current_version < 8 {
+            self.apply_migration_tx(&mut conn, 8, |tx| self.migrate_v8(tx))?;
+        }
+
         if current_version < CURRENT_SCHEMA_VERSION {
-            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v8(tx))?;
+            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v9(tx))?;
         }
 
         // Guard against schema drift: ensure lyrics index schema exists even if
@@ -557,6 +561,20 @@ impl Database {
                 )?;
             }
         }
+        Ok(())
+    }
+
+    pub(super) fn migrate_v9(&self, conn: &Connection) -> SqliteResult<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS playlist_mutation_results (
+                mutation_key TEXT PRIMARY KEY,
+                playlist_id TEXT NOT NULL,
+                result_json TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_playlist_mutation_results_created_at
+                ON playlist_mutation_results(created_at);",
+        )?;
         Ok(())
     }
 
