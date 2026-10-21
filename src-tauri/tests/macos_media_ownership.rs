@@ -35,7 +35,9 @@ fn every_objective_c_entry_point_drains_a_scoped_autorelease_pool() {
 #[test]
 fn owned_objective_c_allocations_use_raii_and_mutable_copies_are_released() {
     assert_eq!(
-        MACOS_MEDIA.matches("NSString::alloc(nil).init_str(").count(),
+        MACOS_MEDIA
+            .matches("NSString::alloc(nil).init_str(")
+            .count(),
         1,
         "alloc/init must be centralized in the ownership helper"
     );
@@ -44,8 +46,7 @@ fn owned_objective_c_allocations_use_raii_and_mutable_copies_are_released() {
         .map(|start| &MACOS_MEDIA[start..])
         .expect("autoreleased NSString helper");
     assert!(
-        string_helper.contains("StrongPtr::new")
-            && string_helper.contains(".autorelease()"),
+        string_helper.contains("StrongPtr::new") && string_helper.contains(".autorelease()"),
         "the +1 NSString allocation must transfer to the current autorelease pool"
     );
     assert_eq!(
