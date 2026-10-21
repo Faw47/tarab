@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 69 |
+| FIXED_VERIFIED | 70 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 36 |
+| NATIVE_VALIDATION_REQUIRED | 38 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 52 |
+| PENDING | 49 |
 | **Total** | **160** |
 
 ## Findings
@@ -158,11 +158,11 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: run 39559283847 reproduces the configured-root mismatch (503 frontend tests pass, regression fails). G2: all five CI jobs pass on PR #47 head fc74a39 (run 39560325930). G3 exact-head review: no blockers; Rust emits configured root ID plus canonical-root-relative path, and TS validates containment/traversal and falls back to root scans. Native check: add a symlinked library root, edit/add a file through the canonical path, and confirm scoped rescan uses the configured root on supported desktop platforms. | fc74a39 | #47 |
 | AR-21 | P3 | Schema and index issues | FIXED_VERIFIED | PASS / PASS / PASS | G1 test-only run 39561149017: all five added regressions failed on the pre-fix head (188 other Rust tests passed), reproducing the duplicate path index, broad FTS trigger, path-scan and paging/query-plan issues. G2 all five CI jobs pass at PR #48 head aaf66a3 (run 39562481013). G3 exact-head review found no blockers for migration order, FTS trigger scope, path-range boundaries, keyset ordering or short-query handling. | aaf66a3 | #48 |
 | LD-15 | P3 | Paginated queries order by non-unique columns without a tiebreaker | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Paginated ORDER BY adds id as a tiebreaker. Rust test paginated_tracks_sort_case_insensitively_with_a_stable_tiebreaker proves no repeated or skipped rows across page boundaries. | d6d91ba | #3 |
-| AR-22 | P3 | Deep-link track resolution hashes every row | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-34 | P3 | Shuffle-all and aggregates pull whole-library payloads into JavaScript | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-22 | P3 | Deep-link track resolution hashes every row | FIXED_VERIFIED | PASS / PASS / PASS | G1 test-only run 39562837774 reproduced the full-row hash lookup and missing public_id index/query plan (196 other Rust tests passed). G2 all five hosted jobs pass at PR #49 head 77f118d (run 39563929932). G3 exact-head review found no blockers after checking backfill/index, path mutations, Windows normalization and library-root authorization. | 77f118d | #49 |
+| AR-34 | P3 | Shuffle-all and aggregates pull whole-library payloads into JavaScript | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only aggregate baseline at head 093c3c0 reproduced oversized album/artist representatives on Ubuntu, macOS and Windows. Shuffle baseline run 39590509052 failed the lightweight-entry assertion on pre-optimization head 8ab18a7 because the old loader returned hydrated metadata; History regression run 39589989032 reproduced restored placeholders in liquid (neo passed; 512 other frontend tests passed). G2: all five hosted jobs pass on exact #50 head 95e8e05 (run 39589783676) and exact #51 head 2f693e34 (run 39590149053). G3 independent exact-head reviews found no blockers on both drafts. Native check: restore a lazy shuffle queue, verify History metadata in both themes, and replay a History item. | 95e8e05, 2f693e34 | #50, #51 |
 | AR-35 | P3 | Smart-shuffle de-clustering is roughly quadratic in the worst case | FIXED_VERIFIED | PASS / PASS / PASS | G1: 50,000-track test-only run 39569343478 exceeded its 8-second budget on Ubuntu (39.681s), Windows (33.021s), and macOS (72.953s). G2: all five jobs passed at head e6575abdab4eaaec0af8b0330f1686bd9baa8966 (run 39570619194). G3: independent review found no code blocker. This is a deterministic ordering/performance change with no native-device gate. | e6575ab | #52 |
 | LD-07 | P3 | Genre is editable in the tag editor but absent from the library schema | FIXED_VERIFIED | PASS / PASS / PASS | G1: test-only run 39570832003 reproduced schema migration, genre persistence, tag extraction, matching, scan reconciliation, and metadata-refresh regressions. G2: all five jobs passed at head f695efb5b6fb752d1a0f6ee4d70d33d96a9a3a70 (run 39574496255). G3: independent review found no remaining blocker. Existing rows migrate with null genre; rescan the library to populate it from tags. | f695efb | #53 |
-| QA-04 | P3 | Legacy `music-player` data may not migrate on Linux | PENDING | - | Audit confidence LIKELY. | - | - |
+| QA-04 | P3 | Legacy `music-player` data may not migrate on Linux | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1 test-only run 39572573667 reproduced Linux startup with the log plugin creating `com.fawaz.tarab/logs` before database initialization; the new-path database was missing while legacy `music-player/library.db` existed (206 other Rust tests passed). G2 all five hosted jobs pass on exact PR #54 ledger head ffc3ec2 (run 39589541149). G3 independent review found no code blockers at substantive code head ab5d3b03; later commits only update the ledger. Native check: launch on Linux with a populated legacy library while logging creates the app-data directory; confirm migration and backup preservation behavior. | ab5d3b03 | #54 |
 | LD-19 | P3 | Backend diagnostics go to stderr instead of the configured log plugin | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-26 | P3 | macOS builds two app menus; label updates go to the replaced one | NATIVE_VALIDATION_REQUIRED | G1 n/a (platform) / G2 pass (macOS via CI) / G3 approve | macOS installs only the macos_menu bar, which returns its playback items so Play/Pause labels and enabled state update the installed menu. Needs a check on macOS. | 1036599 | #6 |
 | AR-32 | P3 | Hidden mini-player webview is created at startup even though the feature is off by default | PENDING | - | Audit confidence LIKELY. | - | - |
