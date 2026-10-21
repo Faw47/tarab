@@ -30,7 +30,7 @@ fn audio_command_arm(signature: &str) -> &str {
 fn play_once_access_lasts_with_the_active_queue_entry() {
     let play_command = command_body(AUDIO, "pub fn play_track(");
     assert!(
-        play_command.contains("retain_transient_file_for_queue_entry"),
+        play_command.contains("retain_transient_file_for_queue_entry_at_generation"),
         "starting playback must retain its exact one-file grant for the queue entry"
     );
     assert!(
@@ -38,9 +38,15 @@ fn play_once_access_lasts_with_the_active_queue_entry() {
         "starting playback must not consume the grant before artwork and preload use it"
     );
 
+    let crossfade_command = command_body(AUDIO, "pub fn crossfade_to_track(");
+    assert!(
+        crossfade_command.contains("mark_playback_generation"),
+        "queued crossfades must reserve their generation before async completion"
+    );
+
     let stop_command = command_body(AUDIO, "pub fn stop_playback(");
     assert!(
-        stop_command.contains("clear_transient_file_grants"),
+        stop_command.contains("clear_transient_file_grants_at_generation"),
         "stopping playback must release one-file access"
     );
 }
@@ -79,16 +85,21 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
         "AudioCommand::CrossfadeTo {\n                                file_path,",
     );
     assert!(
-        crossfade.contains("retain_transient_file_for_queue_entry"),
+        crossfade.contains("retain_transient_file_for_queue_entry_at_generation"),
         "a successfully started crossfade must retain only its incoming track grant"
     );
 
     let gapless = audio_command_arm(
         "AudioCommand::GaplessHandoffStarted {\n                                ended,",
     );
+    let stop_arm = audio_command_arm("AudioCommand::Stop");
+    assert!(
+        stop_arm.contains("clear_transient_file_grants_at_generation"),
+        "the serialized Stop handler must clear grants using its source generation"
+    );
     assert!(
         gapless.contains("if is_still_current")
-            && gapless.contains("retain_transient_file_for_queue_entry"),
+            && gapless.contains("retain_transient_file_for_queue_entry_at_generation"),
         "a committed gapless handoff must update grants only for the current track"
     );
 }
