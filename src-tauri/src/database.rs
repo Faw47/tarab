@@ -1858,11 +1858,11 @@ mod tests {
             .expect("collect title keyset plan");
 
         assert!(
-            details.iter().any(|detail| detail.contains("idx_tracks_title_id")),
+            details\n                .iter()\n                .any(|detail| detail.contains("idx_tracks_title_id")),
             "title keyset should seek through idx_tracks_title_id: {details:?}"
         );
         assert!(
-            !details.iter().any(|detail| detail.contains("USE TEMP B-TREE")),
+            !details\n                .iter()\n                .any(|detail| detail.contains("USE TEMP B-TREE")),
             "title keyset should not sort each page: {details:?}"
         );
     }
@@ -1887,7 +1887,7 @@ mod tests {
             .expect("collect folder LIKE plan");
 
         assert!(
-            details.iter().any(|detail| detail.contains("SEARCH tracks USING INDEX")),
+            details\n                .iter()\n                .any(|detail| detail.contains("SEARCH tracks USING INDEX")),
             "folder prefix should use the file_path index: {details:?}"
         );
     }
