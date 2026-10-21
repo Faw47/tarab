@@ -47,6 +47,7 @@ interface PlayerState {
   // Actions
   setCurrentTrack: (track: Track | null) => void;
   setQueue: (tracks: Track[]) => void;
+  hydrateQueueTrack: (track: Track) => void;
   applyTrackRatings: (trackIds: string[], rating: number | null) => void;
   addToQueue: (track: Track, position?: 'next' | 'last') => void;
   removeFromQueue: (index: number) => void;
@@ -237,6 +238,38 @@ export const usePlayerStore = create<PlayerState>()(
           'player/setQueue',
         );
       },
+
+      hydrateQueueTrack: (track) =>
+        set(
+          (state) => {
+            const targetIndex = state.queue.findIndex(
+              (entry) =>
+                entry._lazyQueueEntry &&
+                (track._queueId ? entry._queueId === track._queueId : entry.id === track.id),
+            );
+            const queue =
+              targetIndex >= 0
+                ? state.queue.map((entry, index) =>
+                    index === targetIndex
+                      ? { ...track, _queueId: entry._queueId }
+                      : entry,
+                  )
+                : state.queue;
+            const currentTrack =
+              state.currentTrack?._lazyQueueEntry &&
+              state.currentTrack.id === track.id &&
+              (!track._queueId ||
+                !state.currentTrack._queueId ||
+                state.currentTrack._queueId === track._queueId)
+                ? { ...track, _queueId: state.currentTrack._queueId ?? track._queueId }
+                : state.currentTrack;
+
+            if (queue === state.queue && currentTrack === state.currentTrack) return {};
+            return { queue, currentTrack };
+          },
+          false,
+          'player/hydrateQueueTrack',
+        ),
 
       applyTrackRatings: (trackIds, rating) => {
         if (trackIds.length === 0) return;
