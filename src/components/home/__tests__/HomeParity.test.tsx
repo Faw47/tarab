@@ -8,7 +8,7 @@ import { HomeViewNeo } from '../HomeViewNeo';
 
 const { playAdjacentTrackMock, toggleCurrentPlaybackMock, reportErrorMock, model } = vi.hoisted(
   () => ({
-    playAdjacentTrackMock: vi.fn(async () => undefined),
+    playAdjacentTrackMock: vi.fn(async (_direction: 'next' | 'previous') => undefined),
     toggleCurrentPlaybackMock: vi.fn(async () => undefined),
     reportErrorMock: vi.fn(),
     model: { albums: [] as unknown[], tracks: [] as Track[], libraryStats: null as unknown },
