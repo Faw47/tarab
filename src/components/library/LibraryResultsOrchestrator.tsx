@@ -3,6 +3,7 @@ import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent } from 're
 import { memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { getContextMenuPosition } from '../../lib/context-menu-position';
+import { formatCountLabel } from '../../lib/format-count';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
 import { CoverArtImage } from '../shared/CoverArtImage';
@@ -360,7 +361,7 @@ const AlbumTile = memo(function AlbumTile({
             <Play className="h-4 w-4" fill="currentColor" strokeWidth={3} />
           </button>
           <div className="absolute left-2 top-2 z-20 border border-white bg-black px-1 py-0.5 text-[12px] font-black leading-none tracking-widest text-white shadow-[2px_2px_0_0_#000]">
-            {album.count} {album.count === 1 ? 'FILE' : 'FILES'}
+            {formatCountLabel(album.count, 'track').toUpperCase()}
           </div>
         </div>
         <div
@@ -621,7 +622,7 @@ const ArtistTile = memo(function ArtistTile({
           dir="auto"
           className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide opacity-60 leading-tight"
         >
-          {artist.count} {artist.count === 1 ? 'FILE' : 'FILES'}
+          {formatCountLabel(artist.count, 'track').toUpperCase()}
         </div>
       </article>
     );
