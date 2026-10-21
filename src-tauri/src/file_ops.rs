@@ -778,7 +778,9 @@ pub(crate) fn discard_transient_file_for_failed_playback(
     }
 
     let previous_len = state.transient_files.len();
-    state.transient_files.retain(|candidate| candidate != &canonical);
+    state
+        .transient_files
+        .retain(|candidate| candidate != &canonical);
     state.transient_files.len() != previous_len
 }
 
