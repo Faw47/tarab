@@ -34,8 +34,6 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
     ),
     ("shutdown.rs", include_str!("../src/shutdown.rs")),
 ];
-
-
 fn direct_stderr_locations() -> Vec<String> {
     RUNTIME_SOURCES
         .iter()
