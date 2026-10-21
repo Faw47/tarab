@@ -551,9 +551,7 @@ const GlassCardBase = forwardRef<HTMLDivElement, GlassCardProps>(
       () => ({
         ...baseStyle,
         ...style,
-        ...(finalReducedEffects
-          ? { backdropFilter: 'none', WebkitBackdropFilter: 'none' }
-          : {}),
+        ...(finalReducedEffects ? { backdropFilter: 'none', WebkitBackdropFilter: 'none' } : {}),
         '--glass-sheen-color': sheenColor,
       }),
       [baseStyle, finalReducedEffects, sheenColor, style],
