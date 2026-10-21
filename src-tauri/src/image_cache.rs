@@ -87,9 +87,7 @@ fn touch_cache_file(path: &Path) {
     let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(path) else {
         return;
     };
-    let _ = file.set_times(
-        fs::FileTimes::new().set_accessed(std::time::SystemTime::now()),
-    );
+    let _ = file.set_times(fs::FileTimes::new().set_accessed(std::time::SystemTime::now()));
 }
 
 fn read_thumbnail_file(path: &Path, size: &str) -> Result<Option<Vec<u8>>, String> {
@@ -311,7 +309,8 @@ impl ImageCache {
                                         if let Ok(duration) =
                                             accessed.duration_since(std::time::UNIX_EPOCH)
                                         {
-                                            let time = duration.as_millis().min(i64::MAX as u128) as i64;
+                                            let time =
+                                                duration.as_millis().min(i64::MAX as u128) as i64;
                                             oldest_time =
                                                 Some(oldest_time.map_or(time, |t| t.min(time)));
                                         }
