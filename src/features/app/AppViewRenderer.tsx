@@ -184,6 +184,7 @@ export const AppViewRenderer = memo(function AppViewRenderer({
       return (
         <Suspense fallback={viewFallback}>
           <QueueView
+            onNavigateToLibrary={() => onNavigate('library')}
             isLibraryLoading={initialLibraryLoading}
             libraryError={libraryLoadError}
             onRetryLoad={onRetryLoad}
