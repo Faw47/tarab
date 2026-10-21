@@ -5,11 +5,14 @@ import { libraryKeys } from '../../features/library/queryKeys';
 import type { Track, TrackMetadata } from '../../types';
 import { refreshTracksByFilePaths } from '../track-refresh';
 
-const { getBatchMetadataMock } = vi.hoisted(() => ({ getBatchMetadataMock: vi.fn() }));
+const { getBatchMetadataMock, dbUpsertTracksMock } = vi.hoisted(() => ({
+  getBatchMetadataMock: vi.fn(),
+  dbUpsertTracksMock: vi.fn(),
+}));
 
 vi.mock('../tauri-commands', () => ({
   dbGetTracksByIds: vi.fn(async () => []),
-  dbUpsertTracks: vi.fn(async () => undefined),
+  dbUpsertTracks: dbUpsertTracksMock,
   generateCoverArtHashes: vi.fn(async () => []),
   getBatchMetadata: getBatchMetadataMock,
 }));
@@ -38,6 +41,8 @@ describe('refreshTracksByFilePaths', () => {
   let client: QueryClient;
 
   beforeEach(() => {
+    getBatchMetadataMock.mockReset();
+    dbUpsertTracksMock.mockReset();
     client = new QueryClient();
     setLibraryQueryClient(client);
   });
@@ -78,4 +83,35 @@ describe('refreshTracksByFilePaths', () => {
     }
     expect(client.getQueryData(libraryKeys.tracks())).toBeUndefined();
   });
+  it('keeps refreshed genres in the library cache and database payload', async () => {
+    const edited = { ...track('/music/genre.flac', 'Song'), genre: 'Rock' };
+    client.setQueryData(libraryKeys.tracks('dateAdded'), [edited]);
+    getBatchMetadataMock.mockResolvedValue([
+      {
+        file_path: edited.filePath,
+        title: 'Song',
+        artist: 'Artist',
+        album: 'Album',
+        album_artist: null,
+        genre: 'Jazz',
+        year: null,
+        track_number: null,
+        disc_number: null,
+        duration_secs: 100,
+        has_cover_art: false,
+        file_format: 'flac',
+        bitrate: null,
+        sample_rate: null,
+        file_size: null,
+      } satisfies TrackMetadata,
+    ]);
+
+    await refreshTracksByFilePaths([edited.filePath]);
+
+    expect(client.getQueryData<Track[]>(libraryKeys.tracks('dateAdded'))?.[0].genre).toBe('Jazz');
+    expect(dbUpsertTracksMock).toHaveBeenCalledWith([
+      expect.objectContaining({ id: edited.filePath, genre: 'Jazz' }),
+    ]);
+  });
+
 });
