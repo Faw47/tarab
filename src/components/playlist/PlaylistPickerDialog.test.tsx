@@ -85,7 +85,11 @@ describe('PlaylistPickerDialog', () => {
     fireEvent.click(roadButton!);
 
     await waitFor(() => {
-      expect(mockAddTracks).toHaveBeenCalledWith({ playlistId: 'pl_road', trackIds: ['t1', 't2'] });
+      expect(mockAddTracks).toHaveBeenCalledWith({
+        playlistId: 'pl_road',
+        trackIds: ['t1', 't2'],
+        mutationId: expect.any(String),
+      });
     });
     expect(onClose).toHaveBeenCalled();
   });

@@ -167,6 +167,7 @@ export function PlaylistsView() {
         playlistId: detail.data.id,
         expectedTrackIds,
         trackIds: ids,
+        mutationId: crypto.randomUUID(),
       });
     } catch (error) {
       reportError('Could not reorder the playlist', {
@@ -501,6 +502,7 @@ export function PlaylistsView() {
                               .mutateAsync({
                                 playlistId: detail.data.id,
                                 trackIds: [...selectedTrackIds],
+                                mutationId: crypto.randomUUID(),
                               })
                               .then(() => setSelectedTrackIds(new Set()));
                           }}

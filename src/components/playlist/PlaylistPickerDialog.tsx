@@ -43,7 +43,11 @@ export const PlaylistPickerDialog = memo(
 
     const handleAdd = async (playlistId: string) => {
       try {
-        await addTracksMutation.mutateAsync({ playlistId, trackIds });
+        await addTracksMutation.mutateAsync({
+          playlistId,
+          trackIds,
+          mutationId: crypto.randomUUID(),
+        });
         onAdded?.(playlistId);
         onClose();
       } catch (error) {

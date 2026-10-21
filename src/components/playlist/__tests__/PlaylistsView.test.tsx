@@ -3,9 +3,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaylistDetail, PlaylistEntry, PlaylistSummary } from '../../../types';
 import { PlaylistsView, playlistTypeLabel, trackCountLabel } from '../PlaylistsView';
 
-const { startPlaybackMock, reorderTracksMock, state } = vi.hoisted(() => ({
+const { startPlaybackMock, removeTracksMutation, reorderTracksMock, state } = vi.hoisted(() => ({
   startPlaybackMock: vi.fn(async () => 1),
-  reorderTracksMock: vi.fn(async () => undefined),
+  removeTracksMutation: vi.fn(
+    async (_variables: { playlistId: string; trackIds: string[]; mutationId: string }) => undefined,
+  ),
+  reorderTracksMock: vi.fn(
+    async (_variables: {
+      playlistId: string;
+      trackIds: string[];
+      expectedTrackIds: string[];
+      mutationId: string;
+    }) => undefined,
+  ),
   state: { summaries: [] as unknown[], detail: null as unknown },
 }));
 
@@ -29,7 +39,11 @@ vi.mock('../../../features/playlists/mutations', () => {
     usePinPlaylistMutation: mutation,
     useRelinkPlaylistTrackMutation: mutation,
     useRemoveMissingTracksMutation: mutation,
-    useRemoveTracksMutation: mutation,
+    useRemoveTracksMutation: () => ({
+      mutate: vi.fn(),
+      mutateAsync: removeTracksMutation,
+      isPending: false,
+    }),
     useReorderPlaylistTracksMutation: () => ({
       mutate: vi.fn(),
       mutateAsync: reorderTracksMock,
@@ -121,6 +135,7 @@ describe('PlaylistsView (FE-26)', () => {
       playlistId: 'p1',
       expectedTrackIds: ['t0', 't1'],
       trackIds: ['t1', 't0'],
+      mutationId: expect.any(String),
     });
   });
 
@@ -156,5 +171,32 @@ describe('PlaylistsView (FE-26)', () => {
     rect.mockRestore();
     height.mockRestore();
     width.mockRestore();
+  });
+  it('reuses a unique request ID for each playlist edit action', () => {
+    setPlaylist([entry(0), entry(1)], 'Manual');
+    render(<PlaylistsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Road trip/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Song 1 up' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Song 0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 1' }));
+
+    expect(reorderTracksMock).toHaveBeenCalledWith({
+      playlistId: 'p1',
+      expectedTrackIds: ['t0', 't1'],
+      trackIds: ['t1', 't0'],
+      mutationId: expect.any(String),
+    });
+    expect(removeTracksMutation).toHaveBeenCalledWith({
+      playlistId: 'p1',
+      trackIds: ['t0'],
+      mutationId: expect.any(String),
+    });
+
+    const reorderId = reorderTracksMock.mock.calls[0]?.[0]?.mutationId;
+    const removeId = removeTracksMutation.mock.calls[0]?.[0]?.mutationId;
+    expect(reorderId).toEqual(expect.any(String));
+    expect(removeId).toEqual(expect.any(String));
+    expect(removeId).not.toBe(reorderId);
   });
 });

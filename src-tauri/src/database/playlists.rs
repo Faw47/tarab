@@ -1,6 +1,63 @@
 use super::*;
 
+fn existing_playlist_mutation_result(
+    conn: &Connection,
+    mutation_key: &str,
+) -> SqliteResult<Option<Option<String>>> {
+    let cutoff = now_millis_i64_or_default().saturating_sub(PLAYLIST_MUTATION_RESULT_RETENTION_MS);
+    conn.execute(
+        "DELETE FROM playlist_mutation_results WHERE created_at < ?1",
+        [cutoff],
+    )?;
+    conn.query_row(
+        "SELECT result_json FROM playlist_mutation_results WHERE mutation_key = ?1",
+        [mutation_key],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+}
+
+fn register_playlist_mutation(
+    conn: &Connection,
+    mutation_key: Option<&str>,
+    playlist_id: &str,
+    created_at: i64,
+) -> SqliteResult<()> {
+    if let Some(mutation_key) = mutation_key {
+        conn.execute(
+            "INSERT INTO playlist_mutation_results (mutation_key, playlist_id, result_json, created_at)
+             VALUES (?1, ?2, NULL, ?3)",
+            params![mutation_key, playlist_id, created_at],
+        )?;
+    }
+    Ok(())
+}
+
 impl Database {
+    pub fn get_playlist_mutation_result(&self, mutation_key: &str) -> SqliteResult<Option<String>> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let result = existing_playlist_mutation_result(&tx, mutation_key)?;
+        tx.commit()?;
+        Ok(result.flatten())
+    }
+
+    pub fn store_playlist_mutation_result(
+        &self,
+        mutation_key: &str,
+        result_json: &str,
+    ) -> SqliteResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE playlist_mutation_results SET result_json = ?1 WHERE mutation_key = ?2",
+            params![result_json, mutation_key],
+        )?;
+        if changed == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        Ok(())
+    }
+
     // ========== Playlist Operations ==========
 
     pub fn get_playlist_count(&self) -> SqliteResult<i64> {
@@ -299,6 +356,7 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn reorder_playlist_tracks(
         &self,
         playlist_id: &str,
@@ -306,8 +364,49 @@ impl Database {
         expected_track_ids: &[String],
         updated_at: i64,
     ) -> SqliteResult<()> {
+        self.reorder_playlist_tracks_impl(
+            playlist_id,
+            track_ids,
+            expected_track_ids,
+            updated_at,
+            None,
+        )
+        .map(|_| ())
+    }
+
+    pub fn reorder_playlist_tracks_idempotent(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        expected_track_ids: &[String],
+        updated_at: i64,
+        mutation_key: &str,
+    ) -> SqliteResult<Option<String>> {
+        self.reorder_playlist_tracks_impl(
+            playlist_id,
+            track_ids,
+            expected_track_ids,
+            updated_at,
+            Some(mutation_key),
+        )
+    }
+
+    fn reorder_playlist_tracks_impl(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        expected_track_ids: &[String],
+        updated_at: i64,
+        mutation_key: Option<&str>,
+    ) -> SqliteResult<Option<String>> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        if let Some(mutation_key) = mutation_key {
+            if let Some(result) = existing_playlist_mutation_result(&tx, mutation_key)? {
+                tx.commit()?;
+                return Ok(result);
+            }
+        }
 
         let playlist_type = tx
             .query_row(
@@ -392,17 +491,44 @@ impl Database {
             "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
             params![updated_at, playlist_id],
         )?;
+        register_playlist_mutation(&tx, mutation_key, playlist_id, now_millis_i64_or_default())?;
         tx.commit()?;
-        Ok(())
+        Ok(None)
     }
 
+    #[cfg(test)]
     pub fn add_tracks_to_playlist(
         &self,
         playlist_id: &str,
         track_ids: &[String],
     ) -> SqliteResult<()> {
+        self.add_tracks_to_playlist_impl(playlist_id, track_ids, None)
+            .map(|_| ())
+    }
+
+    pub fn add_tracks_to_playlist_idempotent(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        mutation_key: &str,
+    ) -> SqliteResult<Option<String>> {
+        self.add_tracks_to_playlist_impl(playlist_id, track_ids, Some(mutation_key))
+    }
+
+    fn add_tracks_to_playlist_impl(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        mutation_key: Option<&str>,
+    ) -> SqliteResult<Option<String>> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        if let Some(mutation_key) = mutation_key {
+            if let Some(result) = existing_playlist_mutation_result(&tx, mutation_key)? {
+                tx.commit()?;
+                return Ok(result);
+            }
+        }
 
         let now = now_millis_i64_or_default();
 
@@ -467,8 +593,9 @@ impl Database {
             params![now, playlist_id],
         )?;
 
+        register_playlist_mutation(&tx, mutation_key, playlist_id, now_millis_i64_or_default())?;
         tx.commit()?;
-        Ok(())
+        Ok(None)
     }
 
     pub fn remove_tracks_from_playlist(
@@ -476,8 +603,33 @@ impl Database {
         playlist_id: &str,
         track_ids: &[String],
     ) -> SqliteResult<()> {
+        self.remove_tracks_from_playlist_impl(playlist_id, track_ids, None)
+            .map(|_| ())
+    }
+
+    pub fn remove_tracks_from_playlist_idempotent(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        mutation_key: &str,
+    ) -> SqliteResult<Option<String>> {
+        self.remove_tracks_from_playlist_impl(playlist_id, track_ids, Some(mutation_key))
+    }
+
+    fn remove_tracks_from_playlist_impl(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        mutation_key: Option<&str>,
+    ) -> SqliteResult<Option<String>> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        if let Some(mutation_key) = mutation_key {
+            if let Some(result) = existing_playlist_mutation_result(&tx, mutation_key)? {
+                tx.commit()?;
+                return Ok(result);
+            }
+        }
         let normalized_track_ids: Vec<String> = track_ids
             .iter()
             .map(|track_id| Self::normalize_path(track_id))
@@ -501,8 +653,9 @@ impl Database {
             params![now, playlist_id],
         )?;
 
+        register_playlist_mutation(&tx, mutation_key, playlist_id, now_millis_i64_or_default())?;
         tx.commit()?;
-        Ok(())
+        Ok(None)
     }
 
     pub fn relink_playlist_track(

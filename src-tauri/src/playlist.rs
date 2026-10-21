@@ -2,8 +2,8 @@ use crate::database::{DbPlaylist, DbTrack, SharedDatabase};
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,7 +15,6 @@ const UNSUPPORTED_GENRE_RULE_MESSAGE: &str =
     "ByGenre rules are not supported by the current track schema.";
 pub struct PlaylistGuard {
     lock: Mutex<()>,
-    recent_mutations: Mutex<VecDeque<(String, PlaylistDetail)>>,
 }
 
 pub type SharedPlaylistGuard = Arc<PlaylistGuard>;
@@ -23,35 +22,66 @@ pub type SharedPlaylistGuard = Arc<PlaylistGuard>;
 pub fn create_playlist_guard() -> SharedPlaylistGuard {
     Arc::new(PlaylistGuard {
         lock: Mutex::new(()),
-        recent_mutations: Mutex::new(VecDeque::new()),
     })
 }
 
-impl PlaylistGuard {
-    fn mutation_result(&self, key: &str) -> Option<PlaylistDetail> {
-        self.recent_mutations
-            .lock()
-            .iter()
-            .find(|(stored_key, _)| stored_key == key)
-            .map(|(_, detail)| detail.clone())
-    }
-
-    fn store_mutation_result(&self, key: String, detail: PlaylistDetail) {
-        const MAX_RECENT_MUTATIONS: usize = 256;
-        let mut recent = self.recent_mutations.lock();
-        if recent.len() >= MAX_RECENT_MUTATIONS {
-            recent.pop_front();
-        }
-        recent.push_back((key, detail));
-    }
-}
-
-fn mutation_key(operation: &str, playlist_id: &str, mutation_id: &str) -> Result<String, String> {
+fn mutation_key(
+    operation: &str,
+    playlist_id: &str,
+    mutation_id: &str,
+    track_ids: &[String],
+    expected_track_ids: &[String],
+) -> Result<String, String> {
     let id = mutation_id.trim();
     if id.is_empty() || id.len() > 128 {
         return Err("mutationId must contain 1 to 128 characters".to_string());
     }
-    Ok(format!("{operation}:{playlist_id}:{id}"))
+
+    let mut hasher = Sha256::new();
+    for value in [operation, playlist_id, id] {
+        hasher.update((value.len() as u64).to_be_bytes());
+        hasher.update(value.as_bytes());
+    }
+    for values in [track_ids, expected_track_ids] {
+        hasher.update((values.len() as u64).to_be_bytes());
+        for value in values {
+            hasher.update((value.len() as u64).to_be_bytes());
+            hasher.update(value.as_bytes());
+        }
+    }
+
+    let digest_hex = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!("{operation}:{digest_hex}"))
+}
+
+fn cached_mutation_detail(
+    db: &SharedDatabase,
+    key: &str,
+) -> Result<Option<PlaylistDetail>, String> {
+    let Some(encoded) = db
+        .get_playlist_mutation_result(key)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    serde_json::from_str(&encoded)
+        .map(Some)
+        .map_err(|error| format!("Cached playlist mutation result is invalid: {error}"))
+}
+
+fn store_mutation_detail(
+    db: &SharedDatabase,
+    key: &str,
+    detail: &PlaylistDetail,
+) -> Result<(), String> {
+    let encoded = serde_json::to_string(detail)
+        .map_err(|error| format!("Failed to encode playlist mutation result: {error}"))?;
+    db.store_playlist_mutation_result(key, &encoded)
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1010,39 +1040,44 @@ fn add_tracks_to_playlist_blocking(
     mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
-    let key = mutation_key("add", &playlist_id, &mutation_id)?;
-    if let Some(detail) = guard.mutation_result(&key) {
+    let key = mutation_key("add", &playlist_id, &mutation_id, &track_ids, &[])?;
+    if let Some(detail) = cached_mutation_detail(&db, &key)? {
         return Ok(detail);
     }
 
     let playlist = db
         .get_playlist_by_id(&playlist_id)
-        .map_err(|e| e.to_string())?
+        .map_err(|error| error.to_string())?
         .ok_or_else(|| "Playlist not found".to_string())?;
 
     if PlaylistType::from_db_value(&playlist.playlist_type) != PlaylistType::Manual {
         return Err("Tracks can only be added to manual playlists".to_string());
     }
 
-    db.add_tracks_to_playlist(&playlist_id, &track_ids)
-        .map_err(|e| e.to_string())?;
+    if let Some(encoded) = db
+        .add_tracks_to_playlist_idempotent(&playlist_id, &track_ids, &key)
+        .map_err(|error| error.to_string())?
+    {
+        return serde_json::from_str(&encoded)
+            .map_err(|error| format!("Cached playlist mutation result is invalid: {error}"));
+    }
 
     let detail = get_playlist_detail_internal(&db, &playlist_id)?;
-    guard.store_mutation_result(key, detail.clone());
+    store_mutation_detail(&db, &key, &detail)?;
     Ok(detail)
 }
-
 #[tauri::command]
 pub async fn remove_tracks_from_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
     track_ids: Vec<String>,
+    mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let guard = guard.inner().clone();
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        remove_tracks_from_playlist_blocking(guard, db, playlist_id, track_ids)
+        remove_tracks_from_playlist_blocking(guard, db, playlist_id, track_ids, mutation_id)
     })
     .await
     .map_err(|error| format!("Playlist task failed: {error}"))?
@@ -1053,15 +1088,26 @@ fn remove_tracks_from_playlist_blocking(
     db: SharedDatabase,
     playlist_id: String,
     track_ids: Vec<String>,
+    mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
+    let key = mutation_key("remove", &playlist_id, &mutation_id, &track_ids, &[])?;
+    if let Some(detail) = cached_mutation_detail(&db, &key)? {
+        return Ok(detail);
+    }
 
-    db.remove_tracks_from_playlist(&playlist_id, &track_ids)
-        .map_err(|e| e.to_string())?;
+    if let Some(encoded) = db
+        .remove_tracks_from_playlist_idempotent(&playlist_id, &track_ids, &key)
+        .map_err(|error| error.to_string())?
+    {
+        return serde_json::from_str(&encoded)
+            .map_err(|error| format!("Cached playlist mutation result is invalid: {error}"));
+    }
 
-    get_playlist_detail_internal(&db, &playlist_id)
+    let detail = get_playlist_detail_internal(&db, &playlist_id)?;
+    store_mutation_detail(&db, &key, &detail)?;
+    Ok(detail)
 }
-
 #[tauri::command]
 pub async fn relink_playlist_track(
     guard: tauri::State<'_, SharedPlaylistGuard>,
@@ -1131,20 +1177,36 @@ fn reorder_playlist_tracks_blocking(
     mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
-    let key = mutation_key("reorder", &playlist_id, &mutation_id)?;
-    if let Some(detail) = guard.mutation_result(&key) {
+    let key = mutation_key(
+        "reorder",
+        &playlist_id,
+        &mutation_id,
+        &track_ids,
+        &expected_track_ids,
+    )?;
+    if let Some(detail) = cached_mutation_detail(&db, &key)? {
         return Ok(detail);
     }
 
     let now = to_i64(now_millis_u64()?);
-    db.reorder_playlist_tracks(&playlist_id, &track_ids, &expected_track_ids, now)
-        .map_err(|e| e.to_string())?;
+    if let Some(encoded) = db
+        .reorder_playlist_tracks_idempotent(
+            &playlist_id,
+            &track_ids,
+            &expected_track_ids,
+            now,
+            &key,
+        )
+        .map_err(|error| error.to_string())?
+    {
+        return serde_json::from_str(&encoded)
+            .map_err(|error| format!("Cached playlist mutation result is invalid: {error}"));
+    }
 
     let detail = get_playlist_detail_internal(&db, &playlist_id)?;
-    guard.store_mutation_result(key, detail.clone());
+    store_mutation_detail(&db, &key, &detail)?;
     Ok(detail)
 }
-
 #[tauri::command]
 pub async fn sync_playlist(
     guard: tauri::State<'_, SharedPlaylistGuard>,
@@ -1418,46 +1480,61 @@ mod tests {
         assert_eq!(count("folder"), Some(30));
     }
 
-    fn sample_detail(id: &str) -> PlaylistDetail {
-        PlaylistDetail {
-            summary: PlaylistSummary {
-                id: id.to_string(),
-                name: "Playlist".to_string(),
-                playlist_type: PlaylistType::Manual,
-                track_count: 0,
-                missing_count: 0,
-                smart_rules: None,
-                folder_path: None,
-                created_at: 1,
-                updated_at: 1,
-                is_pinned: false,
-                pinned_at: None,
-                last_synced_at: None,
-                sync_error: None,
-            },
-            track_ids: Vec::new(),
-            entries: Vec::new(),
-        }
-    }
-
     #[test]
-    fn playlist_mutation_cache_returns_the_original_result_for_a_retry() {
-        let guard = create_playlist_guard();
-        let key = mutation_key("add", "playlist-1", "mutation-1").expect("valid key");
-        let detail = sample_detail("playlist-1");
+    fn playlist_mutation_key_binds_operation_and_ordered_payload() {
+        let base = mutation_key(
+            "add",
+            "playlist-1",
+            "mutation-1",
+            &["track-a".to_string(), "track-b".to_string()],
+            &[],
+        )
+        .expect("valid mutation key");
+        let same = mutation_key(
+            "add",
+            "playlist-1",
+            " mutation-1 ",
+            &["track-a".to_string(), "track-b".to_string()],
+            &[],
+        )
+        .expect("same trimmed mutation id");
+        let reordered_payload = mutation_key(
+            "add",
+            "playlist-1",
+            "mutation-1",
+            &["track-b".to_string(), "track-a".to_string()],
+            &[],
+        )
+        .expect("valid changed payload");
+        let different_operation = mutation_key(
+            "remove",
+            "playlist-1",
+            "mutation-1",
+            &["track-a".to_string(), "track-b".to_string()],
+            &[],
+        )
+        .expect("valid different operation");
+        let different_snapshot = mutation_key(
+            "reorder",
+            "playlist-1",
+            "mutation-1",
+            &["track-b".to_string(), "track-a".to_string()],
+            &["track-a".to_string(), "track-b".to_string()],
+        )
+        .expect("valid reorder payload");
 
-        guard.store_mutation_result(key.clone(), detail);
-
-        assert_eq!(
-            guard
-                .mutation_result(&key)
-                .expect("cached mutation result")
-                .summary
-                .id,
-            "playlist-1"
+        assert_eq!(base, same, "surrounding whitespace is trimmed");
+        assert_ne!(
+            base, reordered_payload,
+            "ordered payload is part of the key"
         );
-        assert!(mutation_key("add", "playlist-1", "").is_err());
-        assert!(mutation_key("add", "playlist-1", &"x".repeat(129)).is_err());
+        assert_ne!(base, different_operation, "operation is part of the key");
+        assert_ne!(
+            base, different_snapshot,
+            "reorder snapshot is part of the key"
+        );
+        assert!(mutation_key("add", "playlist-1", "", &[], &[]).is_err());
+        assert!(mutation_key("add", "playlist-1", &"x".repeat(129), &[], &[]).is_err());
     }
 
     fn sample_track(
@@ -1659,6 +1736,146 @@ mod tests {
             2_000,
             "rejected stale reorder must preserve the newer update timestamp"
         );
+    }
+
+    #[test]
+    fn add_playlist_mutation_cache_is_durable_and_payload_specific() {
+        let db = seed_manual_playlist_for_reorder(&[]);
+        let first = add_tracks_to_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-mutation".to_string(),
+        )
+        .expect("first add");
+
+        assert_eq!(first.track_ids, vec!["a".to_string()]);
+        db.remove_tracks_from_playlist("reorder-test", &["a".to_string()])
+            .expect("simulate a later removal");
+
+        let retry = add_tracks_to_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-mutation".to_string(),
+        )
+        .expect("retry same add");
+        assert_eq!(retry.track_ids, vec!["a".to_string()]);
+        assert!(
+            db.get_playlist_track_entries("reorder-test")
+                .expect("read rows after retry")
+                .is_empty(),
+            "the retry returns its persisted result without reapplying"
+        );
+
+        let different_payload = add_tracks_to_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["b".to_string()],
+            "same-mutation".to_string(),
+        )
+        .expect("add a distinct payload with the same request ID");
+        assert_eq!(different_payload.track_ids, vec!["b".to_string()]);
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read current rows")
+                .iter()
+                .map(|row| row.0.clone())
+                .collect::<Vec<_>>(),
+            vec!["b".to_string()]
+        );
+    }
+
+    #[test]
+    fn remove_retry_after_many_mutations_preserves_readded_track() {
+        let db = seed_manual_playlist_for_reorder(&["a"]);
+        let first = remove_tracks_from_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-remove".to_string(),
+        )
+        .expect("first remove");
+        assert!(first.track_ids.is_empty());
+
+        db.set_playlist_tracks("reorder-test", &["a".to_string()], 2_000)
+            .expect("simulate a later re-add");
+        for index in 0..300 {
+            add_tracks_to_playlist_blocking(
+                create_playlist_guard(),
+                Arc::clone(&db),
+                "reorder-test".to_string(),
+                vec![format!("later-track-{index}")],
+                format!("later-mutation-{index}"),
+            )
+            .expect("record later mutation");
+        }
+
+        let retry = remove_tracks_from_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-remove".to_string(),
+        )
+        .expect("retry remove after later mutations");
+        assert!(
+            retry.track_ids.is_empty(),
+            "the original PlaylistDetail is returned from SQLite"
+        );
+        assert!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read rows after retry")
+                .iter()
+                .any(|(track_id, _, _)| track_id == "a"),
+            "a retry must not remove a track added after its first execution"
+        );
+    }
+
+    #[test]
+    fn retry_after_result_read_failure_does_not_apply_the_mutation_again() {
+        let db = seed_manual_playlist_for_reorder(&["a"]);
+        let track_ids = vec!["a".to_string()];
+        let key = mutation_key(
+            "remove",
+            "reorder-test",
+            "read-failure-remove",
+            &track_ids,
+            &[],
+        )
+        .expect("valid mutation key");
+
+        assert_eq!(
+            db.remove_tracks_from_playlist_idempotent("reorder-test", &track_ids, &key)
+                .expect("committed remove"),
+            None,
+            "a newly committed mutation has no serialized response yet"
+        );
+        db.set_playlist_tracks("reorder-test", &track_ids, 2_000)
+            .expect("simulate another edit after response construction failed");
+
+        let retry = remove_tracks_from_playlist_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            track_ids,
+            "read-failure-remove".to_string(),
+        )
+        .expect("retry returns current detail without reapplying");
+
+        assert!(
+            retry.track_ids.iter().any(|track_id| track_id == "a"),
+            "the later re-added track must remain"
+        );
+        assert!(db
+            .playlist_track_rows_for_test("reorder-test")
+            .expect("read current rows")
+            .iter()
+            .any(|(track_id, _, _)| track_id == "a"));
     }
 
     #[test]
