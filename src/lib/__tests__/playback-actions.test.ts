@@ -114,7 +114,7 @@ describe('overlapping source requests', () => {
     const queue = [
       track('first'),
       track('second', {
-        filePath: 'second',
+        filePath: '',
         _lazyQueueEntry: true,
         _queueId: 'queue-second',
       }),
@@ -141,7 +141,7 @@ describe('overlapping source requests', () => {
     const queue = [
       track('first'),
       track('second', {
-        filePath: 'second',
+        filePath: '',
         _lazyQueueEntry: true,
         _queueId: 'queue-second',
       }),
@@ -176,7 +176,7 @@ describe('overlapping source requests', () => {
 
   it('hydrates a lazy restored current track before resuming playback', async () => {
     const lazy = track('restored', {
-      filePath: 'restored',
+      filePath: '',
       _lazyQueueEntry: true,
       _queueId: 'queue-restored',
     });
