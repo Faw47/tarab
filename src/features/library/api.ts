@@ -41,8 +41,8 @@ interface SearchLike {
 }
 
 export interface LibrarySearchPayload {
-  metadata: SearchLike[];
-  lyrics: Array<SearchLike & { matchedLine: string; matchedLineIndex: number }>;
+  metadata: Track[];
+  lyrics: Array<Track & { matchedLine: string; matchedLineIndex: number }>;
 }
 
 export const mapDbTrackToTrack = (track: {
