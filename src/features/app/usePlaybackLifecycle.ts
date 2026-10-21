@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
+import { fetchLibraryTrackById } from '../library/api';
 import {
   crossfadeToSource,
   playAdjacentTrack,
@@ -9,6 +10,7 @@ import { logError, reportError } from '../../lib/report-error';
 import { dbUpdatePlayStats } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
+import type { Track } from '../../types';
 import { invalidateLibraryForMutation } from '../library/mutations';
 import { getLibraryQueryClient } from '../library/queryClientBridge';
 import { type PreloadedGaplessEntry, resolveGaplessHandoffIndex } from './gapless-handoff';
@@ -182,6 +184,44 @@ export function usePlaybackLifecycle() {
       return null;
     }
     return pending;
+  }, []);
+
+  useEffect(() => {
+    const hydrateCurrentTrack = (track: Track | null) => {
+      if (!track?._lazyQueueEntry) return;
+      const trackId = track.id;
+      const queueId = track._queueId;
+      void fetchLibraryTrackById(trackId)
+        .then((hydrated) => {
+          if (!hydrated) return;
+          const current = usePlayerStore.getState().currentTrack;
+          if (
+            !current?._lazyQueueEntry ||
+            current.id !== trackId ||
+            (queueId && current._queueId && current._queueId !== queueId)
+          ) {
+            return;
+          }
+          usePlayerStore.getState().hydrateQueueTrack({
+            ...hydrated,
+            _queueId: queueId,
+          });
+        })
+        .catch((error) => {
+          logError('Failed to hydrate active queue track', { source: 'app', error });
+        });
+    };
+
+    hydrateCurrentTrack(usePlayerStore.getState().currentTrack);
+    return usePlayerStore.subscribe((state, prev) => {
+      if (
+        state.currentTrack?._lazyQueueEntry &&
+        (state.currentTrack.id !== prev.currentTrack?.id ||
+          state.currentTrack._queueId !== prev.currentTrack?._queueId)
+      ) {
+        hydrateCurrentTrack(state.currentTrack);
+      }
+    });
   }, []);
 
   useEffect(() => {
