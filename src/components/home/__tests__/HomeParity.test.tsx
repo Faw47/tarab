@@ -111,6 +111,43 @@ describe('Home parity between themes (FE-18)', () => {
     expect(stats).toHaveTextContent('Hours2');
   });
 
+  describe('Neo Home copy and motion (FE-40)', () => {
+    it('uses plain language for an empty library', () => {
+      model.albums = [];
+      model.tracks = [];
+      model.libraryStats = null;
+      render(<HomeViewNeo {...props()} />);
+
+      expect(
+        screen.getByRole('heading', { name: 'Your music library is empty' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Add a music folder to see your albums and tracks here.'),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add music folder' })).toBeInTheDocument();
+    });
+
+    it('keeps album polaroids static when active', () => {
+      render(<HomeViewNeo {...props()} />);
+
+      const card = screen.getByRole('button', { name: 'Open Album 0 by Artist' }).parentElement;
+      expect(card?.className).not.toMatch(/(?:hover|active):translate-/);
+    });
+
+    it('suppresses the playing equalizer pulse when reduced effects are enabled', () => {
+      usePlayerStore.setState({ currentTrack: track(1), isPlaying: true });
+      const { container } = render(<HomeViewNeo {...props()} />);
+
+      expect(container.querySelector('.animate-pulse')).toBeNull();
+    });
+
+    it('suppresses the loading pulse when reduced effects are enabled', () => {
+      render(<HomeViewNeo {...props()} isLibraryLoading />);
+
+      expect(screen.getByRole('status', { name: 'Loading home' })).not.toHaveClass('animate-pulse');
+    });
+  });
+
   it('neo Home reports a failed transport command', async () => {
     usePlayerStore.setState({ currentTrack: track(1) });
     playAdjacentTrackMock.mockRejectedValueOnce(new Error('no next'));
