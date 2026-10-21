@@ -50,11 +50,25 @@ impl CrossfadeState {
     pub(super) fn resume_at(&mut self, resumed_at: Instant) {
         self.start = resume_crossfade_clock(self.start, self.paused_at.take(), resumed_at);
     }
+
+    pub(super) fn set_paused(&mut self, paused: bool, at: Instant) {
+        if paused {
+            self.pause_at(at);
+            self.outgoing_sink.pause();
+        } else {
+            self.resume_at(at);
+            self.outgoing_sink.play();
+        }
+    }
 }
 
 pub(super) fn crossfade_progress(active: &CrossfadeState) -> f32 {
+    crossfade_progress_at(active, Instant::now())
+}
+
+fn crossfade_progress_at(active: &CrossfadeState, now: Instant) -> f32 {
     normalized_progress(
-        crossfade_elapsed(active.start, active.paused_at, Instant::now()),
+        crossfade_elapsed(active.start, active.paused_at, now),
         active.duration,
     )
 }
@@ -112,6 +126,32 @@ mod tests {
             crossfade_elapsed(start, Some(paused_at), later),
             Duration::from_millis(250)
         );
+    }
+
+    #[test]
+    fn crossfade_state_freezes_and_resumes_progress_and_outgoing_sink() {
+        let (outgoing_sink, _queue) = Sink::new_idle();
+        let start = Instant::now();
+        let mut active = CrossfadeState {
+            outgoing_sink,
+            start,
+            paused_at: None,
+            duration: Duration::from_secs(1),
+            generation: 1,
+            incoming_path: "next-track".to_string(),
+        };
+        let paused_at = start + Duration::from_millis(250);
+
+        active.set_paused(true, paused_at);
+
+        assert!(active.outgoing_sink.is_paused());
+        let resumed_at = paused_at + Duration::from_secs(5);
+        assert_eq!(crossfade_progress_at(&active, resumed_at), 0.25);
+
+        active.set_paused(false, resumed_at);
+
+        assert!(!active.outgoing_sink.is_paused());
+        assert_eq!(crossfade_progress_at(&active, resumed_at + Duration::from_millis(500)), 0.75);
     }
 
     #[test]

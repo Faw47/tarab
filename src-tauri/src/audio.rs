@@ -697,8 +697,7 @@ impl AudioManager {
                                     if let Some((generation, current_file)) = paused {
                                         sink.pause();
                                         if let Some(ref mut active) = crossfade_state {
-                                            active.pause_at(Instant::now());
-                                            active.outgoing_sink.pause();
+                                            active.set_paused(true, Instant::now());
                                         }
                                         emit_playback_transition(
                                             &app_for_audio,
@@ -723,8 +722,7 @@ impl AudioManager {
                                     if let Some((generation, current_file)) = resumed {
                                         sink.play();
                                         if let Some(ref mut active) = crossfade_state {
-                                            active.resume_at(Instant::now());
-                                            active.outgoing_sink.play();
+                                            active.set_paused(false, Instant::now());
                                         }
                                         emit_playback_transition(
                                             &app_for_audio,
