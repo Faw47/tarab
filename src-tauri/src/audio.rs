@@ -1889,6 +1889,7 @@ pub fn preload_next_track(
 mod tests {
     use super::source::{validate_decoded_packet, MAX_DECODED_SAMPLES_PER_PACKET};
     use super::*;
+    use crate::file_ops::create_library_roots_state;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
