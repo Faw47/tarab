@@ -217,7 +217,7 @@ describe('useAppStartupEffects', () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(hydrationListeners.size).toBe(1);
+      expect(hydrationListeners.size).toBe(2);
       unmount();
 
       await act(async () => {
@@ -267,14 +267,17 @@ describe('useAppStartupEffects', () => {
     hydratedMock.mockReturnValue(false);
     vi.useFakeTimers();
     try {
-      renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }), {
-        wrapper: StrictMode,
-      });
+      const { unmount } = renderHook(
+        () => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }),
+        { wrapper: StrictMode },
+      );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3200);
       });
 
       expect(showMock).toHaveBeenCalledTimes(1);
+      expect(hydrationListeners.size).toBe(1);
+      unmount();
       expect(hydrationListeners.size).toBe(0);
     } finally {
       vi.useRealTimers();
