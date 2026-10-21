@@ -454,7 +454,8 @@ const LiquidGlassButtonBase = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     const baseClasses = cn(
       buttonVariants({ variant, size }),
-      !isNeobrutalism && 'backdrop-blur-[10px] backdrop-saturate-[1.35] border-0',
+      !isNeobrutalism && 'border-0',
+      !isNeobrutalism && !finalReducedEffects && 'backdrop-blur-[10px] backdrop-saturate-[1.35]',
       isNeobrutalism && 'border-2 border-black',
       className,
     );
