@@ -630,12 +630,10 @@ pub async fn db_get_tracks_paginated(
     db: tauri::State<'_, SharedDatabase>,
 ) -> Result<Vec<DbTrack>, String> {
     let db = db.inner().clone();
-    spawn_blocking(move || {
-        db.get_tracks_paginated(cursor.as_ref(), limit, &sort_by, &sort_order)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    spawn_blocking(move || db.get_tracks_paginated(cursor.as_ref(), limit, &sort_by, &sort_order))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1432,7 +1430,11 @@ mod tests {
 
         assert_eq!(
             seen,
-            vec!["oldest".to_string(), "middle".to_string(), "recent".to_string()]
+            vec![
+                "oldest".to_string(),
+                "middle".to_string(),
+                "recent".to_string()
+            ]
         );
     }
 
@@ -1985,8 +1987,12 @@ mod tests {
         let mut wildcard_lookalike = sample_track("wildcard-lookalike");
         wildcard_lookalike.id = "/music/100X_Jazz/03.flac".to_string();
         wildcard_lookalike.file_path = wildcard_lookalike.id.clone();
-        db.upsert_tracks_batch(&[inside.clone(), prefix_sibling.clone(), wildcard_lookalike.clone()])
-            .expect("seed folder tracks");
+        db.upsert_tracks_batch(&[
+            inside.clone(),
+            prefix_sibling.clone(),
+            wildcard_lookalike.clone(),
+        ])
+        .expect("seed folder tracks");
 
         assert_eq!(
             db.get_track_ids_by_folder("/music/100%_Jazz")
