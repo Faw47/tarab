@@ -65,9 +65,7 @@ fn runtime_diagnostics_use_the_configured_logger() {
         .iter()
         .filter(|(path, _, line)| {
             path.as_str() == "database/migrations.rs"
-                && line.contains(
-                    "Duplicate playlist memberships were collapsed during migration",
-                )
+                && line.contains("Duplicate playlist memberships were collapsed during migration")
         })
         .count();
     let unexpected_stderr: Vec<String> = direct_stderr
