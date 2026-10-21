@@ -23,6 +23,40 @@ const frontendCommands = new Set(
   ),
 );
 
+function frontendSources(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (['__tests__', 'test', 'tests', 'stories'].includes(entry.name)) return [];
+      return frontendSources(path);
+    }
+    if (!/\\.(?:ts|tsx|js|jsx)$/.test(entry.name)) return [];
+    if (/\\.(?:test|stories)\\.(?:ts|tsx|js|jsx)$/.test(entry.name)) return [];
+    if (path.replace(/\\\\/g, '/') === 'src/lib/tauri-commands.ts') return [];
+    return [readFileSync(path, 'utf8')];
+  });
+}
+
+const frontendUsageSource = frontendSources('src').join('\\n');
+const frontendWrapperNames = [...frontendSource.matchAll(
+  /export\\s+const\\s+([A-Za-z_$][\\w$]*)\\s*=/g,
+)]
+  .filter((match) => {
+    const start = match.index ?? 0;
+    const remainder = frontendSource.slice(start + match[0].length);
+    const nextExport = remainder.search(/\\nexport\\s/);
+    const body = nextExport < 0 ? remainder : remainder.slice(0, nextExport);
+    return /\\binvoke(?:<[^>()]*>)?\\(/.test(body);
+  })
+  .map((match) => match[1]);
+const unusedFrontendWrappers = frontendWrapperNames
+  .filter((name) => !new RegExp(`\\\\b${name}\\\\b`).test(frontendUsageSource))
+  .sort();
+
+if (unusedFrontendWrappers.length) {
+  throw new Error(`Unused Tauri IPC wrappers: ${unusedFrontendWrappers.join(', ')}`);
+}
+
 const backendOnlyCommands = new Set([
   'clear_progress',
   'get_cover_art_with_blurhash',
