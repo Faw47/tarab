@@ -1,5 +1,5 @@
 import type { Track } from '../../types';
-import { fetchLibraryTracksPage } from './api';
+import { cursorAfterTrack, fetchLibraryTracksPage } from './api';
 
 export const SHUFFLE_PAGE_SIZE = 1000;
 
@@ -13,11 +13,11 @@ export async function loadTracksForShuffle({
   if (totalTracks <= loadedTracks.length) return loadedTracks;
 
   const tracksById = new Map<string, Track>();
-  let offset = 0;
+  let cursor: ReturnType<typeof cursorAfterTrack> | null = null;
 
-  while (offset < totalTracks) {
+  while (tracksById.size < totalTracks) {
     const page = await fetchLibraryTracksPage({
-      offset,
+      cursor,
       limit: SHUFFLE_PAGE_SIZE,
       sortBy: 'dateAdded',
       sortOrder: 'desc',
@@ -25,11 +25,10 @@ export async function loadTracksForShuffle({
 
     if (page.length === 0) break;
 
+    cursor = cursorAfterTrack(page[page.length - 1], 'dateAdded');
     for (const track of page) {
       if (!tracksById.has(track.id)) tracksById.set(track.id, track);
     }
-
-    offset += page.length;
     if (page.length < SHUFFLE_PAGE_SIZE) break;
   }
 

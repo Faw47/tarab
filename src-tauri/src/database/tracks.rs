@@ -5,6 +5,15 @@ pub(super) const TRACK_PATHS_FIRST_SQL: &str =
 pub(super) const TRACK_PATHS_AFTER_SQL: &str =
     "SELECT id, file_path FROM tracks WHERE id > ?1 ORDER BY id ASC LIMIT ?2";
 
+const MIN_LIKE_FALLBACK_CHARS: usize = 3;
+
+// Descendants of `folder/` sort below `folder0`; NOCASE keeps SQLite LIKE's ASCII
+// case behavior while allowing prefix lookups to use an index.
+fn folder_path_range(folder_path: &str) -> (String, String) {
+    let folder_path = folder_path.trim_end_matches('/');
+    (format!("{folder_path}/"), format!("{folder_path}0"))
+}
+
 impl Database {
     pub fn upsert_tracks_batch(&self, tracks: &[DbTrack]) -> SqliteResult<usize> {
         let mut conn = self.conn.lock();
@@ -311,17 +320,19 @@ impl Database {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
         tx.execute_batch("PRAGMA defer_foreign_keys=ON;")?;
-        let like_pattern = format!("{}/%", escape_like(&normalized_old));
+        let (path_prefix, path_upper_bound) = folder_path_range(&normalized_old);
         let paths = {
             let mut stmt = tx.prepare(
                 "SELECT file_path FROM tracks
-                 WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'
+                 WHERE file_path = ?1 COLLATE BINARY
+                    OR (file_path >= ?2 COLLATE NOCASE AND file_path < ?3 COLLATE NOCASE)
                  ORDER BY length(file_path) ASC",
             )?;
             let rows = stmt
-                .query_map(params![normalized_old, like_pattern], |row| {
-                    row.get::<_, String>(0)
-                })?
+                .query_map(
+                    params![normalized_old, path_prefix, path_upper_bound],
+                    |row| row.get::<_, String>(0),
+                )?
                 .collect::<SqliteResult<Vec<_>>>()?;
             rows
         };
@@ -407,39 +418,74 @@ impl Database {
 
     pub fn get_tracks_paginated(
         &self,
-        offset: u32,
+        cursor: Option<&TrackPageCursor>,
         limit: u32,
         sort_by: &str,
         sort_order: &str,
     ) -> SqliteResult<Vec<DbTrack>> {
         let conn = self.conn.lock();
 
-        // Text columns sort case-insensitively, and `id` breaks ties so OFFSET pages never
-        // repeat or skip rows that share a sort key.
-        let order_clause = match sort_by {
-            "title" => "title COLLATE NOCASE",
-            "artist" => "artist COLLATE NOCASE",
-            "album" => "album COLLATE NOCASE",
-            "dateAdded" => "date_added",
-            "playCount" => "play_count",
-            "duration" => "duration",
-            _ => "date_added",
+        let (order_clause, text_key) = match sort_by {
+            "title" => ("title COLLATE NOCASE", true),
+            "artist" => ("artist COLLATE NOCASE", true),
+            "album" => ("album COLLATE NOCASE", true),
+            "dateAdded" => ("date_added", false),
+            "playCount" => ("play_count", false),
+            "duration" => ("duration", false),
+            _ => ("date_added", false),
+        };
+        let order_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
+        let cursor_operator = if sort_order == "asc" { ">" } else { "<" };
+        let cursor_value = match cursor.map(|cursor| &cursor.value) {
+            None => None,
+            Some(TrackPageCursorValue::Text(value)) if text_key => {
+                Some(rusqlite::types::Value::Text(value.clone()))
+            }
+            Some(TrackPageCursorValue::Number(value)) if !text_key => {
+                Some(rusqlite::types::Value::Real(*value))
+            }
+            Some(_) => {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "cursor value does not match the selected sort key".to_string(),
+                ));
+            }
         };
 
-        let order_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
-
-        let query = format!(
-            "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
-                    cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
-             FROM tracks ORDER BY {} {}, id {} LIMIT ?1 OFFSET ?2",
-            order_clause, order_dir, order_dir
-        );
+        let select_columns = "SELECT id, title, artist, album_artist, album, year, duration, file_path,
+                                     has_cover_art, cover_art_hash, blurhash, date_added, play_count,
+                                     last_played, rating, track_number, disc_number, file_format, bitrate,
+                                     sample_rate, file_size FROM tracks";
+        let query = if cursor.is_some() {
+            format!(
+                "{select_columns}
+                 WHERE ({order_clause}, id) {cursor_operator} (?1, ?2)
+                 ORDER BY {order_clause} {order_dir}, id {order_dir}
+                 LIMIT ?3"
+            )
+        } else {
+            format!(
+                "{select_columns}
+                 ORDER BY {order_clause} {order_dir}, id {order_dir}
+                 LIMIT ?1"
+            )
+        };
 
         let mut stmt = conn.prepare(&query)?;
-        let tracks = stmt
-            .query_map(params![limit, offset], Self::map_db_track_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
+        let tracks = match cursor {
+            Some(cursor) => stmt
+                .query_map(
+                    params![
+                        cursor_value.expect("cursor value validated"),
+                        cursor.id.as_str(),
+                        limit
+                    ],
+                    Self::map_db_track_row,
+                )?
+                .collect::<SqliteResult<Vec<_>>>()?,
+            None => stmt
+                .query_map(params![limit], Self::map_db_track_row)?
+                .collect::<SqliteResult<Vec<_>>>()?,
+        };
 
         Ok(tracks)
     }
@@ -639,8 +685,11 @@ impl Database {
             };
         }
 
-        let escaped_like = query
-            .trim()
+        let trimmed_query = query.trim();
+        if trimmed_query.chars().count() < MIN_LIKE_FALLBACK_CHARS {
+            return Ok(Vec::new());
+        }
+        let escaped_like = trimmed_query
             .to_lowercase()
             .replace('\\', "\\\\")
             .replace('%', "\\%")
@@ -708,13 +757,13 @@ impl Database {
         if normalized.is_empty() {
             return Ok(0);
         }
-        let escaped = escape_like(&normalized);
-        let like_pattern = format!("{escaped}/%");
+        let (path_prefix, path_upper_bound) = folder_path_range(&normalized);
         let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(*) FROM tracks
-             WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized, like_pattern],
+             WHERE file_path = ?1 COLLATE BINARY
+                OR (file_path >= ?2 COLLATE NOCASE AND file_path < ?3 COLLATE NOCASE)",
+            params![normalized, path_prefix, path_upper_bound],
             |row| row.get(0),
         )
     }
@@ -728,18 +777,21 @@ impl Database {
                 "folder_path must identify a non-root folder".to_string(),
             ));
         }
-        let escaped = escape_like(&normalized);
-        let prefix = format!("{escaped}/%");
+        let (path_prefix, path_upper_bound) = folder_path_range(&normalized);
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id
              FROM tracks
-             WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'
+             WHERE file_path = ?1 COLLATE BINARY
+                OR (file_path >= ?2 COLLATE NOCASE AND file_path < ?3 COLLATE NOCASE)
              ORDER BY file_path COLLATE NOCASE ASC",
         )?;
         let ids = stmt
-            .query_map(params![normalized, prefix], |row| row.get::<_, String>(0))?
+            .query_map(params![normalized, path_prefix, path_upper_bound], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<SqliteResult<Vec<_>>>()?;
+
         Ok(ids)
     }
 
@@ -763,26 +815,21 @@ impl Database {
                 "folder_path must identify a non-root folder".to_string(),
             ));
         }
-        let normalized = if normalized_folder.ends_with('/') {
-            normalized_folder.clone()
-        } else {
-            format!("{}/", normalized_folder)
-        };
-        // Escape special LIKE characters with a backslash
-        let escaped = normalized
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_pattern = format!("{}%", escaped);
+        let normalized = normalized_folder.trim_end_matches('/').to_string();
+        let (path_prefix, path_upper_bound) = folder_path_range(&normalized);
         let tx = conn.transaction()?;
         tx.execute(
-            "DELETE FROM lyrics_index WHERE track_id = ?1 OR track_id LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM lyrics_index
+             WHERE track_id = ?1 COLLATE BINARY
+                OR (track_id >= ?2 COLLATE NOCASE AND track_id < ?3 COLLATE NOCASE)",
+            params![normalized, path_prefix, path_upper_bound],
         )?;
         // Query using normalized paths only (database should have normalized paths)
         let count = tx.execute(
-            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM tracks
+             WHERE file_path = ?1 COLLATE BINARY
+                OR (file_path >= ?2 COLLATE NOCASE AND file_path < ?3 COLLATE NOCASE)",
+            params![normalized, path_prefix, path_upper_bound],
         )?;
         tx.commit()?;
         Ok(count)

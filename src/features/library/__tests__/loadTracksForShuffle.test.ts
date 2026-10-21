@@ -4,6 +4,10 @@ import { fetchLibraryTracksPage } from '../api';
 import { loadTracksForShuffle, SHUFFLE_PAGE_SIZE, shuffleTracks } from '../loadTracksForShuffle';
 
 vi.mock('../api', () => ({
+  cursorAfterTrack: (track: Pick<Track, 'id' | 'dateAdded'>) => ({
+    id: track.id,
+    value: track.dateAdded,
+  }),
   fetchLibraryTracksPage: vi.fn(),
 }));
 
@@ -52,13 +56,13 @@ describe('loadTracksForShuffle', () => {
     expect(tracks[0].id).toBe('track-0');
     expect(tracks.at(-1)?.id).toBe('last');
     expect(mockedFetchPage).toHaveBeenNthCalledWith(1, {
-      offset: 0,
+      cursor: null,
       limit: SHUFFLE_PAGE_SIZE,
       sortBy: 'dateAdded',
       sortOrder: 'desc',
     });
     expect(mockedFetchPage).toHaveBeenNthCalledWith(2, {
-      offset: SHUFFLE_PAGE_SIZE,
+      cursor: { id: 'track-999', value: 1 },
       limit: SHUFFLE_PAGE_SIZE,
       sortBy: 'dateAdded',
       sortOrder: 'desc',

@@ -16,6 +16,7 @@ import {
 } from '@/hooks/use-liquid-segmented-pill';
 import { cn } from '@/lib/utils';
 import {
+  cursorAfterTrack,
   fetchAlbumTracks,
   fetchArtistTracks,
   fetchLibraryTracksPage,
@@ -880,17 +881,18 @@ export const LibraryView = memo(function LibraryView({
     setIsLoadingMore(true);
 
     try {
-      const offset = loadedCount;
       const limit = 300;
       const requestedSort = sortBy;
 
-      if (offset >= trackCount) {
+      if (loadedCount >= trackCount) {
         setHasMore(false);
         return;
       }
 
+      const lastTrack = allTracks[allTracks.length - 1];
+      const cursor = lastTrack ? cursorAfterTrack(lastTrack, requestedSort) : null;
       const nextTracks = await fetchLibraryTracksPage({
-        offset,
+        cursor,
         limit,
         sortBy: requestedSort,
         sortOrder: sortOrderFor(requestedSort),
@@ -901,7 +903,7 @@ export const LibraryView = memo(function LibraryView({
       appendTracks(nextTracks);
       prefetchCoverArt(nextTracks);
 
-      if (offset + nextTracks.length >= trackCount || nextTracks.length < limit) {
+      if (loadedCount + nextTracks.length >= trackCount || nextTracks.length < limit) {
         setHasMore(false);
       }
     } catch (error) {
@@ -912,7 +914,16 @@ export const LibraryView = memo(function LibraryView({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appendTracks, hasMore, isLoadingMore, loadedCount, prefetchCoverArt, sortBy, trackCount]);
+  }, [
+    allTracks,
+    appendTracks,
+    hasMore,
+    isLoadingMore,
+    loadedCount,
+    prefetchCoverArt,
+    sortBy,
+    trackCount,
+  ]);
 
   const triggerLoadMoreThrottled = useCallback(() => {
     if (loadMoreThrottleRef.current) {

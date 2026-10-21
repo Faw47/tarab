@@ -794,13 +794,18 @@ export const dbGetArtistAggregates = async (): Promise<DbArtistAggregate[]> => {
   return invoke('db_get_artist_aggregates');
 };
 
+export interface DbTrackPageCursor {
+  id: string;
+  value: string | number;
+}
+
 export const dbGetTracksPaginated = async (
-  offset: number,
+  cursor: DbTrackPageCursor | null,
   limit: number,
   sortBy: string = 'dateAdded',
   sortOrder: string = 'desc',
 ): Promise<DbTrack[]> => {
-  return invoke('db_get_tracks_paginated', { offset, limit, sortBy, sortOrder });
+  return invoke('db_get_tracks_paginated', { cursor, limit, sortBy, sortOrder });
 };
 
 export const dbSearchTracks = async (

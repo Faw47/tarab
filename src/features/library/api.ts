@@ -1,4 +1,5 @@
 import { normalizePath } from '../../lib/path-utils';
+import type { DbTrackPageCursor } from '../../lib/tauri-commands';
 import {
   dbGetAlbumAggregates,
   dbGetArtistAggregates,
@@ -120,14 +121,24 @@ export async function fetchLibraryStats() {
 export const sortOrderFor = (sortBy: SortBy): 'asc' | 'desc' =>
   sortBy === 'dateAdded' ? 'desc' : 'asc';
 
+export function cursorAfterTrack(track: Track, sortBy: SortBy): DbTrackPageCursor {
+  const value = {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    dateAdded: track.dateAdded,
+  }[sortBy];
+  return { id: track.id, value };
+}
+
 export async function fetchLibraryTracksPage(params: {
-  offset: number;
+  cursor?: DbTrackPageCursor | null;
   limit: number;
   sortBy?: SortBy;
   sortOrder?: 'asc' | 'desc';
 }): Promise<Track[]> {
   const raw = await dbGetTracksPaginated(
-    params.offset,
+    params.cursor ?? null,
     params.limit,
     params.sortBy ?? 'dateAdded',
     params.sortOrder ?? sortOrderFor(params.sortBy ?? 'dateAdded'),

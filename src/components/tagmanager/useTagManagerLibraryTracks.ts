@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchLibraryTracksPage } from '../../features/library/api';
+import { cursorAfterTrack, fetchLibraryTracksPage } from '../../features/library/api';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { reportError } from '../../lib/report-error';
 import type { Track } from '../../types';
@@ -33,17 +33,19 @@ export function useTagManagerLibraryTracks(): TagManagerLibraryTracksState {
 
     async function loadRemainingTracks() {
       const pages: Track[] = [];
+      let cursor: ReturnType<typeof cursorAfterTrack> | null = null;
       try {
-        for (let offset = loadedTracks.length; offset < trackCount; offset += PAGE_SIZE) {
+        while (pages.length < trackCount) {
           const page = await fetchLibraryTracksPage({
-            offset,
+            cursor,
             limit: PAGE_SIZE,
             sortBy: 'dateAdded',
             sortOrder: 'desc',
           });
           if (cancelled || page.length === 0) return;
+          cursor = cursorAfterTrack(page[page.length - 1], 'dateAdded');
           pages.push(...page);
-          setAllTracks([...loadedTracks, ...pages]);
+          setAllTracks([...pages]);
           if (page.length < PAGE_SIZE) return;
         }
       } catch (error) {
