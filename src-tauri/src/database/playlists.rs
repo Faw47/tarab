@@ -557,7 +557,7 @@ mod pb16_baseline_tests {
         }
 
         db.set_playlist_tracks("pb16-baseline", &["b".to_string(), "a".to_string()], 2_000)
-            .expect("reorder playlist");ylist");
+            .expect("reorder playlist");
 
         let conn = db.conn.lock();
         let mut stmt = conn
