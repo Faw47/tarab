@@ -8,7 +8,10 @@ const openerCapability = JSON.parse(
   await readFile(new URL('../src-tauri/capabilities/opener.json', import.meta.url), 'utf8'),
 );
 const cargoManifest = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
-const librarySource = await readFile(new URL('../src-tauri/src/library.rs', import.meta.url), 'utf8');
+const librarySource = await readFile(
+  new URL('../src-tauri/src/library.rs', import.meta.url),
+  'utf8',
+);
 const droppedImportSource = await readFile(
   new URL('../src/features/library/useDroppedAudioImport.ts', import.meta.url),
   'utf8',
@@ -75,7 +78,9 @@ if (!sameExtensionSet([...fileAssociationExtensions], requiredAudioExtensions)) 
   failures.push('Desktop file associations must match the supported audio extension list exactly.');
 }
 if (!sameExtensionSet(rustExtensions, requiredAudioExtensions)) {
-  failures.push('The native library scanner extensions must match the supported audio extension list.');
+  failures.push(
+    'The native library scanner extensions must match the supported audio extension list.',
+  );
 }
 if (!sameExtensionSet(droppedExtensions, requiredAudioExtensions)) {
   failures.push('Dropped-file import extensions must match the supported audio extension list.');
