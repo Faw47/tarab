@@ -720,8 +720,8 @@ fn move_database_to_recovery_backup(path: &Path) -> Result<PathBuf, String> {
     ))
 }
 
-fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
-    let mut entries = std::fs::read_dir(source_dir)
+fn validate_legacy_merge(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    let entries = std::fs::read_dir(source_dir)
         .map_err(|error| {
             format!(
                 "Failed to read legacy Tarab data directory {}: {}",
@@ -738,18 +738,92 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
             )
         })?;
 
-    // Move the database last so a failed merge cannot expose a partially migrated database.
-    entries.sort_by_key(|entry| {
-        let name = entry.file_name();
-        (name == "library.db", name)
-    });
-
     for entry in entries {
         let source = entry.path();
         let destination = destination_dir.join(entry.file_name());
         let source_type = std::fs::symlink_metadata(&source)
             .map_err(|error| format!("Failed to inspect {}: {}", source.display(), error))?
             .file_type();
+        let destination_type = match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => Some(metadata.file_type()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration destination {}: {}",
+                    destination.display(),
+                    error
+                ));
+            }
+        };
+
+        if source_type.is_dir() {
+            match destination_type {
+                Some(file_type) if file_type.is_dir() => {
+                    validate_legacy_merge(&source, &destination)?;
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "Cannot migrate {} because {} already exists and is not a directory",
+                        source.display(),
+                        destination.display()
+                    ));
+                }
+                None => {}
+            }
+        } else if destination_type.is_some() {
+            return Err(format!(
+                "Cannot migrate {} because {} already exists",
+                source.display(),
+                destination.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    // Check the whole merge tree before moving anything. This prevents a later collision from
+    // leaving SQLite's main database and its WAL/SHM sidecars in different directories.
+    validate_legacy_merge(source_dir, destination_dir)?;
+
+    let mut entries = std::fs::read_dir(source_dir)
+        .map_err(|error| {
+            format!(
+                "Failed to read legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|error| {
+            format!(
+                "Failed to enumerate legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut database_artifacts = Vec::new();
+    for entry in entries {
+        let source = entry.path();
+        let name = entry.file_name();
+        let destination = destination_dir.join(&name);
+        let source_type = std::fs::symlink_metadata(&source)
+            .map_err(|error| format!("Failed to inspect {}: {}", source.display(), error))?
+            .file_type();
+
+        if !source_type.is_dir()
+            && matches!(
+                name.to_str(),
+                Some("library.db" | "library.db-wal" | "library.db-shm")
+            )
+        {
+            database_artifacts.push((source, destination));
+            continue;
+        }
+
         let destination_type = match std::fs::symlink_metadata(&destination) {
             Ok(metadata) => Some(metadata.file_type()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -786,13 +860,6 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
                 }
             }
         } else {
-            if destination_type.is_some() {
-                return Err(format!(
-                    "Cannot migrate {} because {} already exists",
-                    source.display(),
-                    destination.display()
-                ));
-            }
             std::fs::rename(&source, &destination).map_err(|error| {
                 format!(
                     "Failed to migrate legacy Tarab data from {} to {}: {}",
@@ -802,6 +869,41 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
                 )
             })?;
         }
+    }
+
+    // Move sidecars before the main database. If any rename fails, put already-moved artifacts
+    // back so callers never see a database split across the old and new directories.
+    database_artifacts.sort_by_key(|(source, _)| source.file_name() == "library.db");
+    let mut moved_artifacts = Vec::new();
+    for (source, destination) in database_artifacts {
+        if let Err(error) = std::fs::rename(&source, &destination) {
+            let move_error = format!(
+                "Failed to migrate legacy Tarab data from {} to {}: {}",
+                source.display(),
+                destination.display(),
+                error
+            );
+            let mut rollback_errors = Vec::new();
+            for (original, moved) in moved_artifacts.into_iter().rev() {
+                if let Err(rollback_error) = std::fs::rename(&moved, &original) {
+                    rollback_errors.push(format!(
+                        "failed to restore {} to {}: {}",
+                        moved.display(),
+                        original.display(),
+                        rollback_error
+                    ));
+                }
+            }
+            if rollback_errors.is_empty() {
+                return Err(move_error);
+            }
+            return Err(format!(
+                "{}; SQLite sidecar rollback also failed: {}",
+                move_error,
+                rollback_errors.join("; ")
+            ));
+        }
+        moved_artifacts.push((source, destination));
     }
 
     std::fs::remove_dir(source_dir).map_err(|error| {
@@ -1415,6 +1517,45 @@ mod tests {
 
         drop(current_db);
         drop(legacy_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_merge_conflict_keeps_database_and_sidecars_together() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-wal-conflict-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"current").expect("seed current settings");
+        std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
+
+        for (name, contents) in [
+            ("library.db", b"database".as_slice()),
+            ("library.db-wal", b"wal".as_slice()),
+            ("library.db-shm", b"shm".as_slice()),
+        ] {
+            std::fs::write(legacy_dir.join(name), contents).expect("seed SQLite artifact");
+        }
+
+        let result = merge_legacy_directory(&legacy_dir, &app_dir);
+
+        assert!(result.is_err());
+        for (name, contents) in [
+            ("library.db", b"database".as_slice()),
+            ("library.db-wal", b"wal".as_slice()),
+            ("library.db-shm", b"shm".as_slice()),
+        ] {
+            assert_eq!(
+                std::fs::read(legacy_dir.join(name)).expect("read legacy SQLite artifact"),
+                contents
+            );
+            assert!(!app_dir.join(name).exists());
+        }
+
         let _ = std::fs::remove_dir_all(base_dir);
     }
 
