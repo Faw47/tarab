@@ -2145,7 +2145,10 @@ mod bounded_seek_tests {
         assert_eq!(path, outgoing);
         assert_eq!(duration, 12.0);
         assert!(!committed);
-        assert_eq!(state.lock().current_file.as_deref(), Some(outgoing.as_str()));
+        assert_eq!(
+            state.lock().current_file.as_deref(),
+            Some(outgoing.as_str())
+        );
         let _ = fs::remove_dir_all(directory);
     }
 
