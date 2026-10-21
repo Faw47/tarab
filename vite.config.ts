@@ -35,6 +35,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
   build: {
+    manifest: true,
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
