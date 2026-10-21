@@ -1375,9 +1375,8 @@ mod tests {
             seek_started: None,
             seek_release: None,
         };
-        let mut buffered =
-            BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
-                .expect("start prefetch");
+        let mut buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
+            .expect("start prefetch");
 
         let result = buffered.try_seek(Duration::from_secs(1));
 
