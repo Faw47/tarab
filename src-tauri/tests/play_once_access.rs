@@ -201,7 +201,6 @@ fn superseded_requests_drop_transient_grants_by_generation() {
     );
 }
 
-
 #[test]
 fn failed_play_keeps_the_exact_preloaded_gapless_entry_available() {
     assert!(

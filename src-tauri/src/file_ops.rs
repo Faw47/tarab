@@ -786,7 +786,11 @@ pub(crate) fn replace_preloaded_queue_entry(
     state.preloaded_queue_entry = next;
 
     let active_file = state.active_transient_file.clone();
-    let pending_files: Vec<PathBuf> = state.pending_transient_file_grants.values().cloned().collect();
+    let pending_files: Vec<PathBuf> = state
+        .pending_transient_file_grants
+        .values()
+        .cloned()
+        .collect();
     let preloaded_file = state
         .preloaded_queue_entry
         .as_ref()
@@ -824,12 +828,11 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
 ) -> bool {
     let canonical = canonicalize_existing_path(path).ok();
     let matches_preloaded_entry = canonical.as_ref().is_some_and(|canonical| {
-        state
-            .preloaded_queue_entry
-            .as_ref()
-            .is_some_and(|(preloaded_generation, preloaded_path)| {
+        state.preloaded_queue_entry.as_ref().is_some_and(
+            |(preloaded_generation, preloaded_path)| {
                 *preloaded_generation == generation && preloaded_path == canonical
-            })
+            },
+        )
     });
     let is_pending_request = state.pending_playback_generation == Some(generation)
         && state.transient_playback_generation == generation;
@@ -2119,9 +2122,7 @@ mod tests {
             let mut state = state.write();
             assert!(mark_playback_generation(&mut state, 3, &pending));
             assert!(retain_transient_file_for_queue_entry_at_generation(
-                &mut state,
-                &pending,
-                3,
+                &mut state, &pending, 3,
             ));
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());

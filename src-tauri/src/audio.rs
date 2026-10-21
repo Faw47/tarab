@@ -22,8 +22,7 @@ use crate::file_ops::{
     clear_transient_file_grants_at_generation, discard_transient_file_for_failed_playback,
     ensure_path_allowed_by_state, mark_playback_generation, playback_generation_is_current,
     replace_preloaded_queue_entry, retain_transient_file_for_queue_entry_at_generation,
-    settle_failed_playback_generation,
-    LibraryRootsState, SharedLibraryRoots,
+    settle_failed_playback_generation, LibraryRootsState, SharedLibraryRoots,
 };
 
 mod crossfade;
@@ -1946,11 +1945,7 @@ pub fn preload_next_track(
         ensure_audio_file_allowed(path, &roots, "preload audio file")?;
     }
     let generation = state.preload_next(file_path.clone())?;
-    replace_preloaded_queue_entry(
-        &mut roots,
-        generation,
-        file_path.as_deref().map(Path::new),
-    );
+    replace_preloaded_queue_entry(&mut roots, generation, file_path.as_deref().map(Path::new));
     Ok(generation)
 }
 
@@ -2215,11 +2210,7 @@ mod bounded_seek_tests {
             Path::new(&outgoing),
             7,
         ));
-        replace_preloaded_queue_entry(
-            &mut roots.write(),
-            Some(8),
-            Some(Path::new(&incoming)),
-        );
+        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new(&incoming)));
         assert!(mark_playback_generation(
             &mut roots.write(),
             9,
@@ -2266,7 +2257,10 @@ mod bounded_seek_tests {
             2,
         ));
         assert_eq!(state.lock().generation, 8);
-        assert_eq!(state.lock().current_file.as_deref(), Some(incoming.as_str()));
+        assert_eq!(
+            state.lock().current_file.as_deref(),
+            Some(incoming.as_str())
+        );
         assert_eq!(roots.read().transient_playback_generation, 9);
         assert!(ensure_path_allowed_by_state(
             Path::new(&incoming),
