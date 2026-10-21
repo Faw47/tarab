@@ -468,7 +468,6 @@ enum PrefetchCommand {
     Seek {
         generation: u64,
         position: std::time::Duration,
-        response: std::sync::mpsc::SyncSender<Result<(), String>>,
     },
 }
 
@@ -605,34 +604,49 @@ fn run_prefetch_worker<S: PrefetchableSource>(
         if let Some(PrefetchCommand::Seek {
             generation: seek_generation,
             position,
-            response,
         }) = command
         {
-            if let Err(error) = source.seek_for_prefetch(position) {
-                let _ = response.send(Err(error));
-                return;
+            if seek_generation != active_generation.load(Ordering::Acquire) {
+                continue;
             }
             generation = seek_generation;
+            if let Err(error) = source.seek_for_prefetch(position) {
+                eprintln!("Decoder seek failed during prefetch: {error}");
+                match send_prefetch_message(
+                    &output,
+                    &commands,
+                    &active_generation,
+                    generation,
+                    PrefetchMessage::End { generation },
+                ) {
+                    PrefetchSend::Sent => finished = true,
+                    PrefetchSend::Superseded => continue,
+                    PrefetchSend::Command(command) => {
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchSend::Closed => return,
+                }
+                continue;
+            }
+
             finished = false;
-            let (samples, reached_end) =
-                match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
+            let (samples, reached_end) = match read_prefetch_chunk(
+                &mut source,
+                &commands,
+                &active_generation,
+                generation,
+            ) {
                 PrefetchChunkRead::Ready {
                     samples,
                     reached_end,
                 } => (samples, reached_end),
                 PrefetchChunkRead::Command(command) => {
-                    let _ = response.send(Err("seek superseded".to_string()));
                     pending_command = Some(command);
                     continue;
                 }
-                PrefetchChunkRead::GenerationChanged => {
-                    let _ = response.send(Err("seek superseded".to_string()));
-                    continue;
-                }
-                PrefetchChunkRead::Closed => {
-                    let _ = response.send(Err("decoder source closed".to_string()));
-                    return;
-                }
+                PrefetchChunkRead::GenerationChanged => continue,
+                PrefetchChunkRead::Closed => return,
             };
 
             if !samples.is_empty() {
@@ -647,19 +661,12 @@ fn run_prefetch_worker<S: PrefetchableSource>(
                     },
                 ) {
                     PrefetchSend::Sent => {}
-                    PrefetchSend::Superseded => {
-                        let _ = response.send(Err("seek superseded".to_string()));
-                        continue;
-                    }
+                    PrefetchSend::Superseded => continue,
                     PrefetchSend::Command(command) => {
-                        let _ = response.send(Err("seek superseded".to_string()));
                         pending_command = Some(command);
                         continue;
                     }
-                    PrefetchSend::Closed => {
-                        let _ = response.send(Err("decoder source closed".to_string()));
-                        return;
-                    }
+                    PrefetchSend::Closed => return,
                 }
             }
 
@@ -672,23 +679,14 @@ fn run_prefetch_worker<S: PrefetchableSource>(
                     PrefetchMessage::End { generation },
                 ) {
                     PrefetchSend::Sent => {}
-                    PrefetchSend::Superseded => {
-                        let _ = response.send(Err("seek superseded".to_string()));
-                        continue;
-                    }
+                    PrefetchSend::Superseded => continue,
                     PrefetchSend::Command(command) => {
-                        let _ = response.send(Err("seek superseded".to_string()));
                         pending_command = Some(command);
                         continue;
                     }
-                    PrefetchSend::Closed => {
-                        let _ = response.send(Err("decoder source closed".to_string()));
-                        return;
-                    }
+                    PrefetchSend::Closed => return,
                 }
             }
-
-            let _ = response.send(Ok(()));
             finished = reached_end;
             continue;
         }
@@ -697,8 +695,12 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             continue;
         }
 
-        let (samples, reached_end) =
-            match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
+        let (samples, reached_end) = match read_prefetch_chunk(
+            &mut source,
+            &commands,
+            &active_generation,
+            generation,
+        ) {
             PrefetchChunkRead::Ready {
                 samples,
                 reached_end,
@@ -830,7 +832,9 @@ impl BufferedSymphoniaSource {
                     self.ended = true;
                     return false;
                 }
-                Ok(_) => continue,
+                // Discard only one stale chunk per call. A seek can leave a bounded queue
+                // of old samples behind; draining it all here would make one callback do that work.
+                Ok(_) => return false,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return false,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.ended = true;
@@ -891,30 +895,18 @@ impl Source for BufferedSymphoniaSource {
         self.ended = false;
         self.underrun_signal.store(false, Ordering::Release);
 
-        // Remove queued samples from the old position before asking the producer to seek. New
-        // samples are not sent until the producer receives the command.
-        while self.output.try_recv().is_ok() {}
-
-        let (response_sender, response_receiver) = std::sync::mpsc::sync_channel(1);
+        // Publish the new generation before enqueueing the request so the worker discards any
+        // old-position chunk that finishes concurrently. The command only signals the producer;
+        // waiting for decoding here would stall Rodio's device callback.
         self.commands
             .send(PrefetchCommand::Seek {
                 generation,
                 position,
-                response: response_sender,
             })
             .map_err(|error| {
                 rodio::source::SeekError::Other(Box::new(std::io::Error::other(error.to_string())))
             })?;
-
-        match response_receiver.recv() {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(rodio::source::SeekError::Other(Box::new(
-                std::io::Error::other(error),
-            ))),
-            Err(error) => Err(rodio::source::SeekError::Other(Box::new(
-                std::io::Error::other(error.to_string()),
-            ))),
-        }
+        Ok(())
     }
 }
 
@@ -1184,6 +1176,8 @@ mod tests {
         synthetic_sample: Arc<AtomicBool>,
         last_read_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
         drop_signal: Arc<AtomicBool>,
+        seek_started: Option<mpsc::Sender<()>>,
+        seek_release: Option<mpsc::Receiver<()>>,
     }
 
     impl Iterator for PrefetchProbeSource {
@@ -1236,6 +1230,12 @@ mod tests {
 
     impl PrefetchableSource for PrefetchProbeSource {
         fn seek_for_prefetch(&mut self, _position: Duration) -> Result<(), String> {
+            if let Some(started) = self.seek_started.take() {
+                let _ = started.send(());
+            }
+            if let Some(release) = self.seek_release.take() {
+                let _ = release.recv();
+            }
             Ok(())
         }
 
@@ -1253,6 +1253,8 @@ mod tests {
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::clone(&read_thread),
             drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: None,
+            seek_release: None,
         };
         let underrun = Arc::new(AtomicBool::new(false));
         let mut buffered =
@@ -1294,13 +1296,70 @@ mod tests {
             .try_seek(Duration::from_millis(500))
             .expect("worker should seek the decoder");
 
-        let first_sample = buffered.next().expect("sample at seek target");
         let expected = 4_000.0 * 4.0 / 32_768.0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let first_sample = loop {
+            if let Some(sample) = buffered.next() {
+                if (sample - expected).abs() < 0.002 {
+                    break sample;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "prefetch worker did not publish the seek target"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
         assert!(
             (first_sample - expected).abs() < 0.002,
             "seek returned {first_sample}, expected about {expected}"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn callback_seek_returns_before_the_decoder_worker_finishes() {
+        let (seek_started_tx, seek_started_rx) = mpsc::channel();
+        let (seek_release_tx, seek_release_rx) = mpsc::channel();
+        let source = PrefetchProbeSource {
+            foreign_batches: 0,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: Some(seek_started_tx),
+            seek_release: Some(seek_release_rx),
+        };
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("start prefetch");
+        let (seek_result_tx, seek_result_rx) = mpsc::channel();
+        let seek_thread = std::thread::spawn(move || {
+            let mut buffered = buffered;
+            let result = buffered.try_seek(Duration::from_secs(1)).is_ok();
+            let _ = seek_result_tx.send(result);
+        });
+
+        seek_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("producer should receive the seek");
+        let returned_before_worker_release = matches!(
+            seek_result_rx.try_recv(),
+            Ok(true)
+        );
+        let _ = seek_release_tx.send(());
+        let seek_succeeded = seek_result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("seek call should return");
+        seek_thread.join().expect("seek caller thread");
+
+        assert!(
+            returned_before_worker_release,
+            "Source::try_seek must not wait for decoder work"
+        );
+        assert!(seek_succeeded);
     }
 
     #[test]
@@ -1312,6 +1371,8 @@ mod tests {
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::new(std::sync::Mutex::new(None)),
             drop_signal: Arc::clone(&source_dropped),
+            seek_started: None,
+            seek_release: None,
         };
         let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
             .expect("start prefetch");
