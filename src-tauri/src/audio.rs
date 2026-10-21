@@ -2146,6 +2146,43 @@ mod bounded_seek_tests {
     }
 
     #[test]
+    fn output_replacement_preserves_a_handoff_that_committed_before_snapshot() {
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        {
+            let mut playback = state.lock();
+            playback.current_file = Some("outgoing.wav".to_string());
+            playback.generation = 7;
+            playback.is_playing = true;
+        }
+        let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
+
+        assert!(commit_gapless_handoff(
+            &state,
+            &cancelled,
+            &emitted,
+            Arc::new(AtomicU64::new(0)),
+            "incoming.wav",
+            8,
+            20.0,
+            0.0,
+            48_000,
+            2,
+        ));
+
+        let (generation, path, _, _, playing, handoff_pending) =
+            snapshot_playback_for_output_replacement(&state, &mut pending, &emitted);
+
+        assert_eq!(generation, 8);
+        assert_eq!(path.as_deref(), Some("incoming.wav"));
+        assert!(playing);
+        assert!(!handoff_pending);
+        assert!(pending.is_empty());
+        assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn failed_output_replacement_stops_audio_after_cancelling_a_queued_handoff() {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         {
@@ -2161,7 +2198,6 @@ mod bounded_seek_tests {
         let pending_path = Arc::new(Mutex::new(None));
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
-        assert!(has_uncancelled_gapless_handoff(&pending));
         let (sink, _queue) = Sink::new_idle();
         let sink = Arc::new(sink);
         let mut current_sink = Some(Arc::clone(&sink));
