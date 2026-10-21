@@ -6,6 +6,10 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+fn default_booster_level() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackSession {
@@ -15,6 +19,8 @@ pub struct PlaybackSession {
     pub queue_index: i32,
     pub current_time: f64,
     pub playback_speed: f64,
+    #[serde(default = "default_booster_level")]
+    pub booster_level: f64,
     pub volume: f64,
     pub was_playing: bool,
     pub shuffle_enabled: bool,
@@ -91,4 +97,49 @@ pub async fn save_playback_session(app: AppHandle, session: PlaybackSession) -> 
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn legacy_session() -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "currentTrackId": null,
+            "queueIds": [],
+            "queueIndex": -1,
+            "currentTime": 0.0,
+            "playbackSpeed": 1.0,
+            "volume": 0.8,
+            "wasPlaying": false,
+            "shuffleEnabled": false,
+            "loopMode": "all",
+            "stopAfterCurrent": false,
+            "lastView": null,
+            "lastOpenedAlbum": null,
+            "lastOpenedArtist": null,
+            "timestamp": 0
+        })
+    }
+
+    #[test]
+    fn round_trip_preserves_saved_booster_level() {
+        let mut value = legacy_session();
+        value["boosterLevel"] = serde_json::json!(1.6);
+
+        let session: PlaybackSession = serde_json::from_value(value).expect("parse session");
+        let saved = serde_json::to_value(session).expect("serialize session");
+
+        assert_eq!(saved["boosterLevel"], 1.6);
+    }
+
+    #[test]
+    fn legacy_session_without_booster_defaults_to_unity() {
+        let session: PlaybackSession =
+            serde_json::from_value(legacy_session()).expect("parse legacy session");
+        let saved = serde_json::to_value(session).expect("serialize session");
+
+        assert_eq!(saved["boosterLevel"], 1.0);
+    }
 }

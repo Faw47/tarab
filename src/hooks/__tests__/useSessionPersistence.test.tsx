@@ -41,6 +41,15 @@ describe('session save lifecycle', () => {
     expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ currentTime: 42 }));
   });
 
+  it('includes the volume booster in a saved playback session', async () => {
+    usePlayerStore.setState({ boosterLevel: 1.75 });
+    const { result } = renderHook(() => useSessionPersistence('home', null));
+
+    await act(async () => result.current.flushSessionSave());
+
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ boosterLevel: 1.75 }));
+  });
+
   it('does not run a stale save timer after unmount', async () => {
     const { result, unmount } = renderHook(() => useSessionPersistence('home', null));
     await act(async () => result.current.flushSessionSave());

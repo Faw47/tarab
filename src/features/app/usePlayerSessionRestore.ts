@@ -3,6 +3,7 @@ import type { NavView } from '../../components/navigation';
 import {
   dbGetTracksByAlbumArtist,
   dbGetTracksByIds,
+  setAudioBooster,
   setPlaybackSpeed as setAudioPlaybackSpeed,
   setVolume as setAudioVolume,
 } from '../../lib/tauri-commands';
@@ -140,6 +141,15 @@ export function usePlayerSessionRestore({
         player.setVolume(clampedVol);
         setAudioVolume(clampedVol).catch((err) => console.error('Failed to restore volume:', err));
       }
+
+      const boosterLevel =
+        typeof session.boosterLevel === 'number' && Number.isFinite(session.boosterLevel)
+          ? Math.max(1, Math.min(2, session.boosterLevel))
+          : 1;
+      player.setBoosterLevel(boosterLevel);
+      setAudioBooster(boosterLevel).catch((err) =>
+        console.error('Failed to restore booster:', err),
+      );
 
       player.setShuffleEnabled(!!session.shuffleEnabled);
       player.setLoopMode(

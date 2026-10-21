@@ -102,6 +102,7 @@ export interface PlaybackSessionPayload {
   queueIndex: number;
   currentTime: number;
   playbackSpeed: number;
+  boosterLevel?: number;
   volume: number;
   wasPlaying: boolean;
   shuffleEnabled: boolean;
