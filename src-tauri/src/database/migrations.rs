@@ -621,9 +621,7 @@ impl Database {
     }
 
     pub(super) fn migrate_v11(&self, conn: &Connection) -> SqliteResult<()> {
-        conn.execute_batch(
-            "ALTER TABLE tracks ADD COLUMN public_id TEXT NOT NULL DEFAULT '';",
-        )?;
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN public_id TEXT NOT NULL DEFAULT '';")?;
 
         let rows = {
             let mut statement = conn.prepare("SELECT id, file_path FROM tracks")?;
