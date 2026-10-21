@@ -571,6 +571,25 @@ mod tests {
     }
 
     #[test]
+    fn an_open_source_seeks_again_without_reopening_the_decoder() {
+        let path = write_temp_wav("in-place-seek", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let _: Vec<_> = source.by_ref().take(100).collect();
+        source
+            .try_seek(Duration::from_secs_f64(0.5123))
+            .expect("seek in the existing decoder");
+        let frame = first_frame_value(&mut source);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(frame.round() as i64, 4098);
+    }
+
+    #[test]
     fn seeking_starts_at_the_requested_frame_not_the_packet_boundary() {
         // Regression for PB-07: the seeked packet's start was reported as the requested time.
         let path = write_temp_wav("seek", 8000);
