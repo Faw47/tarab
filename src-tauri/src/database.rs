@@ -1024,8 +1024,7 @@ mod tests {
         std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
         std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
         std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
-        std::fs::write(legacy_dir.join("library.db"), b"legacy")
-            .expect("seed legacy database");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
 
         let migrated = prepare_app_directory(&base_dir).expect("migrate legacy database");
 
