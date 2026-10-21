@@ -873,7 +873,9 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
 
     // Move sidecars before the main database. If any rename fails, put already-moved artifacts
     // back so callers never see a database split across the old and new directories.
-    database_artifacts.sort_by_key(|(source, _)| source.file_name() == "library.db");
+    database_artifacts.sort_by_key(|(source, _)| {
+        source.file_name().map_or(false, |name| name == "library.db")
+    });
     let mut moved_artifacts = Vec::new();
     for (source, destination) in database_artifacts {
         if let Err(error) = std::fs::rename(&source, &destination) {
@@ -1534,9 +1536,9 @@ mod tests {
         std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
 
         for (name, contents) in [
-            ("library.db", b"database".as_slice()),
-            ("library.db-wal", b"wal".as_slice()),
-            ("library.db-shm", b"shm".as_slice()),
+            ("library.db", &b"database"[..]),
+            ("library.db-wal", &b"wal"[..]),
+            ("library.db-shm", &b"shm"[..]),
         ] {
             std::fs::write(legacy_dir.join(name), contents).expect("seed SQLite artifact");
         }
