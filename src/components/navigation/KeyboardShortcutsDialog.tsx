@@ -44,8 +44,8 @@ export function KeyboardShortcutsDialog({ theme }: KeyboardShortcutsDialogProps)
       <DialogContent
         className={
           isNeo
-            ? 'max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-none border-[3px] border-black bg-white text-black shadow-[8px_8px_0_0_#000] sm:max-w-md'
-            : 'max-h-[calc(100dvh-2rem)] overflow-y-auto border-white/15 bg-background/90 sm:max-w-md'
+            ? 'max-h-[calc(100dvh_-_2rem)] overflow-y-auto rounded-none border-[3px] border-black bg-white text-black shadow-[8px_8px_0_0_#000] sm:max-w-md'
+            : 'max-h-[calc(100dvh_-_2rem)] overflow-y-auto border-white/15 bg-background/90 sm:max-w-md'
         }
       >
         <DialogHeader className={isNeo ? 'text-left' : 'text-left'}>
