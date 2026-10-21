@@ -115,6 +115,30 @@ describe('useLibraryScan watcher', () => {
     expect(scanLibraryMock.mock.calls[0][0]).toBe('/music/Artist/Album');
   });
 
+  it('rescans a configured root when the watcher event carries its root identity', async () => {
+    useSettingsStore.setState({ autoWatch: true, libraryFolders: ['/var/music'] });
+    renderHook(() => useLibraryScan(), { wrapper });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    let callbackError: unknown;
+    await act(async () => {
+      try {
+        listeners.get('library-files-changed')?.({
+          payload: { rootId: '/var/music', relativePath: 'Artist/Album/01.flac' },
+        });
+      } catch (error) {
+        callbackError = error;
+      }
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(callbackError).toBeUndefined();
+    expect(scanLibraryMock).toHaveBeenCalledTimes(1);
+    expect(scanLibraryMock.mock.calls[0][0]).toBe('/var/music/Artist/Album');
+  });
+
   it('falls back to the library root when the changed folder cannot be scanned', async () => {
     scanLibraryMock.mockRejectedValueOnce(new Error('Folder does not exist'));
     renderHook(() => useLibraryScan(), { wrapper });
