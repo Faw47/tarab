@@ -517,7 +517,6 @@ impl Database {
     // ========== Smart Playlist Queries ==========
 }
 
-
 #[cfg(test)]
 mod pb16_baseline_tests {
     use super::*;
