@@ -476,9 +476,11 @@ pub fn run() {
                     {
                         for url in urls {
                             if let Ok(path) = url.to_file_path() {
-                                if let Err(_error) =
-                                    launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
-                                {
+                                if let Err(_error) = launch_intents::queue_file_path(
+                                    _app_handle,
+                                    intents.inner(),
+                                    &path,
+                                ) {
                                     log::warn!(
                                         "Ignored macOS file-open request that could not be resolved"
                                     );
@@ -488,7 +490,7 @@ pub fn run() {
                     }
                 }
             })
-        },
+        }
         Err(error) => startup_failure::report_build_failure(&error.to_string()),
     }
 }

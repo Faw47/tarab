@@ -172,7 +172,10 @@ pub fn report_build_failure(error: &str) {
     log::error!("error while building Tauri application: {error}");
     let details = startup_diagnostics_text(
         take_early_diagnostics(),
-        (log::Level::Error, format!("error while building Tauri application: {error}")),
+        (
+            log::Level::Error,
+            format!("error while building Tauri application: {error}"),
+        ),
     );
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
