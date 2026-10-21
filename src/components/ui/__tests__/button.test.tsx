@@ -30,4 +30,16 @@ describe('Button', () => {
     expect(screen.getByRole('button', { name: 'Default' })).toBeInTheDocument();
     expect(usePointerTracker).toHaveBeenCalledTimes(1);
   });
+  it('removes per-button blur when reduced effects are enabled', () => {
+    render(<Button>Normal</Button>);
+    const normalButton = screen.getByRole('button', { name: 'Normal' });
+    expect(normalButton).toHaveClass('backdrop-blur-[10px]');
+    expect(normalButton).toHaveClass('backdrop-saturate-[1.35]');
+
+    render(<Button reducedEffects>Reduced</Button>);
+    const reducedButton = screen.getByRole('button', { name: 'Reduced' });
+    expect(reducedButton).not.toHaveClass('backdrop-blur-[10px]');
+    expect(reducedButton).not.toHaveClass('backdrop-saturate-[1.35]');
+  });
+
 });
