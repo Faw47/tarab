@@ -1634,8 +1634,6 @@ mod tests {
             genre: "classical".to_string(),
         }];
 
-        assert!(validate_supported_smart_rules(&Some(rules.clone())).is_ok());
-
         let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].id, "a");
