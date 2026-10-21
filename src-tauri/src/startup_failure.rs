@@ -47,11 +47,9 @@ fn redact_path_for_home(message: &str, home: &Path) -> String {
     variants.sort_by_key(|variant| std::cmp::Reverse(variant.len()));
     variants.dedup();
 
-    variants
-        .iter()
-        .fold(message.to_string(), |redacted, path| {
-            replace_path_variant(&redacted, path)
-        })
+    variants.iter().fold(message.to_string(), |redacted, path| {
+        replace_path_variant(&redacted, path)
+    })
 }
 
 fn redact_home_directory_prefixes(message: &str) -> String {
@@ -98,9 +96,7 @@ fn startup_diagnostics_text(
     early.push(primary);
     early
         .into_iter()
-        .map(|(level, message)| {
-            format!("{level:?}: {}", redact_home_directory_prefixes(&message))
-        })
+        .map(|(level, message)| format!("{level:?}: {}", redact_home_directory_prefixes(&message)))
         .collect::<Vec<_>>()
         .join("\n")
 }
