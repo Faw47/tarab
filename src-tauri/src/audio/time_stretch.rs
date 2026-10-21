@@ -18,6 +18,8 @@ pub(super) struct PitchPreservingSource<S> {
     booster: BoosterGain,
     emitted_samples: Arc<AtomicU64>,
     real_content_started: Arc<AtomicBool>,
+    yield_to_mixer: Option<Arc<AtomicBool>>,
+    output_is_mixer_yield: bool,
     channels: usize,
     input: Vec<f32>,
     output: Vec<f32>,
@@ -52,6 +54,8 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             booster,
             emitted_samples,
             real_content_started: Arc::new(AtomicBool::new(true)),
+            yield_to_mixer: None,
+            output_is_mixer_yield: false,
             channels,
             input: Vec::with_capacity(INPUT_FRAMES * channels),
             output: Vec::with_capacity(OUTPUT_SAMPLES),
@@ -71,9 +75,14 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
         Arc::clone(&self.real_content_started)
     }
 
+    pub(super) fn set_yield_to_mixer(&mut self, yield_to_mixer: Arc<AtomicBool>) {
+        self.yield_to_mixer = Some(yield_to_mixer);
+    }
+
     fn refill_output(&mut self) -> bool {
         self.output.clear();
         self.output_pos = 0;
+        self.output_is_mixer_yield = false;
 
         while self.output.is_empty() && !self.drained {
             let buffered_output = self.stretcher.available();
@@ -94,11 +103,25 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                 break;
             }
 
-            self.input.clear();
             let requested_samples = INPUT_FRAMES * self.channels;
-            for _ in 0..requested_samples {
+            for _ in 0..requested_samples.saturating_sub(self.input.len()) {
                 match self.inner.next() {
-                    Some(sample) => self.input.push(sample),
+                    Some(sample) => {
+                        self.input.push(sample);
+                        if self
+                            .yield_to_mixer
+                            .as_ref()
+                            .is_some_and(|flag| flag.swap(false, Ordering::AcqRel))
+                        {
+                            // The inner source inserted this sample only to give the mixer a
+                            // chance to run. Keep any real partial frame buffered, but do not feed
+                            // the synthetic sample into WSOLA or let it advance media time.
+                            self.input.pop();
+                            self.output.resize(self.channels, 0.0);
+                            self.output_is_mixer_yield = true;
+                            return true;
+                        }
+                    }
                     None => {
                         self.input_finished = true;
                         break;
@@ -110,6 +133,7 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             self.input.truncate(aligned_len);
             if !self.input.is_empty() {
                 self.stretcher.push(&self.input);
+                self.input.clear();
             }
             self.output.extend(self.stretcher.pull(OUTPUT_SAMPLES));
 
@@ -132,11 +156,13 @@ impl<S: Source<Item = f32>> Iterator for PitchPreservingSource<S> {
 
         let sample = self.output[self.output_pos];
         self.output_pos += 1;
-        self.source_progress_fraction += f64::from(self.output_tempo);
-        let source_samples = self.source_progress_fraction.floor() as u64;
-        self.source_progress_fraction -= source_samples as f64;
-        self.emitted_samples
-            .fetch_add(source_samples, Ordering::Relaxed);
+        if !self.output_is_mixer_yield {
+            self.source_progress_fraction += f64::from(self.output_tempo);
+            let source_samples = self.source_progress_fraction.floor() as u64;
+            self.source_progress_fraction -= source_samples as f64;
+            self.emitted_samples
+                .fetch_add(source_samples, Ordering::Relaxed);
+        }
         Some(apply_booster(sample, self.booster.get()))
     }
 }
@@ -176,6 +202,7 @@ impl<S: Source<Item = f32>> Source for PitchPreservingSource<S> {
         self.output.clear();
         self.output_pos = 0;
         self.output_tempo = tempo;
+        self.output_is_mixer_yield = false;
         self.source_progress_fraction = 0.0;
         self.input_finished = false;
         self.drained = false;
@@ -285,6 +312,77 @@ mod tests {
         )
         .expect("valid mono source");
         (wrapped, emitted)
+    }
+
+    struct MixerYieldSource {
+        yields_left: usize,
+        yield_to_mixer: Arc<std::sync::atomic::AtomicBool>,
+        yield_count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Iterator for MixerYieldSource {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.yields_left > 0 {
+                self.yields_left -= 1;
+                self.yield_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.yield_to_mixer.store(true, Ordering::Release);
+                return Some(0.0);
+            }
+            Some(0.25)
+        }
+    }
+
+    impl Source for MixerYieldSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> u16 {
+            2
+        }
+
+        fn sample_rate(&self) -> u32 {
+            SAMPLE_RATE
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+
+        fn try_seek(&mut self, _position: Duration) -> Result<(), SeekError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mixer_yield_bounds_one_pitch_preserving_pull_and_keeps_channel_alignment() {
+        let yield_to_mixer = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let yield_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let inner = MixerYieldSource {
+            yields_left: 3,
+            yield_to_mixer: Arc::clone(&yield_to_mixer),
+            yield_count: Arc::clone(&yield_count),
+        };
+        let emitted = Arc::new(AtomicU64::new(0));
+        let mut wrapped = PitchPreservingSource::new(
+            inner,
+            SpeedControl::new(1.0),
+            BoosterGain::new(1.0),
+            Arc::clone(&emitted),
+        )
+        .expect("valid stereo source");
+        wrapped.set_yield_to_mixer(yield_to_mixer);
+
+        assert_eq!(wrapped.next(), Some(0.0));
+        assert_eq!(wrapped.next(), Some(0.0));
+        assert_eq!(yield_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(emitted.load(Ordering::Relaxed), 0);
+        assert_eq!(wrapped.next(), Some(0.0));
+        assert_eq!(wrapped.next(), Some(0.0));
+        assert_eq!(yield_count.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]
