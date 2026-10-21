@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 26 |
+| NATIVE_VALIDATION_REQUIRED | 27 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 66 |
+| PENDING | 65 |
 | **Total** | **160** |
 
 ## Findings
@@ -138,7 +138,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | QA-02 | P2 | Trash and move fail for libraries on a different volume from app data | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve after 1 objection | move_path renames, or on a cross-device error copies through a writable staged file, syncs, checks length, renames into place, applies the source permissions and removes the source (clearing read-only only to delete it). Move, Trash, Restore and their rollbacks use it. Tests inject a cross-device rename, including a read-only source. Limitations: Trash for a NAS library copies into app data on the system disk; timestamps are not preserved; no progress or cancel for large copies. | 332d602, 180259a | #8 |
 | QA-18 | P2 | Critical paths have no tests, and existing tests encode the wrong IPC payload | DECISION_REQUIRED | G1 pass / G2 pass / G3 pending | Done: shared playback-event fixture checked by a Rust serialization test and used by the lifecycle tests; renderer no longer accepts bare-number near-end payloads (stale-generation test). Remaining needs a decision: generated TS bindings for all commands and events (tauri-specta or ts-rs, new dependencies and codegen), and the missing hook and command tests the audit lists. | 75e44ad | #9 |
 | QA-31 | P2 | The IPC contract check validates names only | FIXED_VERIFIED | G1 pass (mutation-tested) / G2 pass / G3 pending | check-ipc-contract also compares invoke argument keys with Rust parameters (camelCased, injected parameters skipped, Option optional) for all 115 calls; renamed or extra keys fail. | 75e44ad | #9 |
-| PB-21 | P3 | Playback speed changes pitch | PENDING | PASS / PASS / - | G1: 4-second 440 Hz duration and pitch, live 1.0x to 1.5x, source-progress, and in-place seek regressions pass. Before the fix, the 1.5x duration test failed on sink-rate scaling (run 39538742603); seek-forwarding tests failed with Rodio NotSupported (runs 39540949467 and 39541160067). G2: all five CI jobs passed on 691d76e (run 39541540661). Native audible validation remains; independent adversarial G3 review is open. | b39bf54, 5037a4a, acf6863, f783252, 3d86327, 691d76e | #41 |
+| PB-21 | P3 | Playback speed changes pitch | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: 4-second 440 Hz duration and pitch, live 1.0x to 1.5x, source-progress, and in-place seek regressions pass. Before the fix, the 1.5x duration test failed on sink-rate scaling (run 39538742603); seek-forwarding tests failed with Rodio NotSupported (runs 39540949467 and 39541160067). G2: all five CI jobs passed on 08d15e57 (run 39555966702). G3: independent adversarial review found no code blockers at the exact head. Native audible playback and pitch acceptance remains. | b39bf54, 5037a4a, acf6863, f783252, 3d86327, 691d76e, 08d15e57 | #41 |
 | PB-23 | P3 | Pausing during a crossfade lets the fade finish while paused | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-25 | P3 | Decoder does not filter packets by track ID | PENDING | - | Audit confidence POSSIBLE. | - | - |
