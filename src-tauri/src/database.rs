@@ -328,6 +328,43 @@ impl Database {
         Ok(tracks)
     }
 
+    pub fn get_queue_track_references(
+        &self,
+        ids: &[String],
+    ) -> SqliteResult<Vec<DbShuffleQueueTrack>> {
+        let conn = self.conn.lock();
+        let mut by_id = std::collections::HashMap::with_capacity(ids.len());
+
+        for chunk in ids.chunks(900) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let placeholders = (0..chunk.len())
+                .map(|index| format!("?{}", index + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let query = format!(
+                "SELECT id, duration FROM tracks WHERE id IN ({placeholders})"
+            );
+            let mut statement = conn.prepare(&query)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok(DbShuffleQueueTrack {
+                    id: row.get(0)?,
+                    duration: row.get(1)?,
+                })
+            })?;
+            let references = rows.collect::<SqliteResult<Vec<_>>>()?;
+            for reference in references {
+                by_id.insert(reference.id.clone(), reference);
+            }
+        }
+
+        Ok(ids
+            .iter()
+            .filter_map(|id| by_id.get(id).cloned())
+            .collect())
+    }
+
     pub fn get_shuffle_all_queue(
         &self,
         smart_shuffle: bool,
@@ -340,14 +377,13 @@ impl Database {
                 "SELECT id, duration FROM tracks ORDER BY random()"
             };
             let mut statement = conn.prepare(query)?;
-            statement
-                .query_map([], |row| {
-                    Ok(DbShuffleQueueTrack {
-                        id: row.get(0)?,
-                        duration: row.get(1)?,
-                    })
-                })?
-                .collect::<SqliteResult<Vec<_>>>()?
+            let rows = statement.query_map([], |row| {
+                Ok(DbShuffleQueueTrack {
+                    id: row.get(0)?,
+                    duration: row.get(1)?,
+                })
+            })?;
+            rows.collect::<SqliteResult<Vec<_>>>()?
         };
 
         if !smart_shuffle || tracks.is_empty() {
@@ -1936,6 +1972,35 @@ mod tests {
         assert_eq!(playlists[0].id, "pl_a");
         assert!(playlists[0].is_pinned);
         assert_eq!(playlists[0].pinned_at, Some(now));
+    }
+
+    #[test]
+    fn queue_track_references_preserve_order_and_duplicate_entries() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[
+            sample_track("queue-reference-a"),
+            sample_track("queue-reference-b"),
+        ])
+        .expect("seed tracks");
+
+        let requested = vec![
+            "queue-reference-b".to_string(),
+            "queue-reference-a".to_string(),
+            "queue-reference-b".to_string(),
+            "missing".to_string(),
+        ];
+        let references = db
+            .get_queue_track_references(&requested)
+            .expect("load queue references");
+
+        assert_eq!(
+            references
+                .iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["queue-reference-b", "queue-reference-a", "queue-reference-b"]
+        );
+        assert!(references.iter().all(|track| track.duration > 0.0));
     }
 
     #[test]
