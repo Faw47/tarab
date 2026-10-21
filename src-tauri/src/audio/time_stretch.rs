@@ -131,8 +131,7 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                             // chance to run. Keep any real partial frame buffered, but do not feed
                             // the synthetic sample into WSOLA or let it advance media time.
                             self.input.pop();
-                            self.decoder_retry_after =
-                                Some(Instant::now() + DECODER_RETRY_DELAY);
+                            self.decoder_retry_after = Some(Instant::now() + DECODER_RETRY_DELAY);
                             self.output.resize(self.channels, 0.0);
                             self.output_is_mixer_yield = true;
                             return true;
@@ -382,7 +381,12 @@ mod tests {
     fn yielding_source(
         yields_left: usize,
         real_samples_before_yield: usize,
-    ) -> (MixerYieldSource, Arc<AtomicBool>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    ) -> (
+        MixerYieldSource,
+        Arc<AtomicBool>,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+    ) {
         let yield_to_mixer = Arc::new(AtomicBool::new(false));
         let yield_count = Arc::new(AtomicUsize::new(0));
         let call_count = Arc::new(AtomicUsize::new(0));
@@ -446,13 +450,10 @@ mod tests {
         let content_started = wrapped.real_content_started();
         let callback_count = Arc::new(AtomicUsize::new(0));
         let callback_for_handoff = Arc::clone(&callback_count);
-        let mut handoff = GaplessHandoffSource::new_after_real_content(
-            wrapped,
-            content_started,
-            move || {
+        let mut handoff =
+            GaplessHandoffSource::new_after_real_content(wrapped, content_started, move || {
                 callback_for_handoff.fetch_add(1, Ordering::Relaxed);
-            },
-        );
+            });
 
         // The source prefetched two real samples, then encountered a decoder yield. The
         // callback must wait until a stretched sample is actually returned.
