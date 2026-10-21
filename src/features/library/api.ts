@@ -13,6 +13,7 @@ import {
   dbSearchTracks,
   searchLyrics,
 } from '../../lib/tauri-commands';
+import type { DbTrackPageCursor } from '../../lib/tauri-commands';
 import {
   DbAlbumAggregateArraySchema,
   DbArtistAggregateArraySchema,
@@ -121,13 +122,13 @@ export const sortOrderFor = (sortBy: SortBy): 'asc' | 'desc' =>
   sortBy === 'dateAdded' ? 'desc' : 'asc';
 
 export async function fetchLibraryTracksPage(params: {
-  offset: number;
+  cursor?: DbTrackPageCursor | null;
   limit: number;
   sortBy?: SortBy;
   sortOrder?: 'asc' | 'desc';
 }): Promise<Track[]> {
   const raw = await dbGetTracksPaginated(
-    params.offset,
+    params.cursor ?? null,
     params.limit,
     params.sortBy ?? 'dateAdded',
     params.sortOrder ?? sortOrderFor(params.sortBy ?? 'dateAdded'),
