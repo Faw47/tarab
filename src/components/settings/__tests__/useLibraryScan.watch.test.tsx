@@ -100,6 +100,23 @@ describe('useLibraryScan watcher', () => {
     return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>;
   }
 
+  it('rescans a symlinked library root when the watcher emits its canonical path', async () => {
+    useSettingsStore.setState({ autoWatch: true, libraryFolders: ['/music-link'] });
+    renderHook(() => useLibraryScan(), { wrapper });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    await act(async () => {
+      listeners.get('library-files-changed')?.({
+        payload: '/real/music/Artist/Album/01.flac',
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(scanLibraryMock.mock.calls.map((call) => call[0])).toEqual(['/music-link/Artist/Album']);
+  });
+
   it('rescans only the folder that changed, not the whole library root', async () => {
     renderHook(() => useLibraryScan(), { wrapper });
     await act(async () => {
