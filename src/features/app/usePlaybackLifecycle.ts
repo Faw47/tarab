@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
-import { fetchLibraryTrackById } from '../library/api';
 import {
   crossfadeToSource,
   hydrateQueueTrackMetadata,
@@ -12,6 +11,7 @@ import { dbUpdatePlayStats } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
+import { fetchLibraryTrackById } from '../library/api';
 import { invalidateLibraryForMutation } from '../library/mutations';
 import { getLibraryQueryClient } from '../library/queryClientBridge';
 import { type PreloadedGaplessEntry, resolveGaplessHandoffIndex } from './gapless-handoff';
@@ -108,9 +108,7 @@ const canAutoSkip = (skipped: number, queueLength: number): boolean =>
   skipped < Math.min(MAX_AUTO_SKIPS, Math.max(0, queueLength - 1));
 
 const sameQueueEntry = (left: Track, right: Track): boolean =>
-  left._queueId
-    ? left._queueId === right._queueId
-    : !right._queueId && left.id === right.id;
+  left._queueId ? left._queueId === right._queueId : !right._queueId && left.id === right.id;
 
 const findQueueEntryIndex = (queue: Track[], track: Track): number =>
   queue.findIndex((entry) => sameQueueEntry(entry, track));
@@ -389,10 +387,7 @@ export function usePlaybackLifecycle() {
             incomingQueueId: prepared.track._queueId ?? null,
             incomingTrack: prepared.track,
           };
-          const generation = await crossfadeToSource(
-            prepared.track.filePath,
-            crossfadeSeconds,
-          );
+          const generation = await crossfadeToSource(prepared.track.filePath, crossfadeSeconds);
           if (pendingCrossfadeRef.current) {
             pendingCrossfadeRef.current.generation = generation;
           }
@@ -427,9 +422,7 @@ export function usePlaybackLifecycle() {
           ? player.queue.findIndex((track) => track._queueId === pending.incomingQueueId)
           : findQueueEntryIndex(player.queue, pending.incomingTrack);
         const incoming =
-          incomingIndex >= 0
-            ? player.activateTrackAtIndex(incomingIndex)
-            : pending.incomingTrack;
+          incomingIndex >= 0 ? player.activateTrackAtIndex(incomingIndex) : pending.incomingTrack;
         if (!incoming) return;
         setActivePlaybackGeneration(payload.generation);
         if (incomingIndex < 0) player.setCurrentTrack(incoming);
