@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 40 |
+| NATIVE_VALIDATION_REQUIRED | 41 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 46 |
+| PENDING | 45 |
 | **Total** | **160** |
 
 ## Findings
@@ -179,7 +179,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-39 | P3 | "Lyric size" is labelled in px but is a 1 to 100 scale | PENDING | PASS / PASS / - | G1: baseline #90 (run #632) failed the expected 50 / 100 scale label while 532 other frontend tests passed. G2: cumulative head 1c37ca2 passed all five jobs (run #685). G3 independent code review is pending. | 5430203 | #89 |
 | FE-40 | P3 | Neo Home copy is jargon-heavy and its cards move despite the neo spec | PENDING | PASS / PASS / - | G1: baseline #91 (run #633) reproduced four copy/motion failures with 533 unrelated tests passing. G2: cumulative head 1c37ca2 passed all five jobs (run #685). A code review noted no blocker, but independent G3 at the final head is not recorded. | bf27726 | #95 |
 | FE-44 | P3 | Queue empty state has no call to action | PENDING | PASS / PASS / - | G1: baseline #96 (run #638) failed both missing-button assertions with 537 other tests passing. G2: exact fix head aed75ef passed all five jobs (run #639); cumulative head 1c37ca2 passed all five jobs (run #685). A code review noted no blocker; independent G3 is not recorded. | 2a009e6 | #97 |
-| FE-45 | P3 | Heavy stacked `backdrop-filter` in the liquid theme | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| FE-45 | P3 | Heavy stacked `backdrop-filter` in the liquid theme | NATIVE_VALIDATION_REQUIRED | PASS / PASS / - | G1: test-only run #692 reproduced missing GlassCard blur suppression and missing document Reduced Effects signaling; 558 other frontend tests passed. One overescaped CSS matcher and a JSDOM-only prefixed-property assertion were corrected afterward; the corrected nested-filter matcher matches the fix stylesheet and not the base stylesheet. G2: 563 frontend tests, typecheck, Biome, build, Storybook, knip, dependency audit, and Rust jobs on Linux/Windows/macOS all passed at code/test head d7eac95 (run #697). G3 independent review is not recorded. Native check: on WKWebView, WebView2, and WebKitGTK, verify live theme/Reduced Effects toggles, no grain or blur in Reduced Effects, one blur per nested ancestry, readability, and scroll/compositing performance on library, album details, and player views. | 41910b9, 7fbc9c3, d7eac95 | #130 |
 | LD-14 | P3 | Settings persistence skips validation on the current version and swallows write failures | PENDING | PASS / PASS / - | G1: test-only head 8b3375a (run #687) failed 5 targeted assertions; TypeScript, Biome, 553 other frontend tests, all Rust platform jobs, and dependency audit passed. G2: all five jobs passed on exact fix head 40fb1ba (run #688). G3 independent review is not recorded. | 40fb1ba | #129 |
 | FE-46 | P3 | Two settings behave inconsistently with their defaults or lifecycle | PENDING | - / PASS / - | G1 n/a in this pass: audit-confirmed mismatches are already corrected in the current history—v<3 migration uses the fresh topNav default (9c195fa); app-root autostart reads OS state at startup/focus and retries after hydration (7b11722, b0d7699). Existing migration and Home/focus tests cover those paths. G2: all five jobs passed on exact head 40fb1ba (run #688). G3 independent review is not recorded. | 9c195fa, 7b11722, b0d7699 | #128; #129 evidence |
 | FE-37 | P3 | Collapsed pill player is not keyboard-operable and is mispositioned | PENDING | PASS / PASS / - | G1: baseline #111 reproduced three targeted keyboard, positioning, and Reduced Effects failures (544/547 frontend tests passed). G2: cumulative head 1c37ca2 passed all five jobs (run #685). Independent G3 and desktop keyboard, touch, and visual acceptance remain open. | 154dc56, bf5c7daa | #113 |
