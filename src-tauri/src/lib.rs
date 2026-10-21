@@ -382,10 +382,6 @@ pub fn run() {
         .manage(shutdown::QuitState::default())
         .setup(move |app| {
             let setup_start = Instant::now();
-            // Create audio manager with app handle for events
-            let audio_manager: SharedAudioManager = create_audio_manager(app.handle().clone());
-            app.manage(audio_manager);
-
             let database = match preopened_database {
                 Some(database) => database,
                 None => create_database()
@@ -410,7 +406,13 @@ pub fn run() {
                     file_ops::create_library_roots_state()
                 }
             };
-            app.manage(library_roots);
+            app.manage(library_roots.clone());
+
+            // Give the audio loop the same roots state so playback source transitions can update
+            // one-file grants when a crossfade or gapless handoff becomes active.
+            let audio_manager: SharedAudioManager =
+                create_audio_manager(app.handle().clone(), library_roots);
+            app.manage(audio_manager);
 
             let launch_intents = launch_intents::create_launch_intent_state();
             let startup_arguments: Vec<String> = std::env::args().collect();
