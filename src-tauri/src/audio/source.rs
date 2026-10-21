@@ -533,16 +533,21 @@ impl Source for SymphoniaSource {
 /// Runs a one-shot callback on the first audio sample of the appended segment (gapless handoff).
 pub(super) struct GaplessHandoffSource<S> {
     inner: S,
-    on_first_sample: Option<Box<dyn FnOnce() + Send>>,
+    on_first_sample: Option<Box<dyn FnOnce() -> bool + Send>>,
     started: bool,
+    rejected: bool,
 }
 
 impl<S> GaplessHandoffSource<S> {
-    pub(super) fn new(inner: S, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
+    pub(super) fn new(
+        inner: S,
+        on_first_sample: impl FnOnce() -> bool + Send + 'static,
+    ) -> Self {
         Self {
             inner,
             on_first_sample: Some(Box::new(on_first_sample)),
             started: false,
+            rejected: false,
         }
     }
 }
@@ -551,11 +556,17 @@ impl<S: Iterator<Item = f32>> Iterator for GaplessHandoffSource<S> {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.rejected {
+            return None;
+        }
         let sample = self.inner.next()?;
         if !self.started {
             self.started = true;
             if let Some(cb) = self.on_first_sample.take() {
-                cb();
+                if !cb() {
+                    self.rejected = true;
+                    return None;
+                }
             }
         }
         Some(sample)
@@ -850,6 +861,20 @@ mod tests {
     }
 
     #[test]
+    fn rejected_gapless_handoff_never_yields_the_incoming_samples() {
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_count_for_closure = Arc::clone(&callback_count);
+        let mut source = GaplessHandoffSource::new(vec![0.25, 0.5].into_iter(), move || {
+            callback_count_for_closure.fetch_add(1, Ordering::Relaxed);
+            false
+        });
+
+        assert_eq!(source.next(), None);
+        assert_eq!(source.next(), None);
+        assert_eq!(callback_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
     fn gapless_handoff_source_forwards_in_place_seek_without_repeating_handoff() {
         let path = write_temp_wav("gapless-seek", 8000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
@@ -861,6 +886,7 @@ mod tests {
         let handoff_count_for_callback = Arc::clone(&handoff_count);
         let mut source = GaplessHandoffSource::new(source, move || {
             handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
+            true
         });
 
         let _ = source.next().expect("first sample starts handoff");

@@ -1,5 +1,6 @@
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -75,7 +76,11 @@ pub struct LibraryRootsState {
     pub roots: Vec<PathBuf>,
     grants: Vec<LibraryGrantRecord>,
     transient_files: Vec<PathBuf>,
-    /// Latest source-changing playback request; older async transitions cannot restore a grant.
+    active_transient_file: Option<PathBuf>,
+    pending_transient_file_grants: HashMap<u64, PathBuf>,
+    active_playback_generation: Option<u64>,
+    pending_playback_generation: Option<u64>,
+    /// Highest source-changing request observed; generations never move backwards.
     transient_playback_generation: u64,
     /// Incremented by every grant change, so a refresh that started before it does not write back
     /// roots computed from the old grants (for example re-allowing a revoked folder).
@@ -710,6 +715,7 @@ pub(crate) fn ensure_path_allowed_by_state(
     Ok(canonical)
 }
 
+#[cfg(test)]
 pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Path) {
     if let Ok(canonical) = canonicalize_existing_path(path) {
         roots_state
@@ -719,16 +725,64 @@ pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Pa
     }
 }
 
-pub(crate) fn mark_playback_generation(state: &mut LibraryRootsState, generation: u64) -> bool {
+pub(crate) fn mark_playback_generation(
+    state: &mut LibraryRootsState,
+    generation: u64,
+    path: &Path,
+) -> bool {
     if generation < state.transient_playback_generation {
         return false;
     }
+
     state.transient_playback_generation = generation;
+    state.pending_playback_generation = Some(generation);
+    let candidate = canonicalize_existing_path(path)
+        .ok()
+        .filter(|canonical| state.transient_files.contains(canonical));
+    if let Some(canonical) = candidate.as_ref() {
+        state
+            .pending_transient_file_grants
+            .insert(generation, canonical.clone());
+    }
+    prune_superseded_transient_file_grants(state, generation, candidate.as_deref());
     true
 }
 
-pub(crate) fn playback_generation_is_current(state: &LibraryRootsState, generation: u64) -> bool {
-    state.transient_playback_generation == generation
+fn prune_superseded_transient_file_grants(
+    state: &mut LibraryRootsState,
+    generation: u64,
+    current_candidate: Option<&Path>,
+) {
+    state.pending_transient_file_grants.retain(|request, path| {
+        *request >= generation && current_candidate == Some(path.as_path())
+    });
+
+    let active_file = state.active_transient_file.clone();
+    state.transient_files.retain(|path| {
+        active_file.as_ref() == Some(path) || current_candidate == Some(path.as_path())
+    });
+}
+
+pub(crate) fn playback_generation_is_current(
+    state: &LibraryRootsState,
+    generation: u64,
+) -> bool {
+    if let Some(pending) = state.pending_playback_generation {
+        pending == generation && state.transient_playback_generation == generation
+    } else {
+        state.active_playback_generation == Some(generation)
+    }
+}
+
+pub(crate) fn settle_failed_playback_generation(
+    state: &mut LibraryRootsState,
+    generation: u64,
+) -> bool {
+    if state.pending_playback_generation != Some(generation) {
+        return false;
+    }
+    state.pending_playback_generation = None;
+    true
 }
 
 pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
@@ -736,12 +790,24 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     path: &Path,
     generation: u64,
 ) -> bool {
-    if !mark_playback_generation(state, generation) {
+    let is_pending_request = state.pending_playback_generation == Some(generation)
+        && state.transient_playback_generation == generation;
+    let is_active_source = state.pending_playback_generation.is_none()
+        && state.active_playback_generation == Some(generation);
+    let is_gapless_successor = state.pending_playback_generation.is_none()
+        && generation > state.transient_playback_generation;
+    if !(is_pending_request || is_active_source || is_gapless_successor) {
         return false;
     }
 
+    state.transient_playback_generation = state.transient_playback_generation.max(generation);
+    state.active_playback_generation = Some(generation);
+    state.pending_playback_generation = None;
+    state.pending_transient_file_grants.clear();
+
     let Ok(canonical) = canonicalize_existing_path(path) else {
         state.transient_files.clear();
+        state.active_transient_file = None;
         return true;
     };
 
@@ -749,31 +815,36 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
         state
             .transient_files
             .retain(|candidate| candidate == &canonical);
+        state.active_transient_file = Some(canonical);
     } else {
         state.transient_files.clear();
+        state.active_transient_file = None;
     }
     true
 }
 
-/// Drops the failed request's exact transient authorization without revoking the active
-/// source's grant. A stale failure cannot remove access reserved by a newer request.
+/// Drops a failed request's exact transient authorization while preserving active and newer grants.
 pub(crate) fn discard_transient_file_for_failed_playback(
     state: &mut LibraryRootsState,
     path: &Path,
     active_path: Option<&Path>,
     generation: u64,
 ) -> bool {
-    if !playback_generation_is_current(state, generation) {
-        return false;
-    }
-    let Ok(canonical) = canonicalize_existing_path(path) else {
+    let owned_path = state.pending_transient_file_grants.remove(&generation);
+    let canonical = canonicalize_existing_path(path).ok().or(owned_path);
+    let Some(canonical) = canonical else {
         return false;
     };
-    if active_path
-        .and_then(|active| canonicalize_existing_path(active).ok())
-        .as_ref()
-        == Some(&canonical)
-    {
+    let active_file = state.active_transient_file.as_ref() == Some(&canonical)
+        || active_path
+            .and_then(|active| canonicalize_existing_path(active).ok())
+            .as_ref()
+            == Some(&canonical);
+    let pending_owner = state
+        .pending_transient_file_grants
+        .values()
+        .any(|candidate| candidate == &canonical);
+    if active_file || pending_owner {
         return false;
     }
 
@@ -788,9 +859,14 @@ pub(crate) fn clear_transient_file_grants_at_generation(
     state: &mut LibraryRootsState,
     generation: u64,
 ) -> bool {
-    if !mark_playback_generation(state, generation) {
+    if generation < state.transient_playback_generation {
         return false;
     }
+    state.transient_playback_generation = generation;
+    state.active_playback_generation = None;
+    state.pending_playback_generation = None;
+    state.active_transient_file = None;
+    state.pending_transient_file_grants.clear();
     state.transient_files.clear();
     true
 }
@@ -2007,7 +2083,7 @@ mod tests {
         authorize_transient_file(&state, &pending).expect("authorize pending track");
         {
             let mut roots = state.write();
-            assert!(mark_playback_generation(&mut roots, 11));
+            assert!(mark_playback_generation(&mut roots, 11, &pending));
             assert!(!discard_transient_file_for_failed_playback(
                 &mut roots,
                 &pending,
@@ -2020,6 +2096,7 @@ mod tests {
 
         {
             let mut roots = state.write();
+            assert!(settle_failed_playback_generation(&mut roots, 11));
             assert!(discard_transient_file_for_failed_playback(
                 &mut roots,
                 &pending,
@@ -2029,6 +2106,54 @@ mod tests {
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
+        let _ = fs::remove_dir_all(outside);
+    }
+
+
+    #[test]
+    fn superseded_pending_transient_grant_is_revoked_by_newer_library_request() {
+        let library = temp_dir("superseded-transient-library");
+        let outside = temp_dir("superseded-transient-outside");
+        let active = outside.join("active.mp3");
+        let abandoned = outside.join("abandoned.mp3");
+        let persistent = library.join("persistent.mp3");
+        fs::write(&active, b"audio").expect("write active track");
+        fs::write(&abandoned, b"audio").expect("write abandoned transient track");
+        fs::write(&persistent, b"audio").expect("write persistent track");
+
+        let state = create_library_roots_state();
+        state.write().roots = vec![fs::canonicalize(&library).expect("canonical library root")];
+        authorize_transient_file(&state, &active).expect("authorize active track");
+        authorize_transient_file(&state, &abandoned).expect("authorize pending track");
+        {
+            let mut roots = state.write();
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots,
+                &active,
+                10,
+            ));
+            assert!(mark_playback_generation(&mut roots, 11, &abandoned));
+        }
+        assert!(ensure_path_allowed_by_state(&abandoned, &state.read(), "test").is_ok());
+
+        {
+            let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 12, &persistent));
+            assert!(settle_failed_playback_generation(&mut roots, 12));
+            assert!(!discard_transient_file_for_failed_playback(
+                &mut roots,
+                &persistent,
+                Some(&active),
+                12,
+            ));
+        }
+
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
+        assert!(
+            ensure_path_allowed_by_state(&abandoned, &state.read(), "test").is_err(),
+            "a newer library-track request must retire the superseded one-file grant"
+        );
+        let _ = fs::remove_dir_all(library);
         let _ = fs::remove_dir_all(outside);
     }
 

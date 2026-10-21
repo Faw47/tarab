@@ -21,7 +21,8 @@ use tauri::{AppHandle, Emitter};
 use crate::file_ops::{
     clear_transient_file_grants_at_generation, discard_transient_file_for_failed_playback,
     ensure_path_allowed_by_state, mark_playback_generation, playback_generation_is_current,
-    retain_transient_file_for_queue_entry_at_generation, LibraryRootsState, SharedLibraryRoots,
+    retain_transient_file_for_queue_entry_at_generation, settle_failed_playback_generation,
+    LibraryRootsState, SharedLibraryRoots,
 };
 
 mod crossfade;
@@ -189,6 +190,7 @@ fn discard_failed_transient_file_grant(
     let mut roots = roots_state.write();
     let active_path = state.lock().current_file.clone();
     let active_path = active_path.as_deref().map(Path::new);
+    let _ = settle_failed_playback_generation(&mut roots, generation);
     let _ = discard_transient_file_for_failed_playback(
         &mut roots,
         Path::new(file_path),
@@ -261,6 +263,9 @@ fn commit_gapless_handoff(
     }
 
     let mut state = state.lock();
+    if cancelled.load(Ordering::Acquire) {
+        return false;
+    }
     if state.generation != outgoing_generation
         || state.current_file.as_deref() != Some(outgoing_path)
     {
@@ -1267,7 +1272,7 @@ impl AudioManager {
                                             ch2,
                                         );
                                         if !committed {
-                                            return;
+                                            return false;
                                         }
                                         let ended = PlaybackEndedPayload {
                                             path: Some(out_clone),
@@ -1284,6 +1289,7 @@ impl AudioManager {
                                                 next_path: next_clone,
                                             },
                                         );
+                                        true
                                     });
 
                                     pending_gapless_cancels.push((path.clone(), handoff_cancelled));
@@ -1808,7 +1814,7 @@ pub fn play_track(
     let mut roots = roots_state.inner().write();
     ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
     let generation = state.play(file_path.clone(), start_pos)?;
-    mark_playback_generation(&mut roots, generation);
+    mark_playback_generation(&mut roots, generation, Path::new(&file_path));
     Ok(generation)
 }
 
@@ -1822,8 +1828,8 @@ pub fn crossfade_to_track(
 ) -> Result<u64, String> {
     let mut roots = roots_state.inner().write();
     ensure_audio_file_allowed(&file_path, &roots, "crossfade audio file")?;
-    let generation = state.crossfade_to(file_path, start_pos, duration_secs)?;
-    mark_playback_generation(&mut roots, generation);
+    let generation = state.crossfade_to(file_path.clone(), start_pos, duration_secs)?;
+    mark_playback_generation(&mut roots, generation, Path::new(&file_path));
     Ok(generation)
 }
 
@@ -2091,7 +2097,11 @@ mod bounded_seek_tests {
             playback.duration = 12.0;
         }
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
-        assert!(mark_playback_generation(&mut roots.write(), 7));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots.write(),
+            Path::new("outgoing.wav"),
+            7,
+        ));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
@@ -2128,7 +2138,11 @@ mod bounded_seek_tests {
             ..PlaybackState::default()
         }));
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
-        assert!(mark_playback_generation(&mut roots.write(), 7));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots.write(),
+            Path::new("outgoing.wav"),
+            7,
+        ));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
@@ -2156,9 +2170,63 @@ mod bounded_seek_tests {
     }
 
     #[test]
+    fn a_failed_newer_request_leaves_the_active_source_available_for_gapless() {
+        let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots.write(),
+            Path::new("outgoing.wav"),
+            7,
+        ));
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            8,
+            Path::new("failed.wav"),
+        ));
+
+        let state = Arc::new(Mutex::new(PlaybackState {
+            generation: 7,
+            current_file: Some("outgoing.wav".to_string()),
+            duration: 12.0,
+            is_playing: true,
+            ..PlaybackState::default()
+        }));
+        assert!(settle_failed_playback_generation(&mut roots.write(), 8));
+        assert!(playback_generation_is_current(&roots.read(), 7));
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
+        assert!(commit_gapless_handoff(
+            &roots,
+            &state,
+            &cancelled,
+            &emitted,
+            Arc::new(AtomicU64::new(0)),
+            "outgoing.wav",
+            7,
+            "incoming.wav",
+            9,
+            20.0,
+            0.0,
+            48_000,
+            2,
+        ));
+        assert_eq!(state.lock().generation, 9);
+        assert_eq!(state.lock().current_file.as_deref(), Some("incoming.wav"));
+    }
+
+    #[test]
     fn a_stale_prepared_source_cannot_commit_after_a_newer_play_request() {
         let mut roots = LibraryRootsState::default();
-        assert!(mark_playback_generation(&mut roots, 12));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots,
+            Path::new("active.wav"),
+            10,
+        ));
+        assert!(mark_playback_generation(
+            &mut roots,
+            12,
+            Path::new("newer.wav"),
+        ));
         let state = Arc::new(Mutex::new(PlaybackState {
             generation: 10,
             current_file: Some("active.wav".to_string()),
@@ -2191,7 +2259,16 @@ mod bounded_seek_tests {
     #[test]
     fn a_gapless_handoff_cannot_commit_after_a_newer_source_request() {
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
-        assert!(mark_playback_generation(&mut roots.write(), 9));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots.write(),
+            Path::new("outgoing.wav"),
+            7,
+        ));
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            9,
+            Path::new("newer.wav"),
+        ));
         let state = Arc::new(Mutex::new(PlaybackState {
             generation: 7,
             current_file: Some("outgoing.wav".to_string()),

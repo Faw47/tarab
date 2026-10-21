@@ -1,6 +1,7 @@
 const AUDIO: &str = include_str!("../src/audio.rs");
 const METADATA: &str = include_str!("../src/metadata.rs");
 const AUDIO_SOURCE: &str = include_str!("../src/audio/source.rs");
+const FILE_OPS: &str = include_str!("../src/file_ops.rs");
 
 fn command_body<'a>(source: &'a str, signature: &str) -> &'a str {
     let start = source.find(signature).expect("command signature");
@@ -135,7 +136,7 @@ fn prepared_sources_and_gapless_handoffs_reject_superseded_generations() {
 #[test]
 fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() {
     let crossfade = audio_command_arm(
-        "AudioCommand::CrossfadeTo {\n                                file_path,",
+        "AudioCommand::CrossfadeTo",
     );
     assert!(
         crossfade.contains("play_with_source") && crossfade.contains("&roots_for_audio"),
@@ -143,7 +144,7 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
     );
 
     let gapless = audio_command_arm(
-        "AudioCommand::GaplessHandoffStarted {\n                                ended,",
+        "AudioCommand::GaplessHandoffStarted",
     );
     let stop_arm = audio_command_arm("AudioCommand::Stop");
     assert!(
@@ -154,5 +155,53 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
         gapless.contains("if is_still_current")
             && !gapless.contains("retain_transient_file_for_queue_entry_at_generation"),
         "the serialized handoff event must not expose state before its transient grant is committed"
+    );
+}
+
+
+#[test]
+fn failed_newer_playback_request_restores_the_active_generation() {
+    assert!(
+        FILE_OPS.contains("active_playback_generation:"),
+        "the installed source generation must be tracked separately from the latest request"
+    );
+    assert!(
+        FILE_OPS.contains("pending_playback_generation:"),
+        "failed requests must be distinguishable from a live source transition"
+    );
+    assert!(
+        FILE_OPS.contains("settle_failed_playback_generation"),
+        "a failed source request must settle without invalidating the still-active track"
+    );
+}
+
+#[test]
+fn gapless_commit_rechecks_seek_cancellation_after_taking_the_state_lock() {
+    let commit_start = AUDIO
+        .find("fn commit_gapless_handoff(")
+        .expect("gapless commit");
+    let commit_end = AUDIO[commit_start..]
+        .find("\nfn reset_active_counter")
+        .map(|offset| commit_start + offset)
+        .expect("gapless commit end");
+    let commit = &AUDIO[commit_start..commit_end];
+    let state_lock = commit
+        .find("let mut state = state.lock()")
+        .expect("serialized playback state lock");
+    assert!(
+        commit[state_lock..].contains("cancelled.load(Ordering::Acquire)"),
+        "the callback must observe a Seek cancellation made while it waited for playback state"
+    );
+}
+
+#[test]
+fn superseded_requests_drop_transient_grants_by_generation() {
+    assert!(
+        FILE_OPS.contains("pending_transient_file_grants:"),
+        "pending file access must be associated with the request that authorized it"
+    );
+    assert!(
+        FILE_OPS.contains("prune_superseded_transient_file_grants"),
+        "a newer request must retire older pending grants even if the newer request fails"
     );
 }
