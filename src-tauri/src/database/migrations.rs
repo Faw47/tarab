@@ -403,8 +403,11 @@ impl Database {
             |row| row.get(0),
         )?;
         if duplicate_memberships > 0 {
-            // `create_database()` runs this migration before Tauri installs its logger.
-            eprintln!("Duplicate playlist memberships were collapsed during migration");
+            // Queue this warning until the configured Tauri logger has started.
+            crate::startup_failure::queue_early_diagnostic(
+                log::Level::Warn,
+                "Duplicate playlist memberships were collapsed during migration",
+            );
         }
 
         conn.execute_batch(
