@@ -5,13 +5,11 @@ use rodio::Source;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use wsola::TimeStretch;
 
 const INPUT_FRAMES: usize = 1_024;
 const OUTPUT_SAMPLES: usize = 4_096;
-const DECODER_RETRY_DELAY: Duration = Duration::from_millis(10);
-
 /// Adapts a decoded source to WSOLA while keeping its playback controls lock-free on the mixer.
 pub(super) struct PitchPreservingSource<S> {
     inner: S,
@@ -20,14 +18,13 @@ pub(super) struct PitchPreservingSource<S> {
     booster: BoosterGain,
     emitted_samples: Arc<AtomicU64>,
     real_content_started: Arc<AtomicBool>,
-    yield_to_mixer: Option<Arc<AtomicBool>>,
-    output_is_mixer_yield: bool,
+    underrun_signal: Option<Arc<AtomicBool>>,
+    output_is_underrun: bool,
     channels: usize,
     input: Vec<f32>,
     output: Vec<f32>,
     output_pos: usize,
     output_tempo: f32,
-    decoder_retry_after: Option<Instant>,
     source_progress_fraction: f64,
     input_finished: bool,
     drained: bool,
@@ -57,14 +54,13 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             booster,
             emitted_samples,
             real_content_started: Arc::new(AtomicBool::new(false)),
-            yield_to_mixer: None,
-            output_is_mixer_yield: false,
+            underrun_signal: None,
+            output_is_underrun: false,
             channels,
             input: Vec::with_capacity(INPUT_FRAMES * channels),
             output: Vec::with_capacity(OUTPUT_SAMPLES),
             output_pos: 0,
             output_tempo: initial_speed,
-            decoder_retry_after: None,
             source_progress_fraction: 0.0,
             input_finished: false,
             drained: false,
@@ -75,14 +71,14 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
         Arc::clone(&self.real_content_started)
     }
 
-    pub(super) fn set_yield_to_mixer(&mut self, yield_to_mixer: Arc<AtomicBool>) {
-        self.yield_to_mixer = Some(yield_to_mixer);
+    pub(super) fn set_underrun_signal(&mut self, underrun_signal: Arc<AtomicBool>) {
+        self.underrun_signal = Some(underrun_signal);
     }
 
     fn refill_output(&mut self) -> bool {
         self.output.clear();
         self.output_pos = 0;
-        self.output_is_mixer_yield = false;
+        self.output_is_underrun = false;
 
         while self.output.is_empty() && !self.drained {
             let buffered_output = self.stretcher.available();
@@ -103,37 +99,22 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                 break;
             }
 
-            if self
-                .decoder_retry_after
-                .as_ref()
-                .is_some_and(|deadline| Instant::now() < *deadline)
-            {
-                // Rodio may request many source samples in one CPAL callback. Keep returning
-                // channel-aligned silence during the cool-off so a long foreign-track run cannot
-                // scan another decoder batch inside that same callback.
-                self.output.resize(self.channels, 0.0);
-                self.output_is_mixer_yield = true;
-                return true;
-            }
-            self.decoder_retry_after = None;
-
             let requested_samples = INPUT_FRAMES * self.channels;
             for _ in 0..requested_samples.saturating_sub(self.input.len()) {
                 match self.inner.next() {
                     Some(sample) => {
                         self.input.push(sample);
                         if self
-                            .yield_to_mixer
+                            .underrun_signal
                             .as_ref()
                             .is_some_and(|flag| flag.swap(false, Ordering::AcqRel))
                         {
-                            // The inner source inserted this sample only to give the mixer a
-                            // chance to run. Keep any real partial frame buffered, but do not feed
-                            // the synthetic sample into WSOLA or let it advance media time.
+                            // The buffered decoder source returns one synthetic sample when its
+                            // queue is empty. Keep the frame aligned and avoid counting it as
+                            // playback progress; the producer continues decoding off the callback.
                             self.input.pop();
-                            self.decoder_retry_after = Some(Instant::now() + DECODER_RETRY_DELAY);
                             self.output.resize(self.channels, 0.0);
-                            self.output_is_mixer_yield = true;
+                            self.output_is_underrun = true;
                             return true;
                         }
                     }
@@ -167,7 +148,7 @@ impl<S: Source<Item = f32>> Iterator for PitchPreservingSource<S> {
 
         let sample = self.output[self.output_pos];
         self.output_pos += 1;
-        if !self.output_is_mixer_yield {
+        if !self.output_is_underrun {
             self.real_content_started.store(true, Ordering::Release);
             self.source_progress_fraction += f64::from(self.output_tempo);
             let source_samples = self.source_progress_fraction.floor() as u64;
@@ -214,8 +195,7 @@ impl<S: Source<Item = f32>> Source for PitchPreservingSource<S> {
         self.output.clear();
         self.output_pos = 0;
         self.output_tempo = tempo;
-        self.decoder_retry_after = None;
-        self.output_is_mixer_yield = false;
+        self.output_is_underrun = false;
         self.real_content_started.store(false, Ordering::Release);
         self.source_progress_fraction = 0.0;
         self.input_finished = false;
@@ -238,7 +218,7 @@ mod tests {
     use rodio::Source;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     const SAMPLE_RATE: u32 = 44_100;
     const FREQUENCY: f32 = 440.0;
@@ -405,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn mixer_yield_throttles_decoder_work_and_keeps_channel_alignment() {
+    fn buffer_underrun_preserves_channel_alignment_and_does_not_count_progress() {
         let (inner, yield_to_mixer, yield_count, call_count) = yielding_source(1, 2);
         let emitted = Arc::new(AtomicU64::new(0));
         let mut wrapped = PitchPreservingSource::new(
@@ -415,7 +395,7 @@ mod tests {
             Arc::clone(&emitted),
         )
         .expect("valid stereo source");
-        wrapped.set_yield_to_mixer(yield_to_mixer);
+        wrapped.set_underrun_signal(yield_to_mixer);
 
         assert_eq!(wrapped.next(), Some(0.0));
         assert_eq!(wrapped.next(), Some(0.0));
@@ -423,14 +403,8 @@ mod tests {
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
         assert_eq!(emitted.load(Ordering::Relaxed), 0);
 
-        // Rodio can call next repeatedly while filling one output callback. The cooldown
-        // supplies silent frames without resuming decoder work.
-        wrapped.decoder_retry_after = Some(Instant::now() + Duration::from_secs(1));
-        assert_eq!(wrapped.next(), Some(0.0));
-        assert_eq!(wrapped.next(), Some(0.0));
-        assert_eq!(call_count.load(Ordering::SeqCst), 3);
-
-        wrapped.decoder_retry_after = Some(Instant::now() - Duration::from_secs(1));
+        // An underrun yields one aligned frame; the next pull consumes any newly available input
+        // without a wall-clock cooldown.
         assert!(wrapped.next().is_some());
         assert!(call_count.load(Ordering::SeqCst) > 3);
     }
@@ -446,7 +420,7 @@ mod tests {
             emitted,
         )
         .expect("valid stereo source");
-        wrapped.set_yield_to_mixer(yield_to_mixer);
+        wrapped.set_underrun_signal(yield_to_mixer);
         let content_started = wrapped.real_content_started();
         let callback_count = Arc::new(AtomicUsize::new(0));
         let callback_for_handoff = Arc::clone(&callback_count);
