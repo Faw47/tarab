@@ -21,8 +21,8 @@ import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
 import {
   collapseWatchScanTargets,
-  resolveWatchEventScanTarget,
   type LibraryWatchEventPayload,
+  resolveWatchEventScanTarget,
 } from './library-watch-targets';
 
 /* ─── CONSTANTS ─────────────────────────────────────────────────────────── */

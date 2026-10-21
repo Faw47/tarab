@@ -84,8 +84,11 @@ describe('library watch scan targets', () => {
       target: '/var/music/Artist/Album',
     });
     expect(resolveWatchEventScanTarget(event, ['/other/music'])).toBeNull();
-    expect(resolveWatchEventScanTarget({ ...event, relativePath: '../outside/song.flac' }, ['/var/music']))
-      .toBeNull();
+    expect(
+      resolveWatchEventScanTarget({ ...event, relativePath: '../outside/song.flac' }, [
+        '/var/music',
+      ]),
+    ).toBeNull();
   });
 
   it('collapses nested targets and falls back to the root when too many folders changed', () => {
