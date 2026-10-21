@@ -97,7 +97,7 @@ describe('usePlayerSessionRestore', () => {
 
   it('defaults sessions without a booster setting to unity', async () => {
     usePlayerStore.setState({ boosterLevel: 1.7 });
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
 
     render(<Harness />);
 
@@ -156,7 +156,7 @@ describe('usePlayerSessionRestore', () => {
   });
 
   it('completes hydration under React StrictMode', async () => {
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
 
     render(
       <StrictMode>
@@ -171,7 +171,7 @@ describe('usePlayerSessionRestore', () => {
   });
 
   it('does not restore again when the effect re-runs after a completed restore', async () => {
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
     function Rerendering({ onView }: { onView: () => void }) {
       usePlayerSessionRestore({ replaceView: onView });
       return null;
