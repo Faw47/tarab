@@ -375,39 +375,6 @@ pub async fn desktop_set_native_ui_state(
     Ok(())
 }
 
-#[tauri::command]
-pub fn desktop_focus_main_window(app: AppHandle) -> Result<(), String> {
-    focus_main_window(&app)
-}
-
-#[tauri::command]
-pub fn desktop_quit_application(app: AppHandle) -> Result<(), String> {
-    crate::shutdown::approve_exit(&app);
-    app.exit(0);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn desktop_set_native_ui_state(
-    payload: DesktopNativeUiStatePayload,
-    app: AppHandle,
-    state: tauri::State<'_, DesktopIntegrationState>,
-) -> Result<(), String> {
-    {
-        let _creation_lock = state.mini_window_creation_lock.lock();
-        let mut native = state.native_ui.lock();
-        *native = payload.clone();
-    }
-
-    apply_native_ui_state(&state);
-
-    if !payload.mini_window_enabled {
-        let _ = desktop_close_mini_window(app);
-    }
-
-    Ok(())
-}
-
 /// Largest base64 artwork payload accepted for the OS media session (about 6 MiB decoded).
 const MAX_MEDIA_ARTWORK_BASE64_LEN: usize = 8 * 1024 * 1024;
 
