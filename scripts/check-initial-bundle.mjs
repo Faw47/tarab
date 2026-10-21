@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { gzipSync } from 'node:zlib';
 import { resolve, sep } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 const distDir = resolve('dist');
 const manifestPath = resolve(distDir, '.vite/manifest.json');
