@@ -63,7 +63,9 @@ impl WaveformGenerator {
             cancel_requests: RwLock::new(HashSet::new()),
             active_requests: RwLock::new(HashSet::new()),
             lifecycle: RwLock::new(()),
-            generation: (0..GENERATION_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
+            generation: (0..GENERATION_LOCK_STRIPES)
+                .map(|_| Mutex::new(()))
+                .collect(),
             disk_maintenance: Mutex::new(()),
         }
     }
@@ -662,7 +664,12 @@ mod tests {
             }));
         }
         for request in requests {
-            assert!(request.join().unwrap().peaks.iter().all(|peak| *peak == 1.0));
+            assert!(request
+                .join()
+                .unwrap()
+                .peaks
+                .iter()
+                .all(|peak| *peak == 1.0));
         }
         assert_eq!(generator.get_stats().disk_count, 1);
         assert_eq!(generator.get_stats().memory_count, 1);
