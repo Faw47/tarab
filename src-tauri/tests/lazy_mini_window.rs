@@ -24,9 +24,7 @@ fn command_body(name: &str) -> &'static str {
         .or_else(|| source.find(&sync_signature))
         .expect("mini-window command");
     let command = &source[start..];
-    let end = command
-        .find("\n#[tauri::command]")
-        .unwrap_or(command.len());
+    let end = command.find("\n#[tauri::command]").unwrap_or(command.len());
     &command[..end]
 }
 
@@ -40,8 +38,7 @@ fn mini_window_mutations_are_async_and_toggle_is_serialized() {
 
     let open = command_body("desktop_open_mini_window");
     assert!(
-        open.find(".mini_window_creation_lock.lock().await")
-            < open.find("open_mini_window_locked"),
+        open.find(".mini_window_creation_lock.lock().await") < open.find("open_mini_window_locked"),
         "opening must hold the async gate before checking or creating the webview"
     );
 
@@ -54,13 +51,11 @@ fn mini_window_mutations_are_async_and_toggle_is_serialized() {
 
     let toggle = command_body("desktop_toggle_mini_window");
     assert!(
-        toggle.find(".mini_window_creation_lock.lock().await")
-            < toggle.find(".is_visible()"),
+        toggle.find(".mini_window_creation_lock.lock().await") < toggle.find(".is_visible()"),
         "toggle must read visibility and apply its transition under the same gate"
     );
     assert!(
-        toggle.contains("open_mini_window_locked")
-            && toggle.contains("hide_mini_window_locked"),
+        toggle.contains("open_mini_window_locked") && toggle.contains("hide_mini_window_locked"),
         "toggle must call lock-aware helpers instead of recursively acquiring the gate"
     );
 
