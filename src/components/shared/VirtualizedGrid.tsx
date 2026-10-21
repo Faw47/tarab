@@ -10,6 +10,7 @@ interface VirtualizedGridProps<T> {
   style?: React.CSSProperties;
   getItemKey?: (item: T, index: number) => string | number;
   renderItem: (item: T, index: number) => React.ReactNode;
+  ariaLabel?: string;
   onRangeChange?: (start: number, end: number) => void;
   /** Called when scroll position passes 90% of content (for load more). */
   onScrollNearEnd?: () => void;
@@ -51,6 +52,7 @@ export function VirtualizedGrid<T>({
   className,
   style,
   renderItem,
+  ariaLabel = 'Library items',
   getItemKey,
   onRangeChange,
   onScrollNearEnd,
@@ -178,7 +180,7 @@ export function VirtualizedGrid<T>({
     <div
       ref={containerRef}
       role="grid"
-      aria-label="Library items"
+      aria-label={ariaLabel}
       aria-colcount={columns}
       aria-rowcount={rowCount}
       tabIndex={0}

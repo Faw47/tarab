@@ -55,4 +55,16 @@ describe('VirtualizedGrid', () => {
     const template = screen.getAllByRole('row')[0].style.gridTemplateColumns;
     expect(template).toMatch(/^repeat\(\d+, minmax\(0(px)?, 1fr\)\)$/);
   });
+  it('uses a context-specific accessible name when provided', () => {
+    const props = {
+      items: ['Album'],
+      minColumnWidth: 120,
+      ariaLabel: 'Album results',
+      renderItem: (item: string) => <span>{item}</span>,
+    };
+
+    render(<VirtualizedGrid {...props} />);
+
+    expect(screen.getByRole('grid', { name: 'Album results' })).toBeInTheDocument();
+  });
 });
