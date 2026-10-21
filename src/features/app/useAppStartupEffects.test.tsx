@@ -10,6 +10,9 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: vi.fn(async () => undefined) }),
 }));
 vi.mock('../../lib/tauri-commands', () => ({
+  fixedStoreGet: vi.fn(async () => null),
+  fixedStoreSet: vi.fn(async () => undefined),
+  fixedStoreRemove: vi.fn(async () => undefined),
   desktopShouldStartMinimized: vi.fn(async () => false),
 }));
 vi.mock('../../lib/report-error', () => ({
@@ -19,6 +22,7 @@ vi.mock('../../lib/report-error', () => ({
 
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { reportError } from '../../lib/report-error';
+import { fixedStoreGet } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 import { useAppStartupEffects } from './useAppStartupEffects';
 
@@ -30,6 +34,7 @@ describe('app autostart lifecycle', () => {
   });
 
   beforeEach(async () => {
+    vi.mocked(fixedStoreGet).mockReset().mockResolvedValue(null);
     await useSettingsStore.persist.rehydrate();
     useSettingsStore.setState({ autostartEnabled: false });
     vi.mocked(isEnabled).mockReset().mockResolvedValue(true);
@@ -78,18 +83,20 @@ describe('app autostart lifecycle', () => {
   });
 
   it('does not reconcile before settings hydration finishes', async () => {
-    let finishHydration: (() => void) | undefined;
-    vi.spyOn(useSettingsStore.persist, 'hasHydrated').mockReturnValue(false);
-    vi.spyOn(useSettingsStore.persist, 'onFinishHydration').mockImplementation((callback) => {
-      finishHydration = () => callback(useSettingsStore.getState());
-      return () => undefined;
-    });
+    let finishRead: ((value: Awaited<ReturnType<typeof fixedStoreGet>>) => void) | undefined;
+    vi.mocked(fixedStoreGet).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    const hydration = useSettingsStore.persist.rehydrate();
+    await waitFor(() => expect(fixedStoreGet).toHaveBeenCalledTimes(1));
     mount();
-    expect(finishHydration).toBeDefined();
     expect(isEnabled).not.toHaveBeenCalled();
     await act(async () => {
-      finishHydration?.();
-      await Promise.resolve();
+      finishRead?.(null);
+      await hydration;
     });
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
   });
