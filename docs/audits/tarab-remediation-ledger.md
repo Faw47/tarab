@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 71 |
+| FIXED_VERIFIED | 72 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 41 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 45 |
+| PENDING | 44 |
 | **Total** | **160** |
 
 ## Findings
@@ -186,7 +186,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-41 | P3 | Virtualized lists lack list semantics; queue drag-and-drop sees only rendered rows | PENDING | PASS / PASS / - | G1: baseline #122 reproduced the list semantics, grid label, and offscreen drag failures with 549 other tests passing. G2: cumulative head 1c37ca2 passed all five jobs (run #685). Independent G3 and native visual/touch acceptance remain open. | 295ee18, 3b54433, bf128ae | #123 |
 | FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | FIXED_VERIFIED | G1 six old-provider failures, restored GREEN / G2 frontend and baseline CI PASS / G3 PASS | Existing provider requires playback plus subscribers, emits once on pause/seek, and cancels on pause/final unsubscribe/unmount. Fresh independent lifecycle review clean. Scope is deterministic scheduling, not visibility throttling or audio/visual smoothness. | 13ff91c, a21e4bf; evidence continuation | #14; lyrics continuation |
 | AR-20 | P3 | A single `Mutex<Connection>` serializes every read behind long write transactions | PENDING | PASS / PASS / - | G1: baseline #124 reproduced read serialization on Linux and Windows while 226 Linux and 218 Windows tests passed. G2: exact reader-pool head 4a951c4 passed Linux and Windows jobs (run #669); cumulative head 1c37ca2 passed all five jobs (run #685). A code review noted no blocker; independent G3 is not recorded. | 433fc2c, 241110d | #125 |
-| AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | PENDING | PASS / PASS / - | G1: test-only run #700 reproduced the initial main/mini-player budget and output regressions; 563 other frontend tests passed. Final tests cover raw and gzip caps, shared static imports, and exclusion of the lazy Three.js chunk. G2: all five jobs passed on code/test head dba1097 (run #707). Measured main graph 976,965 B raw / 301,070 B gzip (caps 1,100,000 / 350,000); mini-player 465,487 B / 143,636 B (caps 500,000 / 180,000). G3 independent review is not recorded. | dba1097 | #131 |
+| AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | FIXED_VERIFIED | PASS / PASS / PASS | G1: test-only run #700 reproduced the initial main/mini-player budget and output regressions; 563 other frontend tests passed. Final tests cover raw and gzip caps, shared static imports, and exclusion of the lazy Three.js chunk. G2: all five jobs passed on code/test head dba1097 (run #707); exact ledger head 1307757 passed all five in run #708. Measured main graph 976,965 B raw / 301,070 B gzip (caps 1,100,000 / 350,000); mini-player 465,487 B / 143,636 B (caps 500,000 / 180,000). G3: independent review at exact head 13077572 found no blockers. | dba1097 | #131 |
 | AR-31 | P3 | Redundant UI dependencies | PENDING | n/a / PASS / - | G1 n/a: dependency deletion has no user-visible failure to reproduce; characterization tests cover slider name/value, ArrowRight adjustment, and separate mute action. G2: all five CI jobs passed on corrected code head 2d47193 (run #710), including 569 frontend tests; frozen install and knip pass with React Aria removed from the manifest/root lockfile importer. G3 independent review pending. Framer Motion remains used for entry/exit transitions in TopBar and AppLayouts. | 2d47193 | #132 |
 | AR-33 | P3 | `App.tsx` is a god component; large view files carry most of the complexity | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-36 | P3 | Errors are untyped strings and behavior depends on message text | PENDING | - | Audit confidence CONFIRMED. | - | - |
