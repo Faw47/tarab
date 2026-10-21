@@ -67,5 +67,4 @@ describe('VirtualizedGrid', () => {
 
     expect(screen.getByRole('grid', { name: 'Album results' })).toBeInTheDocument();
   });
-
 });
