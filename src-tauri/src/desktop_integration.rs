@@ -1,7 +1,7 @@
 use base64::Engine;
 use parking_lot::Mutex;
-use tauri::async_runtime::Mutex as AsyncMutex;
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime::Mutex as AsyncMutex;
 #[cfg(target_os = "macos")]
 use tauri::image::Image;
 use tauri::{
