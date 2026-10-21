@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::async_runtime::spawn_blocking;
 
@@ -82,6 +83,15 @@ pub(crate) fn is_valid_thumbnail_size(size: &str) -> bool {
     THUMBNAIL_SIZES.iter().any(|(_, name)| *name == size)
 }
 
+fn touch_cache_file(path: &Path) {
+    let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(path) else {
+        return;
+    };
+    let _ = file.set_times(
+        fs::FileTimes::new().set_accessed(std::time::SystemTime::now()),
+    );
+}
+
 fn read_thumbnail_file(path: &Path, size: &str) -> Result<Option<Vec<u8>>, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -118,6 +128,7 @@ pub struct CacheStats {
 
 pub struct ImageCache {
     cache_dir: PathBuf,
+    max_cache_size_mb: AtomicU64,
 }
 
 impl ImageCache {
@@ -129,7 +140,10 @@ impl ImageCache {
             remove_legacy_thumbnails(&legacy_dir);
         });
 
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            max_cache_size_mb: AtomicU64::new(MAX_CACHE_SIZE_MB),
+        }
     }
 
     #[cfg(test)]
@@ -153,8 +167,8 @@ impl ImageCache {
             if !path.exists() {
                 return false;
             }
-            match image_dimensions(&path) {
-                Ok((w, h)) if w == size && h == size => {}
+                match image_dimensions(&path) {
+                Ok((w, h)) if w == size && h == size => touch_cache_file(&path),
                 _ => {
                     let _ = fs::remove_file(&path);
                     return false;
@@ -173,6 +187,7 @@ impl ImageCache {
 
         // Check if already cached and square; otherwise regenerate
         if self.thumbnails_valid(&hash) {
+            self.enforce_size_limit(None)?;
             return Ok(hash);
         }
 
@@ -188,6 +203,7 @@ impl ImageCache {
             self.save_thumbnail(&hash, name, &previous)?;
         }
 
+        self.enforce_size_limit(None)?;
         Ok(hash)
     }
 
@@ -232,7 +248,12 @@ impl ImageCache {
             return Ok(None);
         }
 
-        read_thumbnail_file(&self.get_thumbnail_path(hash, size), size)
+        let path = self.get_thumbnail_path(hash, size);
+        let bytes = read_thumbnail_file(&path, size)?;
+        if bytes.is_some() {
+            touch_cache_file(&path);
+        }
+        Ok(bytes)
     }
 
     /// Check if thumbnail exists
@@ -254,7 +275,12 @@ impl ImageCache {
         let path = self.get_thumbnail_path(hash, size);
 
         match (read_thumbnail_file(&path, size), image_dimensions(&path)) {
-            (Ok(Some(_)), Ok((width, height))) => width == expected_size && height == expected_size,
+            (Ok(Some(_)), Ok((width, height)))
+                if width == expected_size && height == expected_size =>
+            {
+                touch_cache_file(&path);
+                true
+            }
             _ => false,
         }
     }
@@ -270,17 +296,21 @@ impl ImageCache {
                 if entry.path().is_dir() {
                     if let Ok(sub_entries) = fs::read_dir(entry.path()) {
                         for sub_entry in sub_entries.filter_map(|e| e.ok()) {
-                            if let Ok(metadata) = sub_entry.metadata() {
-                                total_size += metadata.len();
-                                file_count += 1;
+                            if let Ok(metadata) = fs::symlink_metadata(sub_entry.path()) {
+                                if metadata.is_file() {
+                                    total_size = total_size.saturating_add(metadata.len());
+                                    file_count = file_count.saturating_add(1);
 
-                                if let Ok(modified) = metadata.modified() {
-                                    if let Ok(duration) =
-                                        modified.duration_since(std::time::UNIX_EPOCH)
+                                    if let Ok(accessed) =
+                                        metadata.accessed().or_else(|_| metadata.modified())
                                     {
-                                        let time = duration.as_millis() as i64;
-                                        oldest_time =
-                                            Some(oldest_time.map_or(time, |t| t.min(time)));
+                                        if let Ok(duration) =
+                                            accessed.duration_since(std::time::UNIX_EPOCH)
+                                        {
+                                            let time = duration.as_millis().min(i64::MAX as u128) as i64;
+                                            oldest_time =
+                                                Some(oldest_time.map_or(time, |t| t.min(time)));
+                                        }
                                     }
                                 }
                             }
@@ -334,15 +364,19 @@ impl ImageCache {
             }
         }
 
-        // Clear memory cache
-
         Ok(deleted)
     }
 
     /// Evict old entries if cache exceeds size limit
     pub fn enforce_size_limit(&self, max_override_mb: Option<u64>) -> Result<u64, String> {
         let stats = self.get_stats();
-        let max_bytes = max_override_mb.unwrap_or(MAX_CACHE_SIZE_MB) * 1024 * 1024;
+        if let Some(limit_mb) = max_override_mb {
+            self.max_cache_size_mb.store(limit_mb, Ordering::Relaxed);
+        }
+        let max_bytes = self
+            .max_cache_size_mb
+            .load(Ordering::Relaxed)
+            .saturating_mul(1024 * 1024);
 
         if stats.total_size_bytes <= max_bytes {
             return Ok(0);
@@ -356,11 +390,18 @@ impl ImageCache {
                 if entry.path().is_dir() {
                     if let Ok(sub_entries) = fs::read_dir(entry.path()) {
                         for sub_entry in sub_entries.filter_map(|e| e.ok()) {
-                            if let Ok(metadata) = sub_entry.metadata() {
-                                if let Ok(modified) = metadata.modified() {
-                                    files.push((sub_entry.path(), modified, metadata.len()));
-                                }
+                            let path = sub_entry.path();
+                            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                                continue;
+                            };
+                            if !metadata.is_file() {
+                                continue;
                             }
+                            let accessed = metadata
+                                .accessed()
+                                .or_else(|_| metadata.modified())
+                                .unwrap_or(std::time::UNIX_EPOCH);
+                            files.push((path, accessed, metadata.len()));
                         }
                     }
                 }
@@ -380,7 +421,7 @@ impl ImageCache {
             }
 
             if fs::remove_file(&path).is_ok() {
-                current_size -= size;
+                current_size = remaining_cache_size_after_remove(current_size, size);
                 deleted += 1;
             }
         }
@@ -461,7 +502,15 @@ mod tests {
     }
 
     fn test_cache(cache_dir: PathBuf) -> ImageCache {
-        ImageCache { cache_dir }
+        ImageCache {
+            cache_dir,
+            max_cache_size_mb: AtomicU64::new(MAX_CACHE_SIZE_MB),
+        }
+    }
+
+    #[test]
+    fn eviction_size_accounting_saturates_when_a_file_grows_after_stats() {
+        assert_eq!(remaining_cache_size_after_remove(10, 20), 0);
     }
 
     #[test]
