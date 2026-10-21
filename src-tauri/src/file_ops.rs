@@ -383,6 +383,7 @@ pub fn load_library_roots_state(app: &AppHandle) -> Result<SharedLibraryRoots, S
         roots,
         grants,
         transient_files: Vec::new(),
+        transient_playback_generation: 0,
         grants_version: 0,
     })))
 }
