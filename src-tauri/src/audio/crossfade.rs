@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use super::PlaybackState;
 
 pub(super) struct CrossfadeState {
-    pub outgoing_sink: Sink,
+    pub outgoing_sink: Arc<Sink>,
     pub start: Instant,
     pub paused_at: Option<Instant>,
     pub duration: Duration,
@@ -133,7 +133,7 @@ mod tests {
         let (outgoing_sink, _queue) = Sink::new_idle();
         let start = Instant::now();
         let mut active = CrossfadeState {
-            outgoing_sink,
+            outgoing_sink: Arc::new(outgoing_sink),
             start,
             paused_at: None,
             duration: Duration::from_secs(1),

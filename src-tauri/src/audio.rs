@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -119,7 +119,7 @@ fn stop_after_failed_recovery(
     pending_gapless_path: &Arc<Mutex<Option<String>>>,
     active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
     crossfade_state: &mut Option<CrossfadeState>,
-    current_sink: &mut Option<Sink>,
+    current_sink: &mut Option<Arc<Sink>>,
     volume_ramp: &mut Option<VolumeRampState>,
     stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
 ) {
@@ -146,6 +146,99 @@ fn reset_active_counter(slot: &Arc<Mutex<Arc<AtomicU64>>>) {
 fn set_active_counter(slot: &Arc<Mutex<Arc<AtomicU64>>>, counter: Arc<AtomicU64>) {
     counter.store(0, Ordering::Relaxed);
     *slot.lock() = counter;
+}
+
+const IN_PLACE_SEEK_TIMEOUT: Duration = Duration::from_millis(100);
+
+struct SeekWorkerReset(Arc<AtomicBool>);
+
+impl Drop for SeekWorkerReset {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Waits briefly for a seek request. A stuck Rodio callback can strand at most one worker, never
+/// the command loop or an unbounded number of threads.
+fn run_bounded_seek_attempt<F>(
+    worker_active: &Arc<AtomicBool>,
+    timeout: Duration,
+    attempt: F,
+) -> Option<Result<(), String>>
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
+    if worker_active
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return None;
+    }
+
+    let active_in_worker = Arc::clone(worker_active);
+    let (result_sender, result_receiver) = channel::<Result<(), String>>();
+    let spawn = thread::Builder::new()
+        .name("tarab-audio-seek".to_string())
+        .spawn(move || {
+            let reset = SeekWorkerReset(active_in_worker);
+            let result = attempt();
+            drop(reset);
+            let _ = result_sender.send(result);
+        });
+
+    if let Err(error) = spawn {
+        worker_active.store(false, Ordering::Release);
+        return Some(Err(format!("Failed to start seek worker: {}", error)));
+    }
+
+    match result_receiver.recv_timeout(timeout) {
+        Ok(result) => Some(result),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Some(Err("Audio seek worker stopped unexpectedly".to_string()))
+        }
+    }
+}
+
+fn seek_sink_with_timeout(
+    sink: &Arc<Sink>,
+    position: Duration,
+    worker_active: &Arc<AtomicBool>,
+) -> Option<Result<(), String>> {
+    if sink.empty() {
+        return Some(Err("Playback source ended before the seek".to_string()));
+    }
+
+    let sink_for_worker = Arc::clone(sink);
+    let result = run_bounded_seek_attempt(
+        worker_active,
+        IN_PLACE_SEEK_TIMEOUT,
+        move || {
+            sink_for_worker
+                .try_seek(position)
+                .map_err(|error| error.to_string())
+        },
+    );
+
+    match result {
+        Some(Ok(())) if sink.empty() => {
+            Some(Err("Playback source ended during the seek".to_string()))
+        }
+        other => other,
+    }
+}
+
+fn cancel_crossfade_for_seek(
+    crossfade: &mut Option<CrossfadeState>,
+    incoming_sink: Option<&Sink>,
+    target_volume: f32,
+) {
+    if let Some(active) = crossfade.take() {
+        active.outgoing_sink.stop();
+        if let Some(incoming) = incoming_sink {
+            incoming.set_volume(target_volume.clamp(0.0, 1.0));
+        }
+    }
 }
 
 fn apply_volume_ramp_step(
@@ -276,8 +369,9 @@ impl AudioManager {
             // the stream on demand, and SetOutputDevice installs a new one.
             let mut preferred_device: Option<String> = None;
 
-            let mut current_sink: Option<Sink> = None;
+            let mut current_sink: Option<Arc<Sink>> = None;
             let mut crossfade_state: Option<CrossfadeState> = None;
+            let seek_worker_active = Arc::new(AtomicBool::new(false));
             let mut volume_ramp: Option<VolumeRampState> = None;
             let mut output_watch = OutputWatch::new(Instant::now());
             let mut had_stream = false;
@@ -347,6 +441,7 @@ impl AudioManager {
                                                 start_secs: actual_start,
                                                 generation,
                                                 initial_volume: None,
+                                                start_paused: false,
                                             },
                                         ) {
                                             if let Some(sink) = current_sink.take() {
@@ -479,6 +574,7 @@ impl AudioManager {
                                                 start_secs: actual_start,
                                                 generation,
                                                 initial_volume,
+                                                start_paused: false,
                                             },
                                         ) {
                                             if should_fallback_to_play {
@@ -502,7 +598,7 @@ impl AudioManager {
                                                 apply_crossfade_step(
                                                     &mut crossfade_state,
                                                     &state_clone,
-                                                    current_sink.as_ref(),
+                                                    current_sink.as_deref(),
                                                 );
                                             } else {
                                                 current_sink = Some(new_sink);
@@ -557,19 +653,27 @@ impl AudioManager {
                                 }
                             }
                             AudioCommand::Seek(position_secs) => {
-                                let generation = state_clone.lock().generation;
-                                *pending_gapless_path_thread.lock() = None;
-                                if let Some(active) = crossfade_state.take() {
-                                    active.outgoing_sink.stop();
-                                }
+                                // A queued gapless source must be discarded by rebuilding the sink;
+                                // otherwise a later source could be mistaken for this seek target.
+                                let had_queued_gapless_source =
+                                    pending_gapless_path_thread.lock().take().is_some();
                                 let target_position = position_secs.max(0.0);
-                                let (active_path, was_paused, had_sink, duration) = {
+                                let (
+                                    generation,
+                                    active_path,
+                                    was_paused,
+                                    had_sink,
+                                    duration,
+                                    target_volume,
+                                ) = {
                                     let state = state_clone.lock();
                                     (
+                                        state.generation,
                                         state.current_file.clone().unwrap_or_default(),
                                         state.is_paused,
                                         current_sink.is_some(),
                                         state.duration,
+                                        state.volume,
                                     )
                                 };
 
@@ -582,6 +686,11 @@ impl AudioManager {
                                 } else {
                                     target_position
                                 };
+                                cancel_crossfade_for_seek(
+                                    &mut crossfade_state,
+                                    current_sink.as_deref(),
+                                    target_volume,
+                                );
 
                                 if !had_sink {
                                     {
@@ -600,6 +709,7 @@ impl AudioManager {
                                     continue;
                                 }
 
+                                let had_output_stream = stream_bundle.is_some();
                                 if let Err(error) = ensure_output_stream(&mut stream_bundle, || {
                                     open_output_stream(preferred_device.as_deref())
                                         .or_else(|_| open_output_stream(None))
@@ -617,6 +727,48 @@ impl AudioManager {
                                     );
                                     continue;
                                 };
+
+                                if had_output_stream && !was_paused && !had_queued_gapless_source {
+                                    let seek_position =
+                                        Duration::from_secs_f64(normalized_position);
+                                    let active_sink =
+                                        current_sink.as_ref().filter(|sink| !sink.empty());
+                                    if let Some(sink) = active_sink {
+                                        match seek_sink_with_timeout(
+                                            sink,
+                                            seek_position,
+                                            &seek_worker_active,
+                                        ) {
+                                            Some(Ok(())) => {
+                                                {
+                                                    let mut state = state_clone.lock();
+                                                    state.start_position = normalized_position;
+                                                    state.warned_near_end = false;
+                                                }
+                                                reset_active_counter(&active_emitted_for_audio);
+                                                let _ = app_for_audio.emit(
+                                                    "playback-seeked",
+                                                    PlaybackPositionEvent {
+                                                        generation,
+                                                        position: normalized_position,
+                                                    },
+                                                );
+                                                continue;
+                                            }
+                                            Some(Err(error)) => {
+                                                eprintln!(
+                                                    "In-place seek failed; rebuilding decoder: {}",
+                                                    error
+                                                );
+                                            }
+                                            None => {
+                                                eprintln!(
+                                                    "In-place seek timed out or another seek is still pending; rebuilding decoder"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
 
                                 if let Some(sink) = current_sink.take() {
                                     sink.stop();
@@ -640,14 +792,9 @@ impl AudioManager {
                                                 start_secs: actual_start,
                                                 generation,
                                                 initial_volume: None,
+                                                start_paused: was_paused,
                                             },
                                         ) {
-                                            if was_paused {
-                                                sink.pause();
-                                                let mut state = state_clone.lock();
-                                                state.is_playing = true;
-                                                state.is_paused = true;
-                                            }
                                             current_sink = Some(sink);
                                             set_active_counter(
                                                 &active_emitted_for_audio,
@@ -761,7 +908,7 @@ impl AudioManager {
                                 state.volume = volume;
                                 if crossfade_state.is_some() {
                                     if let Some(ref active) = crossfade_state {
-                                        apply_crossfade_mix(active, current_sink.as_ref(), volume);
+                                        apply_crossfade_mix(active, current_sink.as_deref(), volume);
                                     }
                                 } else if let Some(ref sink) = current_sink {
                                     sink.set_volume(volume);
@@ -782,7 +929,7 @@ impl AudioManager {
                                         if let Some(ref active) = crossfade_state {
                                             apply_crossfade_mix(
                                                 active,
-                                                current_sink.as_ref(),
+                                                current_sink.as_deref(),
                                                 clamped_to,
                                             );
                                         }
@@ -798,7 +945,7 @@ impl AudioManager {
                                         if let Some(ref active) = crossfade_state {
                                             apply_crossfade_mix(
                                                 active,
-                                                current_sink.as_ref(),
+                                                current_sink.as_deref(),
                                                 clamped_from,
                                             );
                                         }
@@ -1022,14 +1169,9 @@ impl AudioManager {
                                                         start_secs: actual_start,
                                                         generation: current_generation,
                                                         initial_volume: None,
+                                                        start_paused: was_paused,
                                                     },
                                                 )?;
-                                                if was_paused {
-                                                    sink.pause();
-                                                    let mut state = state_clone.lock();
-                                                    state.is_paused = true;
-                                                    state.is_playing = true;
-                                                }
                                                 Some((sink, emitted_for_replacement))
                                             })
                                         } else {
@@ -1218,7 +1360,7 @@ impl AudioManager {
                             .then(|| (active.generation, active.incoming_path.clone()))
                     });
                     apply_volume_ramp_step(&mut volume_ramp, &state_clone, None);
-                    apply_crossfade_step(&mut crossfade_state, &state_clone, current_sink.as_ref());
+                    apply_crossfade_step(&mut crossfade_state, &state_clone, current_sink.as_deref());
                     if let Some((generation, path)) = completed_crossfade {
                         emit_playback_transition(
                             &app_for_audio,
@@ -1230,7 +1372,7 @@ impl AudioManager {
                         );
                     }
                 } else {
-                    apply_volume_ramp_step(&mut volume_ramp, &state_clone, current_sink.as_ref());
+                    apply_volume_ramp_step(&mut volume_ramp, &state_clone, current_sink.as_deref());
                 }
             }
         });
@@ -1631,3 +1773,66 @@ mod tests {
         assert_eq!(validate_decoded_packet(2, 1_024, 768_000), None);
     }
 }
+
+#[cfg(test)]
+mod bounded_seek_tests {
+    use super::*;
+
+    #[test]
+    fn a_blocked_seek_worker_does_not_block_the_audio_loop_or_duplicate_workers() {
+        let worker_active = Arc::new(AtomicBool::new(false));
+        let (release_sender, release_receiver) = channel();
+        let first = run_bounded_seek_attempt(
+            &worker_active,
+            Duration::from_millis(20),
+            move || {
+                let _ = release_receiver.recv();
+                Ok(())
+            },
+        );
+
+        assert!(first.is_none());
+        assert!(worker_active.load(Ordering::Acquire));
+        let second = run_bounded_seek_attempt(
+            &worker_active,
+            Duration::from_millis(20),
+            || Ok(()),
+        );
+        assert!(second.is_none());
+
+        release_sender.send(()).expect("release seek worker");
+    }
+
+    #[test]
+    fn an_empty_sink_is_not_reported_as_a_successful_in_place_seek() {
+        let (sink, _queue) = Sink::new_idle();
+        let sink = Arc::new(sink);
+        let worker_active = Arc::new(AtomicBool::new(false));
+
+        let result = seek_sink_with_timeout(&sink, Duration::from_secs(1), &worker_active);
+
+        assert!(matches!(result, Some(Err(_))));
+        assert!(!worker_active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn cancelling_crossfade_restores_the_incoming_sink_volume() {
+        let (outgoing_sink, _outgoing_queue) = Sink::new_idle();
+        let (incoming_sink, _incoming_queue) = Sink::new_idle();
+        incoming_sink.set_volume(0.15);
+        let mut crossfade = Some(CrossfadeState {
+            outgoing_sink: Arc::new(outgoing_sink),
+            start: Instant::now(),
+            paused_at: None,
+            duration: Duration::from_secs(1),
+            generation: 1,
+            incoming_path: "next-track".to_string(),
+        });
+
+        cancel_crossfade_for_seek(&mut crossfade, Some(&incoming_sink), 0.7);
+
+        assert!(crossfade.is_none());
+        assert!((incoming_sink.volume() - 0.7).abs() < f32::EPSILON);
+    }
+}
+
