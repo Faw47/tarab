@@ -137,6 +137,43 @@ describe('overlapping source requests', () => {
     expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
 
+  it('cancels lazy next playback when a newer source starts during hydration', async () => {
+    const queue = [
+      track('first'),
+      track('second', {
+        filePath: 'second',
+        _lazyQueueEntry: true,
+        _queueId: 'queue-second',
+      }),
+    ];
+    usePlayerStore.getState().setQueue(queue);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+
+    let resolveTrack: (value: Track | null) => void = () => undefined;
+    let resolveLookupStarted: () => void = () => undefined;
+    const lookupStarted = new Promise<void>((resolve) => {
+      resolveLookupStarted = resolve;
+    });
+    fetchLibraryTrackByIdMock.mockImplementationOnce(
+      () =>
+        new Promise<Track | null>((resolve) => {
+          resolveTrack = resolve;
+          resolveLookupStarted();
+        }),
+    );
+
+    const next = playAdjacentTrack('next');
+    await lookupStarted;
+    await startPlayback(track('newer'));
+    resolveTrack(track('second', { filePath: '/music/second.mp3' }));
+
+    await expect(next).resolves.toBeNull();
+    expect(playTrackMock).toHaveBeenCalledTimes(1);
+    expect(playTrackMock).toHaveBeenCalledWith('/music/newer.mp3', undefined);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
+  });
+
   it('keeps the newer track when an earlier start completes late', async () => {
     let resolveOlder: (generation: number) => void = () => undefined;
     playTrackMock.mockImplementationOnce(
