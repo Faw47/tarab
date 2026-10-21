@@ -2058,6 +2058,24 @@ mod tests {
 #[cfg(test)]
 mod bounded_seek_tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "tarab-bounded-seek-{}-{}-{}",
+            name,
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&directory).expect("create temporary directory");
+        directory
+    }
 
     #[test]
     fn a_blocked_seek_worker_does_not_block_the_audio_loop_or_duplicate_workers() {
