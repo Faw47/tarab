@@ -255,30 +255,34 @@ fn gapless_handoff_matches_playback(
         && state.current_file.as_deref() == Some(next_path)
 }
 
-fn commit_gapless_handoff(
-    state: &Arc<Mutex<PlaybackState>>,
-    cancelled: &AtomicBool,
-    active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
+struct GaplessHandoffCommit<'a> {
     emitted_for_next: Arc<AtomicU64>,
-    next_path: &str,
+    next_path: &'a str,
     next_generation: u64,
     duration: f64,
     start_position: f64,
     sample_rate: u32,
     channels: u16,
+}
+
+fn commit_gapless_handoff(
+    state: &Arc<Mutex<PlaybackState>>,
+    cancelled: &AtomicBool,
+    active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
+    handoff: GaplessHandoffCommit<'_>,
 ) -> bool {
     let mut state = state.lock();
     if cancelled.load(Ordering::Acquire) {
         return false;
     }
 
-    set_active_counter(active_emitted, emitted_for_next);
-    state.current_file = Some(next_path.to_string());
-    state.generation = next_generation;
-    state.duration = duration;
-    state.start_position = start_position;
-    state.position_sample_rate = sample_rate;
-    state.position_channels = channels;
+    set_active_counter(active_emitted, handoff.emitted_for_next);
+    state.current_file = Some(handoff.next_path.to_string());
+    state.generation = handoff.next_generation;
+    state.duration = handoff.duration;
+    state.start_position = handoff.start_position;
+    state.position_sample_rate = handoff.sample_rate;
+    state.position_channels = handoff.channels;
     state.warned_near_end = false;
     true
 }
@@ -1186,13 +1190,15 @@ impl AudioManager {
                                             &state_emit,
                                             &handoff_cancelled_for_callback,
                                             &active_slot,
-                                            Arc::clone(&cnt_next),
-                                            &next_clone,
-                                            next_generation,
-                                            duration2,
-                                            actual_start2,
-                                            sr2,
-                                            ch2,
+                                            GaplessHandoffCommit {
+                                                emitted_for_next: Arc::clone(&cnt_next),
+                                                next_path: &next_clone,
+                                                next_generation,
+                                                duration: duration2,
+                                                start_position: actual_start2,
+                                                sample_rate: sr2,
+                                                channels: ch2,
+                                            },
                                         );
                                         if !committed {
                                             return;
@@ -2119,13 +2125,15 @@ mod bounded_seek_tests {
             &state,
             &cancelled,
             &emitted,
-            Arc::new(AtomicU64::new(0)),
-            "incoming.wav",
-            8,
-            20.0,
-            0.0,
-            48_000,
-            2,
+            GaplessHandoffCommit {
+                emitted_for_next: Arc::new(AtomicU64::new(0)),
+                next_path: "incoming.wav",
+                next_generation: 8,
+                duration: 20.0,
+                start_position: 0.0,
+                sample_rate: 48_000,
+                channels: 2,
+            },
         );
 
         assert_eq!(generation, 7);
@@ -2137,10 +2145,12 @@ mod bounded_seek_tests {
 
     #[test]
     fn stopped_playback_suppresses_a_queued_handoff_event() {
-        let mut state = PlaybackState::default();
-        state.current_file = Some("incoming.wav".to_string());
-        state.generation = 8;
-        state.is_playing = false;
+        let mut state = PlaybackState {
+            current_file: Some("incoming.wav".to_string()),
+            generation: 8,
+            is_playing: false,
+            ..PlaybackState::default()
+        };
 
         assert!(!gapless_handoff_matches_playback(&state, 8, "incoming.wav"));
         state.is_playing = true;
@@ -2170,13 +2180,15 @@ mod bounded_seek_tests {
             &state,
             &cancelled,
             &emitted,
-            Arc::new(AtomicU64::new(0)),
-            "incoming.wav",
-            8,
-            20.0,
-            0.0,
-            48_000,
-            2,
+            GaplessHandoffCommit {
+                emitted_for_next: Arc::new(AtomicU64::new(0)),
+                next_path: "incoming.wav",
+                next_generation: 8,
+                duration: 20.0,
+                start_position: 0.0,
+                sample_rate: 48_000,
+                channels: 2,
+            },
         );
 
         assert_eq!(generation, 7);
@@ -2207,13 +2219,15 @@ mod bounded_seek_tests {
             &state,
             &cancelled,
             &emitted,
-            Arc::new(AtomicU64::new(0)),
-            "incoming.wav",
-            8,
-            20.0,
-            0.0,
-            48_000,
-            2,
+            GaplessHandoffCommit {
+                emitted_for_next: Arc::new(AtomicU64::new(0)),
+                next_path: "incoming.wav",
+                next_generation: 8,
+                duration: 20.0,
+                start_position: 0.0,
+                sample_rate: 48_000,
+                channels: 2,
+            },
         ));
 
         let (generation, path, _, _, playing, handoff_pending) =
@@ -2292,13 +2306,15 @@ mod bounded_seek_tests {
             &state,
             &cancelled,
             &emitted,
-            Arc::new(AtomicU64::new(0)),
-            "incoming.wav",
-            8,
-            20.0,
-            0.0,
-            48_000,
-            2,
+            GaplessHandoffCommit {
+                emitted_for_next: Arc::new(AtomicU64::new(0)),
+                next_path: "incoming.wav",
+                next_generation: 8,
+                duration: 20.0,
+                start_position: 0.0,
+                sample_rate: 48_000,
+                channels: 2,
+            },
         ));
         let (generation, path, _, duration, _, had_queued_source) =
             snapshot_playback_for_seek(&state, &mut pending);
