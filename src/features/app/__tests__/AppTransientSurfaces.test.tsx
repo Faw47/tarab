@@ -66,3 +66,11 @@ describe('AppTransientSurfaces full player Escape (FE-25)', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+describe('AppTransientSurfaces keyboard shortcuts reference (FE-36)', () => {
+  it('opens from the top-bar event', async () => {
+    renderSurfaces(vi.fn());
+    fireEvent(window, new Event('tarab:open-keyboard-shortcuts'));
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+});

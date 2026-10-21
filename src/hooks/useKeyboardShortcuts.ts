@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { playAdjacentTrack, toggleCurrentPlayback } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
-import { stepVolume, toggleMute } from '../lib/volume';
+import { toggleMute } from '../lib/volume';
 import { usePlayerStore } from '../store/player-store';
 import type { ContextMenuPosition, Track } from '../types';
 
@@ -104,30 +104,6 @@ export const useKeyboardShortcuts = ({
             }
           }
           break;
-
-        case 'ArrowUp': {
-          const target = e.target instanceof HTMLElement ? e.target : null;
-          const inScrollable =
-            target?.closest('[data-scrollable]') ||
-            target?.closest('.overflow-auto') ||
-            target?.closest('.overflow-y-auto');
-          if (inScrollable) break;
-          e.preventDefault();
-          await stepVolume(0.1, 'app');
-          break;
-        }
-
-        case 'ArrowDown': {
-          const target = e.target instanceof HTMLElement ? e.target : null;
-          const inScrollable =
-            target?.closest('[data-scrollable]') ||
-            target?.closest('.overflow-auto') ||
-            target?.closest('.overflow-y-auto');
-          if (inScrollable) break;
-          e.preventDefault();
-          await stepVolume(-0.1, 'app');
-          break;
-        }
 
         case 'KeyM': {
           e.preventDefault();

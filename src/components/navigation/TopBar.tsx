@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronLeft,
   Home,
+  Keyboard,
   ListMusic,
   Loader2,
   type LucideIcon,
@@ -768,6 +769,12 @@ export const TopBar = memo(function TopBar({
             label={commandPaletteLabel}
             icon={<TerminalSquare className="h-4 w-4" />}
             onClick={() => window.dispatchEvent(new Event('tarab:open-command-palette'))}
+          />
+
+          <ActionIconButton
+            label="Keyboard shortcuts"
+            icon={<Keyboard className="h-4 w-4" />}
+            onClick={() => window.dispatchEvent(new Event('tarab:open-keyboard-shortcuts'))}
           />
 
           {showShuffle && onShuffleAll && (

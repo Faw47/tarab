@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { Check } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { FloatingDock, type NavView } from '../../components/navigation';
+import { KeyboardShortcutsDialog } from '../../components/navigation/KeyboardShortcutsDialog';
 import type { AppTheme } from '../../store/settings-store';
 import type { Track } from '../../types';
 
@@ -98,6 +99,7 @@ export function AppTransientSurfaces({
 
   return (
     <>
+      <KeyboardShortcutsDialog theme={theme} />
       <Suspense fallback={null}>
         <GlobalCommandPalette
           currentView={currentView}
