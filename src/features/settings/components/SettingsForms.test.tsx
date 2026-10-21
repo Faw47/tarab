@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listAudioOutputDevices, setAudioOutputDevice } from '../../../lib/tauri-commands';
 import { useSettingsStore } from '../../../store/settings-store';
+import { useAutostartIntegration } from '../../app/useAutostartIntegration';
 import { DesktopIntegrationForm, PlaybackSettingsForm } from './SettingsForms';
 
 vi.mock('@tauri-apps/plugin-autostart', () => ({
@@ -20,6 +21,11 @@ vi.mock('../../../lib/tauri-commands', () => ({
   setAudioOutputDevice: vi.fn(async () => undefined),
 }));
 
+function DesktopSettings() {
+  useAutostartIntegration();
+  return <DesktopIntegrationForm />;
+}
+
 describe('DesktopIntegrationForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -33,7 +39,7 @@ describe('DesktopIntegrationForm', () => {
   it('hydrates open-at-login from the OS before applying stored settings', async () => {
     vi.mocked(isEnabled).mockResolvedValue(true);
 
-    render(<DesktopIntegrationForm />);
+    render(<DesktopSettings />);
 
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
     expect(disable).not.toHaveBeenCalled();
@@ -44,7 +50,7 @@ describe('DesktopIntegrationForm', () => {
     vi.mocked(isEnabled).mockResolvedValue(false);
     vi.mocked(enable).mockRejectedValueOnce(new Error('permission denied'));
 
-    render(<DesktopIntegrationForm />);
+    render(<DesktopSettings />);
 
     await waitFor(() => expect(isEnabled).toHaveBeenCalled());
 
@@ -59,7 +65,7 @@ describe('DesktopIntegrationForm', () => {
       shortcuts: { playPause: 'Ctrl+Space', next: 'Ctrl+Right', previous: 'Ctrl+Left' },
     });
 
-    render(<DesktopIntegrationForm />);
+    render(<DesktopSettings />);
 
     const input = screen.getByRole('textbox', { name: 'Play/Pause shortcut' });
     fireEvent.change(input, { target: { value: 'Alt+P' } });

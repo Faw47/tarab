@@ -23,12 +23,6 @@ const normalizeShortcut = (key: ShortcutKey, value: string | undefined): string 
   return normalized || DEFAULT_SHORTCUTS[key];
 };
 
-const normalizeShortcuts = (shortcuts?: Partial<Record<ShortcutKey, string>>) => ({
-  playPause: normalizeShortcut('playPause', shortcuts?.playPause),
-  next: normalizeShortcut('next', shortcuts?.next),
-  previous: normalizeShortcut('previous', shortcuts?.previous),
-});
-
 const normalizeLibraryFolder = (folder: string): string =>
   normalizePath(folder.trim()).replace(/\/+$/, '');
 
@@ -307,8 +301,45 @@ export const useSettingsStore = create<SettingsState>()(
         name: 'tarab-settings',
         storage: createJSONStorage(() => createTauriZustandStorage('settings.json')),
         version: 7,
+        merge: (persisted, current) => {
+          const incoming =
+            persisted !== null && typeof persisted === 'object' && !Array.isArray(persisted)
+              ? (persisted as Record<string, unknown>)
+              : {};
+          const valid: Record<string, unknown> = {};
+          for (const [key, schema] of Object.entries(SettingsSchema.shape)) {
+            if (key === 'shortcuts') continue;
+            const parsed = schema.safeParse(incoming[key]);
+            if (parsed.success && parsed.data !== undefined) valid[key] = parsed.data;
+          }
+          const shortcuts = { ...current.shortcuts };
+          if (
+            incoming.shortcuts !== null &&
+            typeof incoming.shortcuts === 'object' &&
+            !Array.isArray(incoming.shortcuts)
+          ) {
+            const stored = incoming.shortcuts as Record<string, unknown>;
+            for (const key of Object.keys(DEFAULT_SHORTCUTS) as ShortcutKey[]) {
+              if (typeof stored[key] === 'string') {
+                shortcuts[key] = normalizeShortcut(key, stored[key]);
+              }
+            }
+          }
+          return {
+            ...current,
+            ...valid,
+            libraryFolders: mergeLibraryFolders(
+              [],
+              (valid.libraryFolders as string[] | undefined) ?? current.libraryFolders,
+            ),
+            shortcuts,
+          };
+        },
         migrate: (persisted, version) => {
-          let incoming = (persisted as Partial<SettingsState>) ?? {};
+          let incoming: Partial<SettingsState> =
+            persisted !== null && typeof persisted === 'object' && !Array.isArray(persisted)
+              ? { ...(persisted as Partial<SettingsState>) }
+              : {};
           if ((version ?? 0) < 2) {
             incoming = {
               ...incoming,
@@ -323,7 +354,7 @@ export const useSettingsStore = create<SettingsState>()(
               ...incoming,
               smartShuffleEnabled: incoming.smartShuffleEnabled ?? true,
               theme: incoming.theme ?? 'liquid-glass',
-              navMode: incoming.navMode ?? 'iconRail',
+              navMode: incoming.navMode ?? 'topNav',
             } as Partial<SettingsState>;
           }
           if ((version ?? 0) < 4) {
@@ -331,7 +362,6 @@ export const useSettingsStore = create<SettingsState>()(
               ...incoming,
               globalShortcutsEnabled: incoming.globalShortcutsEnabled ?? false,
               autostartEnabled: incoming.autostartEnabled ?? false,
-              shortcuts: normalizeShortcuts(incoming.shortcuts),
             } as Partial<SettingsState>;
           }
           if ((version ?? 0) < 5) {
@@ -346,16 +376,6 @@ export const useSettingsStore = create<SettingsState>()(
               autoLyrics: false,
             } as Partial<SettingsState>;
           }
-          incoming = {
-            ...incoming,
-            libraryFolders: mergeLibraryFolders([], incoming.libraryFolders ?? []),
-            shortcuts: normalizeShortcuts(incoming.shortcuts),
-          } as Partial<SettingsState>;
-          const parsed = SettingsSchema.safeParse(incoming);
-          if (parsed.success) {
-            return parsed.data as SettingsState;
-          }
-          console.warn('Failed to parse some settings from storage', parsed.error);
           return incoming as SettingsState;
         },
       },

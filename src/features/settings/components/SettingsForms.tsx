@@ -1,4 +1,3 @@
-import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { Eye, HardDrive, Layout, ListMusic, Monitor, Shuffle } from 'lucide-react';
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -11,7 +10,6 @@ import {
   SettingsSwitch,
 } from '../../../components/settings/primitives';
 import { liquidGlassSettingsTextInputClassName } from '../../../lib/liquid-glass-settings-ui';
-import { reportError } from '../../../lib/report-error';
 import { type AudioOutputDeviceInfo, listAudioOutputDevices } from '../../../lib/tauri-commands';
 import { cn } from '../../../lib/utils';
 import { DEFAULT_SHORTCUTS, useSettingsStore } from '../../../store/settings-store';
@@ -179,7 +177,6 @@ export const DesktopIntegrationForm = memo(() => {
   const setShortcut = useSettingsStore((s) => s.setShortcut);
   const setAutostartEnabled = useSettingsStore((s) => s.setAutostartEnabled);
 
-  const autostartHydratedRef = useRef(false);
   const skipNextShortcutCommitRef = useRef(false);
 
   const [draftPlayPause, setDraftPlayPause] = useState(shortcuts.playPause);
@@ -235,41 +232,6 @@ export const DesktopIntegrationForm = memo(() => {
     },
     [],
   );
-
-  useEffect(() => {
-    const syncAutostart = async () => {
-      const wasHydrated = autostartHydratedRef.current;
-      let currentlyEnabled: boolean | null = null;
-      try {
-        currentlyEnabled = await isEnabled();
-        if (!wasHydrated) {
-          autostartHydratedRef.current = true;
-          if (currentlyEnabled !== autostartEnabled) {
-            setAutostartEnabled(currentlyEnabled);
-          }
-          return;
-        }
-        if (currentlyEnabled !== autostartEnabled) {
-          if (autostartEnabled) await enable();
-          else await disable();
-        }
-      } catch (error) {
-        if (wasHydrated) {
-          if (currentlyEnabled !== null && currentlyEnabled !== autostartEnabled) {
-            setAutostartEnabled(currentlyEnabled);
-          }
-          reportError('Failed to sync open at login', { source: 'desktop-settings', error });
-        } else {
-          reportError('Failed to read open at login setting', {
-            source: 'desktop-settings',
-            error,
-          });
-          autostartHydratedRef.current = true;
-        }
-      }
-    };
-    void syncAutostart();
-  }, [autostartEnabled, setAutostartEnabled]);
 
   const shortcutInputClassName = cn(
     'w-full max-w-[14rem] outline-none transition-colors',

@@ -1,9 +1,20 @@
 import type { StateStorage } from 'zustand/middleware';
+import { reportError } from '../lib/report-error';
 import { fixedStoreGet, fixedStoreRemove, fixedStoreSet } from '../lib/tauri-commands';
 import { logger } from './logger';
 
 const DOMAIN = 'TauriZustandStorage';
 const pendingWrites = new Set<Promise<void>>();
+let writeFailureReported = false;
+
+function reportWriteFailure(error: unknown) {
+  if (writeFailureReported) return;
+  writeFailureReported = true;
+  reportError('Could not save settings. Your changes may be lost when Tarab closes.', {
+    source: 'settings-storage',
+    error,
+  });
+}
 
 async function trackSettingsWrite(write: Promise<void>): Promise<void> {
   pendingWrites.add(write);
@@ -39,15 +50,19 @@ export const createTauriZustandStorage = (_storePath: 'settings.json'): StateSto
   setItem: async (name: string, value: string): Promise<void> => {
     try {
       await trackSettingsWrite(fixedStoreSet('settings', name, JSON.parse(value)));
+      writeFailureReported = false;
     } catch (err) {
       logger.error(DOMAIN, `Failed to set item "${name}"`, err);
+      reportWriteFailure(err);
     }
   },
   removeItem: async (name: string): Promise<void> => {
     try {
       await trackSettingsWrite(fixedStoreRemove('settings', name));
+      writeFailureReported = false;
     } catch (err) {
       logger.error(DOMAIN, `Failed to remove item "${name}"`, err);
+      reportWriteFailure(err);
     }
   },
 });
