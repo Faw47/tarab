@@ -223,9 +223,8 @@ const playAdjacentTrackOnce = async (
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
     const currentIndex = findQueueEntryIndex(track);
-    const activated = currentIndex >= 0
-      ? freshState.activateTrackAtIndex(currentIndex, { backward: true })
-      : null;
+    const activated =
+      currentIndex >= 0 ? freshState.activateTrackAtIndex(currentIndex, { backward: true }) : null;
     if (!activated) freshState.setCurrentTrack(track);
     freshState.setDuration(track.duration);
     freshState.setIsPlaying(true);
