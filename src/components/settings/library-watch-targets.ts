@@ -1,5 +1,10 @@
 import { isSameOrSubPath, normalizePath } from '../../lib/path-utils';
 
+export interface LibraryWatchEventPayload {
+  rootId: string;
+  relativePath: string;
+}
+
 /** Above this many distinct changed folders in one debounce window, rescan the whole root. */
 export const MAX_WATCH_SCAN_TARGETS = 16;
 
@@ -34,6 +39,29 @@ export function resolveWatchScanTarget(
     : trimTrailingSlash(changedPath);
   const target = isSameOrSubPath(candidate, root) ? candidate : root;
   return { root, target };
+}
+
+/**
+ * Converts a root-identified native event into a scan target under the exact configured root.
+ * Relative paths come from the native watcher, but are still checked before joining.
+ */
+export function resolveWatchEventScanTarget(
+  event: LibraryWatchEventPayload,
+  roots: string[],
+): { root: string; target: string } | null {
+  const root = roots.find((candidate) => candidate === event.rootId);
+  if (!root) return null;
+
+  const relativePath = normalizePath(event.relativePath);
+  if (relativePath.startsWith('/') || /^[a-z]:/i.test(relativePath)) return null;
+  const segments = relativePath.split('/').filter((segment) => segment && segment !== '.');
+  if (segments.some((segment) => segment === '..')) return null;
+
+  const normalizedRoot = trimTrailingSlash(root) || '/';
+  const changedPath = segments.length
+    ? `${normalizedRoot === '/' ? '' : normalizedRoot}/${segments.join('/')}`
+    : normalizedRoot;
+  return resolveWatchScanTarget(changedPath, [root]);
 }
 
 /**

@@ -31,6 +31,19 @@ impl WatchChange {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WatchedRoot {
+    root_id: String,
+    canonical_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryWatchEventPayload {
+    root_id: String,
+    relative_path: String,
+}
+
 fn is_audio_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -132,9 +145,29 @@ impl WatcherTask {
     }
 }
 
-pub fn start_watcher<R: Runtime>(
+fn watch_event_payload(
+    changed_path: &Path,
+    roots: &[WatchedRoot],
+) -> Option<LibraryWatchEventPayload> {
+    let (root, relative_path) = roots
+        .iter()
+        .filter_map(|root| {
+            changed_path
+                .strip_prefix(&root.canonical_path)
+                .ok()
+                .map(|relative_path| (root, relative_path))
+        })
+        .max_by_key(|(root, _)| root.canonical_path.components().count())?;
+
+    Some(LibraryWatchEventPayload {
+        root_id: root.root_id.clone(),
+        relative_path: relative_path.to_string_lossy().into_owned(),
+    })
+}
+
+fn start_watcher<R: Runtime>(
     app_handle: AppHandle<R>,
-    paths: Vec<String>,
+    roots: Vec<WatchedRoot>,
 ) -> Result<WatcherTask, String> {
     let (event_tx, event_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
@@ -146,15 +179,18 @@ pub fn start_watcher<R: Runtime>(
     // stop watching the others.
     let mut watched = 0;
     let mut first_error = None;
-    for path in &paths {
-        let p = Path::new(path);
-        if !p.exists() {
+    for root in &roots {
+        let path = &root.canonical_path;
+        if !path.exists() {
             continue;
         }
-        match watcher.watch(p, RecursiveMode::Recursive) {
+        match watcher.watch(path, RecursiveMode::Recursive) {
             Ok(()) => watched += 1,
             Err(error) => {
-                eprintln!("library watcher could not watch {}: {}", path, error);
+                eprintln!(
+                    "library watcher could not watch {}: {}",
+                    root.root_id, error
+                );
                 first_error.get_or_insert_with(|| error.to_string());
             }
         }
@@ -188,11 +224,10 @@ pub fn start_watcher<R: Runtime>(
             }
 
             for (path, change) in debouncer.drain_ready(Instant::now()) {
-                let _ = app_handle.emit_to(
-                    MAIN_WINDOW_LABEL,
-                    change.event_name(),
-                    path.to_string_lossy().to_string(),
-                );
+                let Some(payload) = watch_event_payload(&path, &roots) else {
+                    continue;
+                };
+                let _ = app_handle.emit_to(MAIN_WINDOW_LABEL, change.event_name(), payload);
             }
         }
     });
@@ -200,12 +235,15 @@ pub fn start_watcher<R: Runtime>(
     Ok(WatcherTask { stop_tx, handle })
 }
 
-fn validate_watch_paths(paths: Vec<String>, roots: &[PathBuf]) -> Result<Vec<String>, String> {
+fn validate_watch_paths(paths: Vec<String>, roots: &[PathBuf]) -> Result<Vec<WatchedRoot>, String> {
     let mut allowed_paths = Vec::with_capacity(paths.len());
     for path in paths {
         let canonical =
             ensure_existing_path_allowed(Path::new(&path), roots, "watch library folder")?;
-        allowed_paths.push(canonical.to_string_lossy().to_string());
+        allowed_paths.push(WatchedRoot {
+            root_id: path,
+            canonical_path: canonical,
+        });
     }
     Ok(allowed_paths)
 }
@@ -263,7 +301,13 @@ mod tests {
         let allowed =
             validate_watch_paths(vec![allowed_root.to_string_lossy().to_string()], &roots)
                 .expect("allowed path");
-        assert_eq!(allowed, vec![roots[0].to_string_lossy().to_string()]);
+        assert_eq!(
+            allowed,
+            vec![WatchedRoot {
+                root_id: allowed_root.to_string_lossy().to_string(),
+                canonical_path: roots[0].clone(),
+            }]
+        );
 
         let blocked =
             validate_watch_paths(vec![outside_root.to_string_lossy().to_string()], &roots);
@@ -271,6 +315,68 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validation_preserves_a_symlinked_configured_root_id() {
+        let real_root = temp_path("watch-real");
+        let alias_root = temp_path("watch-alias");
+        fs::create_dir_all(&real_root).expect("create real root");
+        std::os::unix::fs::symlink(&real_root, &alias_root).expect("create symlink");
+
+        let canonical_root = fs::canonicalize(&real_root).expect("canonical root");
+        let configured_root = alias_root.to_string_lossy().into_owned();
+        let roots = validate_watch_paths(
+            vec![configured_root.clone()],
+            std::slice::from_ref(&canonical_root),
+        )
+        .expect("validate symlinked root");
+
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].root_id, configured_root);
+        assert_eq!(roots[0].canonical_path, canonical_root);
+
+        let _ = fs::remove_file(alias_root);
+        let _ = fs::remove_dir_all(real_root);
+    }
+
+    #[test]
+    fn canonical_watcher_event_keeps_the_configured_root_identity() {
+        let roots = vec![WatchedRoot {
+            root_id: "/var/music".to_string(),
+            canonical_path: PathBuf::from("/private/var/music"),
+        }];
+
+        assert_eq!(
+            watch_event_payload(Path::new("/private/var/music/Artist/Album/01.flac"), &roots),
+            Some(LibraryWatchEventPayload {
+                root_id: "/var/music".to_string(),
+                relative_path: "Artist/Album/01.flac".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn canonical_watcher_event_uses_the_most_specific_configured_root() {
+        let roots = vec![
+            WatchedRoot {
+                root_id: "/music".to_string(),
+                canonical_path: PathBuf::from("/real/music"),
+            },
+            WatchedRoot {
+                root_id: "/music/Jazz".to_string(),
+                canonical_path: PathBuf::from("/real/music/Jazz"),
+            },
+        ];
+
+        assert_eq!(
+            watch_event_payload(Path::new("/real/music/Jazz/song.flac"), &roots),
+            Some(LibraryWatchEventPayload {
+                root_id: "/music/Jazz".to_string(),
+                relative_path: "song.flac".to_string(),
+            })
+        );
     }
 
     fn event(kind: EventKind, paths: &[&str]) -> Event {
