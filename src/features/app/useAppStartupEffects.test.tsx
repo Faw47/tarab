@@ -31,6 +31,7 @@ describe('app autostart lifecycle', () => {
 
   beforeEach(async () => {
     await useSettingsStore.persist.rehydrate();
+    await waitFor(() => expect(useSettingsStore.persist.hasHydrated()).toBe(true));
     useSettingsStore.setState({ autostartEnabled: false });
     vi.mocked(isEnabled).mockReset().mockResolvedValue(true);
     vi.mocked(enable).mockReset().mockResolvedValue(undefined);
