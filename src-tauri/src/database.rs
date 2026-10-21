@@ -14,7 +14,7 @@ mod migrations;
 mod playlists;
 mod tracks;
 
-const CURRENT_SCHEMA_VERSION: i32 = 11;
+const CURRENT_SCHEMA_VERSION: i32 = 12;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
@@ -46,6 +46,8 @@ pub struct DbTrack {
     pub artist: String,
     pub album_artist: Option<String>,
     pub album: String,
+    #[serde(default)]
+    pub genre: Option<String>,
     pub year: Option<i32>,
     pub duration: f64,
     pub file_path: String,
@@ -295,7 +297,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks 
              WHERE date_added >= ?1 
              ORDER BY date_added DESC 
@@ -314,7 +316,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks 
              WHERE play_count > 0
              ORDER BY play_count DESC 
@@ -1027,6 +1029,7 @@ mod tests {
             artist: "Artist".to_string(),
             album_artist: None,
             album: "Album".to_string(),
+            genre: None,
             year: None,
             duration: 1.0,
             file_path: outside_file.to_string_lossy().to_string(),
@@ -1062,6 +1065,7 @@ mod tests {
             artist: "Artist".to_string(),
             album_artist: None,
             album: "Album".to_string(),
+            genre: None,
             year: Some(2020),
             duration: 180.0,
             file_path: format!("/tmp/{}.mp3", id),
