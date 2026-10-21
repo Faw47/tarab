@@ -50,13 +50,13 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | Disposition | Count |
 |---|---|
 | FIXED_VERIFIED | 72 |
-| ALREADY_RESOLVED | 1 |
+| ALREADY_RESOLVED | 2 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 41 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 44 |
+| PENDING | 43 |
 | **Total** | **160** |
 
 ## Findings
@@ -192,7 +192,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | AR-36 | P3 | Errors are untyped strings and behavior depends on message text | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-25 | P3 | Dead code, dead dependencies and unused IPC surface | PENDING | PASS / PASS / - | G1: baseline #126 (run #672) found 21 unused renderer wrappers. G2: exact fix head d7094e2 passed all five jobs (run #679); cumulative head 1c37ca2 passed all five jobs (run #685). G3 independent review is not recorded. | d7094e2 | #127 |
 | AR-28 | P3 | Image cache: dead in-memory LRU, mtime-based "LRU", possible size underflow, renderer-only enforcement | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-29 | P3 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | PENDING | n/a / PASS / - | G1 n/a: the generator had no UI callers and was reachable only through IPC; AR-25 removed the unused feature rather than maintaining a dead cache. G2: PR #127 removes src-tauri/src/waveform.rs and its module/import/IPC registrations; all five jobs passed on removal head d7094e2 (run #679), and the cumulative stack passed run #710. G3 independent review pending. | d7094e2 | #127 |
+| AR-29 | P3 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | ALREADY_RESOLVED | n/a / PASS / PASS | G1 n/a: the generator had no UI callers and was reachable only through IPC; AR-25 removed the unused feature rather than maintaining a dead cache. G2: PR #127 removes src-tauri/src/waveform.rs and its module/import/IPC registrations; all five jobs passed on removal head d7094e2 (run #679), and the cumulative stack passed run #710. G3: independent review at exact head d7094e2 confirmed there is no remaining waveform generator, wrapper, module or consumer. This resolution is part of the unmerged AR-25 stack. | d7094e2 | #127 |
 | PB-22 | P3 | `rubato` dependency unused; sample-rate conversion uses rodio's linear converter | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-37 | P3 | Minor reliability items | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-03 | P3 | Waveform generator sizes a buffer from an unvalidated sample rate | FIXED_VERIFIED | G1 bounds regression/source proof / G2 exact-base Rust CI PASS / G3 fresh PASS | Metadata validation precedes allocation; checked chunk sizes cap at 307200 f32 samples (1228800 bytes). One Rust regression test has seven assertions covering invalid metadata and bounds. PR #30 Rust tests/check/Clippy pass on all three platforms. Independent source review clean. No local Cargo or malformed-file decoding claimed. | f28b588 | #18; evidence continuation |
