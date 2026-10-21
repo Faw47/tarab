@@ -3,6 +3,46 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+static EARLY_DIAGNOSTICS: OnceLock<Mutex<Vec<(log::Level, String)>>> = OnceLock::new();
+
+fn early_diagnostics() -> &'static Mutex<Vec<(log::Level, String)>> {
+    EARLY_DIAGNOSTICS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub(crate) fn queue_early_diagnostic(level: log::Level, message: impl Into<String>) {
+    early_diagnostics()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push((level, message.into()));
+}
+
+fn take_early_diagnostics() -> Vec<(log::Level, String)> {
+    std::mem::take(
+        &mut *early_diagnostics()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
+}
+
+pub(crate) fn flush_early_diagnostics() {
+    for (level, message) in take_early_diagnostics() {
+        log::log!(level, "{message}");
+    }
+}
+
+fn startup_diagnostics_text(
+    mut early: Vec<(log::Level, String)>,
+    primary: (log::Level, String),
+) -> String {
+    early.push(primary);
+    early
+        .into_iter()
+        .map(|(level, message)| format!("{level:?}: {message}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Whether this process is the first running copy of Tarab. Taken before the library is opened,
 /// so a second launch (which the single-instance plugin hands off) never runs migrations or the
@@ -26,7 +66,10 @@ pub fn acquire_instance_lock() -> InstanceLock {
     let instance = acquire_lock_file(&dir.join("instance.lock"));
     if instance.is_primary() {
         if let Err(error) = crate::database::get_app_data_dir() {
-            eprintln!("Failed to prepare Tarab data directory before startup: {error}");
+            queue_early_diagnostic(
+                log::Level::Error,
+                format!("Failed to prepare Tarab data directory before startup: {error}"),
+            );
         }
     }
     instance
@@ -127,10 +170,14 @@ fn log_note(message: &str) -> String {
 /// Shows why the Tauri application could not be built.
 pub fn report_build_failure(error: &str) {
     log::error!("error while building Tauri application: {error}");
+    let details = startup_diagnostics_text(
+        take_early_diagnostics(),
+        (log::Level::Error, format!("error while building Tauri application: {error}")),
+    );
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("Tarab could not start")
-        .set_description(format!("{error}{}", log_note(error)))
+        .set_description(format!("{error}{}", log_note(&details)))
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
 }
@@ -138,8 +185,12 @@ pub fn report_build_failure(error: &str) {
 /// Shows that the library database could not be opened (before Tauri starts) and offers to move
 /// it aside (renamed, not deleted) and start again with an empty library.
 pub fn report_database_failure(database_error: &str, instance: InstanceLock) {
-    eprintln!("{database_error}");
-    let log_note = log_note(database_error);
+    log::error!("{database_error}");
+    let details = startup_diagnostics_text(
+        take_early_diagnostics(),
+        (log::Level::Error, database_error.to_string()),
+    );
+    let log_note = log_note(&details);
 
     let start_fresh = "Start with an empty library";
     let choice = rfd::MessageDialog::new()

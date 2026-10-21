@@ -460,7 +460,9 @@ pub fn run() {
         .build(tauri::generate_context!());
 
     match app {
-        Ok(app) => app.run(|_app_handle, _event| {
+        Ok(app) => {
+            startup_failure::flush_early_diagnostics();
+            app.run(|_app_handle, _event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
                 if !shutdown::exit_approved(_app_handle) {
                     api.prevent_exit();
@@ -485,7 +487,8 @@ pub fn run() {
                     }
                 }
             }
-        }),
+            })
+        },
         Err(error) => startup_failure::report_build_failure(&error.to_string()),
     }
 }
