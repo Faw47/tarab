@@ -633,17 +633,17 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             finished = false;
             let (samples, reached_end) =
                 match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
-                PrefetchChunkRead::Ready {
-                    samples,
-                    reached_end,
-                } => (samples, reached_end),
-                PrefetchChunkRead::Command(command) => {
-                    pending_command = Some(command);
-                    continue;
-                }
-                PrefetchChunkRead::GenerationChanged => continue,
-                PrefetchChunkRead::Closed => return,
-            };
+                    PrefetchChunkRead::Ready {
+                        samples,
+                        reached_end,
+                    } => (samples, reached_end),
+                    PrefetchChunkRead::Command(command) => {
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchChunkRead::GenerationChanged => continue,
+                    PrefetchChunkRead::Closed => return,
+                };
 
             if !samples.is_empty() {
                 match send_prefetch_message(
@@ -693,17 +693,17 @@ fn run_prefetch_worker<S: PrefetchableSource>(
 
         let (samples, reached_end) =
             match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
-            PrefetchChunkRead::Ready {
-                samples,
-                reached_end,
-            } => (samples, reached_end),
-            PrefetchChunkRead::Command(command) => {
-                pending_command = Some(command);
-                continue;
-            }
-            PrefetchChunkRead::GenerationChanged => continue,
-            PrefetchChunkRead::Closed => return,
-        };
+                PrefetchChunkRead::Ready {
+                    samples,
+                    reached_end,
+                } => (samples, reached_end),
+                PrefetchChunkRead::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchChunkRead::GenerationChanged => continue,
+                PrefetchChunkRead::Closed => return,
+            };
         if !samples.is_empty() {
             match send_prefetch_message(
                 &output,
