@@ -463,37 +463,76 @@ impl Database {
             })
             .collect();
         ranked.sort_unstable_by(|left, right| left.2.total_cmp(&right.2));
-        let mut ordered: Vec<(String, String)> = ranked
+        let ordered: Vec<(String, String)> = ranked
             .into_iter()
             .map(|(id, artist, _)| (id, artist))
             .collect();
 
-        let n = ordered.len();
-        for _ in 0..(n * 3).min(512) {
-            let mut swapped = false;
-            for i in 0..n {
-                let artist_i = ordered[i].1.clone();
-                let near_dup = (1..=3).any(|d| {
-                    let j = i + d;
-                    j < n && ordered[j].1 == artist_i
-                });
-                if !near_dup {
-                    continue;
+        let ordered = Self::interleave_smart_shuffle_by_artist(ordered);
+        Ok(ordered.into_iter().map(|(id, _)| id).collect())
+    }
+
+    fn interleave_smart_shuffle_by_artist(ordered: Vec<(String, String)>) -> Vec<(String, String)> {
+        if ordered.len() < 2 {
+            return ordered;
+        }
+
+        // Preserve each artist's weighted rank, while choosing the best-ranked artist whose
+        // bucket has not appeared in the last three slots. Only one head per artist is available,
+        // so at most three heads can be skipped before finding an eligible bucket.
+        let mut artist_indices = std::collections::HashMap::<String, usize>::new();
+        let mut artist_buckets = Vec::<Vec<usize>>::new();
+        for (rank, (_, artist)) in ordered.iter().enumerate() {
+            let bucket_index = match artist_indices.get(artist) {
+                Some(index) => *index,
+                None => {
+                    let index = artist_buckets.len();
+                    artist_buckets.push(Vec::new());
+                    artist_indices.insert(artist.clone(), index);
+                    index
                 }
-                for j in (i + 4)..n {
-                    if ordered[j].1 != artist_i {
-                        ordered.swap(i + 1, j);
-                        swapped = true;
-                        break;
-                    }
-                }
-            }
-            if !swapped {
-                break;
+            };
+            artist_buckets[bucket_index].push(rank);
+        }
+
+        let mut available = std::collections::BTreeSet::<(usize, usize)>::new();
+        for (artist_index, bucket) in artist_buckets.iter().enumerate() {
+            if let Some(rank) = bucket.first() {
+                available.insert((*rank, artist_index));
             }
         }
 
-        Ok(ordered.into_iter().map(|(id, _)| id).collect())
+        let mut bucket_cursors = vec![0; artist_buckets.len()];
+        let mut recent_artists = std::collections::VecDeque::with_capacity(3);
+        let mut interleaved = Vec::with_capacity(ordered.len());
+
+        while !available.is_empty() {
+            let next = available
+                .iter()
+                .find(|(_, artist_index)| !recent_artists.contains(artist_index))
+                .copied()
+                .or_else(|| available.iter().next().copied());
+            let Some((rank, artist_index)) = next else {
+                break;
+            };
+
+            available.remove(&(rank, artist_index));
+            let (id, artist) = &ordered[rank];
+            interleaved.push((id.clone(), artist.clone()));
+
+            bucket_cursors[artist_index] += 1;
+            if let Some(next_rank) = artist_buckets[artist_index].get(bucket_cursors[artist_index])
+            {
+                available.insert((*next_rank, artist_index));
+            }
+
+            if recent_artists.len() == 3 {
+                let _ = recent_artists.pop_front();
+            }
+            recent_artists.push_back(artist_index);
+        }
+
+        interleaved
     }
 
     // ========== Stats ==========
@@ -2045,6 +2084,54 @@ mod tests {
             assert!(reference.contains_key("id"));
             assert!(reference.contains_key("duration"));
         }
+    }
+
+    #[test]
+    fn smart_shuffle_scales_for_a_large_single_artist_library() {
+        const TRACK_COUNT: usize = 50_000;
+        let db = test_db();
+        let tracks = (0..TRACK_COUNT)
+            .map(|index| {
+                let mut track = sample_track(&format!("smart-shuffle-{index:05}"));
+                track.artist = "One artist".to_string();
+                track
+            })
+            .collect::<Vec<_>>();
+        let ids = tracks.iter().map(|track| track.id.clone()).collect();
+
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+
+        let started = std::time::Instant::now();
+        let result = db.get_smart_shuffle_queue(ids).expect("smart shuffle");
+        let elapsed = started.elapsed();
+
+        assert_eq!(result.len(), TRACK_COUNT);
+        assert!(
+            elapsed < std::time::Duration::from_secs(8),
+            "smart shuffle took {elapsed:?} for {TRACK_COUNT} tracks by one artist"
+        );
+    }
+
+    #[test]
+    fn smart_shuffle_interleaves_artist_buckets_when_alternatives_exist() {
+        let ranked = [
+            ("a-1", "A"),
+            ("a-2", "A"),
+            ("b-1", "B"),
+            ("c-1", "C"),
+            ("d-1", "D"),
+        ]
+        .into_iter()
+        .map(|(id, artist)| (id.to_string(), artist.to_string()))
+        .collect();
+
+        let interleaved = Database::interleave_smart_shuffle_by_artist(ranked);
+        let ids = interleaved
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["a-1", "b-1", "c-1", "d-1", "a-2"]);
     }
 
     #[test]
