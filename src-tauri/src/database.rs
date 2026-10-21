@@ -1398,8 +1398,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock is after the Unix epoch")
             .as_nanos();
-        let base_dir =
-            std::env::temp_dir().join(format!("tarab-ar20-read-only-{}-{nonce}", std::process::id()));
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-ar20-read-only-{}-{nonce}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&base_dir).expect("create database directory");
         let database = Database::new(base_dir.join("library.db")).expect("create test database");
 
