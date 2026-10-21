@@ -1013,6 +1013,37 @@ mod tests {
     }
 
     #[test]
+    fn legacy_database_migrates_when_app_directory_already_exists() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-existing-app-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let logs_dir = app_dir.join("logs");
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
+        std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy")
+            .expect("seed legacy database");
+
+        let migrated = prepare_app_directory(&base_dir).expect("migrate legacy database");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(
+            std::fs::read(migrated.join("library.db")).expect("read migrated database"),
+            b"legacy"
+        );
+        assert_eq!(
+            std::fs::read(logs_dir.join("plugin.log")).expect("read plugin log"),
+            b"log"
+        );
+        assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
     fn upsert_track_validation_rejects_paths_outside_library_roots() {
         let allowed_root =
             std::env::temp_dir().join(format!("tarab-db-allowed-{}", now_millis_i64_or_default()));
