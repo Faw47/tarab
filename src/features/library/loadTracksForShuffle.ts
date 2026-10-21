@@ -10,7 +10,7 @@ export function createLazyQueueTrack(reference: DbShuffleQueueTrack): Track {
     album: '',
     year: null,
     duration: reference.duration,
-    filePath: reference.id,
+    filePath: '',
     hasCoverArt: false,
     coverArtHash: null,
     dateAdded: 0,
