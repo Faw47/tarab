@@ -82,8 +82,10 @@ pub(super) fn prepare_source(
         let state = state.lock();
         (state.speed_control.clone(), state.booster.clone())
     };
-    let source =
+    let real_content_started = Arc::clone(&source.real_content_started);
+    let mut source =
         PitchPreservingSource::new(source, speed_control, booster, emitted_samples.clone())?;
+    source.set_real_content_started(real_content_started);
     Ok((source, duration, actual_start))
 }
 
@@ -289,29 +291,22 @@ pub(super) struct SymphoniaSource {
     buf_pos: usize,
     channels: u16,
     sample_rate: u32,
+    real_content_started: Arc<AtomicBool>,
 }
 
-enum TrackPacket {
-    Selected(Packet),
-    Skipped,
-    Exhausted,
+fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
+    (packet.track_id() == selected_track_id).then_some(packet)
 }
 
-fn packet_for_track(
-    packet: Packet,
-    selected_track_id: u32,
-    attempts: &mut usize,
-) -> TrackPacket {
-    if packet.track_id() == selected_track_id {
-        return TrackPacket::Selected(packet);
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefillResult {
+    SamplesReady,
+    YieldToMixer,
+}
 
-    *attempts = attempts.saturating_add(1);
-    if *attempts >= MAX_REFILL_ATTEMPTS {
-        TrackPacket::Exhausted
-    } else {
-        TrackPacket::Skipped
-    }
+fn foreign_packet_budget_exhausted(foreign_packets: &mut usize) -> bool {
+    *foreign_packets = (*foreign_packets).saturating_add(1);
+    *foreign_packets >= MAX_REFILL_ATTEMPTS
 }
 
 impl SymphoniaSource {
@@ -336,11 +331,13 @@ impl SymphoniaSource {
             buf_pos: 0,
             channels,
             sample_rate,
+            real_content_started: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    fn refill(&mut self) -> Option<()> {
+    fn refill(&mut self) -> Option<RefillResult> {
         let mut attempts = 0;
+        let mut foreign_packets = 0;
         loop {
             if attempts >= MAX_REFILL_ATTEMPTS {
                 eprintln!(
@@ -366,16 +363,13 @@ impl SymphoniaSource {
                 }
             };
 
-            let packet = match packet_for_track(packet, self.track_id, &mut attempts) {
-                TrackPacket::Selected(packet) => packet,
-                TrackPacket::Skipped => continue,
-                TrackPacket::Exhausted => {
-                    eprintln!(
-                        "Decoder refill exceeded {} attempts for {}",
-                        MAX_REFILL_ATTEMPTS, self.file_path
-                    );
-                    return None;
+            let Some(packet) = packet_for_track(packet, self.track_id) else {
+                if foreign_packet_budget_exhausted(&mut foreign_packets) {
+                    // None from Iterator::next permanently ends the source. Return a silent
+                    // sample instead so packet scanning can continue on the next mixer request.
+                    return Some(RefillResult::YieldToMixer);
                 }
+                continue;
             };
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
@@ -396,7 +390,7 @@ impl SymphoniaSource {
                         self.skip_samples -= skipped;
                         self.buf_pos = skipped;
                         if self.buf_pos < self.buffer.len() {
-                            return Some(());
+                            return Some(RefillResult::SamplesReady);
                         }
                         // The whole packet precedes the seek target; decode the next one.
                         continue;
@@ -494,11 +488,15 @@ impl Iterator for SymphoniaSource {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.buf_pos >= self.buffer.len() {
-            self.refill()?;
+            match self.refill()? {
+                RefillResult::SamplesReady => {}
+                RefillResult::YieldToMixer => return Some(0.0),
+            }
         }
 
         let sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
+        self.real_content_started.store(true, Ordering::Release);
         Some(sample)
     }
 }
@@ -529,14 +527,28 @@ impl Source for SymphoniaSource {
 /// Runs a one-shot callback on the first audio sample of the appended segment (gapless handoff).
 pub(super) struct GaplessHandoffSource<S> {
     inner: S,
+    real_content_started: Arc<AtomicBool>,
     on_first_sample: Option<Box<dyn FnOnce() + Send>>,
     started: bool,
 }
 
 impl<S> GaplessHandoffSource<S> {
     pub(super) fn new(inner: S, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
+        Self::new_after_real_content(
+            inner,
+            Arc::new(AtomicBool::new(true)),
+            on_first_sample,
+        )
+    }
+
+    pub(super) fn new_after_real_content(
+        inner: S,
+        real_content_started: Arc<AtomicBool>,
+        on_first_sample: impl FnOnce() + Send + 'static,
+    ) -> Self {
         Self {
             inner,
+            real_content_started,
             on_first_sample: Some(Box::new(on_first_sample)),
             started: false,
         }
@@ -548,7 +560,7 @@ impl<S: Iterator<Item = f32>> Iterator for GaplessHandoffSource<S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next()?;
-        if !self.started {
+        if !self.started && self.real_content_started.load(Ordering::Acquire) {
             self.started = true;
             if let Some(cb) = self.on_first_sample.take() {
                 cb();
@@ -708,22 +720,40 @@ mod tests {
     }
 
     #[test]
-    fn refill_bounds_consecutive_foreign_track_packets() {
-        let mut attempts = 0;
+    fn refill_yields_after_a_bounded_foreign_packet_batch_without_ending_track() {
+        let mut foreign_packets = 0;
         for _ in 0..MAX_REFILL_ATTEMPTS - 1 {
-            let packet = Packet::new_from_slice(2, 0, 0, &[0_u8]);
-            assert!(matches!(
-                packet_for_track(packet, 1, &mut attempts),
-                TrackPacket::Skipped
-            ));
+            assert!(!foreign_packet_budget_exhausted(&mut foreign_packets));
         }
+        assert!(foreign_packet_budget_exhausted(&mut foreign_packets));
 
-        let final_packet = Packet::new_from_slice(2, 0, 0, &[0_u8]);
-        assert!(matches!(
-            packet_for_track(final_packet, 1, &mut attempts),
-            TrackPacket::Exhausted
+        // A later selected-track packet remains eligible on the next mixer request.
+        let mut next_batch_foreign_packets = 0;
+        assert!(!foreign_packet_budget_exhausted(
+            &mut next_batch_foreign_packets
         ));
-        assert_eq!(attempts, MAX_REFILL_ATTEMPTS);
+        let selected = Packet::new_from_slice(1, 0, 0, &[0_u8]);
+        assert!(packet_for_track(selected, 1).is_some());
+    }
+
+    #[test]
+    fn gapless_handoff_waits_for_real_content_after_a_silent_mixer_yield() {
+        let content_started = Arc::new(AtomicBool::new(false));
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_count_for_handoff = Arc::clone(&callback_count);
+        let mut handoff = GaplessHandoffSource::new_after_real_content(
+            std::iter::repeat(0.0).take(2),
+            Arc::clone(&content_started),
+            move || {
+                callback_count_for_handoff.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+
+        assert_eq!(handoff.next(), Some(0.0));
+        assert_eq!(callback_count.load(Ordering::Relaxed), 0);
+        content_started.store(true, Ordering::Release);
+        assert_eq!(handoff.next(), Some(0.0));
+        assert_eq!(callback_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
