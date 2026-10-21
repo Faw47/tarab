@@ -437,7 +437,7 @@ impl Database {
         sort_by: &str,
         sort_order: &str,
     ) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
 
         let (order_clause, text_key) = match sort_by {
             "title" => ("title COLLATE NOCASE", true),
@@ -505,7 +505,7 @@ impl Database {
     }
 
     pub fn get_all_tracks(&self) -> SqliteResult<Vec<DbTrack>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
 
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
@@ -528,7 +528,7 @@ impl Database {
         after_id: Option<&str>,
         limit: u32,
     ) -> SqliteResult<Vec<TrackPathRow>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let map_row = |row: &rusqlite::Row<'_>| {
             Ok(TrackPathRow {
                 id: row.get(0)?,
@@ -551,7 +551,7 @@ impl Database {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         // Normalize IDs since they're typically file paths
         let normalized_ids: Vec<String> = ids.iter().map(|id| Self::normalize_path(id)).collect();
         let mut tracks_by_id: std::collections::HashMap<String, DbTrack> =
@@ -592,7 +592,7 @@ impl Database {
         if public_id.len() != 64 || !public_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Ok(None);
         }
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let normalized_public_id = public_id.to_ascii_lowercase();
         conn.query_row(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
@@ -615,7 +615,7 @@ impl Database {
             return Ok(Vec::new());
         }
 
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
@@ -638,7 +638,7 @@ impl Database {
         if artist.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
@@ -657,7 +657,7 @@ impl Database {
     }
 
     pub fn search_tracks(&self, query: &str, limit: u32) -> SqliteResult<Vec<SearchResult>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
 
         let fts_terms = query
             .split_whitespace()
@@ -730,7 +730,7 @@ impl Database {
             return Ok(vec![]);
         }
 
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let normalized_paths: Vec<String> = paths.iter().map(|p| Self::normalize_path(p)).collect();
         let mut existing = Vec::new();
 
@@ -757,7 +757,7 @@ impl Database {
     }
 
     pub fn get_track_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
     }
 
@@ -769,7 +769,7 @@ impl Database {
             return Ok(0);
         }
         let (path_prefix, path_upper_bound) = folder_path_range(&normalized);
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         conn.query_row(
             "SELECT COUNT(*) FROM tracks
              WHERE file_path = ?1 COLLATE BINARY
@@ -789,7 +789,7 @@ impl Database {
             ));
         }
         let (path_prefix, path_upper_bound) = folder_path_range(&normalized);
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             "SELECT id
              FROM tracks
@@ -869,7 +869,7 @@ impl Database {
     }
 
     pub fn get_cover_art_hash(&self, file_path: &str) -> SqliteResult<Option<String>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let normalized_path = Self::normalize_path(file_path);
         conn.query_row(
             "SELECT cover_art_hash FROM tracks WHERE file_path = ?1",

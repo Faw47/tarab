@@ -61,7 +61,7 @@ impl Database {
     // ========== Playlist Operations ==========
 
     pub fn get_playlist_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         conn.query_row("SELECT COUNT(*) FROM playlists", [], |row| row.get(0))
     }
 
@@ -132,7 +132,7 @@ impl Database {
     }
 
     pub fn get_all_playlists(&self) -> SqliteResult<Vec<DbPlaylist>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             "SELECT id, name, playlist_type, folder_path, smart_rules, created_at, updated_at, is_pinned, pinned_at, last_synced_at, sync_error
              FROM playlists
@@ -161,7 +161,7 @@ impl Database {
     }
 
     pub fn get_playlist_by_id(&self, playlist_id: &str) -> SqliteResult<Option<DbPlaylist>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         conn.query_row(
             "SELECT id, name, playlist_type, folder_path, smart_rules, created_at, updated_at, is_pinned, pinned_at, last_synced_at, sync_error
              FROM playlists
@@ -190,7 +190,7 @@ impl Database {
         &self,
         playlist_id: &str,
     ) -> SqliteResult<Vec<DbPlaylistTrackEntry>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt = conn.prepare(
             r#"
             SELECT
