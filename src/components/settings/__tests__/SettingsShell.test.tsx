@@ -40,11 +40,17 @@ describe('SettingsShell neo version badge (FE-34)', () => {
     expect(await screen.findByText('TARAB V2.3.4')).toBeInTheDocument();
   });
 
-  it('keeps the badge in the Settings heading row', async () => {
+  it('stacks the badge below the heading at the fixed-width sidebar breakpoint', async () => {
     const { container } = renderNeoSettings();
 
     const badge = await screen.findByText(/TARAB V/);
-    expect(badge.parentElement).toHaveClass('neo-settings-heading-row');
+    expect(badge.parentElement).toHaveClass(
+      'neo-settings-heading-layout',
+      'md:flex-col',
+      'md:items-stretch',
+    );
+    expect(badge).toHaveClass('md:self-end');
+    expect(container.querySelector('h1')).toHaveClass('md:w-full');
     expect(container.querySelector('h1')).toHaveTextContent('Settings');
   });
 });
