@@ -4,14 +4,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { usePlayerSessionRestore } from '../usePlayerSessionRestore';
 
-const { dbGetQueueTrackReferencesMock, dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock, setAudioBoosterMock } =
-  vi.hoisted(() => ({
-    dbGetQueueTrackReferencesMock: vi.fn(),
-    dbGetTracksByIdsMock: vi.fn(),
-    loadPlayerStateMock: vi.fn(),
-    markHydratedMock: vi.fn(),
-    setAudioBoosterMock: vi.fn(async () => undefined),
-  }));
+const {
+  dbGetQueueTrackReferencesMock,
+  dbGetTracksByIdsMock,
+  loadPlayerStateMock,
+  markHydratedMock,
+  setAudioBoosterMock,
+} = vi.hoisted(() => ({
+  dbGetQueueTrackReferencesMock: vi.fn(),
+  dbGetTracksByIdsMock: vi.fn(),
+  loadPlayerStateMock: vi.fn(),
+  markHydratedMock: vi.fn(),
+  setAudioBoosterMock: vi.fn(async () => undefined),
+}));
 
 vi.mock('../../../lib/tauri-commands', () => ({
   dbGetQueueTrackReferences: dbGetQueueTrackReferencesMock,
