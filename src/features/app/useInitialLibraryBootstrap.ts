@@ -30,7 +30,12 @@ export function useInitialLibraryBootstrap({
     try {
       const [total, tracks] = await Promise.all([
         fetchLibraryTrackCount(),
-        fetchLibraryTracksPage({ offset: 0, limit: 400, sortBy: 'dateAdded', sortOrder: 'desc' }),
+        fetchLibraryTracksPage({
+          cursor: null,
+          limit: 400,
+          sortBy: 'dateAdded',
+          sortOrder: 'desc',
+        }),
       ]);
       setTracks(tracks);
       setTrackCount(total);
