@@ -656,11 +656,12 @@ fn database_has_user_data(path: &Path) -> Option<bool> {
                  ORDER BY name",
             )
             .ok()?;
-        statement
+        let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
             .ok()?
             .collect::<SqliteResult<Vec<_>>>()
-            .ok()?
+            .ok()?;
+        rows
     };
 
     let recognized_schema = table_names
@@ -1235,21 +1236,30 @@ mod tests {
         std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
         std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
         std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
-        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy-migrated")])
+            .expect("seed legacy track");
+        drop(legacy_db);
 
         let migrated = prepare_app_directory(&base_dir).expect("migrate legacy database");
+        let migrated_db =
+            Database::new(migrated.join("library.db")).expect("open migrated database");
+        let tracks = migrated_db
+            .get_all_tracks()
+            .expect("read migrated tracks");
 
         assert_eq!(migrated, app_dir);
-        assert_eq!(
-            std::fs::read(migrated.join("library.db")).expect("read migrated database"),
-            b"legacy"
-        );
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "legacy-migrated");
         assert_eq!(
             std::fs::read(logs_dir.join("plugin.log")).expect("read plugin log"),
             b"log"
         );
         assert!(!legacy_dir.exists());
 
+        drop(migrated_db);
         let _ = std::fs::remove_dir_all(base_dir);
     }
 
@@ -1422,7 +1432,12 @@ mod tests {
         std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
         std::fs::write(app_dir.join("settings.json"), b"current").expect("seed current settings");
         std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
-        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("conflict-legacy")])
+            .expect("seed legacy track");
+        drop(legacy_db);
 
         let result = prepare_app_directory(&base_dir);
 
@@ -1435,10 +1450,14 @@ mod tests {
             std::fs::read(legacy_dir.join("settings.json")).expect("read legacy settings"),
             b"legacy"
         );
-        assert_eq!(
-            std::fs::read(legacy_dir.join("library.db")).expect("read legacy database"),
-            b"legacy"
-        );
+        let preserved_db =
+            Database::new(legacy_dir.join("library.db")).expect("open preserved legacy database");
+        let tracks = preserved_db
+            .get_all_tracks()
+            .expect("read preserved legacy tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "conflict-legacy");
+        drop(preserved_db);
 
         let _ = std::fs::remove_dir_all(base_dir);
     }
