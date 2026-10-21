@@ -157,7 +157,7 @@ fn first_picture(file: &TaggedFile) -> Option<&Picture> {
 
 fn extract_metadata_fast(file_path: &str) -> Option<TrackMetadata> {
     crate::parse_guard::guard(file_path, || extract_metadata_fast_unguarded(file_path))
-        .map_err(|error| eprintln!("{}", error))
+        .map_err(|_error| log::warn!("Metadata parsing failed; skipping unsupported file"))
         .ok()
         .flatten()
 }
@@ -265,7 +265,7 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
 // Full metadata extraction with cover art
 fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
     crate::parse_guard::guard(file_path, || extract_metadata_with_art_unguarded(file_path))
-        .map_err(|error| eprintln!("{}", error))
+        .map_err(|_error| log::warn!("Metadata parsing failed; skipping unsupported file"))
         .ok()
         .flatten()
 }
@@ -477,8 +477,8 @@ fn allowed_metadata_paths(file_paths: Vec<String>, roots: &[PathBuf], action: &s
     file_paths
         .into_iter()
         .filter(|path| {
-            if let Err(err) = ensure_metadata_path_allowed(path, roots, action) {
-                eprintln!("Skipped metadata path: {}", err);
+            if ensure_metadata_path_allowed(path, roots, action).is_err() {
+                log::warn!("Skipped a metadata operation outside the allowed library roots");
                 false
             } else {
                 true

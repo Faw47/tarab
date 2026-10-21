@@ -13,6 +13,7 @@ dependencies = [
  "hex",
  "image",
  "lofty",
+ "log",
  "notify",
  "parking_lot",
  "rand 0.8.7",
