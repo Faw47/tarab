@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { useSettingsStore } from './settings-store';
 
 const { settingsStorage } = vi.hoisted(() => ({
   settingsStorage: {
@@ -11,8 +12,6 @@ const { settingsStorage } = vi.hoisted(() => ({
 vi.mock('../platform/tauri-zustand-storage', () => ({
   createTauriZustandStorage: () => settingsStorage,
 }));
-
-import { useSettingsStore } from './settings-store';
 
 describe('settings navigation migration', () => {
   it('uses the fresh-install navigation default for older settings without navMode', async () => {
