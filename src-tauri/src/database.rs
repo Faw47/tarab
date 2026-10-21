@@ -868,6 +868,18 @@ pub async fn db_get_shuffle_all_queue(
 }
 
 #[tauri::command]
+pub async fn db_get_queue_track_references(
+    ids: Vec<String>,
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<DbShuffleQueueTrack>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_queue_track_references(&ids))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn get_smart_shuffle_queue(
     track_ids: Vec<String>,
     db: tauri::State<'_, SharedDatabase>,
