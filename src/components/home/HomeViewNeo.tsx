@@ -15,6 +15,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 
 import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { getAlbumArtist, getAlbumKey } from '../../lib/album-key';
 import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
 
@@ -48,7 +49,7 @@ const POLAROID_TAPE_ROTATIONS = [
 ];
 
 const NEO_POLAROID_CARD =
-  'group relative cursor-pointer select-none border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none hover:bg-[#fcfcf9] hover:shadow-[4px_4px_0_0_#1a1a1a] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none';
+  'group relative cursor-pointer select-none border-[1.5px] border-[#1a1a1a] bg-[#fafaf7] p-2 pb-7 shadow-[3px_3px_0_0_#1a1a1a] transition-none';
 const NEO_POLAROID_PLAYING =
   'border-[var(--signal-play)] bg-[var(--signal-play)] shadow-[3px_3px_0_0_var(--signal-play)]';
 
@@ -148,25 +149,27 @@ const NeoVolumeControl = memo(() => {
 });
 NeoVolumeControl.displayName = 'NeoVolumeControl';
 
-const NowPlayingEqualizer = memo(({ isPlaying }: { isPlaying: boolean }) => {
-  return (
-    <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
-            isPlaying && 'animate-pulse',
-          )}
-          style={{
-            height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
-            animationDelay: `${i * 0.15}s`,
-          }}
-        />
-      ))}
-    </div>
-  );
-});
+const NowPlayingEqualizer = memo(
+  ({ isPlaying, reducedEffects }: { isPlaying: boolean; reducedEffects: boolean }) => {
+    return (
+      <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
+              isPlaying && !reducedEffects && 'animate-pulse',
+            )}
+            style={{
+              height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
+              animationDelay: `${i * 0.15}s`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  },
+);
 NowPlayingEqualizer.displayName = 'NowPlayingEqualizer';
 
 const NeoLyricsConsole = memo(() => {
@@ -327,6 +330,8 @@ export const HomeViewNeo = memo(function HomeViewNeo({
     })),
   );
 
+  const reducedEffects = useEffectiveReducedEffects();
+
   const currentCoverUrl =
     useCoverArt(
       currentTrack?.filePath,
@@ -352,7 +357,10 @@ export const HomeViewNeo = memo(function HomeViewNeo({
     return (
       <div className="h-full overflow-y-auto bg-transparent custom-scrollbar">
         <div
-          className="mx-auto flex max-w-[1600px] animate-pulse flex-col gap-8 p-6 md:p-8 lg:p-10"
+          className={cn(
+            'mx-auto flex max-w-[1600px] flex-col gap-8 p-6 md:p-8 lg:p-10',
+            !reducedEffects && 'animate-pulse',
+          )}
           role="status"
           aria-label="Loading home"
         >
@@ -434,7 +442,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   </div>
                 )}
                 <div className="absolute right-3 top-3">
-                  <NowPlayingEqualizer isPlaying={isPlaying} />
+                  <NowPlayingEqualizer isPlaying={isPlaying} reducedEffects={reducedEffects} />
                 </div>
               </div>
 
@@ -572,10 +580,9 @@ export const HomeViewNeo = memo(function HomeViewNeo({
           ) : (
             <div className="neo-empty-state mt-6">
               <Music2 size={80} strokeWidth={STROKE} className="mx-auto mb-8 text-black/10" />
-              <h3 className="neo-empty-state-primary">COLD STORAGE / NO RECORDS FOUND</h3>
+              <h3 className="neo-empty-state-primary">Your music library is empty</h3>
               <p className="neo-empty-state-secondary">
-                The local entity database is currently empty. Initialize a source mapping to begin
-                records ingestion.
+                Add a music folder to see your albums and tracks here.
               </p>
               <button
                 type="button"
@@ -588,7 +595,7 @@ export const HomeViewNeo = memo(function HomeViewNeo({
                   SHADOW_COMP,
                 )}
               >
-                MAP FOLDERS
+                Add music folder
               </button>
             </div>
           )}
