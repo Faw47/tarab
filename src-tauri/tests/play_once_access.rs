@@ -7,7 +7,7 @@ fn command_body<'a>(source: &'a str, signature: &str) -> &'a str {
     let end = source[start..]
         .find("\n#[tauri::command]")
         .map(|offset| start + offset)
-        .expect("next Tauri command");
+        .unwrap_or(source.len());
     &source[start..end]
 }
 
@@ -31,8 +31,21 @@ fn audio_command_arm(signature: &str) -> &str {
 fn play_once_access_lasts_with_the_active_queue_entry() {
     let play_command = command_body(AUDIO, "pub fn play_track(");
     assert!(
-        play_command.contains("retain_transient_file_for_queue_entry_at_generation"),
-        "starting playback must retain its exact one-file grant for the queue entry"
+        play_command.contains("mark_playback_generation"),
+        "starting playback must reserve its generation before queued source preparation"
+    );
+    assert!(
+        !play_command.contains("retain_transient_file_for_queue_entry_at_generation"),
+        "a failed playback request must not replace the active track's transient grant"
+    );
+    let prepared_commit = command_body(AUDIO, "fn commit_prepared_source(");
+    assert!(
+        prepared_commit.contains("retain_transient_file_for_queue_entry_at_generation"),
+        "the new transient grant must be committed only after source preparation succeeds"
+    );
+    assert!(
+        AUDIO.contains("discard_transient_file_for_failed_playback"),
+        "failed preparation must discard only its pending transient grant"
     );
     assert!(
         !play_command.contains("consume_transient_file"),
@@ -104,11 +117,18 @@ fn prepared_sources_and_gapless_handoffs_reject_superseded_generations() {
         .map(|offset| commit_start + offset)
         .expect("gapless commit helper end");
     let commit = &AUDIO[commit_start..commit_end];
+    let grant_commit = commit
+        .find("retain_transient_file_for_queue_entry_at_generation")
+        .expect("gapless grant commit");
+    let state_commit = commit
+        .find("state.current_file = Some(next_path.to_string())")
+        .expect("gapless playback-state commit");
     assert!(
-        commit.contains("roots_state.read()")
+        commit.contains("roots_state.write()")
             && commit.contains("outgoing_generation")
-            && commit.contains("state.current_file.as_deref()"),
-        "gapless playback state must not commit after its outgoing source was superseded"
+            && commit.contains("state.current_file.as_deref()")
+            && grant_commit < state_commit,
+        "gapless grant and playback state must commit atomically before exposing the next generation"
     );
 }
 
@@ -132,7 +152,7 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
     );
     assert!(
         gapless.contains("if is_still_current")
-            && gapless.contains("retain_transient_file_for_queue_entry_at_generation"),
-        "a committed gapless handoff must update grants only for the current track"
+            && !gapless.contains("retain_transient_file_for_queue_entry_at_generation"),
+        "the serialized handoff event must not expose state before its transient grant is committed"
     );
 }

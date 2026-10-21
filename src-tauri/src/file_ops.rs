@@ -755,6 +755,33 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     true
 }
 
+/// Drops the failed request's exact transient authorization without revoking the active
+/// source's grant. A stale failure cannot remove access reserved by a newer request.
+pub(crate) fn discard_transient_file_for_failed_playback(
+    state: &mut LibraryRootsState,
+    path: &Path,
+    active_path: Option<&Path>,
+    generation: u64,
+) -> bool {
+    if !playback_generation_is_current(state, generation) {
+        return false;
+    }
+    let Ok(canonical) = canonicalize_existing_path(path) else {
+        return false;
+    };
+    if active_path
+        .and_then(|active| canonicalize_existing_path(active).ok())
+        .as_ref()
+        == Some(&canonical)
+    {
+        return false;
+    }
+
+    let previous_len = state.transient_files.len();
+    state.transient_files.retain(|candidate| candidate != &canonical);
+    state.transient_files.len() != previous_len
+}
+
 pub(crate) fn clear_transient_file_grants_at_generation(
     state: &mut LibraryRootsState,
     generation: u64,
@@ -1956,6 +1983,50 @@ mod tests {
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
         let _ = fs::remove_dir_all(library);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn failed_play_request_discards_only_its_pending_transient_grant() {
+        let outside = temp_dir("failed-transient-play");
+        let active = outside.join("active.mp3");
+        let pending = outside.join("pending.mp3");
+        fs::write(&active, b"audio").expect("write active track");
+        fs::write(&pending, b"audio").expect("write pending track");
+
+        let state = create_library_roots_state();
+        authorize_transient_file(&state, &active).expect("authorize active track");
+        {
+            let mut roots = state.write();
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &active, 10
+            ));
+        }
+        authorize_transient_file(&state, &pending).expect("authorize pending track");
+        {
+            let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 11));
+            assert!(!discard_transient_file_for_failed_playback(
+                &mut roots,
+                &pending,
+                Some(&active),
+                10,
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_ok());
+
+        {
+            let mut roots = state.write();
+            assert!(discard_transient_file_for_failed_playback(
+                &mut roots,
+                &pending,
+                Some(&active),
+                11,
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
         let _ = fs::remove_dir_all(outside);
     }
 

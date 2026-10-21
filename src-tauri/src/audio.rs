@@ -19,8 +19,8 @@ use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
 use crate::file_ops::{
-    clear_transient_file_grants_at_generation, ensure_path_allowed_by_state,
-    mark_playback_generation, playback_generation_is_current,
+    clear_transient_file_grants_at_generation, discard_transient_file_for_failed_playback,
+    ensure_path_allowed_by_state, mark_playback_generation, playback_generation_is_current,
     retain_transient_file_for_queue_entry_at_generation, LibraryRootsState, SharedLibraryRoots,
 };
 
@@ -179,6 +179,24 @@ fn snapshot_playback_for_seek(
     )
 }
 
+/// Discards a failed Play Once request without revoking the still-active source's authorization.
+fn discard_failed_transient_file_grant(
+    roots_state: &SharedLibraryRoots,
+    state: &Arc<Mutex<PlaybackState>>,
+    file_path: &str,
+    generation: u64,
+) {
+    let mut roots = roots_state.write();
+    let active_path = state.lock().current_file.clone();
+    let active_path = active_path.as_deref().map(Path::new);
+    let _ = discard_transient_file_for_failed_playback(
+        &mut roots,
+        Path::new(file_path),
+        active_path,
+        generation,
+    );
+}
+
 /// Commits an installed source and its transient access while source-changing requests are
 /// excluded by the caller's library-roots write lock.
 fn commit_prepared_source(
@@ -232,9 +250,10 @@ fn commit_gapless_handoff(
     sample_rate: u32,
     channels: u16,
 ) -> bool {
-    // Lock in the same order as prepared-source installation. The roots read lock keeps a newer
-    // Play/Stop from reserving its generation until this handoff either commits or is rejected.
-    let roots = roots_state.read();
+    // Commit the grant and playback state under the same roots lock. A queued Seek can then
+    // observe either the outgoing track or the fully-authorized incoming track, never half a
+    // handoff.
+    let mut roots = roots_state.write();
     if !playback_generation_is_current(&roots, outgoing_generation)
         || cancelled.load(Ordering::Acquire)
     {
@@ -245,6 +264,13 @@ fn commit_gapless_handoff(
     if state.generation != outgoing_generation
         || state.current_file.as_deref() != Some(outgoing_path)
     {
+        return false;
+    }
+    if !retain_transient_file_for_queue_entry_at_generation(
+        &mut roots,
+        Path::new(next_path),
+        next_generation,
+    ) {
         return false;
     }
 
@@ -535,6 +561,12 @@ impl AudioManager {
                                     log::warn!("Audio output is not available");
                                 }
                                 let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                    discard_failed_transient_file_grant(
+                                        &roots_for_audio,
+                                        &state_clone,
+                                        &file_path,
+                                        generation,
+                                    );
                                     emit_playback_error(
                                         &app_for_audio,
                                         "",
@@ -596,6 +628,12 @@ impl AudioManager {
                                             &roots_for_audio.read(),
                                             generation,
                                         ) {
+                                            discard_failed_transient_file_grant(
+                                                &roots_for_audio,
+                                                &state_clone,
+                                                &file_path,
+                                                generation,
+                                            );
                                             emit_playback_error(
                                                 &app_for_audio,
                                                 file_path.clone(),
@@ -607,6 +645,12 @@ impl AudioManager {
                                         }
                                     }
                                     Err(err) => {
+                                        discard_failed_transient_file_grant(
+                                            &roots_for_audio,
+                                            &state_clone,
+                                            &file_path,
+                                            generation,
+                                        );
                                         log::error!("Failed to start playback");
                                         emit_playback_error(
                                             &app_for_audio,
@@ -657,6 +701,12 @@ impl AudioManager {
                                     log::warn!("Audio output is not available");
                                 }
                                 let Some((_, stream_handle)) = stream_bundle.as_ref() else {
+                                    discard_failed_transient_file_grant(
+                                        &roots_for_audio,
+                                        &state_clone,
+                                        &file_path,
+                                        generation,
+                                    );
                                     emit_playback_error(
                                         &app_for_audio,
                                         "",
@@ -668,6 +718,12 @@ impl AudioManager {
                                     continue;
                                 };
                                 if crossfade_state.is_some() {
+                                    discard_failed_transient_file_grant(
+                                        &roots_for_audio,
+                                        &state_clone,
+                                        &file_path,
+                                        generation,
+                                    );
                                     let message =
                                         "A crossfade transition is already active".to_string();
                                     emit_playback_error(
@@ -772,6 +828,12 @@ impl AudioManager {
                                             &roots_for_audio.read(),
                                             generation,
                                         ) {
+                                            discard_failed_transient_file_grant(
+                                                &roots_for_audio,
+                                                &state_clone,
+                                                &file_path,
+                                                generation,
+                                            );
                                             emit_playback_error(
                                                 &app_for_audio,
                                                 file_path.clone(),
@@ -783,6 +845,12 @@ impl AudioManager {
                                         }
                                     }
                                     Err(err) => {
+                                        discard_failed_transient_file_grant(
+                                            &roots_for_audio,
+                                            &state_clone,
+                                            &file_path,
+                                            generation,
+                                        );
                                         emit_playback_error(
                                             &app_for_audio,
                                             file_path.clone(),
@@ -1250,21 +1318,13 @@ impl AudioManager {
                                 next_path,
                             } => {
                                 let is_still_current = {
+                                    let roots = roots_for_audio.read();
                                     let state = state_clone.lock();
-                                    state.generation == next_generation
+                                    playback_generation_is_current(&roots, next_generation)
+                                        && state.generation == next_generation
                                         && state.current_file.as_deref() == Some(next_path.as_str())
                                 };
-                                let grant_is_current = if is_still_current {
-                                    let mut roots = roots_for_audio.write();
-                                    retain_transient_file_for_queue_entry_at_generation(
-                                        &mut roots,
-                                        Path::new(&next_path),
-                                        next_generation,
-                                    )
-                                } else {
-                                    false
-                                };
-                                if is_still_current && grant_is_current {
+                                if is_still_current {
                                     let _ = app_for_audio.emit("playback-ended", ended);
                                     emit_playback_transition(
                                         &app_for_audio,
@@ -1748,11 +1808,7 @@ pub fn play_track(
     let mut roots = roots_state.inner().write();
     ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
     let generation = state.play(file_path.clone(), start_pos)?;
-    retain_transient_file_for_queue_entry_at_generation(
-        &mut roots,
-        Path::new(&file_path),
-        generation,
-    );
+    mark_playback_generation(&mut roots, generation);
     Ok(generation)
 }
 
