@@ -1,6 +1,5 @@
 import clsx from 'clsx';
 import { Pause, Play } from 'lucide-react';
-import type React from 'react';
 import { memo, useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { toggleCurrentPlayback } from '../../lib/playback-actions';
@@ -10,6 +9,7 @@ import { CoverArtImage } from '../shared/CoverArtImage';
 
 interface PillMiniPlayerProps {
   onExpand: () => void;
+  reducedEffects?: boolean;
 }
 
 const RING_SIZE = 58;
@@ -56,7 +56,7 @@ const ProgressRing = memo(() => {
 });
 ProgressRing.displayName = 'ProgressRing';
 
-export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
+export const PillMiniPlayer = memo(({ onExpand, reducedEffects = false }: PillMiniPlayerProps) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const { isPlaying } = usePlayerStore(
     useShallow((s) => ({
@@ -65,34 +65,32 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
   );
   const [isHovered, setIsHovered] = useState(false);
 
-  const handleTogglePlay = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      try {
-        if (!currentTrack) return;
-        await toggleCurrentPlayback();
-      } catch (e) {
-        reportError('Failed to toggle playback', { source: 'pill-mini-player', error: e });
-      }
-    },
-    [currentTrack],
-  );
+  const handleTogglePlay = useCallback(async () => {
+    try {
+      if (!currentTrack) return;
+      await toggleCurrentPlayback();
+    } catch (error) {
+      reportError('Failed to toggle playback', {
+        source: 'pill-mini-player',
+        error,
+      });
+    }
+  }, [currentTrack]);
 
   if (!currentTrack) return null;
 
   return (
     <div
-      className="fixed bottom-6 left-6 z-40 group cursor-pointer"
+      className="relative z-40 group"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
-        onClick={onExpand}
         className={clsx(
-          'relative overflow-hidden',
+          'relative overflow-hidden rounded-full',
           'transition-[color,background-color,border-color,opacity,box-shadow,transform,width,height,left,right,top,bottom] duration-[var(--motion-standard)]',
           isHovered && 'scale-110',
-          isPlaying && !isHovered && 'animate-breathe',
+          isPlaying && !isHovered && !reducedEffects && 'animate-breathe',
         )}
         style={{ width: RING_SIZE, height: RING_SIZE }}
       >
@@ -124,30 +122,41 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
             iconClassName="w-5 h-5"
             lazy={false}
           />
+        </div>
 
-          <div
+        <button
+          type="button"
+          onClick={onExpand}
+          aria-label={`Expand player for ${currentTrack.title}`}
+          className="absolute inset-0 z-[2] cursor-pointer rounded-full focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_2px_white]"
+        />
+
+        <div
+          className={clsx(
+            'pointer-events-none absolute inset-0 z-[3] flex items-center justify-center rounded-full bg-black/[0.42] backdrop-blur-md transition-opacity duration-[var(--motion-standard)]',
+            isHovered ? 'opacity-100' : 'opacity-0 group-focus-within:opacity-100',
+          )}
+        >
+          <button
+            type="button"
+            onClick={handleTogglePlay}
             className={clsx(
-              'absolute inset-0 flex items-center justify-center bg-black/[0.42] backdrop-blur-md',
-              'transition-opacity duration-[var(--motion-standard)]',
-              isHovered ? 'opacity-100' : 'opacity-0',
+              'cursor-pointer w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.18] hover:bg-white/[0.28] transition-colors duration-[var(--motion-standard)] active:scale-[0.9] shadow-[0_0_18px_var(--hero-glow)]',
+              isHovered
+                ? 'opacity-100 pointer-events-auto'
+                : 'opacity-0 pointer-events-none group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
             )}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
           >
-            <button
-              onClick={handleTogglePlay}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.18] hover:bg-white/[0.28] transition-colors duration-[var(--motion-standard)] active:scale-[0.9] shadow-[0_0_18px_var(--hero-glow)]"
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-            >
-              {isPlaying ? (
-                <Pause className="w-3.5 h-3.5 text-white" fill="currentColor" />
-              ) : (
-                <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" />
-              )}
-            </button>
-          </div>
+            {isPlaying ? (
+              <Pause className="w-3.5 h-3.5 text-white" fill="currentColor" />
+            ) : (
+              <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Hover tooltip with track info */}
       <div
         className={clsx(
           'absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-2',
@@ -169,5 +178,3 @@ export const PillMiniPlayer = memo(({ onExpand }: PillMiniPlayerProps) => {
     </div>
   );
 });
-
-PillMiniPlayer.displayName = 'PillMiniPlayer';
