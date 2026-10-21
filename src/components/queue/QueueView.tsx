@@ -48,6 +48,7 @@ import { Button } from '../ui/button';
 import { NeoSectionHeader } from '../ui/NeoSectionHeader';
 
 interface QueueViewProps {
+  onNavigateToLibrary: () => void;
   isLibraryLoading?: boolean;
   libraryError?: string | null;
   onRetryLoad?: () => void;
@@ -94,6 +95,7 @@ export const QueueView = memo(
   ({
     isLibraryLoading = false,
     libraryError = null,
+    onNavigateToLibrary,
     onRetryLoad,
     onScrollChange,
   }: QueueViewProps) => {
@@ -349,17 +351,26 @@ export const QueueView = memo(
             </header>
 
             {queue.length === 0 && (
-              <section
-                className="border-2 border-black bg-[var(--signal-active)] p-8 text-center shadow-[4px_4px_0_0_#000]"
-                role="status"
-              >
-                <p className="font-mono text-lg font-black uppercase tracking-tight text-black">
-                  NOTHING QUEUED
-                </p>
-                <p className="mt-2 text-sm font-bold uppercase tracking-widest text-black/70">
-                  Drop a track to start
-                </p>
-              </section>
+              <>
+                <section
+                  className="border-2 border-black bg-[var(--signal-active)] p-8 text-center shadow-[4px_4px_0_0_#000]"
+                  role="status"
+                >
+                  <p className="font-mono text-lg font-black uppercase tracking-tight text-black">
+                    NOTHING QUEUED
+                  </p>
+                  <p className="mt-2 text-sm font-bold uppercase tracking-widest text-black/70">
+                    Drop a track to start
+                  </p>
+                </section>
+                <button
+                  type="button"
+                  onClick={onNavigateToLibrary}
+                  className="mx-auto border-2 border-black bg-[var(--signal-play)] px-5 py-3 font-black uppercase tracking-[0.08em] text-black shadow-[4px_4px_0_0_#000] transition-none focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-black"
+                >
+                  Browse library
+                </button>
+              </>
             )}
 
             {nowPlayingTrack && (
@@ -557,15 +568,24 @@ export const QueueView = memo(
           </header>
 
           {queue.length === 0 ? (
-            <section className="flex flex-col items-center justify-center rounded-[22px] border border-white/[0.06] bg-white/[0.02] py-24 text-center backdrop-blur-md">
-              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-[18px] bg-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
-                <Music2 className="h-10 w-10 text-white/60" />
-              </div>
-              <h3 className="text-xl font-semibold text-white">Your queue is empty</h3>
-              <p className="mt-2.5 max-w-sm text-sm font-medium text-white/60">
-                Start playback from your library, playlists, or album views to build a queue.
-              </p>
-            </section>
+            <>
+              <section className="flex flex-col items-center justify-center rounded-[22px] border border-white/[0.06] bg-white/[0.02] py-24 text-center backdrop-blur-md">
+                <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-[18px] bg-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
+                  <Music2 className="h-10 w-10 text-white/60" />
+                </div>
+                <h3 className="text-xl font-semibold text-white">Your queue is empty</h3>
+                <p className="mt-2.5 max-w-sm text-sm font-medium text-white/60">
+                  Start playback from your library, playlists, or album views to build a queue.
+                </p>
+              </section>
+              <button
+                type="button"
+                onClick={onNavigateToLibrary}
+                className="mx-auto mt-6 rounded-full border border-white/15 bg-white/10 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              >
+                Browse library
+              </button>
+            </>
           ) : (
             <section className="flex flex-col gap-6">
               {nowPlayingTrack && (
