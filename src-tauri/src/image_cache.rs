@@ -129,16 +129,12 @@ impl ImageCache {
             remove_legacy_thumbnails(&legacy_dir);
         });
 
-        Self {
-            cache_dir,
-        }
+        Self { cache_dir }
     }
 
     #[cfg(test)]
     pub(crate) fn with_dir(cache_dir: PathBuf) -> Self {
-        Self {
-            cache_dir,
-        }
+        Self { cache_dir }
     }
 
     /// Generate hash from image data for cache key
@@ -465,9 +461,7 @@ mod tests {
     }
 
     fn test_cache(cache_dir: PathBuf) -> ImageCache {
-        ImageCache {
-            cache_dir,
-        }
+        ImageCache { cache_dir }
     }
 
     #[test]

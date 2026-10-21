@@ -74,7 +74,7 @@ export const setAudioBooster = async (level: number): Promise<void> => {
 };
 
 // Playback session persistence
-interface PlaybackSessionPayload {
+export interface PlaybackSessionPayload {
   version: number;
   revision?: number;
   currentTrackId: string | null;

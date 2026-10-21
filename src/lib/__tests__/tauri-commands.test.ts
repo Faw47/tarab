@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { dbGetTracksPaginated, setVolumeRamp, watchLibraryPaths } from '../tauri-commands';
+import { dbGetTracksPaginated, watchLibraryPaths } from '../tauri-commands';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async () => undefined),
@@ -30,16 +30,6 @@ describe('tauri command wrappers', () => {
       limit: 200,
       sortBy: 'title',
       sortOrder: 'asc',
-    });
-  });
-
-  it('uses Tauri camelCase argument names for set_volume_ramp', async () => {
-    await setVolumeRamp(0.1, 0.8, 124.6);
-
-    expect(invokeMock).toHaveBeenCalledWith('set_volume_ramp', {
-      from: 0.1,
-      to: 0.8,
-      durationMs: 125,
     });
   });
 

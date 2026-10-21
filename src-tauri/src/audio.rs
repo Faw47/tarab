@@ -1555,7 +1555,6 @@ impl AudioManager {
                         );
                     }
                 } else {
-
                 }
             }
         });
@@ -1673,7 +1672,6 @@ impl AudioManager {
             .send(AudioCommand::SourceRenamed { old_path, new_path })
             .map_err(|e| format!("Failed to update active playback source: {}", e))
     }
-
 }
 
 fn next_playback_generation(counter: &AtomicU64) -> u64 {

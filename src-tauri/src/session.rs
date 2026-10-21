@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::ErrorKind,
-    path::PathBuf,
-};
+use std::{fs, io::ErrorKind, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
 fn default_booster_level() -> f64 {
