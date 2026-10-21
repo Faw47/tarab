@@ -1,8 +1,6 @@
 use rusqlite::Result as SqliteResult;
 
-use super::{
-    Database, DbAlbumAggregate, DbArtistAggregate, DbTrackAggregateRepresentative,
-};
+use super::{Database, DbAlbumAggregate, DbArtistAggregate, DbTrackAggregateRepresentative};
 
 impl Database {
     fn get_aggregate_representatives(
