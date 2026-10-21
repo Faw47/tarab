@@ -433,6 +433,35 @@ impl SymphoniaSource {
     }
 }
 
+fn apply_booster(sample: f32, gain: f32) -> f32 {
+    if sample.is_nan() || gain.is_nan() {
+        return 0.0;
+    }
+
+    let boosted = sample * gain;
+    if !boosted.is_finite() {
+        return if boosted.is_sign_negative() {
+            -1.0
+        } else {
+            1.0
+        };
+    }
+    if gain <= 1.0 {
+        return boosted.clamp(-1.0, 1.0);
+    }
+
+    const KNEE_START: f32 = 0.95;
+    const KNEE_WIDTH: f32 = 0.05;
+    let magnitude = boosted.abs();
+    if magnitude <= KNEE_START {
+        return boosted;
+    }
+
+    let excess = magnitude - KNEE_START;
+    let limited_magnitude = KNEE_START + excess / (1.0 + excess / KNEE_WIDTH);
+    boosted.signum() * limited_magnitude
+}
+
 impl Iterator for SymphoniaSource {
     type Item = f32;
 
@@ -441,9 +470,8 @@ impl Iterator for SymphoniaSource {
             self.refill()?;
         }
 
-        let mut sample = *self.buffer.get(self.buf_pos)?;
+        let sample = apply_booster(*self.buffer.get(self.buf_pos)?, self.booster.get());
         self.buf_pos += 1;
-        sample = (sample * self.booster.get()).clamp(-1.0, 1.0);
         self.emitted_samples.fetch_add(1, Ordering::Relaxed);
         Some(sample)
     }
@@ -605,6 +633,35 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tarab-source-{name}-{nonce}.wav"));
         std::fs::write(&path, stereo_wav(frames)).expect("write wav");
         path
+    }
+
+    #[test]
+    fn boosted_samples_are_soft_limited_without_hard_clipping() {
+        let path = write_temp_wav("soft-clip", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        state.lock().booster.set(2.0);
+        let counter = Arc::new(AtomicU64::new(0));
+        let (source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+        let samples: Vec<f32> = source.collect();
+        let _ = std::fs::remove_file(&path);
+
+        // Frame 7,500 is close enough to full scale that 2x gain exceeds the output range.
+        let left = samples[7_500 * 2];
+        let right = samples[7_500 * 2 + 1];
+        assert!(
+            left > 0.95 && left < 1.0,
+            "left sample {left} should be softly limited"
+        );
+        assert!(
+            right < -0.95 && right > -1.0,
+            "right sample {right} should be softly limited"
+        );
+        assert!(
+            (left + right).abs() < 1e-6,
+            "stereo polarity should stay symmetric"
+        );
     }
 
     #[test]

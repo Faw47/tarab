@@ -23,6 +23,7 @@ export function useAppSessionPersistence({
     queueVersion,
     queueIndex,
     playbackSpeed,
+    boosterLevel,
   } = usePlayerStore(
     useShallow((state) => ({
       currentTrackId: state.currentTrack?.id,
@@ -33,6 +34,7 @@ export function useAppSessionPersistence({
       queueVersion: state.queueVersion,
       queueIndex: state.queueIndex,
       playbackSpeed: state.playbackSpeed,
+      boosterLevel: state.boosterLevel,
     })),
   );
 
@@ -46,6 +48,7 @@ export function useAppSessionPersistence({
     queueVersion,
     queueIndex,
     playbackSpeed,
+    boosterLevel,
     shuffleEnabled,
     loopMode,
     stopAfterCurrent,

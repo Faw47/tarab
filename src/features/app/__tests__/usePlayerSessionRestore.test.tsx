@@ -4,17 +4,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { usePlayerSessionRestore } from '../usePlayerSessionRestore';
 
-const { dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock } = vi.hoisted(() => ({
-  dbGetTracksByIdsMock: vi.fn(),
-  loadPlayerStateMock: vi.fn(),
-  markHydratedMock: vi.fn(),
-}));
+const { dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock, setAudioBoosterMock } =
+  vi.hoisted(() => ({
+    dbGetTracksByIdsMock: vi.fn(),
+    loadPlayerStateMock: vi.fn(),
+    markHydratedMock: vi.fn(),
+    setAudioBoosterMock: vi.fn(async () => undefined),
+  }));
 
 vi.mock('../../../lib/tauri-commands', () => ({
   dbGetTracksByIds: dbGetTracksByIdsMock,
   dbGetTracksByAlbumArtist: vi.fn(async () => []),
   setPlaybackSpeed: vi.fn(async () => undefined),
   setVolume: vi.fn(async () => undefined),
+  setAudioBooster: setAudioBoosterMock,
 }));
 
 vi.mock('../player-state-store', () => ({
@@ -66,6 +69,32 @@ describe('usePlayerSessionRestore', () => {
     vi.clearAllMocks();
     usePlayerStore.setState(initialPlayerState, true);
     loadPlayerStateMock.mockResolvedValue(session);
+  });
+
+  it('restores the saved booster setting to the UI and native decoder', async () => {
+    loadPlayerStateMock.mockResolvedValue({ ...session, boosterLevel: 1.6 });
+    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+    expect(usePlayerStore.getState().boosterLevel).toBe(1.6);
+    expect(setAudioBoosterMock).toHaveBeenCalledWith(1.6);
+  });
+
+  it('defaults sessions without a booster setting to unity', async () => {
+    usePlayerStore.setState({ boosterLevel: 1.7 });
+    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+    expect(usePlayerStore.getState().boosterLevel).toBe(1);
+    expect(setAudioBoosterMock).toHaveBeenCalledWith(1);
   });
 
   it('does not enable saving when the stored queue cannot be resolved', async () => {
