@@ -1220,7 +1220,6 @@ impl AudioManager {
                                         let (
                                             initial_path,
                                             initial_position,
-                                            initial_paused,
                                             had_playback,
                                             initial_generation,
                                         ) = {
@@ -1233,7 +1232,6 @@ impl AudioManager {
                                             (
                                                 state.current_file.clone(),
                                                 position_from_samples(&state, emitted),
-                                                state.is_paused,
                                                 state.is_playing,
                                                 state.generation,
                                             )
@@ -1302,7 +1300,7 @@ impl AudioManager {
                                                     duration,
                                                     actual_start,
                                                     emitted_for_replacement,
-                                                ) = if active_path == *path
+                                                ) = if active_path.as_str() == path.as_str()
                                                     && generation == initial_generation
                                                 {
                                                     (
