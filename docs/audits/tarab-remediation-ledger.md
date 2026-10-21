@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 71 |
+| FIXED_VERIFIED | 72 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 41 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 45 |
+| PENDING | 44 |
 | **Total** | **160** |
 
 ## Findings
@@ -186,13 +186,13 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | FE-41 | P3 | Virtualized lists lack list semantics; queue drag-and-drop sees only rendered rows | PENDING | PASS / PASS / - | G1: baseline #122 reproduced the list semantics, grid label, and offscreen drag failures with 549 other tests passing. G2: cumulative head 1c37ca2 passed all five jobs (run #685). Independent G3 and native visual/touch acceptance remain open. | 295ee18, 3b54433, bf128ae | #123 |
 | FE-42 | P3 | `SmoothTimeProvider` runs a requestAnimationFrame loop even when paused or unused | FIXED_VERIFIED | G1 six old-provider failures, restored GREEN / G2 frontend and baseline CI PASS / G3 PASS | Existing provider requires playback plus subscribers, emits once on pause/seek, and cancels on pause/final unsubscribe/unmount. Fresh independent lifecycle review clean. Scope is deterministic scheduling, not visibility throttling or audio/visual smoothness. | 13ff91c, a21e4bf; evidence continuation | #14; lyrics continuation |
 | AR-20 | P3 | A single `Mutex<Connection>` serializes every read behind long write transactions | PENDING | PASS / PASS / - | G1: baseline #124 reproduced read serialization on Linux and Windows while 226 Linux and 218 Windows tests passed. G2: exact reader-pool head 4a951c4 passed Linux and Windows jobs (run #669); cumulative head 1c37ca2 passed all five jobs (run #685). A code review noted no blocker; independent G3 is not recorded. | 433fc2c, 241110d | #125 |
-| AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | PENDING | PASS / PASS / - | G1: test-only run #700 reproduced the initial main/mini-player budget and output regressions; 563 other frontend tests passed. Final tests cover raw and gzip caps, shared static imports, and exclusion of the lazy Three.js chunk. G2: all five jobs passed on code/test head dba1097 (run #707). Measured main graph 976,965 B raw / 301,070 B gzip (caps 1,100,000 / 350,000); mini-player 465,487 B / 143,636 B (caps 500,000 / 180,000). G3 independent review is not recorded. | dba1097 | #131 |
-| AR-31 | P3 | Redundant UI dependencies | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-30 | P3 | Initial bundle is about 955 KB of JavaScript (292 KB gzip) and the size check has no byte budget | FIXED_VERIFIED | PASS / PASS / PASS | G1: test-only run #700 reproduced the initial main/mini-player budget and output regressions; 563 other frontend tests passed. Final tests cover raw and gzip caps, shared static imports, and exclusion of the lazy Three.js chunk. G2: all five jobs passed on code/test head dba1097 (run #707); exact ledger head 1307757 passed all five in run #708. Measured main graph 976,965 B raw / 301,070 B gzip (caps 1,100,000 / 350,000); mini-player 465,487 B / 143,636 B (caps 500,000 / 180,000). G3: independent review at exact head 13077572 found no blockers. | dba1097 | #131 |
+| AR-31 | P3 | Redundant UI dependencies | PENDING | n/a / PASS / - | G1 n/a: dependency deletion has no user-visible failure to reproduce; characterization tests cover slider name/value, ArrowRight adjustment, and separate mute action. G2: all five CI jobs passed on corrected code head 2d47193 (run #710), including 569 frontend tests; frozen install and knip pass with React Aria removed from the manifest/root lockfile importer. G3 independent review pending. Framer Motion remains used for entry/exit transitions in TopBar and AppLayouts. | 2d47193 | #132 |
 | AR-33 | P3 | `App.tsx` is a god component; large view files carry most of the complexity | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-36 | P3 | Errors are untyped strings and behavior depends on message text | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-25 | P3 | Dead code, dead dependencies and unused IPC surface | PENDING | PASS / PASS / - | G1: baseline #126 (run #672) found 21 unused renderer wrappers. G2: exact fix head d7094e2 passed all five jobs (run #679); cumulative head 1c37ca2 passed all five jobs (run #685). G3 independent review is not recorded. | d7094e2 | #127 |
 | AR-28 | P3 | Image cache: dead in-memory LRU, mtime-based "LRU", possible size underflow, renderer-only enforcement | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-29 | P3 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-29 | P3 | Waveform cache is keyed by path, unbounded on disk, and goes stale after edits | PENDING | n/a / PASS / - | G1 n/a: the generator had no UI callers and was reachable only through IPC; AR-25 removed the unused feature rather than maintaining a dead cache. G2: PR #127 removes src-tauri/src/waveform.rs and its module/import/IPC registrations; all five jobs passed on removal head d7094e2 (run #679), and the cumulative stack passed run #710. G3 independent review pending. | d7094e2 | #127 |
 | PB-22 | P3 | `rubato` dependency unused; sample-rate conversion uses rodio's linear converter | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-37 | P3 | Minor reliability items | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | SEC-03 | P3 | Waveform generator sizes a buffer from an unvalidated sample rate | FIXED_VERIFIED | G1 bounds regression/source proof / G2 exact-base Rust CI PASS / G3 fresh PASS | Metadata validation precedes allocation; checked chunk sizes cap at 307200 f32 samples (1228800 bytes). One Rust regression test has seven assertions covering invalid metadata and bounds. PR #30 Rust tests/check/Clippy pass on all three platforms. Independent source review clean. No local Cargo or malformed-file decoding claimed. | f28b588 | #18; evidence continuation |
