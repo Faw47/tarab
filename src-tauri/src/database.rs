@@ -14,7 +14,7 @@ mod migrations;
 mod playlists;
 mod tracks;
 
-const CURRENT_SCHEMA_VERSION: i32 = 10;
+const CURRENT_SCHEMA_VERSION: i32 = 11;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
@@ -940,6 +940,13 @@ mod tests {
                 .id,
             track.id
         );
+        assert_eq!(
+            db.get_track_by_public_id(&public_id.to_ascii_uppercase())
+                .expect("resolve uppercase public id")
+                .expect("linked track")
+                .id,
+            track.id
+        );
         assert!(db
             .get_track_by_public_id("../not-an-id")
             .expect("reject invalid public id")
@@ -954,7 +961,7 @@ mod tests {
             .prepare("EXPLAIN QUERY PLAN SELECT id FROM tracks WHERE public_id = ?1")
             .expect("prepare public ID lookup plan");
         let details = statement
-            .query_map(["c".repeat(64)], |row| row.get::<_, String>(3))
+            .query_map(rusqlite::params!["c".repeat(64)], |row| row.get::<_, String>(3))
             .expect("query public ID lookup plan")
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("collect public ID lookup plan");
@@ -965,6 +972,106 @@ mod tests {
                 .any(|detail| detail.contains("idx_tracks_public_id")),
             "public ID lookup should use its index: {details:?}"
         );
+    }
+
+    #[test]
+    fn folder_scan_upsert_stores_the_public_track_id() {
+        let db = test_db();
+        let mut track = sample_track("reconciled-public");
+        track.id = track.file_path.clone();
+        let file_path = track.file_path.clone();
+
+        db.reconcile_folder_scan(ScanReconcileRequest {
+            folder_path: "/tmp".to_string(),
+            discovered_paths: vec![file_path.clone()],
+            tracks: vec![track],
+            traversal_complete: true,
+            errors: Vec::new(),
+        })
+        .expect("reconcile track");
+
+        let resolved = db
+            .get_track_by_public_id(&Database::public_track_id(&file_path))
+            .expect("resolve reconciled track")
+            .expect("reconciled track exists");
+        assert_eq!(resolved.file_path, file_path);
+    }
+
+    #[test]
+    fn public_track_id_follows_renames_and_folder_rebases() {
+        let db = test_db();
+        let track = sample_track("public-path");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed track");
+
+        let original_id = Database::public_track_id(&track.file_path);
+        let renamed_path = "/tmp/public-path-renamed.mp3";
+        db.rename_track_path(&track.file_path, renamed_path)
+            .expect("rename track path");
+        assert!(db
+            .get_track_by_public_id(&original_id)
+            .expect("lookup old path")
+            .is_none());
+
+        let renamed_id = Database::public_track_id(renamed_path);
+        assert_eq!(
+            db.get_track_by_public_id(&renamed_id)
+                .expect("lookup renamed path")
+                .expect("renamed track")
+                .file_path,
+            renamed_path
+        );
+
+        db.rebase_track_paths("/tmp", "/archive")
+            .expect("rebase track paths");
+        let rebased_path = "/archive/public-path-renamed.mp3";
+        assert!(db
+            .get_track_by_public_id(&renamed_id)
+            .expect("lookup pre-rebase path")
+            .is_none());
+        assert_eq!(
+            db.get_track_by_public_id(&Database::public_track_id(rebased_path))
+                .expect("lookup rebased path")
+                .expect("rebased track")
+                .file_path,
+            rebased_path
+        );
+    }
+
+    #[test]
+    fn migration_v11_backfills_and_indexes_existing_public_track_ids() {
+        let db = test_db();
+        let conn = Connection::open_in_memory().expect("open legacy database");
+        conn.execute_batch(
+            "CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT NOT NULL);",
+        )
+        .expect("create legacy tracks table");
+        let file_path = "/tmp/legacy-public-track.mp3";
+        conn.execute(
+            "INSERT INTO tracks (id, file_path) VALUES (?1, ?2)",
+            params!["legacy-track", file_path],
+        )
+        .expect("insert legacy track");
+
+        db.migrate_v11(&conn).expect("migrate public track IDs");
+
+        let stored_id: String = conn
+            .query_row(
+                "SELECT public_id FROM tracks WHERE id = ?1",
+                rusqlite::params!["legacy-track"],
+                |row| row.get(0),
+            )
+            .expect("read backfilled public ID");
+        assert_eq!(stored_id, Database::public_track_id(file_path));
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_tracks_public_id'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("verify public ID index");
+        assert_eq!(index_count, 1);
     }
 
     #[test]
