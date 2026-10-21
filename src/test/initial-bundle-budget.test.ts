@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,7 +90,9 @@ describe('initial bundle budget', () => {
       const result = runBundleCheck(root);
       expect(result.error).toBeUndefined();
       expect(result.status).not.toBe(0);
-      expect(result.stdout + '\n' + result.stderr).toMatch(/mini-player.*budget|budget.*mini-player/i);
+      expect(result.stdout + '\n' + result.stderr).toMatch(
+        /mini-player.*budget|budget.*mini-player/i,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
