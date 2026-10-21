@@ -468,6 +468,7 @@ enum PrefetchCommand {
     Seek {
         generation: u64,
         position: std::time::Duration,
+        result: std::sync::mpsc::SyncSender<Result<(), String>>,
     },
 }
 
@@ -604,30 +605,30 @@ fn run_prefetch_worker<S: PrefetchableSource>(
         if let Some(PrefetchCommand::Seek {
             generation: seek_generation,
             position,
+            result,
         }) = command
         {
             if seek_generation != active_generation.load(Ordering::Acquire) {
+                let _ = result.send(Err("decoder seek was superseded".to_string()));
                 continue;
             }
             generation = seek_generation;
-            if let Err(error) = source.seek_for_prefetch(position) {
-                eprintln!("Decoder seek failed during prefetch: {error}");
-                match send_prefetch_message(
-                    &output,
-                    &commands,
-                    &active_generation,
-                    generation,
-                    PrefetchMessage::End { generation },
-                ) {
-                    PrefetchSend::Sent => finished = true,
-                    PrefetchSend::Superseded => continue,
-                    PrefetchSend::Command(command) => {
-                        pending_command = Some(command);
-                        continue;
-                    }
-                    PrefetchSend::Closed => return,
-                }
+            let seek_result = source.seek_for_prefetch(position);
+            if active_generation.load(Ordering::Acquire) != generation {
+                let _ = result.send(Err("decoder seek was superseded".to_string()));
                 continue;
+            }
+            if let Err(error) = seek_result {
+                eprintln!("Decoder seek failed during prefetch: {error}");
+                let _ = result.send(Err(error));
+                // Do not send End: a failed seek is an error, not normal track exhaustion. The
+                // playback controller receives the error and rebuilds the decoder off the callback.
+                finished = true;
+                continue;
+            }
+            if result.send(Ok(())).is_err() {
+                // The playback controller gave up (for example, its bounded seek timed out).
+                // Keep producing from the requested position until the source is dropped.
             }
 
             finished = false;
@@ -888,17 +889,28 @@ impl Source for BufferedSymphoniaSource {
         self.underrun_signal.store(false, Ordering::Release);
 
         // Publish the new generation before enqueueing the request so the worker discards any
-        // old-position chunk that finishes concurrently. The command only signals the producer;
-        // waiting for decoding here would stall Rodio's device callback.
+        // old-position chunk that finishes concurrently. This runs inside the bounded seek worker,
+        // not Rodio's device callback. Wait only for the decoder reposition result, not for refill,
+        // so an actual seek failure reaches the playback controller and triggers its rebuild path.
+        let (result_sender, result_receiver) = std::sync::mpsc::sync_channel(1);
         self.commands
             .send(PrefetchCommand::Seek {
                 generation,
                 position,
+                result: result_sender,
             })
             .map_err(|error| {
                 rodio::source::SeekError::Other(Box::new(std::io::Error::other(error.to_string())))
             })?;
-        Ok(())
+        match result_receiver.recv() {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(rodio::source::SeekError::Other(Box::new(
+                std::io::Error::other(error),
+            ))),
+            Err(error) => Err(rodio::source::SeekError::Other(Box::new(
+                std::io::Error::other(format!("decoder seek worker stopped: {error}")),
+            ))),
+        }
     }
 }
 
@@ -1165,6 +1177,7 @@ mod tests {
     struct PrefetchProbeSource {
         foreign_batches: usize,
         samples_left: usize,
+        fail_seek: bool,
         synthetic_sample: Arc<AtomicBool>,
         last_read_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
         drop_signal: Arc<AtomicBool>,
@@ -1222,6 +1235,9 @@ mod tests {
 
     impl PrefetchableSource for PrefetchProbeSource {
         fn seek_for_prefetch(&mut self, _position: Duration) -> Result<(), String> {
+            if self.fail_seek {
+                return Err("probe rejected decoder seek".to_string());
+            }
             if let Some(started) = self.seek_started.take() {
                 let _ = started.send(());
             }
@@ -1242,6 +1258,7 @@ mod tests {
         let source = PrefetchProbeSource {
             foreign_batches: 8,
             samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: false,
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::clone(&read_thread),
             drop_signal: Arc::new(AtomicBool::new(false)),
@@ -1310,12 +1327,13 @@ mod tests {
     }
 
     #[test]
-    fn callback_seek_returns_before_the_decoder_worker_finishes() {
+    fn source_seek_waits_for_decoder_seek_acknowledgement() {
         let (seek_started_tx, seek_started_rx) = mpsc::channel();
         let (seek_release_tx, seek_release_rx) = mpsc::channel();
         let source = PrefetchProbeSource {
             foreign_batches: 0,
             samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: false,
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::new(std::sync::Mutex::new(None)),
             drop_signal: Arc::new(AtomicBool::new(false)),
@@ -1334,18 +1352,44 @@ mod tests {
         seek_started_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("producer should receive the seek");
-        let returned_before_worker_release = matches!(seek_result_rx.try_recv(), Ok(true));
-        let _ = seek_release_tx.send(());
+        // Releasing on this path (and disconnecting the sender on panic) ensures the producer
+        // cannot remain stranded if the bounded result wait fails.
+        seek_release_tx.send(()).expect("release blocked producer");
         let seek_succeeded = seek_result_rx
             .recv_timeout(Duration::from_secs(1))
-            .expect("seek call should return");
+            .expect("seek call should return after the worker responds");
         seek_thread.join().expect("seek caller thread");
 
-        assert!(
-            returned_before_worker_release,
-            "Source::try_seek must not wait for decoder work"
-        );
         assert!(seek_succeeded);
+    }
+
+    #[test]
+    fn failed_prefetch_seek_is_reported_without_marking_the_track_ended() {
+        let source = PrefetchProbeSource {
+            foreign_batches: 0,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: true,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: None,
+            seek_release: None,
+        };
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
+                .expect("start prefetch");
+
+        let result = buffered.try_seek(Duration::from_secs(1));
+
+        assert!(
+            result.is_err(),
+            "the decoder's seek error must reach Rodio so playback can rebuild the source"
+        );
+        assert_eq!(
+            buffered.next(),
+            Some(0.0),
+            "a failed seek must not be reported as normal end-of-track"
+        );
     }
 
     #[test]
@@ -1354,6 +1398,7 @@ mod tests {
         let source = PrefetchProbeSource {
             foreign_batches: usize::MAX,
             samples_left: 0,
+            fail_seek: false,
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::new(std::sync::Mutex::new(None)),
             drop_signal: Arc::clone(&source_dropped),
