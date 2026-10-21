@@ -264,12 +264,19 @@ pub(super) fn play_with_source<S>(
     stream_handle: &OutputStreamHandle,
     source: S,
     state: &Arc<Mutex<PlaybackState>>,
+    roots_state: &SharedLibraryRoots,
     start: PlaybackStart<'_>,
     cancelled_handoffs: &[Arc<AtomicBool>],
 ) -> Option<Arc<Sink>>
 where
     S: Source<Item = f32> + Send + 'static,
 {
+    // Keep source requests from reserving a newer generation between validation and installation.
+    let mut roots = roots_state.write();
+    if !playback_generation_is_current(&roots, start.generation) {
+        return None;
+    }
+
     let sink = Sink::try_new(stream_handle).ok()?;
     let channels = source.channels();
     let sample_rate = source.sample_rate();
@@ -286,20 +293,16 @@ where
         return None;
     }
 
-    {
-        let mut s = state.lock();
-        for cancelled in cancelled_handoffs {
-            cancelled.store(true, Ordering::Release);
-        }
-        s.current_file = Some(start.file_path.to_string());
-        s.generation = start.generation;
-        s.duration = start.duration;
-        s.start_position = start.start_secs;
-        s.position_sample_rate = sample_rate;
-        s.position_channels = channels;
-        s.is_playing = true;
-        s.is_paused = start.start_paused;
-        s.warned_near_end = false;
+    if !commit_prepared_source(
+        &mut roots,
+        state,
+        &start,
+        sample_rate,
+        channels,
+        cancelled_handoffs,
+    ) {
+        sink.stop();
+        return None;
     }
     Some(Arc::new(sink))
 }

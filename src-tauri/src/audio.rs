@@ -179,12 +179,52 @@ fn snapshot_playback_for_seek(
     )
 }
 
+/// Commits an installed source and its transient access while source-changing requests are
+/// excluded by the caller's library-roots write lock.
+fn commit_prepared_source(
+    roots: &mut LibraryRootsState,
+    state: &Arc<Mutex<PlaybackState>>,
+    start: &PlaybackStart<'_>,
+    sample_rate: u32,
+    channels: u16,
+    cancelled_handoffs: &[Arc<AtomicBool>],
+) -> bool {
+    if !playback_generation_is_current(roots, start.generation) {
+        return false;
+    }
+    if !retain_transient_file_for_queue_entry_at_generation(
+        roots,
+        Path::new(start.file_path),
+        start.generation,
+    ) {
+        return false;
+    }
+
+    let mut state = state.lock();
+    for cancelled in cancelled_handoffs {
+        cancelled.store(true, Ordering::Release);
+    }
+    state.current_file = Some(start.file_path.to_string());
+    state.generation = start.generation;
+    state.duration = start.duration;
+    state.start_position = start.start_secs;
+    state.position_sample_rate = sample_rate;
+    state.position_channels = channels;
+    state.is_playing = true;
+    state.is_paused = start.start_paused;
+    state.warned_near_end = false;
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn commit_gapless_handoff(
+    roots_state: &SharedLibraryRoots,
     state: &Arc<Mutex<PlaybackState>>,
     cancelled: &AtomicBool,
     active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
     emitted_for_next: Arc<AtomicU64>,
+    outgoing_path: &str,
+    outgoing_generation: u64,
     next_path: &str,
     next_generation: u64,
     duration: f64,
@@ -192,8 +232,19 @@ fn commit_gapless_handoff(
     sample_rate: u32,
     channels: u16,
 ) -> bool {
+    // Lock in the same order as prepared-source installation. The roots read lock keeps a newer
+    // Play/Stop from reserving its generation until this handoff either commits or is rejected.
+    let roots = roots_state.read();
+    if !playback_generation_is_current(&roots, outgoing_generation)
+        || cancelled.load(Ordering::Acquire)
+    {
+        return false;
+    }
+
     let mut state = state.lock();
-    if cancelled.load(Ordering::Acquire) {
+    if state.generation != outgoing_generation
+        || state.current_file.as_deref() != Some(outgoing_path)
+    {
         return false;
     }
 
@@ -207,7 +258,6 @@ fn commit_gapless_handoff(
     state.warned_near_end = false;
     true
 }
-
 fn reset_active_counter(slot: &Arc<Mutex<Arc<AtomicU64>>>) {
     let counter = slot.lock().clone();
     counter.store(0, Ordering::Relaxed);
@@ -513,6 +563,7 @@ impl AudioManager {
                                             stream_handle,
                                             source,
                                             &state_clone,
+                                            &roots_for_audio,
                                             PlaybackStart {
                                                 file_path: &file_path,
                                                 duration,
@@ -523,14 +574,6 @@ impl AudioManager {
                                             },
                                             &gapless_cancellation_tokens,
                                         ) {
-                                            {
-                                                let mut roots = roots_for_audio.write();
-                                                retain_transient_file_for_queue_entry_at_generation(
-                                                    &mut roots,
-                                                    Path::new(&file_path),
-                                                    generation,
-                                                );
-                                            }
                                             pending_gapless_cancels.clear();
                                             if let Some(sink) = current_sink.take() {
                                                 sink.stop();
@@ -549,7 +592,10 @@ impl AudioManager {
                                                 None,
                                                 true,
                                             );
-                                        } else {
+                                        } else if playback_generation_is_current(
+                                            &roots_for_audio.read(),
+                                            generation,
+                                        ) {
                                             emit_playback_error(
                                                 &app_for_audio,
                                                 file_path.clone(),
@@ -666,6 +712,7 @@ impl AudioManager {
                                             stream_handle,
                                             source,
                                             &state_clone,
+                                            &roots_for_audio,
                                             PlaybackStart {
                                                 file_path: &file_path,
                                                 duration,
@@ -676,14 +723,6 @@ impl AudioManager {
                                             },
                                             &gapless_cancellation_tokens,
                                         ) {
-                                            {
-                                                let mut roots = roots_for_audio.write();
-                                                retain_transient_file_for_queue_entry_at_generation(
-                                                    &mut roots,
-                                                    Path::new(&file_path),
-                                                    generation,
-                                                );
-                                            }
                                             pending_gapless_cancels.clear();
                                             if should_fallback_to_play {
                                                 if let Some(sink) = current_sink.take() {
@@ -729,7 +768,10 @@ impl AudioManager {
                                                 None,
                                                 true,
                                             );
-                                        } else {
+                                        } else if playback_generation_is_current(
+                                            &roots_for_audio.read(),
+                                            generation,
+                                        ) {
                                             emit_playback_error(
                                                 &app_for_audio,
                                                 file_path.clone(),
@@ -883,6 +925,7 @@ impl AudioManager {
                                             stream_handle,
                                             source,
                                             &state_clone,
+                                            &roots_for_audio,
                                             PlaybackStart {
                                                 file_path: &active_path,
                                                 duration: updated_duration,
@@ -905,7 +948,10 @@ impl AudioManager {
                                                     position: actual_start,
                                                 },
                                             );
-                                        } else {
+                                        } else if playback_generation_is_current(
+                                            &roots_for_audio.read(),
+                                            generation,
+                                        ) {
                                             emit_playback_error(
                                                 &app_for_audio,
                                                 active_path.clone(),
@@ -1131,15 +1177,20 @@ impl AudioManager {
                                     let handoff_cancelled_for_callback =
                                         Arc::clone(&handoff_cancelled);
                                     let out_clone = out_path.clone();
+                                    let out_path_for_handoff = out_path.clone();
+                                    let roots_for_handoff = Arc::clone(&roots_for_audio);
                                     let next_clone = path.clone();
                                     let cnt_next = Arc::clone(&emitted_for_next);
 
                                     let handoff = GaplessHandoffSource::new(source2, move || {
                                         let committed = commit_gapless_handoff(
+                                            &roots_for_handoff,
                                             &state_emit,
                                             &handoff_cancelled_for_callback,
                                             &active_slot,
                                             Arc::clone(&cnt_next),
+                                            &out_path_for_handoff,
+                                            outgoing_generation,
                                             &next_clone,
                                             next_generation,
                                             duration2,
@@ -1241,7 +1292,13 @@ impl AudioManager {
                                 let preferred = preferred_device.as_deref();
                                 match open_output_stream(preferred) {
                                     Ok(new_stream_bundle) => {
-                                        let (active_path, position, was_paused, had_playback) = {
+                                        let (
+                                            active_path,
+                                            position,
+                                            was_paused,
+                                            had_playback,
+                                            active_generation,
+                                        ) = {
                                             let state = state_clone.lock();
                                             let emitted = {
                                                 let counter =
@@ -1253,6 +1310,7 @@ impl AudioManager {
                                                 position_from_samples(&state, emitted),
                                                 state.is_paused,
                                                 state.is_playing,
+                                                state.generation,
                                             )
                                         };
 
@@ -1290,12 +1348,12 @@ impl AudioManager {
                                                             return None;
                                                         }
                                                     };
-                                                let current_generation =
-                                                    state_clone.lock().generation;
+                                                let current_generation = active_generation;
                                                 let sink = play_with_source(
                                                     &new_stream_bundle.1,
                                                     source,
                                                     &state_clone,
+                                                    &roots_for_audio,
                                                     PlaybackStart {
                                                         file_path: path,
                                                         duration,
@@ -1313,6 +1371,12 @@ impl AudioManager {
                                         };
 
                                         if had_playback && replacement.is_none() {
+                                            if !playback_generation_is_current(
+                                                &roots_for_audio.read(),
+                                                active_generation,
+                                            ) {
+                                                continue;
+                                            }
                                             if recovering {
                                                 stop_after_failed_recovery(
                                                     &state_clone,
@@ -1969,16 +2033,21 @@ mod bounded_seek_tests {
             playback.generation = 7;
             playback.duration = 12.0;
         }
+        let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(&mut roots.write(), 7));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
 
         let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
         let committed = commit_gapless_handoff(
+            &roots,
             &state,
             &cancelled,
             &emitted,
             Arc::new(AtomicU64::new(0)),
+            "outgoing.wav",
+            7,
             "incoming.wav",
             8,
             20.0,
@@ -1996,16 +2065,25 @@ mod bounded_seek_tests {
 
     #[test]
     fn seek_snapshot_uses_a_gapless_track_that_committed_first() {
-        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let state = Arc::new(Mutex::new(PlaybackState {
+            generation: 7,
+            current_file: Some("outgoing.wav".to_string()),
+            ..PlaybackState::default()
+        }));
+        let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(&mut roots.write(), 7));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
 
         assert!(commit_gapless_handoff(
+            &roots,
             &state,
             &cancelled,
             &emitted,
             Arc::new(AtomicU64::new(0)),
+            "outgoing.wav",
+            7,
             "incoming.wav",
             8,
             20.0,
@@ -2018,6 +2096,75 @@ mod bounded_seek_tests {
         assert_eq!(generation, 8);
         assert_eq!(path, "incoming.wav");
         assert_eq!(duration, 20.0);
+    }
+
+    #[test]
+    fn a_stale_prepared_source_cannot_commit_after_a_newer_play_request() {
+        let mut roots = LibraryRootsState::default();
+        assert!(mark_playback_generation(&mut roots, 12));
+        let state = Arc::new(Mutex::new(PlaybackState {
+            generation: 10,
+            current_file: Some("active.wav".to_string()),
+            is_playing: true,
+            ..PlaybackState::default()
+        }));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let start = PlaybackStart {
+            file_path: "stale.wav",
+            duration: 30.0,
+            start_secs: 0.0,
+            generation: 11,
+            initial_volume: None,
+            start_paused: false,
+        };
+
+        assert!(!commit_prepared_source(
+            &mut roots,
+            &state,
+            &start,
+            48_000,
+            2,
+            &[cancelled],
+        ));
+        assert_eq!(state.lock().generation, 10);
+        assert_eq!(state.lock().current_file.as_deref(), Some("active.wav"));
+        assert!(state.lock().is_playing);
+    }
+
+    #[test]
+    fn a_gapless_handoff_cannot_commit_after_a_newer_source_request() {
+        let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(&mut roots.write(), 9));
+        let state = Arc::new(Mutex::new(PlaybackState {
+            generation: 7,
+            current_file: Some("outgoing.wav".to_string()),
+            duration: 12.0,
+            is_playing: true,
+            ..PlaybackState::default()
+        }));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let active_counter = Arc::new(AtomicU64::new(5));
+        let emitted = Arc::new(Mutex::new(Arc::clone(&active_counter)));
+
+        assert!(!commit_gapless_handoff(
+            &roots,
+            &state,
+            &cancelled,
+            &emitted,
+            Arc::new(AtomicU64::new(0)),
+            "outgoing.wav",
+            7,
+            "incoming.wav",
+            8,
+            20.0,
+            0.0,
+            48_000,
+            2,
+        ));
+        assert_eq!(active_counter.load(Ordering::Relaxed), 5);
+        assert_eq!(state.lock().generation, 7);
+        assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
+        assert_eq!(state.lock().duration, 12.0);
     }
 
     #[test]

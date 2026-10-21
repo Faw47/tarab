@@ -1,5 +1,6 @@
 const AUDIO: &str = include_str!("../src/audio.rs");
 const METADATA: &str = include_str!("../src/metadata.rs");
+const AUDIO_SOURCE: &str = include_str!("../src/audio/source.rs");
 
 fn command_body<'a>(source: &'a str, signature: &str) -> &'a str {
     let start = source.find(signature).expect("command signature");
@@ -80,13 +81,46 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
 }
 
 #[test]
+fn prepared_sources_and_gapless_handoffs_reject_superseded_generations() {
+    let installer_start = AUDIO_SOURCE
+        .find("pub(super) fn play_with_source(")
+        .expect("prepared source installer");
+    let installer_end = AUDIO_SOURCE[installer_start..]
+        .find("\npub(super) struct SymphoniaSource")
+        .map(|offset| installer_start + offset)
+        .expect("prepared source installer end");
+    let installer = &AUDIO_SOURCE[installer_start..installer_end];
+    assert!(
+        installer.contains("roots_state.write()")
+            && installer.contains("playback_generation_is_current")
+            && installer.contains("commit_prepared_source"),
+        "prepared sources must validate and commit while the latest source generation is locked"
+    );
+
+    let commit_start = AUDIO
+        .find("fn commit_gapless_handoff(")
+        .expect("gapless commit helper");
+    let commit_end = AUDIO[commit_start..]
+        .find("\nfn reset_active_counter")
+        .map(|offset| commit_start + offset)
+        .expect("gapless commit helper end");
+    let commit = &AUDIO[commit_start..commit_end];
+    assert!(
+        commit.contains("roots_state.read()")
+            && commit.contains("outgoing_generation")
+            && commit.contains("state.current_file.as_deref()"),
+        "gapless playback state must not commit after its outgoing source was superseded"
+    );
+}
+
+#[test]
 fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() {
     let crossfade = audio_command_arm(
         "AudioCommand::CrossfadeTo {\n                                file_path,",
     );
     assert!(
-        crossfade.contains("retain_transient_file_for_queue_entry_at_generation"),
-        "a successfully started crossfade must retain only its incoming track grant"
+        crossfade.contains("play_with_source") && crossfade.contains("&roots_for_audio"),
+        "crossfade source installation must commit its current generation and transient grant atomically"
     );
 
     let gapless = audio_command_arm(
