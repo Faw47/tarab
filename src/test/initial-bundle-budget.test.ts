@@ -63,8 +63,14 @@ function createBundleFixture(options: {
     'src/three-stack.ts': { file: 'assets/three-stack.js' },
   };
   writeFileSync(join(dist, '.vite', 'manifest.json'), JSON.stringify(manifest));
-  writeFileSync(join(dist, 'index.html'), '<!doctype html><html></html>');
-  writeFileSync(join(dist, 'mini-player.html'), '<!doctype html><html></html>');
+  writeFileSync(
+    join(dist, 'index.html'),
+    '<!doctype html><html><script type="module" src="/assets/main.js"></script></html>',
+  );
+  writeFileSync(
+    join(dist, 'mini-player.html'),
+    '<!doctype html><html><script type="module" src="/assets/mini-player.js"></script></html>',
+  );
 
   return root;
 }
