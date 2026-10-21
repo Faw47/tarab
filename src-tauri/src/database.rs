@@ -873,11 +873,8 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
 
     // Move sidecars before the main database. If any rename fails, put already-moved artifacts
     // back so callers never see a database split across the old and new directories.
-    database_artifacts.sort_by_key(|(source, _)| {
-        source
-            .file_name()
-            .is_some_and(|name| name == "library.db")
-    });
+    database_artifacts
+        .sort_by_key(|(source, _)| source.file_name().is_some_and(|name| name == "library.db"));
     let mut moved_artifacts: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (source, destination) in database_artifacts {
         if let Err(error) = std::fs::rename(&source, &destination) {
