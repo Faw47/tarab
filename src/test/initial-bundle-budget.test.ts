@@ -8,8 +8,23 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const scriptPath = join(repoRoot, 'scripts/check-initial-bundle.mjs');
 
+function pseudoRandomBytes(size: number) {
+  const bytes = Buffer.alloc(size);
+  let state = 0x12345678;
+
+  for (let index = 0; index < size; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    bytes[index] = state & 0xff;
+  }
+
+  return bytes;
+}
+
 function createBundleFixture(options: {
   mainBytes?: number;
+  mainIncompressible?: boolean;
   miniPlayerBytes?: number;
   threeBytes?: number;
 }) {
@@ -19,10 +34,13 @@ function createBundleFixture(options: {
   mkdirSync(assets, { recursive: true });
   mkdirSync(join(dist, '.vite'), { recursive: true });
 
-  const writeAsset = (name: string, bytes: number) => {
-    writeFileSync(join(assets, name), Buffer.alloc(bytes, 97));
+  const writeAsset = (name: string, bytes: number, incompressible = false) => {
+    writeFileSync(
+      join(assets, name),
+      incompressible ? pseudoRandomBytes(bytes) : Buffer.alloc(bytes, 97),
+    );
   };
-  writeAsset('main.js', options.mainBytes ?? 128);
+  writeAsset('main.js', options.mainBytes ?? 128, options.mainIncompressible);
   writeAsset('mini-player.js', options.miniPlayerBytes ?? 128);
   writeAsset('shared.js', 64);
   writeAsset('three-stack.js', options.threeBytes ?? 0);
@@ -56,14 +74,27 @@ function runBundleCheck(cwd: string) {
 }
 
 describe('initial bundle budget', () => {
-  it('rejects a main entry whose static graph exceeds its raw byte budget', () => {
-    const root = createBundleFixture({ mainBytes: 1_100_001 });
+  it('counts shared static imports against the main raw byte budget', () => {
+    const root = createBundleFixture({ mainBytes: 1_100_000 });
 
     try {
       const result = runBundleCheck(root);
       expect(result.error).toBeUndefined();
       expect(result.status).not.toBe(0);
-      expect(result.stdout + '\n' + result.stderr).toMatch(/main.*budget|budget.*main/i);
+      expect(result.stdout + '\n' + result.stderr).toMatch(/main.*raw.*budget/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces the gzip budget even when the raw graph is below its limit', () => {
+    const root = createBundleFixture({ mainBytes: 400_000, mainIncompressible: true });
+
+    try {
+      const result = runBundleCheck(root);
+      expect(result.error).toBeUndefined();
+      expect(result.status).not.toBe(0);
+      expect(result.stdout + '\n' + result.stderr).toMatch(/main.*gzip.*budget/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -83,15 +114,15 @@ describe('initial bundle budget', () => {
     }
   });
 
-  it('enforces the mini-player budget separately', () => {
-    const root = createBundleFixture({ miniPlayerBytes: 500_001 });
+  it('enforces the mini-player raw byte budget separately', () => {
+    const root = createBundleFixture({ miniPlayerBytes: 500_000 });
 
     try {
       const result = runBundleCheck(root);
       expect(result.error).toBeUndefined();
       expect(result.status).not.toBe(0);
       expect(result.stdout + '\n' + result.stderr).toMatch(
-        /mini-player.*budget|budget.*mini-player/i,
+        /mini-player.*raw.*budget/i,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
