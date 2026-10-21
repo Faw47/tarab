@@ -24,7 +24,7 @@ Findings: PB-29 and QA-13 in the comprehensive audit and remediation ledger.
 
 - Final tests-only commit `1290879`: CI run 39493591993 reproduced all 30 expected assertions; 490 frontend tests passed.
 - Production changes fix queue History identity/indexing and startup deep-link lifecycle, with regressions for both themes and asynchronous cleanup.
-- An earlier validation attempt was based on the pre-Opus branch and is superseded. The current restack onto `ecfe6462` is awaiting its own full CI run.
+- The current restack onto `ecfe6462` passed all five CI jobs in run 39558532101; G2 includes frontend, dependency audit, and Rust tests/check/strict Clippy on Windows, macOS and Linux.
 - Independent source review found no remaining code blocker. Native rapid Next/History playback and repeated deep-link acceptance remain open.
 
 ## Rulings
