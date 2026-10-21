@@ -102,7 +102,7 @@ export function useLibraryData(options: { includeLibraryShelves?: boolean } = {}
     queryKey: tracksKey,
     queryFn: () =>
       fetchLibraryTracksPage({
-        offset: 0,
+        cursor: null,
         limit: 400,
         sortBy,
         sortOrder: sortOrderFor(sortBy),
