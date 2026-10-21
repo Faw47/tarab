@@ -10,8 +10,8 @@ import {
 } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
-import type { AlbumDetailsState } from './app-state-types';
 import { createLazyQueueTrack } from '../library/loadTracksForShuffle';
+import type { AlbumDetailsState } from './app-state-types';
 import { loadPlayerStateFromStore, markPlayerStateHydrated } from './player-state-store';
 
 const toTrack = (track: {
