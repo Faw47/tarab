@@ -184,6 +184,12 @@ fn pending_gapless_tokens(pending: &[PendingGaplessHandoff]) -> Vec<Arc<AtomicBo
         .collect()
 }
 
+fn has_uncancelled_gapless_handoff(pending: &[PendingGaplessHandoff]) -> bool {
+    pending
+        .iter()
+        .any(|(_, cancelled)| !cancelled.load(Ordering::Acquire))
+}
+
 fn snapshot_playback_for_seek(
     state: &Arc<Mutex<PlaybackState>>,
     pending: &mut Vec<PendingGaplessHandoff>,
@@ -1307,8 +1313,14 @@ impl AudioManager {
                                                 // candidate decoder opened. Cancel and snapshot under
                                                 // the same state lock the callback uses, then rebuild
                                                 // for the committed track if it changed.
+                                                // PreloadNext(None) clears the path marker but
+                                                // cannot remove the source already queued in Rodio.
+                                                // The cancellation tokens remain the reliable
+                                                // indicator that a queued handoff may still advance.
                                                 let had_queued_gapless_source =
-                                                    pending_gapless_path_thread.lock().is_some();
+                                                    has_uncancelled_gapless_handoff(
+                                                        &pending_gapless_cancels,
+                                                    );
                                                 let (
                                                     generation,
                                                     active_path,
@@ -2146,9 +2158,11 @@ mod bounded_seek_tests {
         }
         let active_counter = Arc::new(AtomicU64::new(123));
         let active_emitted = Arc::new(Mutex::new(Arc::clone(&active_counter)));
-        let pending_path = Arc::new(Mutex::new(Some("incoming.wav".to_string())));
+        // A queue edit may clear this path marker even though Rodio still owns the source.
+        let pending_path = Arc::new(Mutex::new(None));
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        assert!(has_uncancelled_gapless_handoff(&pending));
         let (sink, _queue) = Sink::new_idle();
         let sink = Arc::new(sink);
         let mut current_sink = Some(Arc::clone(&sink));
