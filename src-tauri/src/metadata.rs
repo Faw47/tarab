@@ -23,6 +23,7 @@ pub struct TrackMetadata {
     pub artist: String,
     pub album_artist: Option<String>,
     pub album: String,
+    pub genre: Option<String>,
     pub year: Option<i32>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
@@ -174,6 +175,9 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
     let tag = tagged_file
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
+    let genre = tag
+        .and_then(|tag| tag.genre().map(|value| value.to_string()))
+        .filter(|genre| !genre.trim().is_empty());
 
     let (title, artist, album_artist, album, year, track_number, disc_number) =
         if let Some(tag) = tag {
@@ -242,6 +246,7 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
         artist,
         album_artist,
         album,
+        genre,
         year,
         track_number,
         disc_number,
