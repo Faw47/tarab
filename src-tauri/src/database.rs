@@ -1912,5 +1912,4 @@ mod tests {
             "two-character no-hit prefixes should not scan all text columns: {results:?}"
         );
     }
-
 }
