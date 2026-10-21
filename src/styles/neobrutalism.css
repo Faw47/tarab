@@ -589,14 +589,15 @@
 }
 
 [data-theme="neobrutalism"] .neo-version-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: #595959;
-  position: absolute;
-  right: 16px;
-  top: 20px;
 }
 
 [data-theme="neobrutalism"] .neo-cover-album {
