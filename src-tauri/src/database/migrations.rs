@@ -652,8 +652,10 @@ impl Database {
     pub(super) fn migrate_v12(&self, conn: &Connection) -> SqliteResult<()> {
         let existing = {
             let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
-            stmt.query_map([], |row| row.get::<_, String>(1))?
-                .collect::<SqliteResult<std::collections::HashSet<_>>>()?
+            let columns = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<SqliteResult<std::collections::HashSet<_>>>()?;
+            columns
         };
         if !existing.contains("genre") {
             conn.execute("ALTER TABLE tracks ADD COLUMN genre TEXT", [])?;
