@@ -2111,7 +2111,10 @@ mod bounded_seek_tests {
 
         let (generation, path, _, duration, _, had_queued_source) =
             snapshot_playback_for_seek(&state, &mut pending);
-        assert!(had_queued_source, "the sink still owns this queued source after its marker clears");
+        assert!(
+            had_queued_source,
+            "the sink still owns this queued source after its marker clears"
+        );
         let committed = commit_gapless_handoff(
             &state,
             &cancelled,
@@ -2139,17 +2142,9 @@ mod bounded_seek_tests {
         state.generation = 8;
         state.is_playing = false;
 
-        assert!(!gapless_handoff_matches_playback(
-            &state,
-            8,
-            "incoming.wav"
-        ));
+        assert!(!gapless_handoff_matches_playback(&state, 8, "incoming.wav"));
         state.is_playing = true;
-        assert!(gapless_handoff_matches_playback(
-            &state,
-            8,
-            "incoming.wav"
-        ));
+        assert!(gapless_handoff_matches_playback(&state, 8, "incoming.wav"));
     }
 
     #[test]
