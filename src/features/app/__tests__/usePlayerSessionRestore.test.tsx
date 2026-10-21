@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlayerStore } from '../../../store/player-store';
 import { usePlayerSessionRestore } from '../usePlayerSessionRestore';
 
-const { dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock, setAudioBoosterMock } =
+const { dbGetQueueTrackReferencesMock, dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock, setAudioBoosterMock } =
   vi.hoisted(() => ({
+    dbGetQueueTrackReferencesMock: vi.fn(),
     dbGetTracksByIdsMock: vi.fn(),
     loadPlayerStateMock: vi.fn(),
     markHydratedMock: vi.fn(),
@@ -13,6 +14,7 @@ const { dbGetTracksByIdsMock, loadPlayerStateMock, markHydratedMock, setAudioBoo
   }));
 
 vi.mock('../../../lib/tauri-commands', () => ({
+  dbGetQueueTrackReferences: dbGetQueueTrackReferencesMock,
   dbGetTracksByIds: dbGetTracksByIdsMock,
   dbGetTracksByAlbumArtist: vi.fn(async () => []),
   setPlaybackSpeed: vi.fn(async () => undefined),
@@ -37,6 +39,8 @@ const dbTrack = (id: string) => ({
   coverArtHash: null,
   dateAdded: 1,
 });
+
+const queueReference = (id: string) => ({ id, duration: 200 });
 
 const session = {
   version: 2,
@@ -69,11 +73,13 @@ describe('usePlayerSessionRestore', () => {
     vi.clearAllMocks();
     usePlayerStore.setState(initialPlayerState, true);
     loadPlayerStateMock.mockResolvedValue(session);
+    dbGetQueueTrackReferencesMock.mockResolvedValue(session.queueIds.map(queueReference));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
   });
 
   it('restores the saved booster setting to the UI and native decoder', async () => {
     loadPlayerStateMock.mockResolvedValue({ ...session, boosterLevel: 1.6 });
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'c', 'd'].map(dbTrack));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
 
     render(<Harness />);
 
@@ -97,14 +103,32 @@ describe('usePlayerSessionRestore', () => {
     expect(setAudioBoosterMock).toHaveBeenCalledWith(1);
   });
 
+  it('restores queue references and hydrates only the active track', async () => {
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(markHydratedMock).toHaveBeenCalledTimes(1);
+    });
+
+    const state = usePlayerStore.getState();
+    expect(state.queue).toHaveLength(session.queueIds.length);
+    expect(state.queue[0]._lazyQueueEntry).toBe(true);
+    expect(state.queue[1]._lazyQueueEntry).toBe(true);
+    expect(state.queue[2]._lazyQueueEntry).toBe(true);
+    expect(state.queue[3]._lazyQueueEntry).toBe(true);
+    expect(state.currentTrack?.title).toBe('c');
+    expect(dbGetQueueTrackReferencesMock).toHaveBeenCalledWith(session.queueIds);
+    expect(dbGetTracksByIdsMock).toHaveBeenCalledWith(['c']);
+  });
+
   it('does not enable saving when the stored queue cannot be resolved', async () => {
-    dbGetTracksByIdsMock.mockRejectedValue(new Error('database locked'));
+    dbGetQueueTrackReferencesMock.mockRejectedValue(new Error('database locked'));
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     render(<Harness />);
 
     await waitFor(() => {
-      expect(dbGetTracksByIdsMock).toHaveBeenCalledTimes(2);
+      expect(dbGetQueueTrackReferencesMock).toHaveBeenCalledTimes(2);
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(markHydratedMock).not.toHaveBeenCalled();
@@ -113,7 +137,8 @@ describe('usePlayerSessionRestore', () => {
   });
 
   it('points the queue index at the restored current track when earlier IDs are missing', async () => {
-    dbGetTracksByIdsMock.mockResolvedValue(['b', 'c', 'd'].map(dbTrack));
+    dbGetQueueTrackReferencesMock.mockResolvedValue(['b', 'c', 'd'].map(queueReference));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('c')]);
 
     render(<Harness />);
 
@@ -167,7 +192,7 @@ describe('usePlayerSessionRestore', () => {
       queueIds: ['a', 'b', 'a'],
       queueIndex: 2,
     });
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b'].map(dbTrack));
+    dbGetTracksByIdsMock.mockResolvedValue([dbTrack('a')]);
 
     render(<Harness />);
 
@@ -201,7 +226,8 @@ describe('usePlayerSessionRestore', () => {
       queueIds: ['x', 'y', 'a', 'c', 'b', 'd'],
       queueIndex: 3,
     });
-    dbGetTracksByIdsMock.mockResolvedValue(['a', 'b', 'd'].map(dbTrack));
+    dbGetQueueTrackReferencesMock.mockResolvedValue(['a', 'b', 'd'].map(queueReference));
+    dbGetTracksByIdsMock.mockResolvedValue([]);
 
     render(<Harness />);
 
