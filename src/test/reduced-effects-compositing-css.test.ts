@@ -15,7 +15,7 @@ describe('liquid glass compositing policy', () => {
 
   it('removes descendant blur when a surface already has backdrop filtering', () => {
     expect(css).toMatch(
-      /:where\(\s*\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*:where\(\s*\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*\{[\s\S]*?backdrop-filter:\s*none\s*!important;/,
+      /:where\(\s*\[[\s\S]*?backdrop-blur-[\s\S]*?\)\s*:where\(\s*\[[\s\S]*?backdrop-blur-[\s\S]*?\)\s*\{[\s\S]*?backdrop-filter:\s*none\s*!important;/,
     );
   });
 
