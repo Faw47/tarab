@@ -30,27 +30,27 @@ function frontendSources(dir) {
       if (['__tests__', 'test', 'tests', 'stories'].includes(entry.name)) return [];
       return frontendSources(path);
     }
-    if (!/\\.(?:ts|tsx|js|jsx)$/.test(entry.name)) return [];
-    if (/\\.(?:test|stories)\\.(?:ts|tsx|js|jsx)$/.test(entry.name)) return [];
-    if (path.replace(/\\\\/g, '/') === 'src/lib/tauri-commands.ts') return [];
+    if (!['.ts', '.tsx', '.js', '.jsx'].some((extension) => entry.name.endsWith(extension))) return [];
+    if (entry.name.includes('.test.') || entry.name.includes('.stories.')) return [];
+    if (entry.name === 'tauri-commands.ts') return [];
     return [readFileSync(path, 'utf8')];
   });
 }
 
-const frontendUsageSource = frontendSources('src').join('\\n');
+const frontendUsageSource = frontendSources('src').join(' ');
+const frontendIdentifiers = new Set(frontendUsageSource.split(/[^A-Za-z0-9_$]+/));
 const frontendWrapperNames = [...frontendSource.matchAll(
-  /export\\s+const\\s+([A-Za-z_$][\\w$]*)\\s*=/g,
+  /export +const +([A-Za-z_$][A-Za-z0-9_$]*) +=/g,
 )]
   .filter((match) => {
     const start = match.index ?? 0;
     const remainder = frontendSource.slice(start + match[0].length);
-    const nextExport = remainder.search(/\\nexport\\s/);
-    const body = nextExport < 0 ? remainder : remainder.slice(0, nextExport);
-    return /\\binvoke(?:<[^>()]*>)?\\(/.test(body);
+    const body = remainder.split(String.fromCharCode(10) + 'export ')[0];
+    return body.includes('invoke(') || body.includes('invoke<');
   })
   .map((match) => match[1]);
 const unusedFrontendWrappers = frontendWrapperNames
-  .filter((name) => !new RegExp(`\\\\b${name}\\\\b`).test(frontendUsageSource))
+  .filter((name) => !frontendIdentifiers.has(name))
   .sort();
 
 if (unusedFrontendWrappers.length) {
