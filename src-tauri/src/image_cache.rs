@@ -191,7 +191,6 @@ impl ImageCache {
         // Check if already cached and square; otherwise regenerate
         if self.thumbnails_valid(&hash) {
             self.touch_hash(&hash);
-            self.enforce_size_limit_locked(*limit)?;
             return Ok(hash);
         }
 
@@ -696,6 +695,29 @@ mod tests {
         let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
         assert_eq!(cache.enforce_size_limit(Some(u64::MAX)).unwrap(), 0);
         assert!(cache.has_thumbnail(&hash));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_thumbnail_hit_does_not_scan_and_evict_unrelated_groups() {
+        let root = temp_dir("cache-hit-maintenance");
+        let cache = test_cache(root.clone());
+        let data = photo_like_png(32);
+        let hash = cache.generate_thumbnails(&data).unwrap();
+        cache.enforce_size_limit(Some(1)).unwrap();
+
+        let unrelated = cache.get_thumbnail_path(&"d".repeat(64), "large");
+        fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+        fs::File::create(&unrelated)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
+
+        assert_eq!(cache.generate_thumbnails(&data).unwrap(), hash);
+        assert!(
+            unrelated.exists(),
+            "a cache hit should not trigger a full-disk quota walk"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

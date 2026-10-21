@@ -15,6 +15,7 @@ const MAX_CACHE_SIZE: usize = 1000; // Max waveforms in memory and on disk
 const MAX_DISK_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_CACHE_ENTRY_BYTES: u64 = 1024 * 1024;
 const MAX_WAVEFORM_SAMPLE_RATE: u32 = 384_000;
+const GENERATION_LOCK_STRIPES: usize = 64;
 const MAX_WAVEFORM_CHANNELS: u16 = 8;
 
 /// Reject malformed decoder metadata before allocating a waveform chunk.
@@ -46,7 +47,9 @@ pub struct WaveformGenerator {
     memory_cache: RwLock<HashMap<String, WaveformData>>,
     cancel_requests: RwLock<HashSet<String>>,
     active_requests: RwLock<HashSet<String>>,
-    generation: Mutex<()>,
+    lifecycle: RwLock<()>,
+    generation: Vec<Mutex<()>>,
+    disk_maintenance: Mutex<()>,
 }
 
 impl WaveformGenerator {
@@ -59,7 +62,9 @@ impl WaveformGenerator {
             memory_cache: RwLock::new(HashMap::new()),
             cancel_requests: RwLock::new(HashSet::new()),
             active_requests: RwLock::new(HashSet::new()),
-            generation: Mutex::new(()),
+            lifecycle: RwLock::new(()),
+            generation: (0..GENERATION_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
+            disk_maintenance: Mutex::new(()),
         }
     }
 
@@ -96,15 +101,31 @@ impl WaveformGenerator {
         Ok(hex::encode(Sha256::digest(identity)))
     }
 
-    /// Serialized cache lookup and extraction coalesce concurrent requests for the same source.
+    /// Coalesce requests for the same source while allowing unrelated files to decode in parallel.
     pub fn generate(&self, file_path: &str) -> Result<WaveformData, String> {
-        let _guard = self.generation.lock();
+        // Shared lifecycle access keeps clear_cache exclusive without serializing independent tracks.
+        let _lifecycle = self.lifecycle.read();
         let key = Self::source_key(file_path)?;
-        self.enforce_disk_limit()?;
         if let Some(data) = self.memory_cache.read().get(&key) {
             return Ok(data.clone());
         }
+
         let cache_path = self.get_cache_path(&key);
+        if let Ok(data) = self.load_from_cache(&cache_path) {
+            self.add_to_memory_cache(key, data.clone());
+            return Ok(data);
+        }
+
+        // A fixed set bounds lock storage while requests for the same identity share one lock.
+        let stripe = key.as_bytes().iter().take(8).fold(0usize, |value, byte| {
+            value.wrapping_mul(31).wrapping_add(*byte as usize)
+        }) % GENERATION_LOCK_STRIPES;
+        let _generation = self.generation[stripe].lock();
+
+        // Another request for this identity may have completed while this one waited.
+        if let Some(data) = self.memory_cache.read().get(&key) {
+            return Ok(data.clone());
+        }
         if let Ok(data) = self.load_from_cache(&cache_path) {
             self.add_to_memory_cache(key, data.clone());
             return Ok(data);
@@ -270,6 +291,7 @@ impl WaveformGenerator {
     }
 
     fn enforce_disk_limit(&self) -> Result<(), String> {
+        let _maintenance = self.disk_maintenance.lock();
         let mut files = Vec::new();
         let mut bytes = 0u64;
         if let Ok(shards) = fs::read_dir(&self.cache_dir) {
@@ -342,7 +364,8 @@ impl WaveformGenerator {
 
     /// Clear cache
     pub fn clear_cache(&self) -> Result<u64, String> {
-        let _guard = self.generation.lock();
+        let _lifecycle = self.lifecycle.write();
+        let _maintenance = self.disk_maintenance.lock();
         // Clear memory
         self.memory_cache.write().clear();
 
@@ -380,7 +403,6 @@ pub fn create_waveform_generator() -> SharedWaveformGenerator {
     let generator = Arc::new(WaveformGenerator::new());
     let maintenance = generator.clone();
     std::thread::spawn(move || {
-        let _guard = maintenance.generation.lock();
         if let Err(error) = maintenance.enforce_disk_limit() {
             eprintln!("Waveform cache maintenance failed: {}", error);
         }
@@ -569,6 +591,34 @@ mod tests {
         write_wav(&track, 1000, 100);
         generator.generate(&track.to_string_lossy()).unwrap();
         assert!(generator.get_stats().total_size_bytes <= 64 * 1024 * 1024);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_waveform_hit_does_not_run_disk_maintenance() {
+        let root = temp_dir("cache-hit-maintenance");
+        let track = root.join("track.wav");
+        write_wav(&track, 1000, 100);
+        let generator = test_generator(&root);
+        let cached = generator.generate(&track.to_string_lossy()).unwrap();
+
+        let shard = generator.cache_dir.join("ff");
+        fs::create_dir_all(&shard).unwrap();
+        for index in 0..MAX_CACHE_SIZE {
+            fs::write(shard.join(format!("unrelated-{}.wf", index)), b"{}").unwrap();
+        }
+        let before = generator.get_stats().disk_count;
+        assert!(before > MAX_CACHE_SIZE as u64);
+
+        assert_eq!(
+            generator.generate(&track.to_string_lossy()).unwrap().peaks,
+            cached.peaks
+        );
+        assert_eq!(
+            generator.get_stats().disk_count,
+            before,
+            "a cache hit should not walk and evict unrelated disk entries"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
