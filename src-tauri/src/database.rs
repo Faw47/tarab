@@ -1115,7 +1115,9 @@ mod tests {
         assert_eq!(genre, None);
 
         let version: i32 = conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .expect("read schema version");
         assert_eq!(version, 12);
     }
