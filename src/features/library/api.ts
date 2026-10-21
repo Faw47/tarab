@@ -131,6 +131,25 @@ export const mapSearchResultToTrack = (result: SearchLike): Track => ({
   dateAdded: Date.now(),
 });
 
+const trackLookupRequests = new Map<string, Promise<Track | null>>();
+
+export function fetchLibraryTrackById(id: string): Promise<Track | null> {
+  const existing = trackLookupRequests.get(id);
+  if (existing) return existing;
+
+  const request = dbGetTracksByIds([id])
+    .then((raw) => {
+      const track = DbTrackArraySchema.parse(raw)[0];
+      return track ? mapDbTrackToTrack(track) : null;
+    })
+    .finally(() => {
+      trackLookupRequests.delete(id);
+    });
+
+  trackLookupRequests.set(id, request);
+  return request;
+}
+
 export async function fetchLibraryTrackCount(): Promise<number> {
   const raw = await dbGetTrackCount();
   return TrackCountSchema.parse(raw);

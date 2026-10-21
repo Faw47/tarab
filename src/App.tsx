@@ -396,7 +396,6 @@ const App = () => {
     handleRevealTrack: handleRevealTrackInFinder,
     handleRevealTracks,
   } = useAppCommandActions({
-    libraryTracks,
     totalTracks,
     isScanning,
     rescanAll: libraryScan.rescanAll,

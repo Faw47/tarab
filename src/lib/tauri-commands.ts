@@ -808,6 +808,21 @@ export const dbGetArtistAggregates = async (): Promise<DbArtistAggregate[]> => {
   return invoke('db_get_artist_aggregates');
 };
 
+export interface DbShuffleQueueTrack {
+  id: string;
+  duration: number;
+}
+
+export const dbGetQueueTrackReferences = async (ids: string[]): Promise<DbShuffleQueueTrack[]> => {
+  return invoke('db_get_queue_track_references', { ids });
+};
+
+export const dbGetShuffleAllQueue = async (
+  smartShuffle: boolean,
+): Promise<DbShuffleQueueTrack[]> => {
+  return invoke('db_get_shuffle_all_queue', { smartShuffle });
+};
+
 export interface DbTrackPageCursor {
   id: string;
   value: string | number;

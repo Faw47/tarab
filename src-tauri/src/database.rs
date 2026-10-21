@@ -87,6 +87,13 @@ pub struct DbTrackAggregateRepresentative {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DbShuffleQueueTrack {
+    pub id: String,
+    pub duration: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DbAlbumAggregate {
     pub album: String,
     pub artist: String,
@@ -319,6 +326,79 @@ impl Database {
             .collect::<SqliteResult<Vec<_>>>()?;
 
         Ok(tracks)
+    }
+
+    pub fn get_queue_track_references(
+        &self,
+        ids: &[String],
+    ) -> SqliteResult<Vec<DbShuffleQueueTrack>> {
+        let conn = self.conn.lock();
+        let mut by_id = std::collections::HashMap::with_capacity(ids.len());
+
+        for chunk in ids.chunks(900) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let placeholders = (0..chunk.len())
+                .map(|index| format!("?{}", index + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let query = format!("SELECT id, duration FROM tracks WHERE id IN ({placeholders})");
+            let mut statement = conn.prepare(&query)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok(DbShuffleQueueTrack {
+                    id: row.get(0)?,
+                    duration: row.get(1)?,
+                })
+            })?;
+            let references = rows.collect::<SqliteResult<Vec<_>>>()?;
+            for reference in references {
+                by_id.insert(reference.id.clone(), reference);
+            }
+        }
+
+        Ok(ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
+    }
+
+    pub fn get_shuffle_all_queue(
+        &self,
+        smart_shuffle: bool,
+    ) -> SqliteResult<Vec<DbShuffleQueueTrack>> {
+        let tracks = {
+            let conn = self.conn.lock();
+            let query = if smart_shuffle {
+                "SELECT id, duration FROM tracks ORDER BY id"
+            } else {
+                "SELECT id, duration FROM tracks ORDER BY random()"
+            };
+            let mut statement = conn.prepare(query)?;
+            let rows = statement.query_map([], |row| {
+                Ok(DbShuffleQueueTrack {
+                    id: row.get(0)?,
+                    duration: row.get(1)?,
+                })
+            })?;
+            rows.collect::<SqliteResult<Vec<_>>>()?
+        };
+
+        if !smart_shuffle || tracks.is_empty() {
+            return Ok(tracks);
+        }
+
+        let ordered_ids =
+            self.get_smart_shuffle_queue(tracks.iter().map(|track| track.id.clone()).collect())?;
+        let mut by_id = tracks
+            .into_iter()
+            .map(|track| (track.id.clone(), track))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut ordered = Vec::with_capacity(by_id.len());
+        for id in ordered_ids {
+            if let Some(track) = by_id.remove(&id) {
+                ordered.push(track);
+            }
+        }
+        ordered.extend(by_id.into_values());
+        Ok(ordered)
     }
 
     pub fn get_smart_shuffle_queue(&self, track_ids: Vec<String>) -> SqliteResult<Vec<String>> {
@@ -773,6 +853,30 @@ pub async fn db_get_most_played(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn db_get_shuffle_all_queue(
+    smart_shuffle: bool,
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<DbShuffleQueueTrack>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_shuffle_all_queue(smart_shuffle))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn db_get_queue_track_references(
+    ids: Vec<String>,
+    db: tauri::State<'_, SharedDatabase>,
+) -> Result<Vec<DbShuffleQueueTrack>, String> {
+    let db = db.inner().clone();
+    spawn_blocking(move || db.get_queue_track_references(&ids))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1874,6 +1978,73 @@ mod tests {
         assert_eq!(playlists[0].id, "pl_a");
         assert!(playlists[0].is_pinned);
         assert_eq!(playlists[0].pinned_at, Some(now));
+    }
+
+    #[test]
+    fn queue_track_references_preserve_order_and_duplicate_entries() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[
+            sample_track("queue-reference-a"),
+            sample_track("queue-reference-b"),
+        ])
+        .expect("seed tracks");
+
+        let requested = vec![
+            "queue-reference-b".to_string(),
+            "queue-reference-a".to_string(),
+            "queue-reference-b".to_string(),
+            "missing".to_string(),
+        ];
+        let references = db
+            .get_queue_track_references(&requested)
+            .expect("load queue references");
+
+        assert_eq!(
+            references
+                .iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "queue-reference-b",
+                "queue-reference-a",
+                "queue-reference-b"
+            ]
+        );
+        assert!(references.iter().all(|track| track.duration > 0.0));
+    }
+
+    #[test]
+    fn shuffle_all_queue_returns_compact_references_for_every_track() {
+        let db = test_db();
+        db.upsert_tracks_batch(&[
+            sample_track("shuffle-a"),
+            sample_track("shuffle-b"),
+            sample_track("shuffle-c"),
+        ])
+        .expect("seed tracks");
+
+        let expected = ["shuffle-a", "shuffle-b", "shuffle-c"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<std::collections::HashSet<_>>();
+        for smart_shuffle in [false, true] {
+            let queue = db
+                .get_shuffle_all_queue(smart_shuffle)
+                .expect("shuffle queue references");
+            assert_eq!(queue.len(), expected.len());
+            assert_eq!(
+                queue
+                    .iter()
+                    .map(|track| track.id.clone())
+                    .collect::<std::collections::HashSet<_>>(),
+                expected
+            );
+            let serialized = serde_json::to_value(&queue[0]).expect("serialize queue reference");
+            let reference = serialized.as_object().expect("queue reference object");
+            assert_eq!(reference.len(), 2);
+            assert!(reference.contains_key("id"));
+            assert!(reference.contains_key("duration"));
+        }
     }
 
     #[test]

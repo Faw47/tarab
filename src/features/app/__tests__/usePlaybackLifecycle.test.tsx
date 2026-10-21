@@ -22,6 +22,7 @@ const {
   listeners,
   listenMock,
   crossfadeToTrackMock,
+  hydrateQueueTrackMetadataMock,
   dbUpdatePlayStatsMock,
   preloadNextTrackMock,
   playAdjacentTrackMock,
@@ -40,6 +41,7 @@ const {
       },
     ),
     crossfadeToTrackMock: vi.fn(async () => 2),
+    hydrateQueueTrackMetadataMock: vi.fn(async (track: Track): Promise<Track> => track),
     dbUpdatePlayStatsMock: vi.fn(async () => undefined),
     preloadNextTrackMock: vi.fn(async () => undefined),
     playAdjacentTrackMock: vi.fn(async (): Promise<unknown> => undefined),
@@ -66,6 +68,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
 
 vi.mock('../../../lib/playback-actions', () => ({
   crossfadeToSource: crossfadeToTrackMock,
+  hydrateQueueTrackMetadata: hydrateQueueTrackMetadataMock,
   playAdjacentTrack: playAdjacentTrackMock,
   preloadGaplessSource: preloadNextTrackMock,
 }));
@@ -114,6 +117,7 @@ describe('usePlaybackLifecycle', () => {
   beforeEach(() => {
     listeners.clear();
     vi.clearAllMocks();
+    hydrateQueueTrackMetadataMock.mockImplementation(async (track) => track);
 
     usePlayerStore.setState(initialPlayerState, true);
     useSettingsStore.setState(initialSettingsState, true);
@@ -166,7 +170,9 @@ describe('usePlaybackLifecycle', () => {
     expect(handler).toBeTruthy();
     await handler?.({ payload: nearEnd() });
 
-    expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    });
     expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
 
     await listeners.get('playback-transition')?.({
@@ -183,6 +189,85 @@ describe('usePlaybackLifecycle', () => {
     expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
 
+  it('hydrates a lazy next track before crossfading to its file path', async () => {
+    const active = { ...queue[0], _queueId: 'queue-track-1' };
+    const lazy = {
+      ...queue[1],
+      filePath: '',
+      _queueId: 'queue-track-2',
+      _lazyQueueEntry: true as const,
+    };
+    usePlayerStore.setState({
+      currentTrack: active,
+      queue: [active, lazy],
+      queueIndex: 0,
+    });
+    hydrateQueueTrackMetadataMock.mockImplementationOnce(async (track) => {
+      const hydrated = queue[1];
+      usePlayerStore.getState().hydrateQueueTrack({
+        ...hydrated,
+        _queueId: track._queueId,
+      });
+      return hydrated;
+    });
+
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+    });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    });
+    await listeners.get('playback-transition')?.({
+      payload: {
+        generation: 2,
+        state: 'crossfadeStarted',
+        filePath: '/music/track-2.mp3',
+        message: null,
+        recoverable: true,
+      },
+    });
+
+    expect(usePlayerStore.getState().currentTrack?.filePath).toBe('/music/track-2.mp3');
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
+  });
+
+  it('hydrates a lazy next track before gapless preload', async () => {
+    const active = { ...queue[0], _queueId: 'queue-track-1' };
+    const lazy = {
+      ...queue[1],
+      filePath: '',
+      _queueId: 'queue-track-2',
+      _lazyQueueEntry: true as const,
+    };
+    usePlayerStore.setState({
+      currentTrack: active,
+      queue: [active, lazy],
+      queueIndex: 0,
+    });
+    useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
+    hydrateQueueTrackMetadataMock.mockImplementationOnce(async (track) => {
+      const hydrated = queue[1];
+      usePlayerStore.getState().hydrateQueueTrack({
+        ...hydrated,
+        _queueId: track._queueId,
+      });
+      return hydrated;
+    });
+
+    render(<Harness />);
+    await waitFor(() => {
+      expect(listeners.has('playback-near-end')).toBe(true);
+    });
+    await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+
+    await waitFor(() => {
+      expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    });
+  });
+
   it('suppresses auto-next when the outgoing crossfade track emits ended', async () => {
     render(<Harness />);
 
@@ -192,6 +277,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalled();
+    });
     await listeners.get('playback-ended')?.({
       payload: { path: '/music/track-1.mp3', seamless: false },
     });
@@ -210,6 +298,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-1.mp3', 4);
+    });
     await listeners.get('playback-transition')?.({
       payload: {
         generation: 2,
@@ -427,7 +518,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
-    expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    await waitFor(() => {
+      expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    });
     expect(crossfadeToTrackMock).not.toHaveBeenCalled();
   });
 

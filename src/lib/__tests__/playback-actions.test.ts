@@ -14,14 +14,25 @@ import {
   switchAudioOutputDevice,
 } from '../playback-actions';
 
-const { playTrackMock, stopPlaybackMock, pausePlaybackMock, seekPlaybackMock, resumePlaybackMock } =
-  vi.hoisted(() => ({
-    playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
-    stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
-    pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
-    seekPlaybackMock: vi.fn(async (_position: number): Promise<void> => undefined),
-    resumePlaybackMock: vi.fn(async (): Promise<void> => undefined),
-  }));
+const {
+  fetchLibraryTrackByIdMock,
+  playTrackMock,
+  stopPlaybackMock,
+  pausePlaybackMock,
+  seekPlaybackMock,
+  resumePlaybackMock,
+} = vi.hoisted(() => ({
+  fetchLibraryTrackByIdMock: vi.fn(async (_id: string): Promise<Track | null> => null),
+  playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
+  stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
+  pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
+  seekPlaybackMock: vi.fn(async (_position: number): Promise<void> => undefined),
+  resumePlaybackMock: vi.fn(async (): Promise<void> => undefined),
+}));
+
+vi.mock('../../features/library/api', () => ({
+  fetchLibraryTrackById: fetchLibraryTrackByIdMock,
+}));
 
 vi.mock('../tauri-commands', () => ({
   pausePlayback: pausePlaybackMock,
@@ -85,6 +96,7 @@ describe('startPlayback', () => {
 describe('overlapping source requests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchLibraryTrackByIdMock.mockResolvedValue(null);
     playTrackMock.mockReset();
     playTrackMock.mockResolvedValue(1);
     stopPlaybackMock.mockReset();
@@ -96,6 +108,94 @@ describe('overlapping source requests', () => {
     resumePlaybackMock.mockReset();
     resumePlaybackMock.mockResolvedValue(undefined);
     usePlayerStore.setState(initialPlayerState, true);
+  });
+
+  it('hydrates a lazy next entry before passing its real path to native playback', async () => {
+    const queue = [
+      track('first'),
+      track('second', {
+        filePath: '',
+        _lazyQueueEntry: true,
+        _queueId: 'queue-second',
+      }),
+    ];
+    const hydrated = track('second', { filePath: '/music/second.mp3' });
+    fetchLibraryTrackByIdMock.mockResolvedValueOnce(hydrated);
+    usePlayerStore.getState().setQueue(queue);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+
+    await expect(playAdjacentTrack('next')).resolves.toMatchObject({ id: 'second' });
+
+    expect(fetchLibraryTrackByIdMock).toHaveBeenCalledWith('second');
+    expect(playTrackMock).toHaveBeenCalledWith('/music/second.mp3');
+    expect(usePlayerStore.getState().queue[1]).toMatchObject({
+      filePath: '/music/second.mp3',
+      _queueId: 'queue-second',
+    });
+    expect(usePlayerStore.getState().queue[1]._lazyQueueEntry).toBeUndefined();
+    expect(usePlayerStore.getState().queueIndex).toBe(1);
+  });
+
+  it('cancels lazy next playback when a newer source starts during hydration', async () => {
+    const queue = [
+      track('first'),
+      track('second', {
+        filePath: '',
+        _lazyQueueEntry: true,
+        _queueId: 'queue-second',
+      }),
+    ];
+    usePlayerStore.getState().setQueue(queue);
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(usePlayerStore.getState().queue[0]);
+
+    let resolveTrack: (value: Track | null) => void = () => undefined;
+    let resolveLookupStarted: () => void = () => undefined;
+    const lookupStarted = new Promise<void>((resolve) => {
+      resolveLookupStarted = resolve;
+    });
+    fetchLibraryTrackByIdMock.mockImplementationOnce(
+      () =>
+        new Promise<Track | null>((resolve) => {
+          resolveTrack = resolve;
+          resolveLookupStarted();
+        }),
+    );
+
+    const next = playAdjacentTrack('next');
+    await lookupStarted;
+    await startPlayback(track('newer'));
+    resolveTrack(track('second', { filePath: '/music/second.mp3' }));
+
+    await expect(next).resolves.toBeNull();
+    expect(playTrackMock).toHaveBeenCalledTimes(1);
+    expect(playTrackMock).toHaveBeenCalledWith('/music/newer.mp3', undefined);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('newer');
+  });
+
+  it('hydrates a lazy restored current track before resuming playback', async () => {
+    const lazy = track('restored', {
+      filePath: '',
+      _lazyQueueEntry: true,
+      _queueId: 'queue-restored',
+    });
+    usePlayerStore.getState().setQueue([lazy]);
+    const queuedTrack = usePlayerStore.getState().queue[0];
+    usePlayerStore.getState().setQueueIndex(0);
+    usePlayerStore.getState().setCurrentTrack(queuedTrack);
+    usePlayerStore.getState().setHasActivePlayback(false);
+    usePlayerStore.getState().setResumePosition('restored', 12);
+    fetchLibraryTrackByIdMock.mockResolvedValueOnce(
+      track('restored', { filePath: '/music/restored.mp3' }),
+    );
+
+    await resumeCurrentPlayback();
+
+    expect(fetchLibraryTrackByIdMock).toHaveBeenCalledWith('restored');
+    expect(playTrackMock).toHaveBeenCalledWith('/music/restored.mp3', 12);
+    expect(usePlayerStore.getState().currentTrack?.filePath).toBe('/music/restored.mp3');
+    expect(usePlayerStore.getState().queue[0].filePath).toBe('/music/restored.mp3');
   });
 
   it('keeps the newer track when an earlier start completes late', async () => {

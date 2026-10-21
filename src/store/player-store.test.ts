@@ -28,6 +28,33 @@ describe('player-store queue index', () => {
     expect(usePlayerStore.getState().queueIndex).toBe(-1);
   });
 
+  it('hydrates only the matching lazy duplicate and keeps its queue identity', () => {
+    const player = usePlayerStore.getState();
+    const placeholder: Track = {
+      ...track('same'),
+      title: '',
+      duration: 0,
+      filePath: '/music/same.mp3',
+      _lazyQueueEntry: true,
+    };
+    player.setQueue([placeholder, placeholder]);
+    const [first, second] = usePlayerStore.getState().queue;
+    player.setQueueIndex(1);
+    player.setCurrentTrack(second);
+
+    player.hydrateQueueTrack({
+      ...track('same'),
+      _queueId: second._queueId,
+    });
+
+    const state = usePlayerStore.getState();
+    expect(state.queue[0]._lazyQueueEntry).toBe(true);
+    expect(state.queue[1]._lazyQueueEntry).toBeUndefined();
+    expect(state.queue[1]._queueId).toBe(second._queueId);
+    expect(state.currentTrack?.title).toBe('same');
+    expect(first._queueId).not.toBe(second._queueId);
+  });
+
   it('uses the current track when queueIndex is stale', () => {
     const queue = [track('one'), track('two'), track('three')];
     const player = usePlayerStore.getState();
