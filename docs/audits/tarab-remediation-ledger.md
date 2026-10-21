@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 28 |
+| NATIVE_VALIDATION_REQUIRED | 29 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 64 |
+| PENDING | 63 |
 | **Total** | **160** |
 
 ## Findings
@@ -143,7 +143,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-25 | P3 | Decoder does not filter packets by track ID | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | PB-26 | P3 | Scanner accepts formats the decoder cannot play; Opus is not scanned | PENDING | - | Audit confidence LIKELY. | - | - |
-| PB-32 | P3 | Volume booster hard-clips and is not persisted | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-32 | P3 | Volume booster hard-clips and is not persisted | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: tests-only predecessor run 39537516639 reproduced clipping and session-persistence failures. G2: all five hosted jobs passed at head 85cd8f21b1a0332ffad62f581adbd40b4bb545d4 (run 39554901506). G3: independent review found no blocker at that head. Native check: verify boosted audio stays smooth without hard clipping and booster level persists after restart on a desktop device. | 85cd8f2 | #39 |
 | QA-27 | P3 | Track duration underestimated by up to one second | ALREADY_RESOLVED | n/a / n/a / n/a | Earlier PB-08 playback fix replaced the extra time-base division with `t.seconds as f64 + t.frac` in `src-tauri/src/audio/source.rs` (duration calculation). Verified against the current source; not newly tested here. | 8ab471d | #4 |
 | LD-04 | P3 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | PENDING | partial G1 pass / G2 frontend pass / G3 renderer pass | Monotonic generations merged in #19. Corrective #20 at afe4559 guards stale success/failure at the synchronous UI boundary and invalidates queued adjacent requests after newer Play/Stop/preview. Fourteen added test cases; independent review found the queued-intent and rejection-settlement gaps, both reproduced red and corrected. Native commands already in flight and editor-preview state ownership remain unresolved. | 145d037, 0e2da73, afe4559 | #19, #20 |
 | PB-28 | P3 | Two quick Next presses advance only one track | NATIVE_VALIDATION_REQUIRED | G1 prior regressions PASS / G2 exact-base all-platform CI PASS / G3 fresh PASS | Fresh independent review and 24 playback-action tests confirm serialization, failure recovery and intervention cancellation. PR #30 all five jobs pass. Real rapid Next/Stop/audio agreement remains. Concurrent queue edits during native IPC still use a previewed numeric index; retain under broader LD-04 ordering work. See pending-evidence review. | 9c1f4a2, b168b99, afe4559 | #17, #20; evidence continuation |
