@@ -113,5 +113,4 @@ describe('refreshTracksByFilePaths', () => {
       expect.objectContaining({ id: edited.filePath, genre: 'Jazz' }),
     ]);
   });
-
 });
