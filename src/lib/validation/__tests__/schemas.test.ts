@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DbTrackSchema } from '../library';
+import { DbAlbumAggregateArraySchema, DbArtistAggregateArraySchema, DbTrackSchema } from '../library';
 import { PlaylistSummarySchema } from '../playlist';
 import { LyricsSearchResultSchema, SearchResultSchema } from '../search';
 import { SettingsSchema } from '../settings';
@@ -100,6 +100,38 @@ describe('Zod Schemas', () => {
         expect(result.data.trackNumber).toBe(7);
         expect(result.data.discNumber).toBe(2);
       }
+    });
+  });
+
+  describe('Aggregate schemas', () => {
+    it('accepts compact album and artist representative payloads', () => {
+      const representative = {
+        id: '/music/song.mp3',
+        title: 'Song',
+        artist: 'Artist',
+        album: 'Album',
+        year: 2024,
+        duration: 245,
+        filePath: '/music/song.mp3',
+        hasCoverArt: true,
+        coverArtHash: 'abc123',
+        blurhash: null,
+      };
+
+      const album = DbAlbumAggregateArraySchema.parse([{
+        album: 'Album',
+        artist: 'Artist',
+        trackCount: 1,
+        representative,
+      }]);
+      const artist = DbArtistAggregateArraySchema.parse([{
+        artist: 'Artist',
+        trackCount: 1,
+        representative,
+      }]);
+
+      expect(album[0].representative).toEqual(representative);
+      expect(artist[0].representative).toEqual(representative);
     });
   });
 
