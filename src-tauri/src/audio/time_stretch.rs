@@ -5,10 +5,12 @@ use rodio::Source;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use wsola::TimeStretch;
 
 const INPUT_FRAMES: usize = 1_024;
 const OUTPUT_SAMPLES: usize = 4_096;
+const DECODER_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// Adapts a decoded source to WSOLA while keeping its playback controls lock-free on the mixer.
 pub(super) struct PitchPreservingSource<S> {
@@ -25,6 +27,7 @@ pub(super) struct PitchPreservingSource<S> {
     output: Vec<f32>,
     output_pos: usize,
     output_tempo: f32,
+    decoder_retry_after: Option<Instant>,
     source_progress_fraction: f64,
     input_finished: bool,
     drained: bool,
@@ -53,7 +56,7 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             speed_control,
             booster,
             emitted_samples,
-            real_content_started: Arc::new(AtomicBool::new(true)),
+            real_content_started: Arc::new(AtomicBool::new(false)),
             yield_to_mixer: None,
             output_is_mixer_yield: false,
             channels,
@@ -61,14 +64,11 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             output: Vec::with_capacity(OUTPUT_SAMPLES),
             output_pos: 0,
             output_tempo: initial_speed,
+            decoder_retry_after: None,
             source_progress_fraction: 0.0,
             input_finished: false,
             drained: false,
         })
-    }
-
-    pub(super) fn set_real_content_started(&mut self, started: Arc<AtomicBool>) {
-        self.real_content_started = started;
     }
 
     pub(super) fn real_content_started(&self) -> Arc<AtomicBool> {
@@ -103,6 +103,20 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                 break;
             }
 
+            if self
+                .decoder_retry_after
+                .as_ref()
+                .is_some_and(|deadline| Instant::now() < *deadline)
+            {
+                // Rodio may request many source samples in one CPAL callback. Keep returning
+                // channel-aligned silence during the cool-off so a long foreign-track run cannot
+                // scan another decoder batch inside that same callback.
+                self.output.resize(self.channels, 0.0);
+                self.output_is_mixer_yield = true;
+                return true;
+            }
+            self.decoder_retry_after = None;
+
             let requested_samples = INPUT_FRAMES * self.channels;
             for _ in 0..requested_samples.saturating_sub(self.input.len()) {
                 match self.inner.next() {
@@ -117,6 +131,8 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                             // chance to run. Keep any real partial frame buffered, but do not feed
                             // the synthetic sample into WSOLA or let it advance media time.
                             self.input.pop();
+                            self.decoder_retry_after =
+                                Some(Instant::now() + DECODER_RETRY_DELAY);
                             self.output.resize(self.channels, 0.0);
                             self.output_is_mixer_yield = true;
                             return true;
@@ -153,6 +169,7 @@ impl<S: Source<Item = f32>> Iterator for PitchPreservingSource<S> {
         let sample = self.output[self.output_pos];
         self.output_pos += 1;
         if !self.output_is_mixer_yield {
+            self.real_content_started.store(true, Ordering::Release);
             self.source_progress_fraction += f64::from(self.output_tempo);
             let source_samples = self.source_progress_fraction.floor() as u64;
             self.source_progress_fraction -= source_samples as f64;
@@ -198,7 +215,9 @@ impl<S: Source<Item = f32>> Source for PitchPreservingSource<S> {
         self.output.clear();
         self.output_pos = 0;
         self.output_tempo = tempo;
+        self.decoder_retry_after = None;
         self.output_is_mixer_yield = false;
+        self.real_content_started.store(false, Ordering::Release);
         self.source_progress_fraction = 0.0;
         self.input_finished = false;
         self.drained = false;
@@ -213,13 +232,14 @@ impl<S: Source<Item = f32>> Source for PitchPreservingSource<S> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::source::GaplessHandoffSource;
     use super::super::state::{BoosterGain, SpeedControl};
     use super::PitchPreservingSource;
     use rodio::source::SeekError;
     use rodio::Source;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     const SAMPLE_RATE: u32 = 44_100;
     const FREQUENCY: f32 = 440.0;
@@ -312,18 +332,24 @@ mod tests {
 
     struct MixerYieldSource {
         yields_left: usize,
-        yield_to_mixer: Arc<std::sync::atomic::AtomicBool>,
-        yield_count: Arc<std::sync::atomic::AtomicUsize>,
+        real_samples_before_yield: usize,
+        yield_to_mixer: Arc<AtomicBool>,
+        yield_count: Arc<AtomicUsize>,
+        call_count: Arc<AtomicUsize>,
     }
 
     impl Iterator for MixerYieldSource {
         type Item = f32;
 
         fn next(&mut self) -> Option<Self::Item> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            if self.real_samples_before_yield > 0 {
+                self.real_samples_before_yield -= 1;
+                return Some(0.25);
+            }
             if self.yields_left > 0 {
                 self.yields_left -= 1;
-                self.yield_count
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.yield_count.fetch_add(1, Ordering::SeqCst);
                 self.yield_to_mixer.store(true, Ordering::Release);
                 return Some(0.0);
             }
@@ -353,15 +379,30 @@ mod tests {
         }
     }
 
+    fn yielding_source(
+        yields_left: usize,
+        real_samples_before_yield: usize,
+    ) -> (MixerYieldSource, Arc<AtomicBool>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let yield_to_mixer = Arc::new(AtomicBool::new(false));
+        let yield_count = Arc::new(AtomicUsize::new(0));
+        let call_count = Arc::new(AtomicUsize::new(0));
+        (
+            MixerYieldSource {
+                yields_left,
+                real_samples_before_yield,
+                yield_to_mixer: Arc::clone(&yield_to_mixer),
+                yield_count: Arc::clone(&yield_count),
+                call_count: Arc::clone(&call_count),
+            },
+            yield_to_mixer,
+            yield_count,
+            call_count,
+        )
+    }
+
     #[test]
-    fn mixer_yield_bounds_one_pitch_preserving_pull_and_keeps_channel_alignment() {
-        let yield_to_mixer = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let yield_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let inner = MixerYieldSource {
-            yields_left: 3,
-            yield_to_mixer: Arc::clone(&yield_to_mixer),
-            yield_count: Arc::clone(&yield_count),
-        };
+    fn mixer_yield_throttles_decoder_work_and_keeps_channel_alignment() {
+        let (inner, yield_to_mixer, yield_count, call_count) = yielding_source(1, 2);
         let emitted = Arc::new(AtomicU64::new(0));
         let mut wrapped = PitchPreservingSource::new(
             inner,
@@ -374,11 +415,49 @@ mod tests {
 
         assert_eq!(wrapped.next(), Some(0.0));
         assert_eq!(wrapped.next(), Some(0.0));
-        assert_eq!(yield_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(yield_count.load(Ordering::SeqCst), 1);
+        assert_eq!(call_count.load(Ordering::SeqCst), 3);
         assert_eq!(emitted.load(Ordering::Relaxed), 0);
+
+        // Rodio can call next repeatedly while filling one output callback. The cooldown
+        // supplies silent frames without resuming decoder work.
+        wrapped.decoder_retry_after = Some(Instant::now() + Duration::from_secs(1));
         assert_eq!(wrapped.next(), Some(0.0));
         assert_eq!(wrapped.next(), Some(0.0));
-        assert_eq!(yield_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(call_count.load(Ordering::SeqCst), 3);
+
+        wrapped.decoder_retry_after = Some(Instant::now() - Duration::from_secs(1));
+        assert!(wrapped.next().is_some());
+        assert!(call_count.load(Ordering::SeqCst) > 3);
+    }
+
+    #[test]
+    fn gapless_handoff_waits_until_stretched_content_is_returned() {
+        let (inner, yield_to_mixer, _, _) = yielding_source(1, 2);
+        let emitted = Arc::new(AtomicU64::new(0));
+        let mut wrapped = PitchPreservingSource::new(
+            inner,
+            SpeedControl::new(1.0),
+            BoosterGain::new(1.0),
+            emitted,
+        )
+        .expect("valid stereo source");
+        wrapped.set_yield_to_mixer(yield_to_mixer);
+        let content_started = wrapped.real_content_started();
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_for_handoff = Arc::clone(&callback_count);
+        let mut handoff = GaplessHandoffSource::new_after_real_content(
+            wrapped,
+            content_started,
+            move || {
+                callback_for_handoff.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+
+        // The source prefetched two real samples, then encountered a decoder yield. The
+        // callback must wait until a stretched sample is actually returned.
+        assert_eq!(handoff.next(), Some(0.0));
+        assert_eq!(callback_count.load(Ordering::Relaxed), 0);
     }
 
     #[test]
