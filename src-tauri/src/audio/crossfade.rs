@@ -23,12 +23,19 @@ pub(super) fn normalized_progress(elapsed: Duration, duration: Duration) -> f32 
     }
 }
 
-pub(super) fn crossfade_elapsed(start: Instant, _paused_at: Option<Instant>, now: Instant) -> Duration {
+pub(super) fn crossfade_elapsed(
+    start: Instant,
+    _paused_at: Option<Instant>,
+    now: Instant,
+) -> Duration {
     now.saturating_duration_since(start)
 }
 
 pub(super) fn crossfade_progress(active: &CrossfadeState) -> f32 {
-    normalized_progress(crossfade_elapsed(active.start, active.paused_at, Instant::now()), active.duration)
+    normalized_progress(
+        crossfade_elapsed(active.start, active.paused_at, Instant::now()),
+        active.duration,
+    )
 }
 
 pub(super) fn apply_crossfade_mix(
