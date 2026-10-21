@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 34 |
+| NATIVE_VALIDATION_REQUIRED | 35 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 55 |
+| PENDING | 54 |
 | **Total** | **160** |
 
 ## Findings
@@ -155,7 +155,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | DUPLICATE | - | Merged into AR-05 by the audit; see AR-05. The mini progress bar still jumps every 2 s (no interpolation), not addressed. | - | - |
 | PB-27 | P3 | LRC parser edge cases | FIXED_VERIFIED | G1 four enhanced-gap regressions RED to GREEN / G2 frontend PASS / G3 PASS | Offset/fraction/plain-gap fixes reconciled; enhanced empty and word-only markers now retained through offsets, repeated tags, normalization and current-line resolution. Independent regression comparison clean. Native lyric appearance/audio are separate, unclaimed checks. | 727485a, dde89c2, 496fd54 + lyrics continuation | #11, #22; lyrics continuation |
 | PB-33 | P3 | Folder reconcile prefix match is case-insensitive | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39558141565 reproduced case-insensitive deletion on Linux and macOS. G2: all five jobs passed at head 9574916420c734d0052566b69407dac05d7286de (run 39579601128). G3: independent review found no remaining code blocker at that head. Native filesystem acceptance remains open for case-distinct folders and deletion/reconciliation. | 9574916 | #46 |
-| PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | PENDING | - | Audit confidence POSSIBLE. | - | - |
+| PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: run 39559283847 reproduces the configured-root mismatch (503 frontend tests pass, regression fails). G2: all five CI jobs pass on PR #47 head fc74a39 (run 39560325930). G3 exact-head review: no blockers; Rust emits configured root ID plus canonical-root-relative path, and TS validates containment/traversal and falls back to root scans. Native check: add a symlinked library root, edit/add a file through the canonical path, and confirm scoped rescan uses the configured root on supported desktop platforms. | fc74a39 | #47 |
 | AR-21 | P3 | Schema and index issues | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | LD-15 | P3 | Paginated queries order by non-unique columns without a tiebreaker | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Paginated ORDER BY adds id as a tiebreaker. Rust test paginated_tracks_sort_case_insensitively_with_a_stable_tiebreaker proves no repeated or skipped rows across page boundaries. | d6d91ba | #3 |
 | AR-22 | P3 | Deep-link track resolution hashes every row | PENDING | - | Audit confidence CONFIRMED. | - | - |
