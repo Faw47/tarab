@@ -952,11 +952,8 @@ mod tests {
                 .as_object()
                 .expect("representative object");
             for field in [
-                "year",
                 "trackNumber",
                 "discNumber",
-                "duration",
-                "filePath",
                 "dateAdded",
                 "playCount",
                 "lastPlayed",
@@ -980,6 +977,9 @@ mod tests {
                 "hasCoverArt",
                 "coverArtHash",
                 "blurhash",
+                "year",
+                "duration",
+                "filePath",
             ] {
                 assert!(
                     representative.contains_key(field),
