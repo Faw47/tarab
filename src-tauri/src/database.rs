@@ -589,12 +589,6 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
     let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
 
-    // A database in the new location is authoritative. The app directory alone is not:
-    // Linux logging may create it before database initialization.
-    if app_dir.join("library.db").is_file() {
-        return Ok(app_dir);
-    }
-
     if !app_dir.exists() && legacy_dir.exists() {
         std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
             format!(
@@ -616,10 +610,52 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     })?;
 
     if legacy_dir.exists() {
+        let current_db = app_dir.join("library.db");
+        let legacy_db = legacy_dir.join("library.db");
+        if current_db.is_file() {
+            let current_has_tracks = database_has_tracks(&current_db);
+            let legacy_has_tracks = database_has_tracks(&legacy_db);
+
+            // Preserve an established library. If an earlier startup created an empty or
+            // unusable database before migration, keep it and its sidecars as a backup before
+            // restoring a populated legacy database.
+            if current_has_tracks == Some(true) || legacy_has_tracks != Some(true) {
+                return Ok(app_dir);
+            }
+
+            let stamp = u64::try_from(now_millis_i64_or_default()).unwrap_or_default();
+            crate::startup_failure::move_database_aside(&current_db, stamp)?;
+        }
+
         merge_legacy_directory(&legacy_dir, &app_dir)?;
     }
 
     Ok(app_dir)
+}
+
+fn database_has_tracks(path: &Path) -> Option<bool> {
+    let connection = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let has_tracks_table = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tracks')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .ok()?;
+    if !has_tracks_table {
+        return None;
+    }
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks LIMIT 1)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .ok()
 }
 
 fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
@@ -723,6 +759,19 @@ pub(crate) fn get_database_path() -> Result<PathBuf, String> {
 pub fn get_app_data_dir() -> Result<PathBuf, String> {
     let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     prepare_app_directory(&base_dir)
+}
+
+pub(crate) fn app_data_dir_for_instance_lock() -> Result<PathBuf, String> {
+    let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+    std::fs::create_dir_all(&app_dir).map_err(|error| {
+        format!(
+            "Failed to create Tarab data directory {}: {}",
+            app_dir.display(),
+            error
+        )
+    })?;
+    Ok(app_dir)
 }
 
 pub fn get_cache_dir() -> PathBuf {
@@ -1159,7 +1208,10 @@ mod tests {
         // discovering the legacy database.
         let current_db =
             Database::new(app_dir.join("library.db")).expect("create empty current database");
-        assert!(current_db.get_all_tracks().expect("read empty database").is_empty());
+        assert!(current_db
+            .get_all_tracks()
+            .expect("read empty database")
+            .is_empty());
         drop(current_db);
 
         std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
@@ -1173,7 +1225,9 @@ mod tests {
         let migrated = prepare_app_directory(&base_dir).expect("recover legacy database");
         let recovered_db =
             Database::new(migrated.join("library.db")).expect("open recovered database");
-        let tracks = recovered_db.get_all_tracks().expect("read recovered tracks");
+        let tracks = recovered_db
+            .get_all_tracks()
+            .expect("read recovered tracks");
 
         assert_eq!(migrated, app_dir);
         assert_eq!(tracks.len(), 1);
@@ -1205,21 +1259,38 @@ mod tests {
         let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
         std::fs::create_dir_all(&app_dir).expect("create app directory");
         std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
-        std::fs::write(app_dir.join("library.db"), b"current").expect("seed current database");
-        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create current database");
+        current_db
+            .upsert_tracks_batch(&[sample_track("current")])
+            .expect("seed current track");
+        drop(current_db);
+
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy")])
+            .expect("seed legacy track");
+        drop(legacy_db);
 
         let migrated = prepare_app_directory(&base_dir).expect("keep current database");
 
         assert_eq!(migrated, app_dir);
-        assert_eq!(
-            std::fs::read(migrated.join("library.db")).expect("read current database"),
-            b"current"
-        );
-        assert_eq!(
-            std::fs::read(legacy_dir.join("library.db")).expect("read legacy database"),
-            b"legacy"
-        );
+        let current_db =
+            Database::new(migrated.join("library.db")).expect("read current database");
+        let current_tracks = current_db.get_all_tracks().expect("read current tracks");
+        assert_eq!(current_tracks.len(), 1);
+        assert_eq!(current_tracks[0].id, "current");
+        assert!(legacy_dir.exists());
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("read legacy database");
+        let legacy_tracks = legacy_db.get_all_tracks().expect("read legacy tracks");
+        assert_eq!(legacy_tracks.len(), 1);
+        assert_eq!(legacy_tracks[0].id, "legacy");
 
+        drop(current_db);
+        drop(legacy_db);
         let _ = std::fs::remove_dir_all(base_dir);
     }
 
