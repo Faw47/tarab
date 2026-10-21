@@ -1876,4 +1876,60 @@ mod tests {
             vec![("a".to_string(), 0, 1_000)]
         );
     }
+
+    #[test]
+    fn evicted_add_retry_does_not_reapply_after_track_was_removed() {
+        let db = seed_manual_playlist_for_reorder(&[]);
+        let guard = create_playlist_guard();
+
+        let first = add_tracks_to_playlist_blocking(
+            Arc::clone(&guard),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-add".to_string(),
+        )
+        .expect("initial add");
+        assert_eq!(first.track_ids, vec!["a".to_string()]);
+
+        remove_tracks_from_playlist_blocking(
+            Arc::clone(&guard),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+        )
+        .expect("remove after initial add");
+
+        for index in 0..300 {
+            add_tracks_to_playlist_blocking(
+                Arc::clone(&guard),
+                Arc::clone(&db),
+                "reorder-test".to_string(),
+                vec![format!("later-track-{index}")],
+                format!("later-mutation-{index}"),
+            )
+            .expect("later playlist mutation");
+        }
+
+        let retry = add_tracks_to_playlist_blocking(
+            guard,
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string()],
+            "same-add".to_string(),
+        )
+        .expect("retry original add");
+        assert_eq!(retry.track_ids, vec!["a".to_string()]);
+
+        let current_ids = db
+            .playlist_track_rows_for_test("reorder-test")
+            .expect("read current playlist rows")
+            .into_iter()
+            .map(|(track_id, _, _)| track_id)
+            .collect::<Vec<_>>();
+        assert!(
+            !current_ids.contains(&"a".to_string()),
+            "retrying an evicted add must not re-add a track removed by a later mutation"
+        );
+    }
 }
