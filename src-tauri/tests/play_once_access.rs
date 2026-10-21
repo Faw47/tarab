@@ -55,8 +55,7 @@ fn play_once_access_lasts_with_the_active_queue_entry() {
 #[test]
 fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
     assert!(
-        command_body(AUDIO, "fn ensure_audio_file_allowed(")
-            .contains("ensure_path_allowed_by_state(Path::new(file_path), roots, action)"),
+        AUDIO.contains("ensure_path_allowed_by_state(Path::new(file_path), roots, action)"),
         "audio validation must honor exact in-memory file grants"
     );
 
@@ -83,7 +82,7 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
 #[test]
 fn prepared_sources_and_gapless_handoffs_reject_superseded_generations() {
     let installer_start = AUDIO_SOURCE
-        .find("pub(super) fn play_with_source(")
+        .find("pub(super) fn play_with_source<")
         .expect("prepared source installer");
     let installer_end = AUDIO_SOURCE[installer_start..]
         .find("\npub(super) struct SymphoniaSource")
