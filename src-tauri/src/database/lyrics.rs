@@ -25,7 +25,7 @@ impl Database {
     }
 
     pub fn get_lyrics_index_meta(&self) -> SqliteResult<Vec<LyricsIndexMeta>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut stmt =
             conn.prepare("SELECT track_id, lyrics_path, lyrics_mtime FROM lyrics_index")?;
         let rows = stmt
@@ -104,7 +104,7 @@ impl Database {
     }
 
     pub fn lyrics_index_count(&self) -> SqliteResult<i64> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         conn.query_row("SELECT COUNT(*) FROM lyrics_index", [], |row| row.get(0))
     }
 
@@ -116,7 +116,7 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(vec![]);
         }
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<LyricsSearchCandidate> {
             Ok(LyricsSearchCandidate {
                 id: row.get(0)?,
