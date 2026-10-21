@@ -11,7 +11,8 @@ use tauri::async_runtime::spawn_blocking;
 
 use crate::database::SharedDatabase;
 use crate::file_ops::{
-    ensure_existing_path_allowed, ensure_path_allowed_by_state, SharedLibraryRoots,
+    ensure_existing_path_allowed, ensure_path_allowed_by_state, LibraryRootsState,
+    SharedLibraryRoots,
 };
 use crate::image_cache::{
     decode_untrusted_image, is_valid_thumbnail_size, ImageCache, SharedImageCache,
@@ -473,6 +474,15 @@ fn ensure_metadata_path_allowed(
     Ok(())
 }
 
+fn ensure_metadata_path_allowed_by_state(
+    file_path: &str,
+    state: &LibraryRootsState,
+    action: &str,
+) -> Result<(), String> {
+    ensure_path_allowed_by_state(Path::new(file_path), state, action)?;
+    Ok(())
+}
+
 fn allowed_metadata_paths(file_paths: Vec<String>, roots: &[PathBuf], action: &str) -> Vec<String> {
     file_paths
         .into_iter()
@@ -514,10 +524,13 @@ pub async fn get_cover_art_with_blurhash(
 ) -> Result<Option<(String, Option<String>)>, String> {
     let cache = cache.inner().clone();
     let db = db.inner().clone();
-    let roots = roots_state.inner().read().roots.clone();
+    let roots_state = roots_state.inner().clone();
 
     spawn_blocking(move || {
-        ensure_metadata_path_allowed(&file_path, &roots, "read cover art")?;
+        {
+            let state = roots_state.read();
+            ensure_metadata_path_allowed_by_state(&file_path, &state, "read cover art")?;
+        }
         let normalized_path = normalize_path(&file_path);
 
         if let Some(hash) = db.get_cover_art_hash(&normalized_path).unwrap_or(None) {
@@ -573,9 +586,29 @@ pub async fn resolve_cover_art(
 
     let cache = cache.inner().clone();
     let db = db.inner().clone();
-    let roots = roots_state.inner().read().roots.clone();
+    let roots_state = roots_state.inner().clone();
 
     spawn_blocking(move || {
+        {
+            let state = roots_state.read();
+            if let Err(error) =
+                ensure_metadata_path_allowed_by_state(&file_path, &state, "repair cover art")
+            {
+                return Ok(CoverArtResolution {
+                    status: "sourceUnavailable".to_string(),
+                    hash: preferred_hash,
+                    size,
+                    cache_available: false,
+                    regenerated: false,
+                    failure_reason: Some(if error.contains("no library roots") {
+                        "missingLibraryGrant".to_string()
+                    } else {
+                        "sourceAccessDenied".to_string()
+                    }),
+                });
+            }
+        }
+
         if let Some(hash) = preferred_hash.as_deref() {
             if cache.has_valid_thumbnail(hash, &size) {
                 return Ok(CoverArtResolution {
@@ -601,21 +634,6 @@ pub async fn resolve_cover_art(
                     failure_reason: None,
                 });
             }
-        }
-
-        if let Err(error) = ensure_metadata_path_allowed(&file_path, &roots, "repair cover art") {
-            return Ok(CoverArtResolution {
-                status: "sourceUnavailable".to_string(),
-                hash: preferred_hash,
-                size,
-                cache_available: false,
-                regenerated: false,
-                failure_reason: Some(if error.contains("no library roots") {
-                    "missingLibraryGrant".to_string()
-                } else {
-                    "sourceAccessDenied".to_string()
-                }),
-            });
         }
 
         let tagged_file = Probe::open(Path::new(&file_path))
@@ -675,9 +693,12 @@ pub async fn get_cover_art_data(
     file_path: String,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<(String, String)>, String> {
-    let roots = roots_state.inner().read().roots.clone();
+    let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
-        ensure_metadata_path_allowed(&file_path, &roots, "read cover art data")?;
+        {
+            let state = roots_state.read();
+            ensure_metadata_path_allowed_by_state(&file_path, &state, "read cover art data")?;
+        }
         let path = Path::new(&file_path);
         let tagged_file = Probe::open(path)
             .map_err(|e| format!("Failed to open file: {}", e))?
@@ -756,9 +777,12 @@ pub async fn get_cover_art_palette(
     file_path: String,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<CoverArtPalette>, String> {
-    let roots = roots_state.inner().read().roots.clone();
+    let roots_state = roots_state.inner().clone();
     spawn_blocking(move || {
-        ensure_metadata_path_allowed(&file_path, &roots, "read cover art palette")?;
+        {
+            let state = roots_state.read();
+            ensure_metadata_path_allowed_by_state(&file_path, &state, "read cover art palette")?;
+        }
         let path = Path::new(&file_path);
         let tagged_file = Probe::open(path)
             .map_err(|e| format!("Failed to open file: {}", e))?
@@ -943,6 +967,35 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn metadata_access_accepts_only_authorized_transient_files() {
+        use crate::file_ops::{authorize_transient_file, create_library_roots_state};
+
+        let outside = temp_dir("transient-access");
+        let authorized = outside.join("authorized.mp3");
+        let sibling = outside.join("sibling.mp3");
+        fs::write(&authorized, b"not audio").expect("write authorized file");
+        fs::write(&sibling, b"not audio").expect("write sibling file");
+        let roots_state = create_library_roots_state();
+        authorize_transient_file(&roots_state, &authorized).expect("authorize one file");
+
+        let state = roots_state.read();
+        assert!(ensure_metadata_path_allowed_by_state(
+            &authorized.to_string_lossy(),
+            &state,
+            "read cover art",
+        )
+        .is_ok());
+        assert!(ensure_metadata_path_allowed_by_state(
+            &sibling.to_string_lossy(),
+            &state,
+            "read cover art",
+        )
+        .is_err());
+
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]
