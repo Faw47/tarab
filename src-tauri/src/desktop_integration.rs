@@ -161,16 +161,14 @@ pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>
     let app_handle = app.handle().clone();
 
     let menu_handles = build_platform_menu(app)
-        .map_err(|e| {
+        .inspect_err(|_| {
             log::error!("Failed to initialize app menu");
-            e
         })
         .ok()
         .flatten();
     let tray_handles = build_tray_menu(&app_handle)
-        .map_err(|e| {
+        .inspect_err(|_| {
             log::error!("Failed to initialize tray menu");
-            e
         })
         .ok();
 
@@ -425,7 +423,7 @@ fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
 
     match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(bytes) => Some(bytes),
-        Err(err) => {
+        Err(_) => {
             log::warn!("Failed to decode media artwork payload");
             None
         }
