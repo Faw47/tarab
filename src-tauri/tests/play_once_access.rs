@@ -16,10 +16,12 @@ fn audio_command_arm(signature: &str) -> &str {
     let command_loop = AUDIO
         .find("match receiver.recv_timeout")
         .expect("audio command loop");
+    let arm_marker = format!("\n                            {signature}");
     let start = command_loop
         + AUDIO[command_loop..]
-            .find(signature)
-            .expect("audio command arm");
+            .find(&arm_marker)
+            .expect("audio command arm")
+        + 1;
     let end = AUDIO[start..]
         .find("\n                            AudioCommand::")
         .or_else(|| AUDIO[start..].find("\n                            command @"))
