@@ -75,6 +75,8 @@ pub struct LibraryRootsState {
     pub roots: Vec<PathBuf>,
     grants: Vec<LibraryGrantRecord>,
     transient_files: Vec<PathBuf>,
+    /// Latest source-changing playback request; older async transitions cannot restore a grant.
+    transient_playback_generation: u64,
     /// Incremented by every grant change, so a refresh that started before it does not write back
     /// roots computed from the old grants (for example re-allowing a revoked folder).
     grants_version: u64,
@@ -716,10 +718,36 @@ pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Pa
     }
 }
 
-pub(crate) fn retain_transient_file_for_queue_entry(state: &mut LibraryRootsState, path: &Path) {
+pub(crate) fn mark_playback_generation(
+    state: &mut LibraryRootsState,
+    generation: u64,
+) -> bool {
+    if generation < state.transient_playback_generation {
+        return false;
+    }
+    state.transient_playback_generation = generation;
+    true
+}
+
+pub(crate) fn playback_generation_is_current(
+    state: &LibraryRootsState,
+    generation: u64,
+) -> bool {
+    state.transient_playback_generation == generation
+}
+
+pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
+    state: &mut LibraryRootsState,
+    path: &Path,
+    generation: u64,
+) -> bool {
+    if !mark_playback_generation(state, generation) {
+        return false;
+    }
+
     let Ok(canonical) = canonicalize_existing_path(path) else {
         state.transient_files.clear();
-        return;
+        return true;
     };
 
     if state.transient_files.contains(&canonical) {
@@ -729,10 +757,18 @@ pub(crate) fn retain_transient_file_for_queue_entry(state: &mut LibraryRootsStat
     } else {
         state.transient_files.clear();
     }
+    true
 }
 
-pub(crate) fn clear_transient_file_grants(state: &mut LibraryRootsState) {
+pub(crate) fn clear_transient_file_grants_at_generation(
+    state: &mut LibraryRootsState,
+    generation: u64,
+) -> bool {
+    if !mark_playback_generation(state, generation) {
+        return false;
+    }
     state.transient_files.clear();
+    true
 }
 
 #[tauri::command]
@@ -1896,7 +1932,7 @@ mod tests {
         // A is active, so its authorization remains while B's pending grant is dropped.
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry(&mut state, &active);
+            retain_transient_file_for_queue_entry_at_generation(&mut state, &active, 1);
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
@@ -1904,7 +1940,7 @@ mod tests {
         // A handoff to a persistent library entry revokes the old transient grant.
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry(&mut state, &persistent);
+            retain_transient_file_for_queue_entry_at_generation(&mut state, &persistent, 2);
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
         assert!(ensure_path_allowed_by_state(&persistent, &state.read(), "test").is_ok());
@@ -1913,18 +1949,66 @@ mod tests {
         authorize_transient_file(&state, &pending).expect("authorize next transient track");
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry(&mut state, &pending);
+            retain_transient_file_for_queue_entry_at_generation(&mut state, &pending, 3);
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_ok());
 
         {
             let mut state = state.write();
-            clear_transient_file_grants(&mut state);
+            clear_transient_file_grants_at_generation(&mut state, 4);
         }
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
         let _ = fs::remove_dir_all(library);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn stale_playback_transitions_cannot_restore_transient_grants() {
+        let outside = temp_dir("stale-transient-outside");
+        let first = outside.join("first.mp3");
+        let next = outside.join("next.mp3");
+        fs::write(&first, b"audio").expect("write first transient track");
+        fs::write(&next, b"audio").expect("write next transient track");
+
+        let state = create_library_roots_state();
+        authorize_transient_file(&state, &first).expect("authorize first track");
+        authorize_transient_file(&state, &next).expect("authorize next track");
+
+        {
+            let mut roots = state.write();
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &first, 10
+            ));
+            assert!(clear_transient_file_grants_at_generation(&mut roots, 12));
+            assert!(!retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &first, 11
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&first, &state.read(), "test").is_err());
+
+        {
+            let mut roots = state.write();
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &next, 13
+            ));
+            assert!(!retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &first, 12
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&first, &state.read(), "test").is_err());
+        assert!(ensure_path_allowed_by_state(&next, &state.read(), "test").is_ok());
+
+        {
+            let mut roots = state.write();
+            assert!(clear_transient_file_grants_at_generation(&mut roots, 14));
+            assert!(!retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &next, 13
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&next, &state.read(), "test").is_err());
+
         let _ = fs::remove_dir_all(outside);
     }
 

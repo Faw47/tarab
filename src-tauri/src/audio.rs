@@ -19,8 +19,9 @@ use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
 use crate::file_ops::{
-    clear_transient_file_grants, ensure_path_allowed_by_state,
-    retain_transient_file_for_queue_entry, LibraryRootsState, SharedLibraryRoots,
+    clear_transient_file_grants_at_generation, ensure_path_allowed_by_state,
+    mark_playback_generation, playback_generation_is_current,
+    retain_transient_file_for_queue_entry_at_generation, LibraryRootsState, SharedLibraryRoots,
 };
 
 mod crossfade;
@@ -59,7 +60,7 @@ enum AudioCommand {
     },
     Pause,
     Resume,
-    Stop,
+    Stop { generation: u64 },
     Seek(f64),
     SetVolume(f32),
     SetVolumeRamp {
@@ -458,6 +459,9 @@ impl AudioManager {
                                 start_pos,
                                 generation,
                             } => {
+                                if !playback_generation_is_current(&roots_for_audio.read(), generation) {
+                                    continue;
+                                }
                                 emit_playback_transition(
                                     &app_for_audio,
                                     generation,
@@ -514,6 +518,14 @@ impl AudioManager {
                                             },
                                             &gapless_cancellation_tokens,
                                         ) {
+                                            {
+                                                let mut roots = roots_for_audio.write();
+                                                retain_transient_file_for_queue_entry_at_generation(
+                                                    &mut roots,
+                                                    Path::new(&file_path),
+                                                    generation,
+                                                );
+                                            }
                                             pending_gapless_cancels.clear();
                                             if let Some(sink) = current_sink.take() {
                                                 sink.stop();
@@ -570,6 +582,9 @@ impl AudioManager {
                                 duration_ms,
                                 generation,
                             } => {
+                                if !playback_generation_is_current(&roots_for_audio.read(), generation) {
+                                    continue;
+                                }
                                 emit_playback_transition(
                                     &app_for_audio,
                                     generation,
@@ -655,9 +670,10 @@ impl AudioManager {
                                         ) {
                                             {
                                                 let mut roots = roots_for_audio.write();
-                                                retain_transient_file_for_queue_entry(
+                                                retain_transient_file_for_queue_entry_at_generation(
                                                     &mut roots,
                                                     Path::new(&file_path),
+                                                    generation,
                                                 );
                                             }
                                             pending_gapless_cancels.clear();
@@ -956,7 +972,13 @@ impl AudioManager {
                                     }
                                 }
                             }
-                            AudioCommand::Stop => {
+                            AudioCommand::Stop { generation } => {
+                                if !clear_transient_file_grants_at_generation(
+                                    &mut roots_for_audio.write(),
+                                    generation,
+                                ) {
+                                    continue;
+                                }
                                 cancel_gapless_handoffs(&mut pending_gapless_cancels);
                                 *pending_gapless_path_thread.lock() = None;
                                 if let Some(sink) = current_sink.take() {
@@ -1173,14 +1195,17 @@ impl AudioManager {
                                     state.generation == next_generation
                                         && state.current_file.as_deref() == Some(next_path.as_str())
                                 };
-                                if is_still_current {
-                                    {
-                                        let mut roots = roots_for_audio.write();
-                                        retain_transient_file_for_queue_entry(
-                                            &mut roots,
-                                            Path::new(&next_path),
-                                        );
-                                    }
+                                let grant_is_current = if is_still_current {
+                                    let mut roots = roots_for_audio.write();
+                                    retain_transient_file_for_queue_entry_at_generation(
+                                        &mut roots,
+                                        Path::new(&next_path),
+                                        next_generation,
+                                    )
+                                } else {
+                                    false
+                                };
+                                if is_still_current && grant_is_current {
                                     let _ = app_for_audio.emit("playback-ended", ended);
                                     emit_playback_transition(
                                         &app_for_audio,
@@ -1513,10 +1538,12 @@ impl AudioManager {
             .map_err(|e| format!("Failed to send resume command: {}", e))
     }
 
-    pub fn stop(&self) -> Result<(), String> {
+    pub fn stop(&self) -> Result<u64, String> {
+        let generation = self.allocate_generation();
         self.command_sender
-            .send(AudioCommand::Stop)
-            .map_err(|e| format!("Failed to send stop command: {}", e))
+            .send(AudioCommand::Stop { generation })
+            .map_err(|e| format!("Failed to send stop command: {}", e))?;
+        Ok(generation)
     }
 
     pub fn seek(&self, position_secs: f64) -> Result<(), String> {
@@ -1649,7 +1676,11 @@ pub fn play_track(
     let mut roots = roots_state.inner().write();
     ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
     let generation = state.play(file_path.clone(), start_pos)?;
-    retain_transient_file_for_queue_entry(&mut roots, Path::new(&file_path));
+    retain_transient_file_for_queue_entry_at_generation(
+        &mut roots,
+        Path::new(&file_path),
+        generation,
+    );
     Ok(generation)
 }
 
@@ -1661,9 +1692,11 @@ pub fn crossfade_to_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<u64, String> {
-    let roots = roots_state.inner().read();
+    let mut roots = roots_state.inner().write();
     ensure_audio_file_allowed(&file_path, &roots, "crossfade audio file")?;
-    state.crossfade_to(file_path, start_pos, duration_secs)
+    let generation = state.crossfade_to(file_path, start_pos, duration_secs)?;
+    mark_playback_generation(&mut roots, generation);
+    Ok(generation)
 }
 
 #[tauri::command]
@@ -1682,8 +1715,8 @@ pub fn stop_playback(
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<(), String> {
     let mut roots = roots_state.inner().write();
-    state.stop()?;
-    clear_transient_file_grants(&mut roots);
+    let generation = state.stop()?;
+    clear_transient_file_grants_at_generation(&mut roots, generation);
     Ok(())
 }
 
