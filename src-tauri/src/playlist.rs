@@ -1616,8 +1616,8 @@ mod tests {
     }
 
     #[test]
-    fn by_genre_rule_returns_sync_error_without_matching_every_track() {
-        let tracks = vec![sample_track(
+    fn genre_rule_matches_tagged_genre_case_insensitively() {
+        let mut encoded = serde_json::to_value(sample_track(
             "a",
             "Artist",
             "Album",
@@ -1625,25 +1625,21 @@ mod tests {
             200.0,
             1,
             None,
-        )];
+        ))
+        .expect("encode track");
+        encoded["genre"] = serde_json::json!("Classical Jazz");
+        let track: DbTrack = serde_json::from_value(encoded).expect("decode tagged track");
+        let tracks = vec![track];
         let rules = vec![SmartPlaylistRule::ByGenre {
-            genre: "Classical".to_string(),
+            genre: "classical".to_string(),
         }];
 
+        assert!(validate_supported_smart_rules(&Some(rules.clone())).is_ok());
+
         let (resolved, sync_error) = resolve_smart_tracks(&tracks, &rules);
-        assert_eq!(resolved.len(), 0);
-        assert!(sync_error.is_some());
-    }
-
-    #[test]
-    fn genre_rule_validation_rejects_new_rules() {
-        let rules = Some(vec![SmartPlaylistRule::ByGenre {
-            genre: "Classical".to_string(),
-        }]);
-
-        let result = validate_supported_smart_rules(&rules);
-
-        assert_eq!(result, Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string()));
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "a");
+        assert_eq!(sync_error, None);
     }
 
     #[test]
