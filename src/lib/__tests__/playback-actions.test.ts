@@ -128,7 +128,7 @@ describe('overlapping source requests', () => {
     await expect(playAdjacentTrack('next')).resolves.toMatchObject({ id: 'second' });
 
     expect(fetchLibraryTrackByIdMock).toHaveBeenCalledWith('second');
-    expect(playTrackMock).toHaveBeenCalledWith('/music/second.mp3', undefined);
+    expect(playTrackMock).toHaveBeenCalledWith('/music/second.mp3');
     expect(usePlayerStore.getState().queue[1]).toMatchObject({
       filePath: '/music/second.mp3',
       _lazyQueueEntry: undefined,
