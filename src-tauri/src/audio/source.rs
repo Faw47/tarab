@@ -1,4 +1,5 @@
 use super::*;
+use rodio::source::SeekError;
 
 pub(super) struct PlaybackStart<'a> {
     pub(super) file_path: &'a str,
@@ -6,6 +7,7 @@ pub(super) struct PlaybackStart<'a> {
     pub(super) start_secs: f64,
     pub(super) generation: u64,
     pub(super) initial_volume: Option<f32>,
+    pub(super) start_paused: bool,
 }
 
 const MAX_REFILL_ATTEMPTS: usize = 64;
@@ -239,7 +241,8 @@ pub(super) fn play_with_source(
     source: SymphoniaSource,
     state: &Arc<Mutex<PlaybackState>>,
     start: PlaybackStart<'_>,
-) -> Option<Sink> {
+    cancelled_handoffs: &[Arc<AtomicBool>],
+) -> Option<Arc<Sink>> {
     let sink = Sink::try_new(stream_handle).ok()?;
     let channels = source.channels();
     let sample_rate = source.sample_rate();
@@ -247,6 +250,9 @@ pub(super) fn play_with_source(
         let s = state.lock();
         sink.set_volume(start.initial_volume.unwrap_or(s.volume).clamp(0.0, 1.0));
         sink.set_speed(s.speed);
+    }
+    if start.start_paused {
+        sink.pause();
     }
 
     sink.append(source);
@@ -256,6 +262,9 @@ pub(super) fn play_with_source(
 
     {
         let mut s = state.lock();
+        for cancelled in cancelled_handoffs {
+            cancelled.store(true, Ordering::Release);
+        }
         s.current_file = Some(start.file_path.to_string());
         s.generation = start.generation;
         s.duration = start.duration;
@@ -263,10 +272,10 @@ pub(super) fn play_with_source(
         s.position_sample_rate = sample_rate;
         s.position_channels = channels;
         s.is_playing = true;
-        s.is_paused = false;
+        s.is_paused = start.start_paused;
         s.warned_near_end = false;
     }
-    Some(sink)
+    Some(Arc::new(sink))
 }
 
 pub(super) struct SymphoniaSource {
@@ -380,6 +389,48 @@ impl SymphoniaSource {
             }
         }
     }
+
+    fn seek_to(&mut self, position_secs: f64) -> Result<(), String> {
+        let seek_result = crate::parse_guard::guard(&self.file_path, || {
+            seek_decoder(self.decoder.as_mut(), self.format.as_mut(), position_secs)
+        })?;
+
+        let (pending_packet, skip_frames) = match seek_result {
+            Ok(skip_frames) => (None, skip_frames),
+            Err(target_error) => {
+                // Some file formats can seek only from their beginning. Restart the already-open
+                // reader and scan packet headers instead of reopening the file.
+                let fallback = crate::parse_guard::guard(&self.file_path, || {
+                    self.format
+                        .seek(
+                            SeekMode::Accurate,
+                            SeekTo::Time {
+                                time: Time::from(0.0),
+                                track_id: None,
+                            },
+                        )
+                        .map_err(|error| format!("seek to start error: {}", error))?;
+                    self.decoder.reset();
+                    skip_packets_to(self.format.as_mut(), position_secs)
+                })?;
+                let start = fallback.map_err(|fallback_error| {
+                    format!(
+                        "{}; in-place fallback failed: {}",
+                        target_error, fallback_error
+                    )
+                })?;
+                (start.packet, start.skip_frames)
+            }
+        };
+
+        self.buffer.clear();
+        self.buf_pos = 0;
+        self.pending_packet = pending_packet;
+        self.skip_samples = usize::try_from(skip_frames)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(usize::from(self.channels));
+        Ok(())
+    }
 }
 
 impl Iterator for SymphoniaSource {
@@ -413,6 +464,11 @@ impl Source for SymphoniaSource {
 
     fn total_duration(&self) -> Option<Duration> {
         None
+    }
+
+    fn try_seek(&mut self, position: Duration) -> Result<(), SeekError> {
+        self.seek_to(position.as_secs_f64())
+            .map_err(|error| SeekError::Other(Box::new(std::io::Error::other(error))))
     }
 }
 
@@ -467,6 +523,10 @@ impl Source for GaplessHandoffSource {
     fn total_duration(&self) -> Option<Duration> {
         self.inner.total_duration()
     }
+
+    fn try_seek(&mut self, position: Duration) -> Result<(), SeekError> {
+        self.inner.try_seek(position)
+    }
 }
 
 /// Interleaves a decoded packet into `out`, reusing `scratch` and `out` across packets.
@@ -510,6 +570,7 @@ pub(super) fn validate_decoded_packet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
 
     /// A 16-bit stereo PCM WAV whose left channel counts up and right channel counts down.
@@ -585,6 +646,50 @@ mod tests {
         assert!((actual_start - 0.5123).abs() < 1e-9);
         // 0.5123 s at 8 kHz is frame 4098.
         assert_eq!(frame.round() as i64, 4098);
+    }
+
+    #[test]
+    fn an_open_source_seeks_again_without_reopening_the_decoder() {
+        let path = write_temp_wav("in-place-seek", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (mut source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+
+        let _: Vec<_> = source.by_ref().take(100).collect();
+        source
+            .try_seek(Duration::from_secs_f64(0.5123))
+            .expect("seek in the existing decoder");
+        let frame = first_frame_value(&mut source);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(frame.round() as i64, 4098);
+    }
+
+    #[test]
+    fn gapless_handoff_source_forwards_in_place_seek_without_repeating_handoff() {
+        let path = write_temp_wav("gapless-seek", 8000);
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        let counter = Arc::new(AtomicU64::new(0));
+        let (source, _, _) =
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+                .expect("prepare source");
+        let handoff_count = Arc::new(AtomicUsize::new(0));
+        let handoff_count_for_callback = Arc::clone(&handoff_count);
+        let mut source = GaplessHandoffSource::new(source, move || {
+            handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
+        });
+
+        let _ = source.next().expect("first sample starts handoff");
+        source
+            .try_seek(Duration::from_secs_f64(0.5123))
+            .expect("seek through gapless wrapper");
+        let frame = source.next().expect("sample after seek") * 32768.0 / 4.0;
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(frame.round() as i64, 4098);
+        assert_eq!(handoff_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
