@@ -1,7 +1,7 @@
 use image::codecs::jpeg::JpegEncoder;
 use image::image_dimensions;
 use image::{imageops::FilterType, DynamicImage};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ const THUMBNAIL_SIZES: [(u32, &str); 3] = [
     (512, "large"),  // For player
 ];
 
-const MAX_CACHE_SIZE_MB: u64 = 500;
+const MAX_CACHE_SIZE_MB: u64 = 200;
 /// Lossy JPEG keeps thumbnails near 20 KB per album; lossless WebP (the only WebP mode of the
 /// `image` crate) used about 200 KB, so the default cache held roughly 1,000 albums.
 const THUMBNAIL_JPEG_QUALITY: u8 = 85;
@@ -123,21 +123,22 @@ pub struct ImageCache {
     // In-memory LRU for recently accessed hashes
     memory_cache: RwLock<HashMap<String, (Vec<u8>, std::time::Instant)>>,
     max_memory_bytes: usize,
+    disk_limit_mb: Mutex<u64>,
+    last_access: RwLock<HashMap<String, std::time::SystemTime>>,
 }
 
 impl ImageCache {
     pub fn new() -> Self {
         let cache_dir = get_cache_dir().join("covers");
         fs::create_dir_all(&cache_dir).ok();
-        let legacy_dir = cache_dir.clone();
-        std::thread::spawn(move || {
-            remove_legacy_thumbnails(&legacy_dir);
-        });
-
         Self {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
             max_memory_bytes: 32 * 1024 * 1024,
+            disk_limit_mb: Mutex::new(
+                crate::fixed_store::image_cache_limit_mb().unwrap_or(MAX_CACHE_SIZE_MB),
+            ),
+            last_access: RwLock::new(HashMap::new()),
         }
     }
 
@@ -147,6 +148,8 @@ impl ImageCache {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
             max_memory_bytes: 32 * 1024 * 1024,
+            disk_limit_mb: Mutex::new(MAX_CACHE_SIZE_MB),
+            last_access: RwLock::new(HashMap::new()),
         }
     }
 
@@ -182,10 +185,12 @@ impl ImageCache {
         if image_data.is_empty() || image_data.len() > MAX_SOURCE_IMAGE_BYTES {
             return Err("Cover image exceeds the encoded byte limit".to_string());
         }
+        let limit = self.disk_limit_mb.lock();
         let hash = Self::hash_image_data(image_data);
 
         // Check if already cached and square; otherwise regenerate
         if self.thumbnails_valid(&hash) {
+            self.touch_hash(&hash);
             return Ok(hash);
         }
 
@@ -201,6 +206,8 @@ impl ImageCache {
             self.save_thumbnail(&hash, name, &previous)?;
         }
 
+        self.touch_hash(&hash);
+        self.enforce_size_limit_locked(*limit)?;
         Ok(hash)
     }
 
@@ -239,73 +246,73 @@ impl ImageCache {
             .join(format!("{}_{}.{}", hash, size_name, THUMBNAIL_EXTENSION))
     }
 
-    /// Get thumbnail as base64
+    /// Both IPC and the cover-art protocol share the bounded memory cache.
     pub fn get_thumbnail(&self, hash: &str, size: &str) -> Result<Option<String>, String> {
-        if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
-            return Ok(None);
-        }
-        let cache_key = format!("{}_{}", hash, size);
-
-        // Check memory cache first
-        {
-            let mut cache = self.memory_cache.write();
-            if let Some((data, instant)) = cache.get_mut(&cache_key) {
-                *instant = std::time::Instant::now();
-                return Ok(Some(base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &*data,
-                )));
-            }
-        }
-
-        // Load from disk
-        let path = self.get_thumbnail_path(hash, size);
-        let Some(data) = read_thumbnail_file(&path, size)? else {
-            return Ok(None);
-        };
-
-        // Add to memory cache
-        {
-            let mut cache = self.memory_cache.write();
-            let mut current_bytes: usize = cache.values().map(|(bytes, _)| bytes.len()).sum();
-            while current_bytes.saturating_add(data.len()) > self.max_memory_bytes {
-                let Some(oldest_key) = cache
-                    .iter()
-                    .min_by_key(|(_, (_, accessed))| *accessed)
-                    .map(|(key, _)| key.clone())
-                else {
-                    break;
-                };
-                if let Some((removed, _)) = cache.remove(&oldest_key) {
-                    current_bytes = current_bytes.saturating_sub(removed.len());
-                }
-            }
-            if data.len() <= self.max_memory_bytes {
-                cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
-            }
-        }
-
-        Ok(Some(base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        )))
+        Ok(self
+            .get_thumbnail_bytes(hash, size)?
+            .map(|bytes| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)))
     }
 
-    /// Get thumbnail as raw bytes (for frontend to display directly)
     pub fn get_thumbnail_bytes(&self, hash: &str, size: &str) -> Result<Option<Vec<u8>>, String> {
         if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
             return Ok(None);
         }
+        let _guard = self.disk_limit_mb.lock();
+        let cache_key = format!("{}_{}", hash, size);
+        {
+            let mut cache = self.memory_cache.write();
+            if let Some((data, accessed)) = cache.get_mut(&cache_key) {
+                *accessed = std::time::Instant::now();
+                self.touch_hash(hash);
+                return Ok(Some(data.clone()));
+            }
+        }
+        let Some(data) = read_thumbnail_file(&self.get_thumbnail_path(hash, size), size)? else {
+            return Ok(None);
+        };
+        let mut cache = self.memory_cache.write();
+        let mut current_bytes: usize = cache.values().map(|(bytes, _)| bytes.len()).sum();
+        while current_bytes.saturating_add(data.len()) > self.max_memory_bytes {
+            let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, (_, accessed))| *accessed)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            if let Some((removed, _)) = cache.remove(&oldest_key) {
+                current_bytes = current_bytes.saturating_sub(removed.len());
+            }
+        }
+        if data.len() <= self.max_memory_bytes {
+            cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
+        }
+        self.touch_hash(hash);
+        Ok(Some(data))
+    }
 
-        read_thumbnail_file(&self.get_thumbnail_path(hash, size), size)
+    fn touch_hash(&self, hash: &str) {
+        let mut access = self.last_access.write();
+        if access.len() >= 10_000 && !access.contains_key(hash) {
+            if let Some(oldest) = access
+                .iter()
+                .min_by_key(|(_, accessed)| **accessed)
+                .map(|(hash, _)| hash.clone())
+            {
+                access.remove(&oldest);
+            }
+        }
+        access.insert(hash.to_string(), std::time::SystemTime::now());
     }
 
     /// Check if thumbnail exists
     pub fn has_thumbnail(&self, hash: &str) -> bool {
+        let _guard = self.disk_limit_mb.lock();
         self.thumbnails_valid(hash)
     }
 
     pub fn has_valid_thumbnail(&self, hash: &str, size: &str) -> bool {
+        let _guard = self.disk_limit_mb.lock();
         if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
             return false;
         }
@@ -326,6 +333,7 @@ impl ImageCache {
 
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
+        let _guard = self.disk_limit_mb.lock();
         let mut total_size = 0u64;
         let mut file_count = 0u64;
         let mut oldest_time: Option<i64> = None;
@@ -364,6 +372,7 @@ impl ImageCache {
 
     /// Clear cache (optionally keeping recent files)
     pub fn clear_cache(&self, keep_recent_days: Option<u32>) -> Result<u64, String> {
+        let _guard = self.disk_limit_mb.lock();
         let mut deleted = 0u64;
         let now = std::time::SystemTime::now();
         let cutoff_duration =
@@ -401,58 +410,98 @@ impl ImageCache {
 
         // Clear memory cache
         self.memory_cache.write().clear();
+        self.last_access.write().clear();
 
         Ok(deleted)
     }
 
-    /// Evict old entries if cache exceeds size limit
+    /// Retain the native policy for subsequent writes, even without renderer maintenance.
     pub fn enforce_size_limit(&self, max_override_mb: Option<u64>) -> Result<u64, String> {
-        let stats = self.get_stats();
-        let max_bytes = max_override_mb.unwrap_or(MAX_CACHE_SIZE_MB) * 1024 * 1024;
-
-        if stats.total_size_bytes <= max_bytes {
-            return Ok(0);
+        let mut limit = self.disk_limit_mb.lock();
+        if let Some(value) = max_override_mb {
+            *limit = value.min(1000);
         }
+        self.enforce_size_limit_locked(*limit)
+    }
 
-        // Collect all files with their modification times
-        let mut files: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
-
-        if let Ok(entries) = fs::read_dir(&self.cache_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if entry.path().is_dir() {
-                    if let Ok(sub_entries) = fs::read_dir(entry.path()) {
-                        for sub_entry in sub_entries.filter_map(|e| e.ok()) {
-                            if let Ok(metadata) = sub_entry.metadata() {
-                                if let Ok(modified) = metadata.modified() {
-                                    files.push((sub_entry.path(), modified, metadata.len()));
-                                }
-                            }
-                        }
+    fn enforce_size_limit_locked(&self, limit_mb: u64) -> Result<u64, String> {
+        // One snapshot supplies both the total and eviction sizes. Generation, reads and
+        // maintenance share the lock; external file changes still cannot underflow totals.
+        let mut groups: HashMap<String, ThumbnailGroup> = HashMap::new();
+        let mut current_size = 0u64;
+        if let Ok(shards) = fs::read_dir(&self.cache_dir) {
+            for shard in shards.filter_map(Result::ok) {
+                if !shard.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    continue;
+                }
+                let Ok(entries) = fs::read_dir(shard.path()) else {
+                    continue;
+                };
+                for entry in entries.filter_map(Result::ok) {
+                    if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                        continue;
                     }
+                    let Ok(metadata) = entry.metadata() else {
+                        continue;
+                    };
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let hash = name.split('_').next().unwrap_or(&name).to_string();
+                    let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+                    let group = groups
+                        .entry(hash.clone())
+                        .or_insert_with(|| ThumbnailGroup {
+                            hash,
+                            accessed: modified,
+                            files: Vec::new(),
+                        });
+                    group.accessed = group.accessed.max(modified);
+                    group.files.push((entry.path(), metadata.len()));
+                    current_size = current_size.saturating_add(metadata.len());
                 }
             }
         }
-
-        // Sort by modification time (oldest first)
-        files.sort_by(|a, b| a.1.cmp(&b.1));
-
-        // Delete oldest files until under limit
-        let mut current_size = stats.total_size_bytes;
-        let mut deleted = 0u64;
-
-        for (path, _, size) in files {
+        let max_bytes = limit_mb.saturating_mul(1024 * 1024);
+        if current_size <= max_bytes {
+            return Ok(0);
+        }
+        let access = self.last_access.read();
+        let mut groups: Vec<_> = groups.into_values().collect();
+        for group in &mut groups {
+            if let Some(accessed) = access.get(&group.hash) {
+                group.accessed = *accessed;
+            }
+        }
+        drop(access);
+        // Runtime reads update group recency; after restart, modification time is the fallback.
+        groups.sort_by_key(|group| group.accessed);
+        let mut deleted = 0;
+        for group in groups {
             if current_size <= max_bytes {
                 break;
             }
-
-            if fs::remove_file(&path).is_ok() {
-                current_size -= size;
-                deleted += 1;
+            for (path, size) in group.files {
+                if fs::remove_file(path).is_ok() {
+                    current_size = current_size.saturating_sub(size);
+                    deleted += 1;
+                }
             }
+            let prefix = format!("{}_", group.hash);
+            self.memory_cache
+                .write()
+                .retain(|key, _| !key.starts_with(&prefix));
+            self.last_access.write().remove(&group.hash);
         }
-
+        if current_size > max_bytes {
+            return Err("Image cache could not be reduced to its size limit".to_string());
+        }
         Ok(deleted)
     }
+}
+
+struct ThumbnailGroup {
+    hash: String,
+    accessed: std::time::SystemTime,
+    files: Vec<(PathBuf, u64)>,
 }
 
 /// JPEG has no alpha channel. Transparent covers are composited onto a dark neutral instead of
@@ -507,7 +556,16 @@ fn remove_legacy_thumbnails(cache_dir: &Path) -> u64 {
 pub type SharedImageCache = Arc<ImageCache>;
 
 pub fn create_image_cache() -> SharedImageCache {
-    Arc::new(ImageCache::new())
+    let cache = Arc::new(ImageCache::new());
+    let maintenance = cache.clone();
+    std::thread::spawn(move || {
+        let limit = maintenance.disk_limit_mb.lock();
+        remove_legacy_thumbnails(&maintenance.cache_dir);
+        if let Err(error) = maintenance.enforce_size_limit_locked(*limit) {
+            eprintln!("Image cache maintenance failed: {}", error);
+        }
+    });
+    cache
 }
 
 #[cfg(test)]
@@ -531,6 +589,8 @@ mod tests {
             cache_dir,
             memory_cache: RwLock::new(HashMap::new()),
             max_memory_bytes: 32 * 1024 * 1024,
+            disk_limit_mb: Mutex::new(MAX_CACHE_SIZE_MB),
+            last_access: RwLock::new(HashMap::new()),
         }
     }
 
@@ -613,6 +673,136 @@ mod tests {
             "large thumbnail is {} bytes",
             large.len()
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn protocol_reads_share_the_memory_cache() {
+        let root = temp_dir("protocol-memory");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        let bytes = cache.get_thumbnail_bytes(&hash, "small").unwrap().unwrap();
+        assert!(!bytes.is_empty());
+        assert!(cache
+            .memory_cache
+            .read()
+            .contains_key(&format!("{}_small", hash)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn size_limit_overflow_does_not_evict_entries() {
+        let root = temp_dir("limit-overflow");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        assert_eq!(cache.enforce_size_limit(Some(u64::MAX)).unwrap(), 0);
+        assert!(cache.has_thumbnail(&hash));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_thumbnail_hit_does_not_scan_and_evict_unrelated_groups() {
+        let root = temp_dir("cache-hit-maintenance");
+        let cache = test_cache(root.clone());
+        let data = photo_like_png(32);
+        let hash = cache.generate_thumbnails(&data).unwrap();
+        cache.enforce_size_limit(Some(1)).unwrap();
+
+        let unrelated = cache.get_thumbnail_path(&"d".repeat(64), "large");
+        fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+        fs::File::create(&unrelated)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
+
+        assert_eq!(cache.generate_thumbnails(&data).unwrap(), hash);
+        assert!(
+            unrelated.exists(),
+            "a cache hit should not trigger a full-disk quota walk"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn eviction_keeps_thumbnail_groups_complete() {
+        let root = temp_dir("group-eviction");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        let large = cache.get_thumbnail_path(&hash, "large");
+        fs::File::options()
+            .write(true)
+            .open(&large)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&large)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1000))
+            .unwrap();
+        cache.enforce_size_limit(Some(1)).unwrap();
+        assert!(THUMBNAIL_SIZES
+            .iter()
+            .all(|(_, size)| !cache.get_thumbnail_path(&hash, size).exists()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn generation_enforces_the_native_limit_without_a_renderer_request() {
+        let root = temp_dir("native-limit");
+        let cache = test_cache(root.clone());
+        cache.enforce_size_limit(Some(1)).unwrap();
+        let old = cache.get_thumbnail_path(&"a".repeat(64), "large");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::File::create(&old)
+            .unwrap()
+            .set_len(2 * 1024 * 1024)
+            .unwrap();
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        assert!(cache.get_stats().total_size_bytes <= 1024 * 1024);
+        assert!(cache.has_thumbnail(&hash));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recently_read_cover_survives_group_eviction() {
+        let root = temp_dir("read-recency");
+        let cache = test_cache(root.clone());
+        let first = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        let second = cache.generate_thumbnails(&photo_like_png(33)).unwrap();
+        for (hash, age) in [(&first, 1000), (&second, 2000)] {
+            for (_, size) in THUMBNAIL_SIZES {
+                let file = fs::File::options()
+                    .write(true)
+                    .open(cache.get_thumbnail_path(hash, size))
+                    .unwrap();
+                if size == "large" {
+                    file.set_len(600 * 1024).unwrap();
+                }
+                file.set_modified(UNIX_EPOCH + std::time::Duration::from_secs(age))
+                    .unwrap();
+            }
+        }
+        // Remove generation-time access records to model covers loaded from disk at startup.
+        cache.last_access.write().clear();
+        cache.get_thumbnail_bytes(&first, "small").unwrap().unwrap();
+        cache.enforce_size_limit(Some(1)).unwrap();
+        assert!(cache.has_thumbnail(&first));
+        assert!(THUMBNAIL_SIZES
+            .iter()
+            .all(|(_, size)| !cache.get_thumbnail_path(&second, size).exists()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clearing_cache_invalidates_protocol_memory_entries() {
+        let root = temp_dir("clear-memory");
+        let cache = test_cache(root.clone());
+        let hash = cache.generate_thumbnails(&photo_like_png(32)).unwrap();
+        cache.get_thumbnail_bytes(&hash, "small").unwrap().unwrap();
+        cache.clear_cache(None).unwrap();
+        assert!(cache.get_thumbnail_bytes(&hash, "small").unwrap().is_none());
         let _ = fs::remove_dir_all(root);
     }
 
