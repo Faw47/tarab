@@ -88,5 +88,4 @@ describe('PillMiniPlayer', () => {
 
     expect(container.querySelector('.animate-breathe')).toBeInTheDocument();
   });
-
 });
