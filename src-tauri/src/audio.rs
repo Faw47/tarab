@@ -32,12 +32,9 @@ mod source;
 mod state;
 mod time_stretch;
 
-use crossfade::{
-    apply_crossfade_mix, apply_crossfade_step, crossfade_progress,
-    CrossfadeState,
-};
 #[cfg(test)]
 use crossfade::normalized_progress;
+use crossfade::{apply_crossfade_mix, apply_crossfade_step, crossfade_progress, CrossfadeState};
 use device::{default_output_device_name, ensure_output_stream, open_output_stream, OutputWatch};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
