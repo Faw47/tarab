@@ -58,8 +58,12 @@ impl Database {
             self.apply_migration_tx(&mut conn, 10, |tx| self.migrate_v10(tx))?;
         }
 
-        if current_version < CURRENT_SCHEMA_VERSION {
+        if current_version < 11 {
             self.apply_migration_tx(&mut conn, 11, |tx| self.migrate_v11(tx))?;
+        }
+
+        if current_version < 12 {
+            self.apply_migration_tx(&mut conn, 12, |tx| self.migrate_v12(tx))?;
         }
 
         // Guard against schema drift: ensure lyrics index schema exists even if
@@ -642,6 +646,18 @@ impl Database {
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_tracks_public_id ON tracks(public_id);",
         )?;
+        Ok(())
+    }
+
+    pub(super) fn migrate_v12(&self, conn: &Connection) -> SqliteResult<()> {
+        let existing = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
+            stmt.query_map([], |row| row.get::<_, String>(1))?
+                .collect::<SqliteResult<std::collections::HashSet<_>>>()?
+        };
+        if !existing.contains("genre") {
+            conn.execute("ALTER TABLE tracks ADD COLUMN genre TEXT", [])?;
+        }
         Ok(())
     }
 
