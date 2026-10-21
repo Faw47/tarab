@@ -941,7 +941,7 @@ pub(crate) fn clear_transient_file_grants_through_generation(
 
     if state
         .active_playback_generation
-        .map_or(true, |active_generation| active_generation <= generation)
+        .is_none_or(|active_generation| active_generation <= generation)
     {
         state.active_playback_generation = None;
         state.active_transient_file = None;
