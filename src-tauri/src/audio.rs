@@ -1408,7 +1408,6 @@ impl AudioManager {
                                                 &active_emitted_for_audio,
                                                 &mut crossfade_state,
                                                 &mut current_sink,
-
                                                 &mut stream_bundle,
                                             );
                                         }

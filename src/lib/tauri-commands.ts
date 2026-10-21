@@ -99,6 +99,8 @@ export const loadPlaybackSession = async (): Promise<PlaybackSessionPayload | nu
   return invoke('load_playback_session');
 };
 
+type FixedStoreName = 'settings' | 'player' | 'player-queue';
+
 export const fixedStoreGet = async <T>(store: FixedStoreName, key: string): Promise<T | null> => {
   return invoke('fixed_store_get', { store, key });
 };
@@ -377,7 +379,6 @@ export interface BatchTrackMetadata {
   file_size: number | null;
 }
 
-
 export const getBatchMetadata = async (filePaths: string[]): Promise<BatchTrackMetadata[]> => {
   return ipcBatchLimit(() => invoke('get_batch_metadata', { filePaths }));
 };
@@ -394,6 +395,7 @@ export const generateCoverArtHashes = async (
   });
 };
 
+// Lyrics commands
 export const getLyricsForTrack = async (
   trackPath: string,
   autoLyrics: boolean,
@@ -833,7 +835,7 @@ export const cacheEnforceLimit = async (limitMb?: number): Promise<number> => {
   return invoke('cache_enforce_limit', { limitMb });
 };
 
-
+// ========== Desktop Integration Commands ==========
 
 export const desktopToggleMiniWindow = async (): Promise<void> => {
   return invoke('desktop_toggle_mini_window');
