@@ -24,9 +24,9 @@ impl Database {
                 r#"
                 INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, public_id,
                                    has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                                   track_number, disc_number, file_format, bitrate, sample_rate, file_size)
+                                   track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                        ?17, ?18, ?19, ?20, ?21, ?22)
+                        ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                 ON CONFLICT(file_path) DO UPDATE SET
                     id = excluded.id,
                     public_id = excluded.public_id,
@@ -44,7 +44,8 @@ impl Database {
                     file_format = excluded.file_format,
                     bitrate = excluded.bitrate,
                     sample_rate = excluded.sample_rate,
-                    file_size = excluded.file_size
+                    file_size = excluded.file_size,
+                    genre = excluded.genre
                 "#,
             )?;
 
@@ -77,6 +78,7 @@ impl Database {
                     track.bitrate,
                     track.sample_rate,
                     track.file_size,
+                    &track.genre,
                 ])?;
             }
         }
@@ -101,6 +103,7 @@ impl Database {
             && existing.bitrate == incoming.bitrate
             && existing.sample_rate == incoming.sample_rate
             && existing.file_size == incoming.file_size
+            && existing.genre == incoming.genre
     }
 
     pub fn reconcile_folder_scan(
@@ -127,7 +130,7 @@ impl Database {
             let mut stmt = tx.prepare(
                 "SELECT id, title, artist, album_artist, album, year, duration, file_path,
                         has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating
-                        ,track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                        ,track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
                  FROM tracks
                  WHERE file_path = ?1
                     OR substr(file_path, 1, length(?2)) = ?2 COLLATE BINARY",
@@ -159,9 +162,9 @@ impl Database {
                 r#"
                 INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, public_id,
                                    has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                                   track_number, disc_number, file_format, bitrate, sample_rate, file_size)
+                                   track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                        ?17, ?18, ?19, ?20, ?21, ?22)
+                        ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                 ON CONFLICT(file_path) DO UPDATE SET
                     id = excluded.id,
                     public_id = excluded.public_id,
@@ -179,7 +182,8 @@ impl Database {
                     file_format = excluded.file_format,
                     bitrate = excluded.bitrate,
                     sample_rate = excluded.sample_rate,
-                    file_size = excluded.file_size
+                    file_size = excluded.file_size,
+                    genre = excluded.genre
                 "#,
             )?;
 
@@ -218,6 +222,7 @@ impl Database {
                     track.bitrate,
                     track.sample_rate,
                     track.file_size,
+                    &track.genre,
                 ])?;
             }
         }
@@ -408,6 +413,7 @@ impl Database {
             bitrate: row.get(18)?,
             sample_rate: row.get(19)?,
             file_size: row.get(20)?,
+            genre: row.get(21)?,
         })
     }
 
@@ -462,7 +468,7 @@ impl Database {
         let select_columns = "SELECT id, title, artist, album_artist, album, year, duration, file_path,
                                      has_cover_art, cover_art_hash, blurhash, date_added, play_count,
                                      last_played, rating, track_number, disc_number, file_format, bitrate,
-                                     sample_rate, file_size FROM tracks";
+                                     sample_rate, file_size, genre FROM tracks";
         let query = if cursor.is_some() {
             format!(
                 "{select_columns}
@@ -504,7 +510,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks ORDER BY date_added DESC",
         )?;
 
@@ -559,7 +565,7 @@ impl Database {
             let query = format!(
                 "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art, 
                         cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                        track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                        track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
                  FROM tracks WHERE id IN ({})",
                 placeholders
             );
@@ -591,7 +597,7 @@ impl Database {
         conn.query_row(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks
              WHERE public_id = ?1",
             params![normalized_public_id],
@@ -613,7 +619,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks
              WHERE album = ?1 AND COALESCE(NULLIF(album_artist, ''), artist) = ?2
              ORDER BY COALESCE(disc_number, 1) ASC,
@@ -636,7 +642,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
-                    track_number, disc_number, file_format, bitrate, sample_rate, file_size
+                    track_number, disc_number, file_format, bitrate, sample_rate, file_size, genre
              FROM tracks
              WHERE artist = ?1
              ORDER BY album COLLATE NOCASE ASC,
