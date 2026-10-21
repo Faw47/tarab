@@ -126,6 +126,10 @@ pub struct CacheStats {
     pub oldest_file: Option<i64>,
 }
 
+fn remaining_cache_size_after_remove(current_size: u64, file_size: u64) -> u64 {
+    current_size.saturating_sub(file_size)
+}
+
 pub struct ImageCache {
     cache_dir: PathBuf,
     max_cache_size_mb: AtomicU64,
@@ -167,7 +171,7 @@ impl ImageCache {
             if !path.exists() {
                 return false;
             }
-                match image_dimensions(&path) {
+            match image_dimensions(&path) {
                 Ok((w, h)) if w == size && h == size => touch_cache_file(&path),
                 _ => {
                     let _ = fs::remove_file(&path);
@@ -382,7 +386,7 @@ impl ImageCache {
             return Ok(0);
         }
 
-        // Collect all files with their modification times
+        // Collect files by last access time, falling back to modification time if unavailable.
         let mut files: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
 
         if let Ok(entries) = fs::read_dir(&self.cache_dir) {
