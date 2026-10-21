@@ -72,11 +72,26 @@ pub struct DbTrack {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DbTrackAggregateRepresentative {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub year: Option<i32>,
+    pub duration: f64,
+    pub file_path: String,
+    pub has_cover_art: bool,
+    pub cover_art_hash: Option<String>,
+    pub blurhash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DbAlbumAggregate {
     pub album: String,
     pub artist: String,
     pub track_count: usize,
-    pub representative: DbTrack,
+    pub representative: DbTrackAggregateRepresentative,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,7 +99,7 @@ pub struct DbAlbumAggregate {
 pub struct DbArtistAggregate {
     pub artist: String,
     pub track_count: usize,
-    pub representative: DbTrack,
+    pub representative: DbTrackAggregateRepresentative,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
