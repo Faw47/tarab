@@ -123,11 +123,22 @@ export function useReorderPlaylistTracksMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) =>
-      reorderPlaylistTracks(playlistId, trackIds),
+    mutationFn: ({
+      playlistId,
+      trackIds,
+      expectedTrackIds,
+    }: {
+      playlistId: string;
+      trackIds: string[];
+      expectedTrackIds: string[];
+    }) => reorderPlaylistTracks(playlistId, trackIds, expectedTrackIds),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
       queryClient.setQueryData(playlistKeys.detail(variables.playlistId), data);
+    },
+    onError: (_error, variables) => {
+      queryClient.invalidateQueries({ queryKey: playlistKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: playlistKeys.detail(variables.playlistId) });
     },
   });
 }

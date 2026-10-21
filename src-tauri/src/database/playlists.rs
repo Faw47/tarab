@@ -299,6 +299,103 @@ impl Database {
         Ok(())
     }
 
+    pub fn reorder_playlist_tracks(
+        &self,
+        playlist_id: &str,
+        track_ids: &[String],
+        expected_track_ids: &[String],
+        updated_at: i64,
+    ) -> SqliteResult<()> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+
+        let playlist_type = tx
+            .query_row(
+                "SELECT playlist_type FROM playlists WHERE id = ?1",
+                params![playlist_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        if !playlist_type.trim().eq_ignore_ascii_case("manual") {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "only manual playlists can be reordered".to_string(),
+            ));
+        }
+
+        let normalized_track_ids = track_ids
+            .iter()
+            .map(|track_id| Self::normalize_path(track_id))
+            .collect::<Vec<_>>();
+        let requested_ids = normalized_track_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        if requested_ids.len() != normalized_track_ids.len() {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "playlist reorder contains duplicate track IDs".to_string(),
+            ));
+        }
+
+        let current_track_ids = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT track_id FROM playlist_tracks
+                 WHERE playlist_id = ?1
+                 ORDER BY position ASC, track_id ASC",
+            )?;
+            let rows = stmt.query_map(params![playlist_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<SqliteResult<Vec<_>>>()?
+        };
+        let current_ids = current_track_ids
+            .iter()
+            .map(|track_id| Self::normalize_path(track_id))
+            .collect::<std::collections::HashSet<_>>();
+        if current_ids.len() != current_track_ids.len() || current_ids != requested_ids {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "playlist reorder must include every current track exactly once".to_string(),
+            ));
+        }
+
+        let current_order = current_track_ids
+            .iter()
+            .map(|track_id| Self::normalize_path(track_id))
+            .collect::<Vec<_>>();
+        let expected_order = expected_track_ids
+            .iter()
+            .map(|track_id| Self::normalize_path(track_id))
+            .collect::<Vec<_>>();
+        if current_order != expected_order {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "playlist reorder is based on a stale order".to_string(),
+            ));
+        }
+
+        {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE playlist_tracks SET position = ?1
+                 WHERE playlist_id = ?2 AND track_id = ?3",
+            )?;
+            for (index, track_id) in normalized_track_ids.iter().enumerate() {
+                let position = i32::try_from(index).map_err(|_| {
+                    rusqlite::Error::InvalidParameterName(
+                        "playlist has too many tracks to reorder".to_string(),
+                    )
+                })?;
+                let changed = stmt.execute(params![position, playlist_id, track_id])?;
+                if changed != 1 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
+            }
+        }
+
+        tx.execute(
+            "UPDATE playlists SET updated_at = ?1 WHERE id = ?2",
+            params![updated_at, playlist_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn add_tracks_to_playlist(
         &self,
         playlist_id: &str,
@@ -512,6 +609,39 @@ impl Database {
         let conn = self.conn.lock();
         conn.execute("DELETE FROM playlists WHERE id = ?1", params![playlist_id])?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn set_playlist_track_added_at_for_test(
+        &self,
+        playlist_id: &str,
+        track_id: &str,
+        added_at: i64,
+    ) -> SqliteResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE playlist_tracks SET added_at = ?1 WHERE playlist_id = ?2 AND track_id = ?3",
+            params![added_at, playlist_id, track_id],
+        )?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn playlist_track_rows_for_test(
+        &self,
+        playlist_id: &str,
+    ) -> SqliteResult<Vec<(String, i32, i64)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT track_id, position, added_at
+             FROM playlist_tracks
+             WHERE playlist_id = ?1
+             ORDER BY position ASC",
+        )?;
+        let rows = stmt.query_map(params![playlist_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect()
     }
 
     // ========== Smart Playlist Queries ==========

@@ -156,12 +156,24 @@ export function PlaylistsView() {
 
   const moveEntry = async (trackId: string, direction: -1 | 1) => {
     if (!detail.data) return;
-    const ids = detail.data.entries.map((entry) => entry.trackId);
+    const expectedTrackIds = detail.data.entries.map((entry) => entry.trackId);
+    const ids = [...expectedTrackIds];
     const from = ids.indexOf(trackId);
     const to = from + direction;
     if (from < 0 || to < 0 || to >= ids.length) return;
     [ids[from], ids[to]] = [ids[to], ids[from]];
-    await reorderTracks.mutateAsync({ playlistId: detail.data.id, trackIds: ids });
+    try {
+      await reorderTracks.mutateAsync({
+        playlistId: detail.data.id,
+        expectedTrackIds,
+        trackIds: ids,
+      });
+    } catch (error) {
+      reportError('Could not reorder the playlist', {
+        source: 'playlists-view',
+        error,
+      });
+    }
   };
 
   const relinkEntry = async (entry: PlaylistEntry) => {
@@ -260,22 +272,26 @@ export function PlaylistsView() {
               </Button>
             </>
           ) : null}
-          <button
-            aria-label={`Move ${name} up`}
-            onClick={() => void moveEntry(entry.trackId, -1)}
-            disabled={entry.position === 0}
-            className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </button>
-          <button
-            aria-label={`Move ${name} down`}
-            onClick={() => void moveEntry(entry.trackId, 1)}
-            disabled={entry.position === (detail.data?.entries.length ?? 0) - 1}
-            className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
+          {detail.data?.playlistType === 'Manual' ? (
+            <>
+              <button
+                aria-label={`Move ${name} up`}
+                onClick={() => void moveEntry(entry.trackId, -1)}
+                disabled={entry.position === 0}
+                className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
+              >
+                <ChevronUp className="h-4 w-4" />
+              </button>
+              <button
+                aria-label={`Move ${name} down`}
+                onClick={() => void moveEntry(entry.trackId, 1)}
+                disabled={entry.position === (detail.data?.entries.length ?? 0) - 1}
+                className="rounded p-1 hover:bg-current/10 disabled:opacity-30"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </>
+          ) : null}
         </span>
       </Row>
     );
