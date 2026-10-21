@@ -681,10 +681,7 @@ fn database_has_user_data(path: &Path) -> Option<bool> {
         }
 
         let escaped_name = table_name.replace('"', "\"\"");
-        let query = format!(
-            "SELECT EXISTS(SELECT 1 FROM \"{}\" LIMIT 1)",
-            escaped_name
-        );
+        let query = format!("SELECT EXISTS(SELECT 1 FROM \"{}\" LIMIT 1)", escaped_name);
         let has_rows = connection
             .query_row(&query, [], |row| row.get::<_, bool>(0))
             .ok()?;
@@ -709,12 +706,8 @@ fn move_database_to_recovery_backup(path: &Path) -> Result<PathBuf, String> {
         let backup_name = format!("{file_name}.unusable-{stamp}");
         let backup = path.with_file_name(&backup_name);
         if !backup.exists()
-            && !path
-                .with_file_name(format!("{backup_name}-wal"))
-                .exists()
-            && !path
-                .with_file_name(format!("{backup_name}-shm"))
-                .exists()
+            && !path.with_file_name(format!("{backup_name}-wal")).exists()
+            && !path.with_file_name(format!("{backup_name}-shm")).exists()
         {
             return crate::startup_failure::move_database_aside(path, stamp);
         }
