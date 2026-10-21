@@ -9,6 +9,7 @@ import {
   Settings,
   Shuffle,
   Tag,
+  TerminalSquare,
   X,
 } from 'lucide-react';
 import {
@@ -20,6 +21,7 @@ import {
   useMemo,
   useRef,
 } from 'react';
+import { getCommandPaletteShortcutLabel } from '@/lib/platform-shortcuts';
 import { cn } from '@/lib/utils';
 import { QueueIcon } from '../ui/Icons';
 import type { NavView } from './FloatingDock';
@@ -259,6 +261,7 @@ export const TopBarNeo = memo(function TopBarNeo({
   canGoBack = false,
 }: TopBarNeoProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const commandPaletteLabel = `Open command palette (${getCommandPaletteShortcutLabel()})`;
   const isWindowsDesktop = /Win/i.test(navigator.platform);
 
   const focusSearchInput = useCallback(() => {
@@ -451,6 +454,12 @@ export const TopBarNeo = memo(function TopBarNeo({
           style={chromeNoDragStyle}
         >
           {status && <ProcessingStatus status={status} />}
+
+          <NeoSecondaryAction
+            label={commandPaletteLabel}
+            icon={<TerminalSquare className="h-4 w-4" strokeWidth={3} />}
+            onClick={() => window.dispatchEvent(new Event('tarab:open-command-palette'))}
+          />
 
           {navMode === 'topNav' && (
             <div className="flex items-center gap-2">

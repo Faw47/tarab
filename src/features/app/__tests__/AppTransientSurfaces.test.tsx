@@ -27,6 +27,8 @@ function renderSurfaces(onCloseFullPlayer: () => void, dialogOnTop?: () => void)
         onTogglePlayback={noop}
         onNextTrack={noop}
         onPreviousTrack={noop}
+        onPlaySearchResult={async () => undefined}
+        onOpenLibrarySearch={() => undefined}
         onRescanLibrary={noop}
         onOpenFullPlayer={vi.fn()}
         onCloseFullPlayer={onCloseFullPlayer}
