@@ -60,7 +60,9 @@ enum AudioCommand {
     },
     Pause,
     Resume,
-    Stop {\n        generation: u64,\n    },
+    Stop {
+        generation: u64,
+    },
     Seek(f64),
     SetVolume(f32),
     SetVolumeRamp {
@@ -459,7 +461,10 @@ impl AudioManager {
                                 start_pos,
                                 generation,
                             } => {
-                                if !playback_generation_is_current(\n                                    &roots_for_audio.read(),\n                                    generation,\n                                ) {
+                                if !playback_generation_is_current(
+                                    &roots_for_audio.read(),
+                                    generation,
+                                ) {
                                     continue;
                                 }
                                 emit_playback_transition(
@@ -582,7 +587,10 @@ impl AudioManager {
                                 duration_ms,
                                 generation,
                             } => {
-                                if !playback_generation_is_current(\n                                    &roots_for_audio.read(),\n                                    generation,\n                                ) {
+                                if !playback_generation_is_current(
+                                    &roots_for_audio.read(),
+                                    generation,
+                                ) {
                                     continue;
                                 }
                                 emit_playback_transition(
