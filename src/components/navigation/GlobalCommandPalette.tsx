@@ -17,7 +17,14 @@ import {
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { fetchLibrarySearch } from '@/features/library/api';
+import {
+  getCommandPaletteShortcutLabel,
+  getDirectionalShortcutLabel,
+  isApplePlatform,
+} from '@/lib/platform-shortcuts';
 import { cn } from '@/lib/utils';
+import type { Track } from '@/types';
 import { reportError } from '../../lib/report-error';
 import type { AppTheme } from '../../store/settings-store';
 import type { NavView } from './FloatingDock';
@@ -35,6 +42,8 @@ interface GlobalCommandPaletteProps {
   isPlaying: boolean;
   isScanning: boolean;
   theme: AppTheme;
+  onPlaySearchResult: (track: Track, results: Track[]) => Promise<void>;
+  onOpenLibrarySearch: (query: string) => void;
 }
 
 interface PaletteCommand {
@@ -62,10 +71,18 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
   isPlaying,
   isScanning,
   theme,
+  onPlaySearchResult,
+  onOpenLibrarySearch,
 }: GlobalCommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Track[]>([]);
+  const [isSearchingLibrary, setIsSearchingLibrary] = useState(false);
+  const [librarySearchFailed, setLibrarySearchFailed] = useState(false);
   const isNeo = theme === 'neobrutalism';
+  const isMac = isApplePlatform();
+  const paletteShortcut = getCommandPaletteShortcutLabel(isMac);
+  const searchTerm = query.trim();
 
   const runAndClose = useCallback((runner: () => void | Promise<void>) => {
     setOpen(false);
@@ -109,6 +126,69 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
       setQuery('');
     }
   }, [open]);
+
+  useEffect(() => {
+    let active = true;
+    if (!open || searchTerm.length < 2) {
+      setSearchResults([]);
+      setIsSearchingLibrary(false);
+      setLibrarySearchFailed(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setSearchResults([]);
+    setIsSearchingLibrary(true);
+    setLibrarySearchFailed(false);
+
+    const timeout = setTimeout(() => {
+      void fetchLibrarySearch(searchTerm, 24, {
+        includeMetadata: true,
+        includeLyrics: false,
+      })
+        .then(({ metadata }) => {
+          if (!active) return;
+          setSearchResults(metadata);
+        })
+        .catch((error) => {
+          if (!active) return;
+          setSearchResults([]);
+          setLibrarySearchFailed(true);
+          reportError('Library search failed', {
+            source: 'command-palette',
+            error,
+          });
+        })
+        .finally(() => {
+          if (active) setIsSearchingLibrary(false);
+        });
+    }, 160);
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [open, searchTerm]);
+
+  const albumResults = useMemo(() => {
+    const albums = new Map<string, { album: string; artist: string; count: number }>();
+
+    for (const track of searchResults) {
+      const album = track.album.trim();
+      if (!album) continue;
+      const artist = (track.albumArtist || track.artist).trim();
+      const key = `${album.toLocaleLowerCase()}\u0000${artist.toLocaleLowerCase()}`;
+      const existing = albums.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        albums.set(key, { album, artist, count: 1 });
+      }
+    }
+
+    return Array.from(albums.values()).slice(0, 8);
+  }, [searchResults]);
 
   const commands = useMemo<PaletteCommand[]>(
     () => [
@@ -189,7 +269,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Skip forward in the queue',
         group: 'Playback',
         icon: SkipForward,
-        shortcut: '⌘→',
+        shortcut: getDirectionalShortcutLabel('next', isMac),
         disabled: !hasCurrentTrack,
         disabledReason: 'Select a track before you skip.',
         onSelect: onNextTrack,
@@ -200,7 +280,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         description: 'Go to previous track or restart current',
         group: 'Playback',
         icon: SkipBack,
-        shortcut: '⌘←',
+        shortcut: getDirectionalShortcutLabel('previous', isMac),
         disabled: !hasCurrentTrack,
         disabledReason: 'Select a track before you go back.',
         onSelect: onPreviousTrack,
@@ -215,6 +295,16 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
         disabled: !hasCurrentTrack,
         disabledReason: 'Select a track before you open the full player.',
         onSelect: onOpenFullPlayer,
+      },
+      {
+        id: 'library-search',
+        label: searchTerm ? `Search Library for "${searchTerm}"` : 'Search Tracks and Albums',
+        description: 'Search track titles, artists, and album names',
+        group: 'Library',
+        icon: Library,
+        disabled: searchTerm.length === 0,
+        disabledReason: 'Type a search term to look through your library.',
+        onSelect: () => onOpenLibrarySearch(searchTerm),
       },
       {
         id: 'library-shuffle',
@@ -237,10 +327,13 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
     ],
     [
       currentView,
+      searchTerm,
+      isMac,
       hasCurrentTrack,
       isPlaying,
       isScanning,
       onNavigate,
+      onOpenLibrarySearch,
       onNextTrack,
       onOpenFullPlayer,
       onPreviousTrack,
@@ -287,7 +380,7 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
               autoFocus
               value={query}
               onValueChange={setQuery}
-              placeholder="Type a command…"
+              placeholder="Search commands, tracks, albums…"
               className={cn(
                 'h-8 w-full bg-transparent text-sm outline-none',
                 isNeo
@@ -295,6 +388,16 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                   : 'text-white placeholder:text-white/45',
               )}
             />
+            <kbd
+              className={cn(
+                'shrink-0 text-xs font-semibold',
+                isNeo
+                  ? 'border-2 border-black bg-[var(--neo-panel)] px-2 py-1 text-black'
+                  : 'rounded border border-white/15 bg-white/5 px-2 py-1 text-white/70',
+              )}
+            >
+              {paletteShortcut}
+            </kbd>
             <kbd
               className={cn(
                 'shrink-0 text-xs font-semibold',
@@ -314,8 +417,115 @@ export const GlobalCommandPalette = memo(function GlobalCommandPalette({
                 isNeo ? 'font-bold uppercase tracking-[0.08em] text-black/70' : 'text-white/60',
               )}
             >
-              No matching commands.
+              {isSearchingLibrary
+                ? 'Searching your library…'
+                : librarySearchFailed
+                  ? 'Library search failed. Try again.'
+                  : searchTerm.length >= 2
+                    ? 'No tracks, albums, or commands match.'
+                    : 'No matching commands.'}
             </Command.Empty>
+
+            {searchTerm.length >= 2 && searchResults.length > 0 && (
+              <>
+                <Command.Group heading="Tracks" className="mb-2">
+                  {searchResults.slice(0, 8).map((track) => (
+                    <Command.Item
+                      key={`track-${track.id}`}
+                      value={`${searchTerm} ${track.title} ${track.artist} ${track.album}`}
+                      onSelect={() => runAndClose(() => onPlaySearchResult(track, searchResults))}
+                      className={cn(
+                        'group flex cursor-pointer items-center gap-3 px-3 py-2.5 outline-none',
+                        'data-[selected=true]:translate-x-[1px] data-[selected=true]:translate-y-[1px]',
+                        isNeo
+                          ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[var(--neo-utility-hover)] data-[selected=true]:shadow-[2px_2px_0_0_#000]'
+                          : 'rounded-xl text-white/90 data-[selected=true]:bg-white/14 data-[selected=true]:text-white',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-8 w-8 shrink-0 items-center justify-center',
+                          isNeo
+                            ? 'border-2 border-black bg-white'
+                            : 'rounded-lg border border-white/10 bg-white/5',
+                        )}
+                      >
+                        <Play className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            'block truncate text-sm',
+                            isNeo ? 'font-black uppercase tracking-[0.08em]' : 'font-semibold',
+                          )}
+                        >
+                          {track.title}
+                        </span>
+                        <span
+                          className={cn(
+                            'block truncate text-xs',
+                            isNeo ? 'text-black/70' : 'text-white/60',
+                          )}
+                        >
+                          {track.artist} · {track.album}
+                        </span>
+                      </span>
+                    </Command.Item>
+                  ))}
+                </Command.Group>
+
+                {albumResults.length > 0 && (
+                  <Command.Group heading="Albums" className="mb-2">
+                    {albumResults.map((album) => (
+                      <Command.Item
+                        key={`album-${album.artist}-${album.album}`}
+                        value={`${searchTerm} ${album.album} ${album.artist}`}
+                        onSelect={() =>
+                          runAndClose(() => onOpenLibrarySearch(`${album.album} ${album.artist}`))
+                        }
+                        className={cn(
+                          'group flex cursor-pointer items-center gap-3 px-3 py-2.5 outline-none',
+                          'data-[selected=true]:translate-x-[1px] data-[selected=true]:translate-y-[1px]',
+                          isNeo
+                            ? 'border-2 border-transparent text-black data-[selected=true]:border-black data-[selected=true]:bg-[var(--neo-utility-hover)] data-[selected=true]:shadow-[2px_2px_0_0_#000]'
+                            : 'rounded-xl text-white/90 data-[selected=true]:bg-white/14 data-[selected=true]:text-white',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'flex h-8 w-8 shrink-0 items-center justify-center',
+                            isNeo
+                              ? 'border-2 border-black bg-white'
+                              : 'rounded-lg border border-white/10 bg-white/5',
+                          )}
+                        >
+                          <Library className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              'block truncate text-sm',
+                              isNeo ? 'font-black uppercase tracking-[0.08em]' : 'font-semibold',
+                            )}
+                          >
+                            {album.album} — {album.artist}
+                          </span>
+                          <span
+                            className={cn(
+                              'block text-xs',
+                              isNeo ? 'text-black/70' : 'text-white/60',
+                            )}
+                          >
+                            Search {album.count}{' '}
+                            {album.count === 1 ? 'matching track' : 'matching tracks'}
+                          </span>
+                        </span>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                )}
+              </>
+            )}
 
             {(Object.keys(grouped) as Array<keyof typeof grouped>).map((group) => (
               <Command.Group key={group} heading={group} className="mb-2">
