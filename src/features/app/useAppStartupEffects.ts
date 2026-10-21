@@ -22,9 +22,10 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const syncAutostartFromSystem = async () => {
-      if (autostartSyncInFlightRef.current) return;
-      autostartSyncInFlightRef.current = true;
+      if (inFlight) return;
+      inFlight = true;
       try {
         const enabled = await isEnabled();
         if (cancelled) return;
@@ -40,7 +41,7 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
           });
         }
       } finally {
-        autostartSyncInFlightRef.current = false;
+        inFlight = false;
       }
     };
 
