@@ -73,6 +73,7 @@ export function useAutostartIntegration() {
     };
 
     const start = () => {
+      console.info('[autostart-debug] start callback');
       if (started || cancelled) return;
       started = true;
 
@@ -88,8 +89,10 @@ export function useAutostartIntegration() {
       void readOs(revision);
     };
 
+    const hydrated = useSettingsStore.persist.hasHydrated();
+    console.info('[autostart-debug] effect hydration check', hydrated);
     const stopHydration = useSettingsStore.persist.onFinishHydration(start);
-    if (useSettingsStore.persist.hasHydrated()) start();
+    if (hydrated) start();
     window.addEventListener('focus', refresh);
     return () => {
       cancelled = true;
