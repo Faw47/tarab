@@ -2048,6 +2048,32 @@ mod tests {
     }
 
     #[test]
+    fn smart_shuffle_scales_for_a_large_single_artist_library() {
+        const TRACK_COUNT: usize = 50_000;
+        let db = test_db();
+        let tracks = (0..TRACK_COUNT)
+            .map(|index| {
+                let mut track = sample_track(&format!("smart-shuffle-{index:05}"));
+                track.artist = "One artist".to_string();
+                track
+            })
+            .collect::<Vec<_>>();
+        let ids = tracks.iter().map(|track| track.id.clone()).collect();
+
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+
+        let started = std::time::Instant::now();
+        let result = db.get_smart_shuffle_queue(ids).expect("smart shuffle");
+        let elapsed = started.elapsed();
+
+        assert_eq!(result.len(), TRACK_COUNT);
+        assert!(
+            elapsed < std::time::Duration::from_secs(8),
+            "smart shuffle took {elapsed:?} for {TRACK_COUNT} tracks by one artist"
+        );
+    }
+
+    #[test]
     fn smart_shuffle_fetches_requested_tracks_in_batch() {
         let db = test_db();
         db.upsert_tracks_batch(&[sample_track("a"), sample_track("b"), sample_track("c")])
