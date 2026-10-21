@@ -500,7 +500,10 @@ impl SeekCoordinator {
         self.inner.next_request_id.fetch_add(1, Ordering::AcqRel) + 1
     }
     fn complete(&self, request_id: u64, result: Result<(), String>) {
-        let _ = self.inner.completion_sender.send(SeekCompletion { request_id, result });
+        let _ = self
+            .inner
+            .completion_sender
+            .send(SeekCompletion { request_id, result });
     }
     pub(super) fn wait_for(
         &self,
@@ -674,19 +677,15 @@ fn run_prefetch_worker<S: PrefetchableSource>(
         }) = command
         {
             if seek_generation != active_generation.load(Ordering::Acquire) {
-                seek_coordinator.complete(
-                    request_id,
-                    Err("decoder seek was superseded".to_string()),
-                );
+                seek_coordinator
+                    .complete(request_id, Err("decoder seek was superseded".to_string()));
                 continue;
             }
             generation = seek_generation;
             let seek_result = source.seek_for_prefetch(position);
             if active_generation.load(Ordering::Acquire) != generation {
-                seek_coordinator.complete(
-                    request_id,
-                    Err("decoder seek was superseded".to_string()),
-                );
+                seek_coordinator
+                    .complete(request_id, Err("decoder seek was superseded".to_string()));
                 continue;
             }
             if let Err(error) = seek_result {
@@ -1335,7 +1334,8 @@ mod tests {
         };
         let underrun = Arc::new(AtomicBool::new(false));
         let mut buffered =
-            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), SeekCoordinator::new()).expect("start prefetch");
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), SeekCoordinator::new())
+                .expect("start prefetch");
 
         let producer_thread = read_thread
             .lock()
@@ -1366,19 +1366,19 @@ mod tests {
                 .expect("prepare decoder source");
         let underrun = Arc::new(AtomicBool::new(false));
         let seek_coordinator = SeekCoordinator::new();
-        let mut buffered = BufferedSymphoniaSource::new(
-            source,
-            Arc::clone(&underrun),
-            seek_coordinator.clone(),
-        )
-        .expect("start prefetch");
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), seek_coordinator.clone())
+                .expect("start prefetch");
 
         let _: Vec<_> = buffered.by_ref().take(32).collect();
         buffered
             .try_seek(Duration::from_millis(500))
             .expect("worker should accept the seek");
         seek_coordinator
-            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1))
+            .wait_for(
+                seek_coordinator.current_request_id(),
+                Duration::from_secs(1),
+            )
             .expect("decoder worker should seek the target");
 
         let expected = 4_000.0 * 4.0 / 32_768.0;
@@ -1447,7 +1447,10 @@ mod tests {
             .wait_for(request_id, Duration::from_secs(1))
             .expect("decoder worker should finish the seek");
 
-        assert!(returned_before_release, "Source::try_seek must not wait for decoding");
+        assert!(
+            returned_before_release,
+            "Source::try_seek must not wait for decoding"
+        );
         assert!(seek_succeeded);
     }
     #[test]
@@ -1471,8 +1474,10 @@ mod tests {
         .expect("start prefetch");
 
         assert!(buffered.try_seek(Duration::from_secs(1)).is_ok());
-        let result = seek_coordinator
-            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1));
+        let result = seek_coordinator.wait_for(
+            seek_coordinator.current_request_id(),
+            Duration::from_secs(1),
+        );
 
         assert!(
             result.is_err_and(|error| error.contains("probe rejected decoder seek")),
@@ -1497,8 +1502,12 @@ mod tests {
             seek_started: None,
             seek_release: None,
         };
-        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)), SeekCoordinator::new())
-            .expect("start prefetch");
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            SeekCoordinator::new(),
+        )
+        .expect("start prefetch");
         drop(buffered);
 
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
@@ -1587,9 +1596,14 @@ mod tests {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         state.lock().booster.set(2.0);
         let counter = Arc::new(AtomicU64::new(0));
-        let (source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter, &SeekCoordinator::new())
-                .expect("prepare source");
+        let (source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &SeekCoordinator::new(),
+        )
+        .expect("prepare source");
         let samples: Vec<f32> = source.collect();
         let _ = std::fs::remove_file(&path);
 
@@ -1693,7 +1707,10 @@ mod tests {
             .try_seek(Duration::from_secs_f64(0.5123))
             .expect("seek through gapless wrapper");
         seek_coordinator
-            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1))
+            .wait_for(
+                seek_coordinator.current_request_id(),
+                Duration::from_secs(1),
+            )
             .expect("decoder worker should seek the wrapped source");
         let sample = source.next().expect("sample after seek");
         let _ = std::fs::remove_file(&path);
@@ -1781,9 +1798,14 @@ mod tests {
         let path = write_temp_wav("lock", 2000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
-        let (mut source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter, &SeekCoordinator::new())
-                .expect("prepare source");
+        let (mut source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &SeekCoordinator::new(),
+        )
+        .expect("prepare source");
 
         let guard = state.lock();
         let (done_tx, done_rx) = mpsc::channel();
