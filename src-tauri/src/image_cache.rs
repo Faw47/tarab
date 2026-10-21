@@ -755,6 +755,31 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn thumbnail_generation_enforces_the_configured_cache_limit() {
+        let root = temp_dir("enforce-on-generate");
+        let cache = test_cache(root.join("covers"));
+        cache
+            .enforce_size_limit(Some(0))
+            .expect("set an empty cache limit");
+        let image = DynamicImage::new_rgb8(8, 8);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, ImageFormat::Png)
+            .expect("encode image");
+
+        cache
+            .generate_thumbnails(&encoded.into_inner())
+            .expect("generate thumbnails");
+
+        assert_eq!(
+            cache.get_stats().file_count,
+            0,
+            "backend thumbnail generation must enforce the configured cap"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 // ========== Tauri Commands ==========
