@@ -403,7 +403,8 @@ impl Database {
             |row| row.get(0),
         )?;
         if duplicate_memberships > 0 {
-            log::warn!("migrate_v4 found {duplicate_memberships} duplicate playlist memberships; preserving one per pair");
+            // `create_database()` runs this migration before Tauri installs its logger.
+            eprintln!("Database migration found duplicate playlist memberships; preserving one per pair");
         }
 
         conn.execute_batch(
