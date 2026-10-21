@@ -878,7 +878,7 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
             .file_name()
             .map_or(false, |name| name == "library.db")
     });
-    let mut moved_artifacts = Vec::new();
+    let mut moved_artifacts: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (source, destination) in database_artifacts {
         if let Err(error) = std::fs::rename(&source, &destination) {
             let move_error = format!(
