@@ -8,7 +8,24 @@ use cocoa::base::{id, nil};
 #[cfg(target_os = "macos")]
 use cocoa::foundation::{NSArray, NSDictionary, NSString};
 #[cfg(target_os = "macos")]
-use objc::{msg_send, runtime::Class, sel, sel_impl};
+use objc::{msg_send, rc::StrongPtr, runtime::Class, sel, sel_impl};
+
+#[cfg(target_os = "macos")]
+struct AutoreleasePoolGuard(*mut std::ffi::c_void);
+
+#[cfg(target_os = "macos")]
+impl AutoreleasePoolGuard {
+    fn new() -> Self {
+        Self(unsafe { objc::runtime::objc_autoreleasePoolPush() })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for AutoreleasePoolGuard {
+    fn drop(&mut self) {
+        unsafe { objc::runtime::objc_autoreleasePoolPop(self.0) };
+    }
+}
 
 pub struct MacOSMediaController {
     event_handler: Option<Box<dyn Fn(MediaControlEvent) + Send>>,
@@ -58,6 +75,7 @@ impl MacOSMediaController {
     #[cfg(target_os = "macos")]
     fn setup_command_handlers(&mut self) -> Result<(), Box<dyn StdError>> {
         unsafe {
+            let _pool = AutoreleasePoolGuard::new();
             let Some(command_center) = Self::get_command_center() else {
                 return Ok(());
             };
@@ -95,6 +113,37 @@ impl MacOSMediaController {
     }
 
     #[cfg(target_os = "macos")]
+    unsafe fn autoreleased_nsstring(value: &str) -> id {
+        // NSString::init returns +1; hand that ownership to the current autorelease pool.
+        let owned = unsafe { StrongPtr::new(NSString::alloc(nil).init_str(value)) };
+        owned.autorelease()
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe fn mutable_copy(object: id) -> Option<StrongPtr> {
+        let copy: id = unsafe { msg_send![object, mutableCopy] };
+        if copy == nil {
+            None
+        } else {
+            Some(unsafe { StrongPtr::new(copy) })
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe fn update_now_playing_info(info_center: id, update: impl FnOnce(id)) {
+        let current_info: id = unsafe { msg_send![info_center, nowPlayingInfo] };
+        if current_info == nil {
+            return;
+        }
+
+        let Some(mut_dict) = (unsafe { Self::mutable_copy(current_info) }) else {
+            return;
+        };
+        update(*mut_dict);
+        let _: () = unsafe { msg_send![info_center, setNowPlayingInfo: *mut_dict] };
+    }
+
+    #[cfg(target_os = "macos")]
     unsafe fn nsnumber_from_f64(value: f64) -> id {
         let Some(cls) = Class::get("NSNumber") else {
             return nil;
@@ -121,75 +170,66 @@ impl super::MediaController for MacOSMediaController {
         #[cfg(target_os = "macos")]
         {
             unsafe {
+                let _pool = AutoreleasePoolGuard::new();
                 let Some(info_center) = Self::get_info_center() else {
                     self.metadata = Some(metadata);
                     return Ok(());
                 };
                 let mut info = Vec::new();
 
-                // Title
-                let title_key = NSString::alloc(nil).init_str("MPMediaItemPropertyTitle");
-                let title_value = NSString::alloc(nil).init_str(&metadata.title);
+                let title_key = Self::autoreleased_nsstring("MPMediaItemPropertyTitle");
+                let title_value = Self::autoreleased_nsstring(&metadata.title);
                 info.push((title_key, title_value));
 
-                // Artist
                 if let Some(artist) = &metadata.artist {
-                    let artist_key = NSString::alloc(nil).init_str("MPMediaItemPropertyArtist");
-                    let artist_value = NSString::alloc(nil).init_str(artist);
+                    let artist_key = Self::autoreleased_nsstring("MPMediaItemPropertyArtist");
+                    let artist_value = Self::autoreleased_nsstring(artist);
                     info.push((artist_key, artist_value));
                 }
 
-                // Album
                 if let Some(album) = &metadata.album {
-                    let album_key = NSString::alloc(nil).init_str("MPMediaItemPropertyAlbumTitle");
-                    let album_value = NSString::alloc(nil).init_str(album);
+                    let album_key = Self::autoreleased_nsstring("MPMediaItemPropertyAlbumTitle");
+                    let album_value = Self::autoreleased_nsstring(album);
                     info.push((album_key, album_value));
                 }
 
-                // Album Artist
                 if let Some(album_artist) = &metadata.album_artist {
                     let album_artist_key =
-                        NSString::alloc(nil).init_str("MPMediaItemPropertyAlbumArtist");
-                    let album_artist_value = NSString::alloc(nil).init_str(album_artist);
+                        Self::autoreleased_nsstring("MPMediaItemPropertyAlbumArtist");
+                    let album_artist_value = Self::autoreleased_nsstring(album_artist);
                     info.push((album_artist_key, album_artist_value));
                 }
 
-                // Duration
                 if let Some(duration) = metadata.duration {
                     let duration_key =
-                        NSString::alloc(nil).init_str("MPMediaItemPropertyPlaybackDuration");
+                        Self::autoreleased_nsstring("MPMediaItemPropertyPlaybackDuration");
                     let duration_value = Self::nsnumber_from_f64(duration);
                     if duration_value != nil {
                         info.push((duration_key, duration_value));
                     }
                 }
 
-                // Artwork
-                // Note: MPMediaItemPropertyArtwork requires creating an MPMediaItemArtwork object
-                // For simplicity, we're storing the URL or data path
                 if let Some(artwork_url) = &metadata.artwork_url {
                     let artwork_key =
-                        NSString::alloc(nil).init_str("MPMediaItemPropertyArtworkURL");
-                    let artwork_value = NSString::alloc(nil).init_str(artwork_url);
+                        Self::autoreleased_nsstring("MPMediaItemPropertyArtworkURL");
+                    let artwork_value = Self::autoreleased_nsstring(artwork_url);
                     info.push((artwork_key, artwork_value));
                 } else if let Some(artwork_data) = &metadata.artwork_data {
-                    // For binary data, save to temp file and use file URL
                     use std::fs;
                     let temp_dir = std::env::temp_dir();
                     let artwork_path = temp_dir.join("macos_artwork.jpg");
 
-                    if let Ok(_) = fs::write(&artwork_path, artwork_data) {
+                    if fs::write(&artwork_path, artwork_data).is_ok() {
                         let file_url = format!("file://{}", artwork_path.display());
                         let artwork_key =
-                            NSString::alloc(nil).init_str("MPMediaItemPropertyArtworkURL");
-                        let artwork_value = NSString::alloc(nil).init_str(&file_url);
+                            Self::autoreleased_nsstring("MPMediaItemPropertyArtworkURL");
+                        let artwork_value = Self::autoreleased_nsstring(&file_url);
                         info.push((artwork_key, artwork_value));
                     }
                 }
 
-                // Create dictionary
-                let keys: Vec<id> = info.iter().map(|(k, _)| *k).collect();
-                let values: Vec<id> = info.iter().map(|(_, v)| *v).collect();
+                let keys: Vec<id> = info.iter().map(|(key, _)| *key).collect();
+                let values: Vec<id> = info.iter().map(|(_, value)| *value).collect();
                 let dict = NSDictionary::dictionaryWithObjects_forKeys_(
                     nil,
                     NSArray::arrayWithObjects(nil, &values),
@@ -212,26 +252,23 @@ impl super::MediaController for MacOSMediaController {
         #[cfg(target_os = "macos")]
         {
             unsafe {
+                let _pool = AutoreleasePoolGuard::new();
                 let Some(info_center) = Self::get_info_center() else {
                     self.playback_info = Some(info);
                     return Ok(());
                 };
-                let current_info: id = msg_send![info_center, nowPlayingInfo];
 
-                if current_info != nil {
-                    let mut_dict: id = msg_send![current_info, mutableCopy];
-
-                    // Position
-                    let position_key = NSString::alloc(nil)
-                        .init_str("MPNowPlayingInfoPropertyElapsedPlaybackTime");
+                Self::update_now_playing_info(info_center, |mut_dict| unsafe {
+                    let position_key =
+                        Self::autoreleased_nsstring("MPNowPlayingInfoPropertyElapsedPlaybackTime");
                     let position_value = Self::nsnumber_from_f64(info.position);
                     if position_value != nil {
-                        let _: () = msg_send![mut_dict, setObject:position_value forKey:position_key];
+                        let _: () =
+                            msg_send![mut_dict, setObject: position_value forKey: position_key];
                     }
 
-                    // Playback rate
                     let rate_key =
-                        NSString::alloc(nil).init_str("MPNowPlayingInfoPropertyPlaybackRate");
+                        Self::autoreleased_nsstring("MPNowPlayingInfoPropertyPlaybackRate");
                     let rate_value =
                         Self::nsnumber_from_f64(if info.status == PlaybackStatus::Playing {
                             info.playback_rate
@@ -239,11 +276,9 @@ impl super::MediaController for MacOSMediaController {
                             0.0
                         });
                     if rate_value != nil {
-                        let _: () = msg_send![mut_dict, setObject:rate_value forKey:rate_key];
+                        let _: () = msg_send![mut_dict, setObject: rate_value forKey: rate_key];
                     }
-
-                    let _: () = msg_send![info_center, setNowPlayingInfo: mut_dict];
-                }
+                });
             }
 
             self.playback_info = Some(info);
@@ -259,6 +294,7 @@ impl super::MediaController for MacOSMediaController {
         #[cfg(target_os = "macos")]
         {
             unsafe {
+                let _pool = AutoreleasePoolGuard::new();
                 let Some(info_center) = Self::get_info_center() else {
                     if let Some(mut info) = self.playback_info.clone() {
                         info.status = status;
@@ -266,13 +302,10 @@ impl super::MediaController for MacOSMediaController {
                     }
                     return Ok(());
                 };
-                let current_info: id = msg_send![info_center, nowPlayingInfo];
 
-                if current_info != nil {
-                    let mut_dict: id = msg_send![current_info, mutableCopy];
-
+                Self::update_now_playing_info(info_center, |mut_dict| unsafe {
                     let rate_key =
-                        NSString::alloc(nil).init_str("MPNowPlayingInfoPropertyPlaybackRate");
+                        Self::autoreleased_nsstring("MPNowPlayingInfoPropertyPlaybackRate");
                     let rate = if status == PlaybackStatus::Playing {
                         1.0
                     } else {
@@ -280,11 +313,9 @@ impl super::MediaController for MacOSMediaController {
                     };
                     let rate_value = Self::nsnumber_from_f64(rate);
                     if rate_value != nil {
-                        let _: () = msg_send![mut_dict, setObject:rate_value forKey:rate_key];
+                        let _: () = msg_send![mut_dict, setObject: rate_value forKey: rate_key];
                     }
-
-                    let _: () = msg_send![info_center, setNowPlayingInfo: mut_dict];
-                }
+                });
             }
 
             if let Some(mut info) = self.playback_info.clone() {
@@ -306,6 +337,7 @@ impl super::MediaController for MacOSMediaController {
         #[cfg(target_os = "macos")]
         {
             unsafe {
+                let _pool = AutoreleasePoolGuard::new();
                 let Some(info_center) = Self::get_info_center() else {
                     if let Some(mut info) = self.playback_info.clone() {
                         info.position = position;
@@ -313,20 +345,16 @@ impl super::MediaController for MacOSMediaController {
                     }
                     return Ok(());
                 };
-                let current_info: id = msg_send![info_center, nowPlayingInfo];
 
-                if current_info != nil {
-                    let mut_dict: id = msg_send![current_info, mutableCopy];
-
-                    let position_key = NSString::alloc(nil)
-                        .init_str("MPNowPlayingInfoPropertyElapsedPlaybackTime");
+                Self::update_now_playing_info(info_center, |mut_dict| unsafe {
+                    let position_key =
+                        Self::autoreleased_nsstring("MPNowPlayingInfoPropertyElapsedPlaybackTime");
                     let position_value = Self::nsnumber_from_f64(position);
                     if position_value != nil {
-                        let _: () = msg_send![mut_dict, setObject:position_value forKey:position_key];
+                        let _: () =
+                            msg_send![mut_dict, setObject: position_value forKey: position_key];
                     }
-
-                    let _: () = msg_send![info_center, setNowPlayingInfo: mut_dict];
-                }
+                });
             }
 
             if let Some(mut info) = self.playback_info.clone() {
@@ -348,6 +376,7 @@ impl super::MediaController for MacOSMediaController {
         #[cfg(target_os = "macos")]
         {
             unsafe {
+                let _pool = AutoreleasePoolGuard::new();
                 if let Some(info_center) = Self::get_info_center() {
                     let _: () = msg_send![info_center, setNowPlayingInfo: nil];
                 }
@@ -371,6 +400,7 @@ impl super::MediaController for MacOSMediaController {
     fn get_metadata(&self) -> Result<Option<MediaMetadata>, Box<dyn StdError>> {
         #[cfg(target_os = "macos")]
         unsafe {
+            let _pool = AutoreleasePoolGuard::new();
             // Get current now playing info from the system
             let Some(info_center) = Self::get_info_center() else {
                 return Ok(self.metadata.clone());
@@ -379,7 +409,7 @@ impl super::MediaController for MacOSMediaController {
 
             if now_playing_info != nil {
                 // Extract metadata from NSDictionary
-                let title_key = NSString::alloc(nil).init_str("MPMediaItemPropertyTitle");
+                let title_key = Self::autoreleased_nsstring("MPMediaItemPropertyTitle");
                 let title: id = msg_send![now_playing_info, objectForKey: title_key];
 
                 if title != nil {
@@ -398,7 +428,7 @@ impl super::MediaController for MacOSMediaController {
                     };
 
                     // Get artist
-                    let artist_key = NSString::alloc(nil).init_str("MPMediaItemPropertyArtist");
+                    let artist_key = Self::autoreleased_nsstring("MPMediaItemPropertyArtist");
                     let artist: id = msg_send![now_playing_info, objectForKey: artist_key];
                     if artist != nil {
                         metadata.artist = Some(
@@ -409,7 +439,7 @@ impl super::MediaController for MacOSMediaController {
                     }
 
                     // Get album
-                    let album_key = NSString::alloc(nil).init_str("MPMediaItemPropertyAlbumTitle");
+                    let album_key = Self::autoreleased_nsstring("MPMediaItemPropertyAlbumTitle");
                     let album: id = msg_send![now_playing_info, objectForKey: album_key];
                     if album != nil {
                         metadata.album = Some(
@@ -421,7 +451,7 @@ impl super::MediaController for MacOSMediaController {
 
                     // Get artwork URL if available
                     let artwork_key =
-                        NSString::alloc(nil).init_str("MPMediaItemPropertyArtworkURL");
+                        Self::autoreleased_nsstring("MPMediaItemPropertyArtworkURL");
                     let artwork: id = msg_send![now_playing_info, objectForKey: artwork_key];
                     if artwork != nil {
                         metadata.artwork_url = Some(
@@ -433,7 +463,7 @@ impl super::MediaController for MacOSMediaController {
 
                     // Get duration
                     let duration_key =
-                        NSString::alloc(nil).init_str("MPMediaItemPropertyPlaybackDuration");
+                        Self::autoreleased_nsstring("MPMediaItemPropertyPlaybackDuration");
                     let duration: id = msg_send![now_playing_info, objectForKey: duration_key];
                     if duration != nil {
                         let duration_val: f64 = msg_send![duration, doubleValue];
