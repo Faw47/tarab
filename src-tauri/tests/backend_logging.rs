@@ -19,7 +19,10 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
     ),
     ("lib.rs", include_str!("../src/lib.rs")),
     ("library.rs", include_str!("../src/library.rs")),
-    ("library_watcher.rs", include_str!("../src/library_watcher.rs")),
+    (
+        "library_watcher.rs",
+        include_str!("../src/library_watcher.rs"),
+    ),
     ("metadata.rs", include_str!("../src/metadata.rs")),
     ("session.rs", include_str!("../src/session.rs")),
     ("shutdown.rs", include_str!("../src/shutdown.rs")),
@@ -45,18 +48,14 @@ fn runtime_diagnostics_use_the_configured_logger() {
         .iter()
         .filter(|(path, _, line)| {
             path == "database.rs"
-                && line.contains(
-                    "Could not prepare preferred app directory; using fallback",
-                )
+                && line.contains("Could not prepare preferred app directory; using fallback")
         })
         .count();
     let unexpected_stderr: Vec<String> = direct_stderr
         .iter()
         .filter(|(path, _, line)| {
             !(path == "database.rs"
-                && line.contains(
-                    "Could not prepare preferred app directory; using fallback",
-                ))
+                && line.contains("Could not prepare preferred app directory; using fallback"))
         })
         .map(|(path, line_number, _)| format!("{path}:{line_number}"))
         .collect();
