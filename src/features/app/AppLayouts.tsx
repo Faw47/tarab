@@ -344,7 +344,7 @@ export function AppLayouts({
             transition={reducedEffects ? INSTANT : { ...BAR_TRANSITION, delay: 0.1 }}
             className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
           >
-            <PillMiniPlayer onExpand={onExpandCollapsedPlayer} />
+            <PillMiniPlayer onExpand={onExpandCollapsedPlayer} reducedEffects={reducedEffects} />
           </motion.div>
         )}
       </AnimatePresence>
