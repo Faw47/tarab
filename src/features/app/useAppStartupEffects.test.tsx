@@ -18,10 +18,22 @@ import { useAppStartupEffects } from './useAppStartupEffects';
 import type { AutostartApi } from './useAutostartIntegration';
 
 const autostartCalls = { isEnabled: 0, enable: 0, disable: 0 };
+let readOs = async () => true;
+let enableOs = async () => undefined;
+let disableOs = async () => undefined;
 const autostartApi: AutostartApi = {
-  isEnabled: vi.fn(),
-  enable: vi.fn(),
-  disable: vi.fn(),
+  isEnabled: async () => {
+    autostartCalls.isEnabled += 1;
+    return readOs();
+  },
+  enable: async () => {
+    autostartCalls.enable += 1;
+    await enableOs();
+  },
+  disable: async () => {
+    autostartCalls.disable += 1;
+    await disableOs();
+  },
 };
 
 describe('app autostart lifecycle', () => {
@@ -37,22 +49,9 @@ describe('app autostart lifecycle', () => {
     autostartCalls.isEnabled = 0;
     autostartCalls.enable = 0;
     autostartCalls.disable = 0;
-    vi.mocked(autostartApi.isEnabled)
-      .mockReset()
-      .mockImplementation(async () => {
-        autostartCalls.isEnabled += 1;
-        return true;
-      });
-    vi.mocked(autostartApi.enable)
-      .mockReset()
-      .mockImplementation(async () => {
-        autostartCalls.enable += 1;
-      });
-    vi.mocked(autostartApi.disable)
-      .mockReset()
-      .mockImplementation(async () => {
-        autostartCalls.disable += 1;
-      });
+    readOs = async () => true;
+    enableOs = async () => undefined;
+    disableOs = async () => undefined;
     vi.mocked(reportError).mockClear();
     vi.stubGlobal('performance', {
       mark: vi.fn(),
@@ -89,10 +88,9 @@ describe('app autostart lifecycle', () => {
   it('applies changes while the settings page is absent and reconciles failures', async () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
-    vi.mocked(autostartApi.disable).mockImplementation(async () => {
-      autostartCalls.disable += 1;
+    disableOs = async () => {
       throw new Error('permission denied');
-    });
+    };
     act(() => useSettingsStore.getState().setAutostartEnabled(false));
     await waitFor(() =>
       expect(reportError).toHaveBeenCalledWith(
@@ -106,13 +104,10 @@ describe('app autostart lifecycle', () => {
 
   it('keeps a user toggle made while the initial OS read is pending', async () => {
     let finish: (enabled: boolean) => void = () => undefined;
-    vi.mocked(autostartApi.isEnabled).mockImplementation(
-      () =>
-        new Promise<boolean>((resolve) => {
-          autostartCalls.isEnabled += 1;
-          finish = resolve;
-        }),
-    );
+    readOs = () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      });
     mount();
     await waitFor(() => expect(autostartCalls.isEnabled).toBe(1));
     act(() => useSettingsStore.getState().setAutostartEnabled(true));
@@ -125,13 +120,10 @@ describe('app autostart lifecycle', () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
     let finish: (enabled: boolean) => void = () => undefined;
-    vi.mocked(autostartApi.isEnabled).mockImplementation(
-      () =>
-        new Promise<boolean>((resolve) => {
-          autostartCalls.isEnabled += 1;
-          finish = resolve;
-        }),
-    );
+    readOs = () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      });
     act(() => window.dispatchEvent(new Event('focus')));
     await waitFor(() => expect(autostartCalls.isEnabled).toBe(2));
     act(() => useSettingsStore.getState().setAutostartEnabled(false));
