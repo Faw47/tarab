@@ -1244,7 +1244,11 @@ mod tests {
         let stored = db
             .get_tracks_by_ids(&[scanned_folder_track.id, case_distinct_track.id.clone()])
             .expect("read reconciled tracks");
-        assert!(stored.iter().any(|track| track.id == case_distinct_track.id));
+        assert!(
+            stored
+                .iter()
+                .any(|track| track.id == case_distinct_track.id)
+        );
     }
 
     #[test]
