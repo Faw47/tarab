@@ -64,5 +64,7 @@ export const DbArtistAggregateArraySchema = z.array(
 );
 
 export type ValidatedDbTrack = z.infer<typeof DbTrackSchema>;
-export type ValidatedDbTrackAggregateRepresentative = z.infer<typeof DbTrackAggregateRepresentativeSchema>;
+export type ValidatedDbTrackAggregateRepresentative = z.infer<
+  typeof DbTrackAggregateRepresentativeSchema
+>;
 export type ValidatedLibraryStats = z.infer<typeof LibraryStatsSchema>;
