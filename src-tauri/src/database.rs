@@ -612,19 +612,31 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     if legacy_dir.exists() {
         let current_db = app_dir.join("library.db");
         let legacy_db = legacy_dir.join("library.db");
-        if current_db.is_file() {
-            let current_has_tracks = database_has_tracks(&current_db);
-            let legacy_has_tracks = database_has_tracks(&legacy_db);
+        let current_has_user_data = if current_db.is_file() {
+            database_has_user_data(&current_db)
+        } else {
+            None
+        };
+        let legacy_has_user_data = if legacy_db.is_file() {
+            database_has_user_data(&legacy_db)
+        } else {
+            None
+        };
 
-            // Preserve an established library. If an earlier startup created an empty or
-            // unusable database before migration, keep it and its sidecars as a backup before
-            // restoring a populated legacy database.
-            if current_has_tracks == Some(true) || legacy_has_tracks != Some(true) {
-                return Ok(app_dir);
-            }
+        // Preserve an established library. A library can contain user data even when it has no
+        // tracks, such as a manually created empty playlist.
+        if current_has_user_data == Some(true) {
+            return Ok(app_dir);
+        }
 
-            let stamp = u64::try_from(now_millis_i64_or_default()).unwrap_or_default();
-            crate::startup_failure::move_database_aside(&current_db, stamp)?;
+        // Replace an empty or unusable early-startup database only when the legacy database has a
+        // recognizable Tarab schema. Keep an unrecognized legacy database as a recovery artifact
+        // while still migrating its other files.
+        if current_db.is_file() && legacy_has_user_data.is_some() {
+            move_database_to_recovery_backup(&current_db)?;
+        }
+        if legacy_db.is_file() && legacy_has_user_data.is_none() {
+            move_database_to_recovery_backup(&legacy_db)?;
         }
 
         merge_legacy_directory(&legacy_dir, &app_dir)?;
@@ -633,24 +645,83 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     Ok(app_dir)
 }
 
-fn database_has_tracks(path: &Path) -> Option<bool> {
+fn database_has_user_data(path: &Path) -> Option<bool> {
     let connection =
         Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let has_tracks_table = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tracks')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .ok()?;
-    if !has_tracks_table {
+    let table_names = {
+        let mut statement = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name",
+            )
+            .ok()?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()?
+            .collect::<SqliteResult<Vec<_>>>()
+            .ok()?
+    };
+
+    let recognized_schema = table_names
+        .iter()
+        .any(|name| matches!(name.as_str(), "schema_version" | "tracks" | "playlists"));
+    if !recognized_schema {
         return None;
     }
-    connection
-        .query_row("SELECT EXISTS(SELECT 1 FROM tracks LIMIT 1)", [], |row| {
-            row.get::<_, bool>(0)
-        })
-        .ok()
+
+    for table_name in table_names {
+        if matches!(table_name.as_str(), "schema_version" | "cache_metadata" | "tracks_fts" | "lyrics_fts")
+            || table_name.starts_with("tracks_fts_")
+            || table_name.starts_with("lyrics_fts_")
+        {
+            continue;
+        }
+
+        let escaped_name = table_name.replace('"', "\"\"");
+        let query = format!(
+            "SELECT EXISTS(SELECT 1 FROM \"{}\" LIMIT 1)",
+            escaped_name
+        );
+        let has_rows = connection
+            .query_row(&query, [], |row| row.get::<_, bool>(0))
+            .ok()?;
+        if has_rows {
+            return Some(true);
+        }
+    }
+
+    Some(false)
+}
+
+fn move_database_to_recovery_backup(path: &Path) -> Result<PathBuf, String> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| "The database path has no file name".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let base_stamp = u64::try_from(now_millis_i64_or_default()).unwrap_or_default();
+
+    for offset in 0..1_000_u64 {
+        let stamp = base_stamp.saturating_add(offset);
+        let backup_name = format!("{file_name}.unusable-{stamp}");
+        let backup = path.with_file_name(&backup_name);
+        if !backup.exists()
+            && !path
+                .with_file_name(format!("{backup_name}-wal"))
+                .exists()
+            && !path
+                .with_file_name(format!("{backup_name}-shm"))
+                .exists()
+        {
+            return crate::startup_failure::move_database_aside(path, stamp);
+        }
+    }
+
+    Err(format!(
+        "Could not find an available recovery backup name for {}",
+        path.display()
+    ))
 }
 
 fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
@@ -1232,6 +1303,63 @@ mod tests {
             std::fs::read(logs_dir.join("plugin.log")).expect("read preserved plugin log"),
             b"log"
         );
+        assert!(std::fs::read_dir(&app_dir)
+            .expect("read app directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.db.unusable-")));
+
+        drop(recovered_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_empty_playlist_is_preserved_when_current_database_is_empty() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-empty-playlist-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create empty current database");
+        drop(current_db);
+
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .create_playlist(&DbPlaylist {
+                id: "legacy-empty-playlist".to_string(),
+                name: "Empty playlist".to_string(),
+                playlist_type: "manual".to_string(),
+                folder_path: None,
+                smart_rules: None,
+                created_at: 1,
+                updated_at: 1,
+                is_pinned: false,
+                pinned_at: None,
+                last_synced_at: None,
+                sync_error: None,
+            })
+            .expect("seed empty legacy playlist");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("recover legacy playlist");
+        let recovered_db =
+            Database::new(migrated.join("library.db")).expect("open recovered database");
+        let playlists = recovered_db
+            .get_all_playlists()
+            .expect("read recovered playlists");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].id, "legacy-empty-playlist");
+        assert!(!legacy_dir.exists());
         assert!(std::fs::read_dir(&app_dir)
             .expect("read app directory")
             .filter_map(Result::ok)
