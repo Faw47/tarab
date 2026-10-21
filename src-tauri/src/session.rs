@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{ErrorKind, Write},
+    io::ErrorKind,
     path::PathBuf,
 };
 use tauri::{AppHandle, Manager};
@@ -44,19 +44,6 @@ fn session_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn write_atomic(path: &PathBuf, data: &[u8]) -> Result<(), String> {
-    let mut tmp = path.clone();
-    tmp.set_extension("json.tmp");
-    let mut file =
-        fs::File::create(&tmp).map_err(|e| format!("Failed to create temp session file: {}", e))?;
-    file.write_all(data)
-        .map_err(|e| format!("Failed to write session: {}", e))?;
-    file.sync_all()
-        .map_err(|e| format!("Failed to sync session file: {}", e))?;
-    fs::rename(&tmp, path).map_err(|e| format!("Failed to replace session file: {}", e))?;
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn load_playback_session(app: AppHandle) -> Result<Option<PlaybackSession>, String> {
     tauri::async_runtime::spawn_blocking(move || read_session(&app))
@@ -84,19 +71,6 @@ fn read_session(app: &AppHandle) -> Result<Option<PlaybackSession>, String> {
             Ok(None)
         }
     }
-}
-
-/// Writes and fsyncs the session file, so it runs off the main thread.
-#[tauri::command]
-pub async fn save_playback_session(app: AppHandle, session: PlaybackSession) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = session_path(&app)?;
-        let data = serde_json::to_vec(&session)
-            .map_err(|e| format!("Failed to serialize session: {}", e))?;
-        write_atomic(&path, &data)
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

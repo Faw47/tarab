@@ -66,11 +66,6 @@ enum AudioCommand {
     },
     Seek(f64),
     SetVolume(f32),
-    SetVolumeRamp {
-        from: f32,
-        to: f32,
-        duration_ms: u64,
-    },
     SetSpeed(f32),
     SetCrossfade(f32),
     SetBooster(f32),
@@ -99,13 +94,6 @@ pub struct AudioManager {
     next_generation: AtomicU64,
 }
 
-struct VolumeRampState {
-    from: f32,
-    to: f32,
-    start: Instant,
-    duration: Duration,
-}
-
 fn position_from_samples(state: &PlaybackState, emitted_samples: u64) -> f64 {
     if state.position_sample_rate == 0 || state.position_channels == 0 {
         return state.start_position;
@@ -126,7 +114,6 @@ fn stop_after_failed_recovery(
     active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
     crossfade_state: &mut Option<CrossfadeState>,
     current_sink: &mut Option<Arc<Sink>>,
-    volume_ramp: &mut Option<VolumeRampState>,
     stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
 ) {
     *pending_gapless_path.lock() = None;
@@ -138,7 +125,7 @@ fn stop_after_failed_recovery(
         sink.stop();
     }
     reset_active_counter(active_emitted);
-    *volume_ramp = None;
+
     *stream_bundle = None;
     let mut state = state.lock();
     state.is_playing = false;
@@ -403,32 +390,6 @@ fn cancel_crossfade_for_seek(
     }
 }
 
-fn apply_volume_ramp_step(
-    ramp: &mut Option<VolumeRampState>,
-    state: &Arc<Mutex<PlaybackState>>,
-    sink: Option<&Sink>,
-) {
-    let Some(current) = ramp.as_ref() else {
-        return;
-    };
-
-    let elapsed = current.start.elapsed();
-    let progress = normalized_progress(elapsed, current.duration);
-    let value = current.from + (current.to - current.from) * progress;
-
-    {
-        let mut playback_state = state.lock();
-        playback_state.volume = value.clamp(0.0, 1.0);
-    }
-    if let Some(active_sink) = sink {
-        active_sink.set_volume(value.clamp(0.0, 1.0));
-    }
-
-    if progress >= 1.0 {
-        *ramp = None;
-    }
-}
-
 impl AudioManager {
     pub fn new(app: AppHandle, library_roots: SharedLibraryRoots) -> Self {
         let (sender, receiver) = channel::<AudioCommand>();
@@ -536,7 +497,7 @@ impl AudioManager {
             let mut crossfade_state: Option<CrossfadeState> = None;
             let mut pending_gapless_cancels: Vec<PendingGaplessHandoff> = Vec::new();
             let seek_worker_active = Arc::new(AtomicBool::new(false));
-            let mut volume_ramp: Option<VolumeRampState> = None;
+
             let mut output_watch = OutputWatch::new(Instant::now());
             let mut had_stream = false;
             let mut handled_command = false;
@@ -635,7 +596,7 @@ impl AudioManager {
                                                 &active_emitted_for_audio,
                                                 Arc::clone(&emitted_for_play),
                                             );
-                                            volume_ramp = None;
+
                                             emit_playback_transition(
                                                 &app_for_audio,
                                                 generation,
@@ -831,7 +792,7 @@ impl AudioManager {
                                                 &active_emitted_for_audio,
                                                 Arc::clone(&emitted_for_crossfade),
                                             );
-                                            volume_ramp = None;
+
                                             emit_playback_transition(
                                                 &app_for_audio,
                                                 generation,
@@ -1131,11 +1092,10 @@ impl AudioManager {
                                 if let Some(active) = crossfade_state.take() {
                                     active.outgoing_sink.stop();
                                 }
-                                volume_ramp = None;
+
                                 reset_active_counter(&active_emitted_for_audio);
                             }
                             AudioCommand::SetVolume(volume) => {
-                                volume_ramp = None;
                                 let mut state = state_clone.lock();
                                 state.volume = volume;
                                 if crossfade_state.is_some() {
@@ -1148,52 +1108,6 @@ impl AudioManager {
                                     }
                                 } else if let Some(ref sink) = current_sink {
                                     sink.set_volume(volume);
-                                }
-                            }
-                            AudioCommand::SetVolumeRamp {
-                                from,
-                                to,
-                                duration_ms,
-                            } => {
-                                let clamped_from = from.clamp(0.0, 1.0);
-                                let clamped_to = to.clamp(0.0, 1.0);
-                                if duration_ms == 0 {
-                                    volume_ramp = None;
-                                    let mut state = state_clone.lock();
-                                    state.volume = clamped_to;
-                                    if crossfade_state.is_some() {
-                                        if let Some(ref active) = crossfade_state {
-                                            apply_crossfade_mix(
-                                                active,
-                                                current_sink.as_deref(),
-                                                clamped_to,
-                                            );
-                                        }
-                                    } else if let Some(ref sink) = current_sink {
-                                        sink.set_volume(clamped_to);
-                                    }
-                                } else {
-                                    {
-                                        let mut state = state_clone.lock();
-                                        state.volume = clamped_from;
-                                    }
-                                    if crossfade_state.is_some() {
-                                        if let Some(ref active) = crossfade_state {
-                                            apply_crossfade_mix(
-                                                active,
-                                                current_sink.as_deref(),
-                                                clamped_from,
-                                            );
-                                        }
-                                    } else if let Some(ref sink) = current_sink {
-                                        sink.set_volume(clamped_from);
-                                    }
-                                    volume_ramp = Some(VolumeRampState {
-                                        from: clamped_from,
-                                        to: clamped_to,
-                                        start: Instant::now(),
-                                        duration: Duration::from_millis(duration_ms),
-                                    });
                                 }
                             }
                             AudioCommand::SetSpeed(speed) => {
@@ -1459,7 +1373,6 @@ impl AudioManager {
                                                     &active_emitted_for_audio,
                                                     &mut crossfade_state,
                                                     &mut current_sink,
-                                                    &mut volume_ramp,
                                                     &mut stream_bundle,
                                                 );
                                             }
@@ -1482,7 +1395,7 @@ impl AudioManager {
                                         } else {
                                             reset_active_counter(&active_emitted_for_audio);
                                         }
-                                        volume_ramp = None;
+
                                         stream_bundle = Some(new_stream_bundle);
                                         output_watch.rebaseline_default(Instant::now());
                                     }
@@ -1495,7 +1408,7 @@ impl AudioManager {
                                                 &active_emitted_for_audio,
                                                 &mut crossfade_state,
                                                 &mut current_sink,
-                                                &mut volume_ramp,
+
                                                 &mut stream_bundle,
                                             );
                                         }
@@ -1626,7 +1539,7 @@ impl AudioManager {
                         (crossfade_progress(active) >= 1.0)
                             .then(|| (active.generation, active.incoming_path.clone()))
                     });
-                    apply_volume_ramp_step(&mut volume_ramp, &state_clone, None);
+
                     apply_crossfade_step(
                         &mut crossfade_state,
                         &state_clone,
@@ -1643,7 +1556,7 @@ impl AudioManager {
                         );
                     }
                 } else {
-                    apply_volume_ramp_step(&mut volume_ramp, &state_clone, current_sink.as_deref());
+
                 }
             }
         });
@@ -1723,16 +1636,6 @@ impl AudioManager {
             .map_err(|e| format!("Failed to send volume command: {}", e))
     }
 
-    pub fn set_volume_ramp(&self, from: f32, to: f32, duration_ms: u64) -> Result<(), String> {
-        self.command_sender
-            .send(AudioCommand::SetVolumeRamp {
-                from: from.clamp(0.0, 1.0),
-                to: to.clamp(0.0, 1.0),
-                duration_ms: duration_ms.min(60_000),
-            })
-            .map_err(|e| format!("Failed to send volume ramp command: {}", e))
-    }
-
     pub fn set_speed(&self, speed: f32) -> Result<(), String> {
         self.command_sender
             .send(AudioCommand::SetSpeed(normalize_speed(speed)))
@@ -1772,22 +1675,6 @@ impl AudioManager {
             .map_err(|e| format!("Failed to update active playback source: {}", e))
     }
 
-    pub fn get_position(&self) -> f64 {
-        let state = self.playback_state.lock();
-        if state.is_playing {
-            let emitted = {
-                let counter = self.active_emitted_samples.lock().clone();
-                counter.load(Ordering::Relaxed)
-            };
-            position_from_samples(&state, emitted)
-        } else {
-            state.start_position
-        }
-    }
-
-    pub fn get_duration(&self) -> f64 {
-        self.playback_state.lock().duration
-    }
 }
 
 fn next_playback_generation(counter: &AtomicU64) -> u64 {
@@ -1871,28 +1758,8 @@ pub fn seek_playback(
 }
 
 #[tauri::command]
-pub fn get_playback_position(state: tauri::State<'_, SharedAudioManager>) -> f64 {
-    state.get_position()
-}
-
-#[tauri::command]
-pub fn get_duration(state: tauri::State<'_, SharedAudioManager>) -> f64 {
-    state.get_duration()
-}
-
-#[tauri::command]
 pub fn set_volume(volume: f32, state: tauri::State<'_, SharedAudioManager>) -> Result<(), String> {
     state.set_volume(volume)
-}
-
-#[tauri::command]
-pub fn set_volume_ramp(
-    from: f32,
-    to: f32,
-    duration_ms: u64,
-    state: tauri::State<'_, SharedAudioManager>,
-) -> Result<(), String> {
-    state.set_volume_ramp(from, to, duration_ms)
 }
 
 #[tauri::command]

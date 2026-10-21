@@ -1360,17 +1360,6 @@ pub async fn reveal_playlists_data_folder(app: tauri::AppHandle) -> Result<(), S
     .map_err(|error| format!("Playlist task failed: {error}"))?
 }
 
-#[tauri::command]
-pub async fn get_playlists_data_path(app: tauri::AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || get_playlists_data_path_blocking(app))
-        .await
-        .map_err(|error| format!("Playlist task failed: {error}"))?
-}
-
-fn get_playlists_data_path_blocking(app: tauri::AppHandle) -> Result<String, String> {
-    Ok(get_playlists_path(&app).to_string_lossy().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

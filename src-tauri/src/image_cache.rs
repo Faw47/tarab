@@ -1,10 +1,8 @@
 use image::codecs::jpeg::JpegEncoder;
 use image::image_dimensions;
 use image::{imageops::FilterType, DynamicImage};
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -120,9 +118,6 @@ pub struct CacheStats {
 
 pub struct ImageCache {
     cache_dir: PathBuf,
-    // In-memory LRU for recently accessed hashes
-    memory_cache: RwLock<HashMap<String, (Vec<u8>, std::time::Instant)>>,
-    max_memory_bytes: usize,
 }
 
 impl ImageCache {
@@ -136,8 +131,6 @@ impl ImageCache {
 
         Self {
             cache_dir,
-            memory_cache: RwLock::new(HashMap::new()),
-            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -145,8 +138,6 @@ impl ImageCache {
     pub(crate) fn with_dir(cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,
-            memory_cache: RwLock::new(HashMap::new()),
-            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -237,58 +228,6 @@ impl ImageCache {
         self.cache_dir
             .join(subdir)
             .join(format!("{}_{}.{}", hash, size_name, THUMBNAIL_EXTENSION))
-    }
-
-    /// Get thumbnail as base64
-    pub fn get_thumbnail(&self, hash: &str, size: &str) -> Result<Option<String>, String> {
-        if !is_valid_thumbnail_hash(hash) || !is_valid_thumbnail_size(size) {
-            return Ok(None);
-        }
-        let cache_key = format!("{}_{}", hash, size);
-
-        // Check memory cache first
-        {
-            let mut cache = self.memory_cache.write();
-            if let Some((data, instant)) = cache.get_mut(&cache_key) {
-                *instant = std::time::Instant::now();
-                return Ok(Some(base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &*data,
-                )));
-            }
-        }
-
-        // Load from disk
-        let path = self.get_thumbnail_path(hash, size);
-        let Some(data) = read_thumbnail_file(&path, size)? else {
-            return Ok(None);
-        };
-
-        // Add to memory cache
-        {
-            let mut cache = self.memory_cache.write();
-            let mut current_bytes: usize = cache.values().map(|(bytes, _)| bytes.len()).sum();
-            while current_bytes.saturating_add(data.len()) > self.max_memory_bytes {
-                let Some(oldest_key) = cache
-                    .iter()
-                    .min_by_key(|(_, (_, accessed))| *accessed)
-                    .map(|(key, _)| key.clone())
-                else {
-                    break;
-                };
-                if let Some((removed, _)) = cache.remove(&oldest_key) {
-                    current_bytes = current_bytes.saturating_sub(removed.len());
-                }
-            }
-            if data.len() <= self.max_memory_bytes {
-                cache.insert(cache_key, (data.clone(), std::time::Instant::now()));
-            }
-        }
-
-        Ok(Some(base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        )))
     }
 
     /// Get thumbnail as raw bytes (for frontend to display directly)
@@ -400,7 +339,6 @@ impl ImageCache {
         }
 
         // Clear memory cache
-        self.memory_cache.write().clear();
 
         Ok(deleted)
     }
@@ -529,8 +467,6 @@ mod tests {
     fn test_cache(cache_dir: PathBuf) -> ImageCache {
         ImageCache {
             cache_dir,
-            memory_cache: RwLock::new(HashMap::new()),
-            max_memory_bytes: 32 * 1024 * 1024,
         }
     }
 
@@ -785,34 +721,6 @@ mod tests {
 // ========== Tauri Commands ==========
 
 #[tauri::command]
-pub async fn cache_generate_thumbnail(
-    image_data: String, // Base64 encoded
-    cache: tauri::State<'_, SharedImageCache>,
-) -> Result<String, String> {
-    let cache = cache.inner().clone();
-    spawn_blocking(move || {
-        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &image_data)
-            .map_err(|e| format!("Failed to decode base64: {}", e))?;
-
-        cache.generate_thumbnails(&data)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn cache_get_thumbnail(
-    hash: String,
-    size: String,
-    cache: tauri::State<'_, SharedImageCache>,
-) -> Result<Option<String>, String> {
-    let cache = cache.inner().clone();
-    spawn_blocking(move || cache.get_thumbnail(&hash, &size))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
 pub async fn cache_get_thumbnail_bytes(
     hash: String,
     size: String,
@@ -831,17 +739,6 @@ pub async fn cache_get_thumbnail_bytes(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn cache_has_thumbnail(
-    hash: String,
-    cache: tauri::State<'_, SharedImageCache>,
-) -> Result<bool, String> {
-    let cache = cache.inner().clone();
-    spawn_blocking(move || cache.has_thumbnail(&hash))
-        .await
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

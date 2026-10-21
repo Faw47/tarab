@@ -58,7 +58,7 @@ This project is a Tauri desktop app with a React frontend and Rust backend.
   renderer then sends `traversalComplete: false`.
   Native traversal sends paths to the main window in bounded 500-path events. Do not restore one
   unbounded path-array IPC response.
-- **Mini player window**: declared in `tauri.conf.json` (`mini-player.html`, 320×92, transparent, undecorated). `desktop_open_mini_window` shows it and moves it with `tauri-plugin-positioner` (`Position::BottomRight`). The Vite build includes a second entry (`mini-player.html` → `src/mini-player.tsx`).
+- **Mini player window**: declared in `tauri.conf.json` (`mini-player.html`, 320×92, transparent, undecorated). `desktop_toggle_mini_window` controls its visibility and moves it with `tauri-plugin-positioner` (`Position::BottomRight`). The Vite build includes a second entry (`mini-player.html` → `src/mini-player.tsx`).
 - **Library database/cache**: app-owned files use the `com.fawaz.tarab` directory. Existing `music-player` directories migrate in place on first access.
 - **Recoverable file removal**: normal disk removal uses app-owned recoverable Trash with one
   persistent token per successful file. Restore must validate the token and original target,

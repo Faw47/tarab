@@ -40,25 +40,6 @@ pub struct TrackMetadata {
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct TrackMetadataWithArt {
-    pub title: String,
-    pub artist: String,
-    pub album_artist: Option<String>,
-    pub album: String,
-    pub year: Option<i32>,
-    pub track_number: Option<u32>,
-    pub disc_number: Option<u32>,
-    pub duration_secs: f64,
-    pub file_path: String,
-    pub cover_art: Option<String>,
-    pub blurhash: Option<String>,
-    pub file_format: String,
-    pub bitrate: Option<u32>,
-    pub sample_rate: Option<u32>,
-    pub file_size: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Clone)]
 pub struct CoverArtPalette {
     pub primary: String,
     pub secondary: String,
@@ -263,109 +244,6 @@ fn extract_metadata_fast_unguarded(file_path: &str) -> Option<TrackMetadata> {
     })
 }
 
-// Full metadata extraction with cover art
-fn extract_metadata_with_art(file_path: &str) -> Option<TrackMetadataWithArt> {
-    crate::parse_guard::guard(file_path, || extract_metadata_with_art_unguarded(file_path))
-        .map_err(|_error| log::warn!("Metadata parsing failed; skipping unsupported file"))
-        .ok()
-        .flatten()
-}
-
-fn extract_metadata_with_art_unguarded(file_path: &str) -> Option<TrackMetadataWithArt> {
-    let path = Path::new(file_path);
-
-    let tagged_file = Probe::open(path).ok()?.read().ok()?;
-
-    let properties = tagged_file.properties();
-    let duration_secs = properties.duration().as_secs_f64();
-    let bitrate = properties.audio_bitrate();
-    let sample_rate = properties.sample_rate();
-
-    let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag());
-
-    let (title, artist, album_artist, album, year, track_number, disc_number) =
-        if let Some(tag) = tag {
-            let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Unknown")
-                    .to_string()
-            });
-
-            let artist = tag
-                .artist()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown Artist".to_string());
-            let album_artist = tag
-                .get_string(&lofty::tag::ItemKey::AlbumArtist)
-                .map(|s| s.to_string())
-                .filter(|s| !s.trim().is_empty());
-
-            let album = tag
-                .album()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown Album".to_string());
-
-            let year = tag.year().map(|y| y as i32);
-
-            (
-                title,
-                artist,
-                album_artist,
-                album,
-                year,
-                tag.track(),
-                tag.disk(),
-            )
-        } else {
-            let title = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Unknown")
-                .to_string();
-
-            (
-                title,
-                "Unknown Artist".to_string(),
-                None,
-                "Unknown Album".to_string(),
-                None,
-                None,
-                None,
-            )
-        };
-    let picture = first_picture(&tagged_file);
-    let cover_art = picture.map(|pic| STANDARD.encode(pic.data()));
-    let blurhash = picture.and_then(|pic| generate_blurhash_from_bytes(pic.data()));
-
-    let file_format = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_uppercase())
-        .unwrap_or_else(|| "UNKNOWN".to_string());
-    let file_size = std::fs::metadata(path).ok().map(|m| m.len());
-
-    Some(TrackMetadataWithArt {
-        title,
-        artist,
-        album_artist,
-        album,
-        year,
-        track_number,
-        disc_number,
-        duration_secs,
-        file_path: file_path.to_string(),
-        cover_art,
-        blurhash,
-        file_format,
-        bitrate,
-        sample_rate,
-        file_size,
-    })
-}
-
 fn extract_palette_from_bytes(bytes: &[u8]) -> Option<CoverArtPalette> {
     let image = decode_untrusted_image(bytes).ok()?.to_rgba8();
     let thumb = image::imageops::thumbnail(&image, 12, 12);
@@ -515,8 +393,7 @@ pub async fn get_track_metadata(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn get_cover_art_with_blurhash(
+async fn get_cover_art_with_blurhash(
     file_path: String,
     cache: tauri::State<'_, SharedImageCache>,
     db: tauri::State<'_, SharedDatabase>,
@@ -718,58 +595,6 @@ pub async fn get_cover_art_data(
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-// Batch metadata loading with cover art - for visible items only
-#[tauri::command]
-pub async fn get_batch_metadata_with_art(
-    file_paths: Vec<String>,
-    roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<Vec<TrackMetadataWithArt>, String> {
-    let roots = roots_state.inner().read().roots.clone();
-    spawn_blocking(move || {
-        let file_paths = allowed_metadata_paths(file_paths, &roots, "read track metadata with art");
-        run_with_pool(art_pool(), || {
-            file_paths
-                .par_iter()
-                .filter_map(|path| extract_metadata_with_art(path))
-                .collect()
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-// Get cover art for multiple files in batch
-#[tauri::command]
-pub async fn get_batch_cover_art(
-    file_paths: Vec<String>,
-    roots_state: tauri::State<'_, SharedLibraryRoots>,
-) -> Result<Vec<(String, Option<String>)>, String> {
-    let roots = roots_state.inner().read().roots.clone();
-    spawn_blocking(move || {
-        let file_paths = allowed_metadata_paths(file_paths, &roots, "read batch cover art");
-        run_with_pool(art_pool(), || {
-            file_paths
-                .par_iter()
-                .map(|path| {
-                    let art = crate::parse_guard::guard(path, || {
-                        Probe::open(Path::new(path))
-                            .ok()
-                            .and_then(|p| p.read().ok())
-                            .and_then(|file| {
-                                first_picture(&file).map(|pic| STANDARD.encode(pic.data()))
-                            })
-                    })
-                    .ok()
-                    .flatten();
-                    (path.clone(), art)
-                })
-                .collect()
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

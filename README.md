@@ -516,7 +516,6 @@ src-tauri/src/
   playlist.rs             playlist storage and rules
   session.rs              playback session migration
   tageditor.rs            metadata editing
-  waveform.rs             waveform generation
 ```
 
 ### Main window authority
