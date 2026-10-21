@@ -83,8 +83,7 @@ pub(super) fn prepare_source(
         (state.speed_control.clone(), state.booster.clone())
     };
     let underrun_signal = Arc::new(AtomicBool::new(false));
-    let buffered_source =
-        BufferedSymphoniaSource::new(source, Arc::clone(&underrun_signal))?;
+    let buffered_source = BufferedSymphoniaSource::new(source, Arc::clone(&underrun_signal))?;
     let mut source = PitchPreservingSource::new(
         buffered_source,
         speed_control,
@@ -288,7 +287,7 @@ pub(super) struct SymphoniaSource {
     track_id: u32,
     file_path: String,
     buffer: Vec<f32>,
-    // Reused for every packet so decoding does not allocate on the mixer thread.
+    // Reused for every packet so decoding does not allocate on the producer thread.
     scratch: Option<SampleBuffer<f32>>,
     /// Packet read while seeking that must be decoded before the next one from the reader.
     pending_packet: Option<Packet>,
@@ -297,7 +296,7 @@ pub(super) struct SymphoniaSource {
     buf_pos: usize,
     channels: u16,
     sample_rate: u32,
-    yield_to_mixer: Arc<AtomicBool>,
+    foreign_batch_yielded: Arc<AtomicBool>,
 }
 
 fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
@@ -307,7 +306,7 @@ fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RefillResult {
     SamplesReady,
-    YieldToMixer,
+    ForeignPacketBatchEnded,
 }
 
 fn foreign_packet_budget_exhausted(foreign_packets: &mut usize) -> bool {
@@ -355,8 +354,7 @@ impl SymphoniaSource {
 
             let packet = match self.pending_packet.take() {
                 Some(packet) => packet,
-                // This runs on the audio device's callback thread, where a panic cannot unwind;
-                // a parser panic ends the track instead.
+                // Packet reads run on the producer thread; a parser panic ends the track instead.
                 None => {
                     match crate::parse_guard::guard(&self.file_path, || self.format.next_packet()) {
                         Ok(Ok(packet)) => packet,
@@ -456,10 +454,10 @@ impl SymphoniaSource {
         self.skip_samples = usize::try_from(skip_frames)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.channels));
+        self.foreign_batch_yielded.store(false, Ordering::Release);
         Ok(())
     }
 }
-
 
 const PREFETCH_CHUNK_SAMPLES: usize = 4_096;
 const PREFETCH_QUEUE_CHUNKS: usize = 64;
@@ -714,18 +712,12 @@ impl BufferedSymphoniaSource {
         let generation = Arc::new(AtomicU64::new(0));
         let worker_generation = Arc::clone(&generation);
         let (command_sender, command_receiver) = std::sync::mpsc::channel();
-        let (output_sender, output_receiver) =
-            std::sync::mpsc::sync_channel(PREFETCH_QUEUE_CHUNKS);
+        let (output_sender, output_receiver) = std::sync::mpsc::sync_channel(PREFETCH_QUEUE_CHUNKS);
 
         std::thread::Builder::new()
             .name("tarab-decoder-prefetch".to_string())
             .spawn(move || {
-                run_prefetch_worker(
-                    source,
-                    command_receiver,
-                    output_sender,
-                    worker_generation,
-                );
+                run_prefetch_worker(source, command_receiver, output_sender, worker_generation);
             })
             .map_err(|error| format!("failed to start decoder prefetch: {error}"))?;
 
@@ -825,11 +817,11 @@ impl Source for BufferedSymphoniaSource {
         None
     }
 
-    fn try_seek(
-        &mut self,
-        position: std::time::Duration,
-    ) -> Result<(), rodio::source::SeekError> {
-        let generation = self.generation.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+    fn try_seek(&mut self, position: std::time::Duration) -> Result<(), rodio::source::SeekError> {
+        let generation = self
+            .generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
         self.pending.clear();
         self.pending_pos = 0;
         self.ended = false;
@@ -847,9 +839,7 @@ impl Source for BufferedSymphoniaSource {
                 response: response_sender,
             })
             .map_err(|error| {
-                rodio::source::SeekError::Other(Box::new(std::io::Error::other(
-                    error.to_string(),
-                )))
+                rodio::source::SeekError::Other(Box::new(std::io::Error::other(error.to_string())))
             })?;
 
         match response_receiver.recv() {
@@ -1206,13 +1196,39 @@ mod tests {
         let output: Vec<_> = (0..1_024)
             .map(|_| buffered.next().expect("prefilled sample"))
             .collect();
-        assert!(output.iter().all(|sample| (*sample - 0.25).abs() < f32::EPSILON));
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < f32::EPSILON));
         assert_eq!(
             *read_thread.lock().expect("read thread lock"),
             Some(producer_thread),
             "callback pulls must not call into the decoder source"
         );
         assert!(!underrun.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn buffered_source_seek_discards_prefetched_samples_and_restarts_at_target() {
+        let path = write_temp_wav("buffered-seek", 8_000);
+        let (source, _, _) =
+            prepare_source_with_seek(path.to_str().expect("utf-8 path"), 0.0, seek_decoder)
+                .expect("prepare decoder source");
+        let underrun = Arc::new(AtomicBool::new(false));
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun)).expect("start prefetch");
+
+        let _: Vec<_> = buffered.by_ref().take(32).collect();
+        buffered
+            .try_seek(Duration::from_millis(500))
+            .expect("worker should seek the decoder");
+
+        let first_sample = buffered.next().expect("sample at seek target");
+        let expected = 4_000.0 * 4.0 / 32_768.0;
+        assert!(
+            (first_sample - expected).abs() < 0.002,
+            "seek returned {first_sample}, expected about {expected}"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
