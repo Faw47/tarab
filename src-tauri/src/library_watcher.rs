@@ -165,7 +165,7 @@ fn watch_event_payload(
     })
 }
 
-pub fn start_watcher<R: Runtime>(
+fn start_watcher<R: Runtime>(
     app_handle: AppHandle<R>,
     roots: Vec<WatchedRoot>,
 ) -> Result<WatcherTask, String> {
@@ -327,8 +327,11 @@ mod tests {
 
         let canonical_root = fs::canonicalize(&real_root).expect("canonical root");
         let configured_root = alias_root.to_string_lossy().into_owned();
-        let roots = validate_watch_paths(vec![configured_root.clone()], &[canonical_root.clone()])
-            .expect("validate symlinked root");
+        let roots = validate_watch_paths(
+            vec![configured_root.clone()],
+            std::slice::from_ref(&canonical_root),
+        )
+        .expect("validate symlinked root");
 
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0].root_id, configured_root);
