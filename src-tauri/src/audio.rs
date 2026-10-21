@@ -492,6 +492,7 @@ impl AudioManager {
                                                 crossfade_state = Some(CrossfadeState {
                                                     outgoing_sink,
                                                     start: Instant::now(),
+                                                    paused_at: None,
                                                     duration: Duration::from_millis(
                                                         duration_ms.max(1),
                                                     ),

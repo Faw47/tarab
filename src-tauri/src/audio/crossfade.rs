@@ -8,6 +8,7 @@ use super::PlaybackState;
 pub(super) struct CrossfadeState {
     pub outgoing_sink: Sink,
     pub start: Instant,
+    pub paused_at: Option<Instant>,
     pub duration: Duration,
     pub generation: u64,
     pub incoming_path: String,
@@ -22,8 +23,12 @@ pub(super) fn normalized_progress(elapsed: Duration, duration: Duration) -> f32 
     }
 }
 
+pub(super) fn crossfade_elapsed(start: Instant, _paused_at: Option<Instant>, now: Instant) -> Duration {
+    now.saturating_duration_since(start)
+}
+
 pub(super) fn crossfade_progress(active: &CrossfadeState) -> f32 {
-    normalized_progress(active.start.elapsed(), active.duration)
+    normalized_progress(crossfade_elapsed(active.start, active.paused_at, Instant::now()), active.duration)
 }
 
 pub(super) fn apply_crossfade_mix(
@@ -62,5 +67,22 @@ pub(super) fn apply_crossfade_step(
         if let Some(incoming) = incoming_sink {
             incoming.set_volume(target_volume);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crossfade_progress_clock_stays_frozen_while_paused() {
+        let start = Instant::now();
+        let paused_at = start + Duration::from_millis(250);
+        let later = paused_at + Duration::from_secs(5);
+
+        assert_eq!(
+            crossfade_elapsed(start, Some(paused_at), later),
+            Duration::from_millis(250)
+        );
     }
 }
