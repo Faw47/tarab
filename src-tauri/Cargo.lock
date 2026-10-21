@@ -44,6 +44,7 @@ dependencies = [
  "walkdir",
  "window-vibrancy 0.5.3",
  "windows 0.58.0",
+ "wsola",
 ]
 
 [[package]]
@@ -7158,6 +7159,15 @@ dependencies = [
  "windows-core 0.61.2",
  "windows-version",
  "x11-dl",
+]
+
+[[package]]
+name = "wsola"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e172e22be78e8ed2843e3acd0c87e120508c0baa2d07337b8db47ce62299a12"
+dependencies = [
+ "thiserror 2.0.19",
 ]
 
 [[package]]

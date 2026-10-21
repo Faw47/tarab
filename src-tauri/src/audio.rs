@@ -28,6 +28,7 @@ mod device;
 mod events;
 mod source;
 mod state;
+mod time_stretch;
 
 use crossfade::{
     apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
@@ -42,7 +43,7 @@ use events::{
 };
 use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
 pub use state::PlaybackState;
-use state::{playback_identity, BoosterGain};
+use state::{normalize_speed, playback_identity};
 
 enum AudioCommand {
     Play {
@@ -1028,14 +1029,10 @@ impl AudioManager {
                                 }
                             }
                             AudioCommand::SetSpeed(speed) => {
+                                let speed = normalize_speed(speed);
                                 let mut state = state_clone.lock();
                                 state.speed = speed;
-                                if let Some(ref sink) = current_sink {
-                                    sink.set_speed(speed);
-                                }
-                                if let Some(ref active) = crossfade_state {
-                                    active.outgoing_sink.set_speed(speed);
-                                }
+                                state.speed_control.set(speed);
                             }
                             AudioCommand::SetCrossfade(seconds) => {
                                 let mut state = state_clone.lock();
@@ -1552,7 +1549,7 @@ impl AudioManager {
 
     pub fn set_speed(&self, speed: f32) -> Result<(), String> {
         self.command_sender
-            .send(AudioCommand::SetSpeed(speed.clamp(0.5, 2.0)))
+            .send(AudioCommand::SetSpeed(normalize_speed(speed)))
             .map_err(|e| format!("Failed to send speed command: {}", e))
     }
 
