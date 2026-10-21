@@ -634,11 +634,8 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
 }
 
 fn database_has_tracks(path: &Path) -> Option<bool> {
-    let connection = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
+    let connection =
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
     let has_tracks_table = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tracks')",
@@ -650,11 +647,9 @@ fn database_has_tracks(path: &Path) -> Option<bool> {
         return None;
     }
     connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM tracks LIMIT 1)",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
+        .query_row("SELECT EXISTS(SELECT 1 FROM tracks LIMIT 1)", [], |row| {
+            row.get::<_, bool>(0)
+        })
         .ok()
 }
 
@@ -1277,14 +1272,12 @@ mod tests {
         let migrated = prepare_app_directory(&base_dir).expect("keep current database");
 
         assert_eq!(migrated, app_dir);
-        let current_db =
-            Database::new(migrated.join("library.db")).expect("read current database");
+        let current_db = Database::new(migrated.join("library.db")).expect("read current database");
         let current_tracks = current_db.get_all_tracks().expect("read current tracks");
         assert_eq!(current_tracks.len(), 1);
         assert_eq!(current_tracks[0].id, "current");
         assert!(legacy_dir.exists());
-        let legacy_db =
-            Database::new(legacy_dir.join("library.db")).expect("read legacy database");
+        let legacy_db = Database::new(legacy_dir.join("library.db")).expect("read legacy database");
         let legacy_tracks = legacy_db.get_all_tracks().expect("read legacy tracks");
         assert_eq!(legacy_tracks.len(), 1);
         assert_eq!(legacy_tracks[0].id, "legacy");
