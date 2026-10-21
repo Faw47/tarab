@@ -54,8 +54,12 @@ impl Database {
             self.apply_migration_tx(&mut conn, 9, |tx| self.migrate_v9(tx))?;
         }
 
+        if current_version < 10 {
+            self.apply_migration_tx(&mut conn, 10, |tx| self.migrate_v10(tx))?;
+        }
+
         if current_version < CURRENT_SCHEMA_VERSION {
-            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v10(tx))?;
+            self.apply_migration_tx(&mut conn, 11, |tx| self.migrate_v11(tx))?;
         }
 
         // Guard against schema drift: ensure lyrics index schema exists even if
@@ -612,6 +616,31 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_tracks_duration_id
                 ON tracks(duration DESC, id DESC);
             "#,
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn migrate_v11(&self, conn: &Connection) -> SqliteResult<()> {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN public_id TEXT NOT NULL DEFAULT '';")?;
+
+        let rows = {
+            let mut statement = conn.prepare("SELECT id, file_path FROM tracks")?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<SqliteResult<Vec<_>>>()?;
+            rows
+        };
+        let mut update = conn.prepare_cached("UPDATE tracks SET public_id = ?1 WHERE id = ?2")?;
+        for (id, file_path) in rows {
+            update.execute(params![Self::public_track_id(&file_path), id])?;
+        }
+
+        // This is intentionally non-unique: Windows path cleanup runs after migrations and can
+        // collapse rows that differ only by separator spelling before the next database open.
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_public_id ON tracks(public_id);",
         )?;
         Ok(())
     }

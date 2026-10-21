@@ -22,13 +22,14 @@ impl Database {
         {
             let mut stmt = tx.prepare_cached(
                 r#"
-                INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, 
+                INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, public_id,
                                    has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating,
                                    track_number, disc_number, file_format, bitrate, sample_rate, file_size)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                        ?16, ?17, ?18, ?19, ?20, ?21)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                        ?17, ?18, ?19, ?20, ?21, ?22)
                 ON CONFLICT(file_path) DO UPDATE SET
                     id = excluded.id,
+                    public_id = excluded.public_id,
                     title = excluded.title,
                     artist = excluded.artist,
                     album_artist = excluded.album_artist,
@@ -51,6 +52,7 @@ impl Database {
                 // Normalize paths to ensure consistent representation
                 let normalized_id = Self::normalize_path(&track.id);
                 let normalized_file_path = Self::normalize_path(&track.file_path);
+                let public_id = Self::public_track_id(&normalized_file_path);
 
                 stmt.execute(params![
                     &normalized_id,
@@ -61,6 +63,7 @@ impl Database {
                     track.year,
                     track.duration,
                     &normalized_file_path,
+                    public_id,
                     track.has_cover_art as i32,
                     &track.cover_art_hash,
                     &track.blurhash,
@@ -154,13 +157,14 @@ impl Database {
         {
             let mut stmt = tx.prepare_cached(
                 r#"
-                INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path,
+                INSERT INTO tracks (id, title, artist, album_artist, album, year, duration, file_path, public_id,
                                    has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating,
                                    track_number, disc_number, file_format, bitrate, sample_rate, file_size)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                        ?16, ?17, ?18, ?19, ?20, ?21)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                        ?17, ?18, ?19, ?20, ?21, ?22)
                 ON CONFLICT(file_path) DO UPDATE SET
                     id = excluded.id,
+                    public_id = excluded.public_id,
                     title = excluded.title,
                     artist = excluded.artist,
                     album_artist = excluded.album_artist,
@@ -182,6 +186,7 @@ impl Database {
             for track in &request.tracks {
                 let normalized_id = Self::normalize_path(&track.id);
                 let normalized_file_path = Self::normalize_path(&track.file_path);
+                let public_id = Self::public_track_id(&normalized_file_path);
                 incoming_paths.insert(normalized_file_path.clone());
                 match existing_by_path.get(&normalized_file_path) {
                     Some(existing) if Self::metadata_matches(existing, track) => {
@@ -199,6 +204,7 @@ impl Database {
                     track.year,
                     track.duration,
                     normalized_file_path,
+                    public_id,
                     track.has_cover_art as i32,
                     &track.cover_art_hash,
                     &track.blurhash,
@@ -296,9 +302,10 @@ impl Database {
             "UPDATE lyrics_index SET track_id = ?1 WHERE track_id = ?2",
             params![normalized_new, normalized_old],
         )?;
+        let public_id = Self::public_track_id(&normalized_new);
         tx.execute(
-            "UPDATE tracks SET id = ?1, file_path = ?1 WHERE file_path = ?2",
-            params![normalized_new, normalized_old],
+            "UPDATE tracks SET id = ?1, file_path = ?1, public_id = ?2 WHERE file_path = ?3",
+            params![normalized_new, public_id, normalized_old],
         )?;
         tx.commit()?;
         Ok(())
@@ -368,9 +375,10 @@ impl Database {
                 "UPDATE lyrics_index SET track_id = ?1 WHERE track_id = ?2",
                 params![new_path, old_path],
             )?;
+            let public_id = Self::public_track_id(&new_path);
             tx.execute(
-                "UPDATE tracks SET id = ?1, file_path = ?1 WHERE file_path = ?2",
-                params![new_path, old_path],
+                "UPDATE tracks SET id = ?1, file_path = ?1, public_id = ?2 WHERE file_path = ?3",
+                params![new_path, public_id, old_path],
             )?;
         }
         tx.commit()?;
@@ -579,20 +587,17 @@ impl Database {
             return Ok(None);
         }
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let normalized_public_id = public_id.to_ascii_lowercase();
+        conn.query_row(
             "SELECT id, title, artist, album_artist, album, year, duration, file_path, has_cover_art,
                     cover_art_hash, blurhash, date_added, play_count, last_played, rating,
                     track_number, disc_number, file_format, bitrate, sample_rate, file_size
-             FROM tracks",
-        )?;
-        let mut rows = stmt.query([])?;
-        while let Some(row) = rows.next()? {
-            let track = Self::map_db_track_row(row)?;
-            if Self::public_track_id(&track.file_path).eq_ignore_ascii_case(public_id) {
-                return Ok(Some(track));
-            }
-        }
-        Ok(None)
+             FROM tracks
+             WHERE public_id = ?1",
+            params![normalized_public_id],
+            Self::map_db_track_row,
+        )
+        .optional()
     }
 
     pub fn get_tracks_by_album_artist(
