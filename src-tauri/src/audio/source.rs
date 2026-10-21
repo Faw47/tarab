@@ -336,7 +336,7 @@ impl SymphoniaSource {
             buf_pos: 0,
             channels,
             sample_rate,
-            yield_to_mixer: Arc::new(AtomicBool::new(false)),
+            foreign_batch_yielded: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -370,8 +370,8 @@ impl SymphoniaSource {
             let Some(packet) = packet_for_track(packet, self.track_id) else {
                 if foreign_packet_budget_exhausted(&mut foreign_packets) {
                     // None from Iterator::next permanently ends the source. Return a silent
-                    // sample instead so packet scanning can continue on the next mixer request.
-                    return Some(RefillResult::YieldToMixer);
+                    // sample instead so packet scanning can continue on the next producer read.
+                    return Some(RefillResult::ForeignPacketBatchEnded);
                 }
                 continue;
             };
@@ -486,7 +486,7 @@ enum PrefetchSend {
 
 trait PrefetchableSource: Source<Item = f32> + Send + 'static {
     fn seek_for_prefetch(&mut self, position: std::time::Duration) -> Result<(), String>;
-    fn take_synthetic_sample(&self) -> bool;
+    fn take_foreign_batch_marker(&self) -> bool;
 }
 
 impl PrefetchableSource for SymphoniaSource {
@@ -494,25 +494,58 @@ impl PrefetchableSource for SymphoniaSource {
         self.seek_to(position.as_secs_f64())
     }
 
-    fn take_synthetic_sample(&self) -> bool {
-        self.yield_to_mixer.swap(false, Ordering::AcqRel)
+    fn take_foreign_batch_marker(&self) -> bool {
+        self.foreign_batch_yielded.swap(false, Ordering::AcqRel)
     }
 }
 
 /// Fills a bounded chunk off the device callback. Synthetic samples only mark the end of a
 /// foreign-packet batch; they are omitted while the producer continues scanning.
-fn read_prefetch_chunk<S: PrefetchableSource>(source: &mut S) -> (Vec<f32>, bool) {
+enum PrefetchChunkRead {
+    Ready {
+        samples: Vec<f32>,
+        reached_end: bool,
+    },
+    Command(PrefetchCommand),
+    GenerationChanged,
+    Closed,
+}
+
+fn read_prefetch_chunk<S: PrefetchableSource>(
+    source: &mut S,
+    commands: &std::sync::mpsc::Receiver<PrefetchCommand>,
+    active_generation: &AtomicU64,
+    generation: u64,
+) -> PrefetchChunkRead {
     let mut samples = Vec::with_capacity(PREFETCH_CHUNK_SAMPLES);
     while samples.len() < PREFETCH_CHUNK_SAMPLES {
         match source.next() {
-            Some(sample) if source.take_synthetic_sample() => {
+            Some(sample) if source.take_foreign_batch_marker() => {
                 let _ = sample;
+                if active_generation.load(Ordering::Acquire) != generation {
+                    return PrefetchChunkRead::GenerationChanged;
+                }
+                match commands.try_recv() {
+                    Ok(command) => return PrefetchChunkRead::Command(command),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        return PrefetchChunkRead::Closed;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
             }
             Some(sample) => samples.push(sample),
-            None => return (samples, true),
+            None => {
+                return PrefetchChunkRead::Ready {
+                    samples,
+                    reached_end: true,
+                };
+            }
         }
     }
-    (samples, false)
+    PrefetchChunkRead::Ready {
+        samples,
+        reached_end: false,
+    }
 }
 
 fn send_prefetch_message(
@@ -581,7 +614,30 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             }
             generation = seek_generation;
             finished = false;
-            let (samples, reached_end) = read_prefetch_chunk(&mut source);
+            let (samples, reached_end) = match read_prefetch_chunk(
+                &mut source,
+                &commands,
+                &active_generation,
+                generation,
+            ) {
+                PrefetchChunkRead::Ready {
+                    samples,
+                    reached_end,
+                } => (samples, reached_end),
+                PrefetchChunkRead::Command(command) => {
+                    let _ = response.send(Err("seek superseded".to_string()));
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchChunkRead::GenerationChanged => {
+                    let _ = response.send(Err("seek superseded".to_string()));
+                    continue;
+                }
+                PrefetchChunkRead::Closed => {
+                    let _ = response.send(Err("decoder source closed".to_string()));
+                    return;
+                }
+            };
 
             if !samples.is_empty() {
                 match send_prefetch_message(
@@ -645,7 +701,23 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             continue;
         }
 
-        let (samples, reached_end) = read_prefetch_chunk(&mut source);
+        let (samples, reached_end) = match read_prefetch_chunk(
+            &mut source,
+            &commands,
+            &active_generation,
+            generation,
+        ) {
+            PrefetchChunkRead::Ready {
+                samples,
+                reached_end,
+            } => (samples, reached_end),
+            PrefetchChunkRead::Command(command) => {
+                pending_command = Some(command);
+                continue;
+            }
+            PrefetchChunkRead::GenerationChanged => continue,
+            PrefetchChunkRead::Closed => return,
+        };
         if !samples.is_empty() {
             match send_prefetch_message(
                 &output,
@@ -890,8 +962,8 @@ impl Iterator for SymphoniaSource {
         if self.buf_pos >= self.buffer.len() {
             match self.refill()? {
                 RefillResult::SamplesReady => {}
-                RefillResult::YieldToMixer => {
-                    self.yield_to_mixer.store(true, Ordering::Release);
+                RefillResult::ForeignPacketBatchEnded => {
+                    self.foreign_batch_yielded.store(true, Ordering::Release);
                     return Some(0.0);
                 }
             }
@@ -899,7 +971,7 @@ impl Iterator for SymphoniaSource {
 
         let sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
-        self.yield_to_mixer.store(false, Ordering::Release);
+        self.foreign_batch_yielded.store(false, Ordering::Release);
         Some(sample)
     }
 }
@@ -1119,6 +1191,7 @@ mod tests {
         samples_left: usize,
         synthetic_sample: Arc<AtomicBool>,
         last_read_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
+        drop_signal: Arc<AtomicBool>,
     }
 
     impl Iterator for PrefetchProbeSource {
@@ -1163,12 +1236,18 @@ mod tests {
         }
     }
 
+    impl Drop for PrefetchProbeSource {
+        fn drop(&mut self) {
+            self.drop_signal.store(true, Ordering::Release);
+        }
+    }
+
     impl PrefetchableSource for PrefetchProbeSource {
         fn seek_for_prefetch(&mut self, _position: Duration) -> Result<(), String> {
             Ok(())
         }
 
-        fn take_synthetic_sample(&self) -> bool {
+        fn take_foreign_batch_marker(&self) -> bool {
             self.synthetic_sample.swap(false, Ordering::AcqRel)
         }
     }
@@ -1181,6 +1260,7 @@ mod tests {
             samples_left: PREFETCH_CHUNK_SAMPLES * 2,
             synthetic_sample: Arc::new(AtomicBool::new(false)),
             last_read_thread: Arc::clone(&read_thread),
+            drop_signal: Arc::new(AtomicBool::new(false)),
         };
         let underrun = Arc::new(AtomicBool::new(false));
         let mut buffered =
@@ -1232,6 +1312,33 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_worker_exits_when_output_drops_during_foreign_packet_scan() {
+        let source_dropped = Arc::new(AtomicBool::new(false));
+        let source = PrefetchProbeSource {
+            foreign_batches: usize::MAX,
+            samples_left: 0,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::clone(&source_dropped),
+        };
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("start prefetch");
+        drop(buffered);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !source_dropped.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            source_dropped.load(Ordering::Acquire),
+            "producer should exit after its command and output channels disconnect"
+        );
+    }
+
+    #[test]
     fn refill_yields_after_a_bounded_foreign_packet_batch_without_ending_track() {
         let mut foreign_packets = 0;
         for _ in 0..MAX_REFILL_ATTEMPTS - 1 {
@@ -1239,7 +1346,7 @@ mod tests {
         }
         assert!(foreign_packet_budget_exhausted(&mut foreign_packets));
 
-        // A later selected-track packet remains eligible on the next mixer request.
+        // A later selected-track packet remains eligible in the next bounded refill batch.
         let mut next_batch_foreign_packets = 0;
         assert!(!foreign_packet_budget_exhausted(
             &mut next_batch_foreign_packets
