@@ -21,7 +21,10 @@ const track: Track = {
   hasCoverArt: false,
   dateAdded: 0,
 };
-describe.each(['liquid-glass', 'neobrutalism'] as const)('queue empty state action (%s)', (theme) => {
+describe.each([
+  'liquid-glass',
+  'neobrutalism',
+] as const)('queue empty state action (%s)', (theme) => {
   it('offers a button to browse the library when the queue is empty', () => {
     useSettingsStore.setState({ theme });
     usePlayerStore.setState({ queue: [], queueIndex: 0, currentTrack: null, isPlaying: false });
