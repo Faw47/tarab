@@ -1714,10 +1714,11 @@ mod tests {
             .expect("decoder worker should seek the wrapped source");
         let mut sample = source.next().expect("sample after seek");
         let progress_deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while counter.load(Ordering::Relaxed) == 0
-            && std::time::Instant::now() < progress_deadline
+        while counter.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < progress_deadline
         {
-            sample = source.next().expect("source should remain open after seeking");
+            sample = source
+                .next()
+                .expect("source should remain open after seeking");
             std::thread::sleep(Duration::from_millis(1));
         }
         let _ = std::fs::remove_file(&path);
