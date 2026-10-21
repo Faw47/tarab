@@ -8,6 +8,11 @@ const openerCapability = JSON.parse(
   await readFile(new URL('../src-tauri/capabilities/opener.json', import.meta.url), 'utf8'),
 );
 const cargoManifest = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+const librarySource = await readFile(new URL('../src-tauri/src/library.rs', import.meta.url), 'utf8');
+const droppedImportSource = await readFile(
+  new URL('../src/features/library/useDroppedAudioImport.ts', import.meta.url),
+  'utf8',
+);
 const releaseWorkflow = await readFile(
   new URL('../.github/workflows/release.yml', import.meta.url),
   'utf8',
@@ -20,7 +25,7 @@ const deepLinkSchemes = tauriConfig.plugins?.['deep-link']?.desktop?.schemes;
 const fileAssociationExtensions = new Set(
   (tauriConfig.bundle?.fileAssociations ?? []).flatMap((association) => association.ext ?? []),
 );
-const requiredAudioExtensions = ['mp3', 'flac', 'aiff', 'wav', 'ogg', 'm4a', 'aac', 'alac', 'wma'];
+const requiredAudioExtensions = ['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'aiff', 'opus'];
 
 if (expectedVersion !== tauriConfig.version || expectedVersion !== cargoVersion) {
   failures.push(
@@ -48,6 +53,26 @@ for (const extension of requiredAudioExtensions) {
   if (!fileAssociationExtensions.has(extension)) {
     failures.push(`Missing required audio file association: ${extension}`);
   }
+}
+
+const sameExtensionSet = (actual, expected) =>
+  actual.length === expected.length && expected.every((extension) => actual.includes(extension));
+const rustExtensions = Array.from(
+  (librarySource.match(/pub const SUPPORTED_EXTENSIONS: \\[&str; \\d+\\] = \\[([\\s\\S]*?)\\];/)?.[1] ?? '').matchAll(/["']([a-z0-9]+)["']/g),
+  (match) => match[1],
+);
+const droppedExtensions = Array.from(
+  (droppedImportSource.match(/SUPPORTED_DROPPED_AUDIO_EXTENSIONS = \\[([\\s\\S]*?)\\] as const/)?.[1] ?? '').matchAll(/["']([a-z0-9]+)["']/g),
+  (match) => match[1],
+);
+if (!sameExtensionSet([...fileAssociationExtensions], requiredAudioExtensions)) {
+  failures.push('Desktop file associations must match the supported audio extension list exactly.');
+}
+if (!sameExtensionSet(rustExtensions, requiredAudioExtensions)) {
+  failures.push('The native library scanner extensions must match the supported audio extension list.');
+}
+if (!sameExtensionSet(droppedExtensions, requiredAudioExtensions)) {
+  failures.push('Dropped-file import extensions must match the supported audio extension list.');
 }
 
 const mainWindow = (tauriConfig.app?.windows ?? []).find((window) => window.label === 'main');
