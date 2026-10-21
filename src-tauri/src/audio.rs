@@ -210,15 +210,11 @@ fn seek_sink_with_timeout(
     }
 
     let sink_for_worker = Arc::clone(sink);
-    let result = run_bounded_seek_attempt(
-        worker_active,
-        IN_PLACE_SEEK_TIMEOUT,
-        move || {
-            sink_for_worker
-                .try_seek(position)
-                .map_err(|error| error.to_string())
-        },
-    );
+    let result = run_bounded_seek_attempt(worker_active, IN_PLACE_SEEK_TIMEOUT, move || {
+        sink_for_worker
+            .try_seek(position)
+            .map_err(|error| error.to_string())
+    });
 
     match result {
         Some(Ok(())) if sink.empty() => {
@@ -908,7 +904,11 @@ impl AudioManager {
                                 state.volume = volume;
                                 if crossfade_state.is_some() {
                                     if let Some(ref active) = crossfade_state {
-                                        apply_crossfade_mix(active, current_sink.as_deref(), volume);
+                                        apply_crossfade_mix(
+                                            active,
+                                            current_sink.as_deref(),
+                                            volume,
+                                        );
                                     }
                                 } else if let Some(ref sink) = current_sink {
                                     sink.set_volume(volume);
@@ -1360,7 +1360,11 @@ impl AudioManager {
                             .then(|| (active.generation, active.incoming_path.clone()))
                     });
                     apply_volume_ramp_step(&mut volume_ramp, &state_clone, None);
-                    apply_crossfade_step(&mut crossfade_state, &state_clone, current_sink.as_deref());
+                    apply_crossfade_step(
+                        &mut crossfade_state,
+                        &state_clone,
+                        current_sink.as_deref(),
+                    );
                     if let Some((generation, path)) = completed_crossfade {
                         emit_playback_transition(
                             &app_for_audio,
@@ -1782,22 +1786,15 @@ mod bounded_seek_tests {
     fn a_blocked_seek_worker_does_not_block_the_audio_loop_or_duplicate_workers() {
         let worker_active = Arc::new(AtomicBool::new(false));
         let (release_sender, release_receiver) = channel();
-        let first = run_bounded_seek_attempt(
-            &worker_active,
-            Duration::from_millis(20),
-            move || {
+        let first =
+            run_bounded_seek_attempt(&worker_active, Duration::from_millis(20), move || {
                 let _ = release_receiver.recv();
                 Ok(())
-            },
-        );
+            });
 
         assert!(first.is_none());
         assert!(worker_active.load(Ordering::Acquire));
-        let second = run_bounded_seek_attempt(
-            &worker_active,
-            Duration::from_millis(20),
-            || Ok(()),
-        );
+        let second = run_bounded_seek_attempt(&worker_active, Duration::from_millis(20), || Ok(()));
         assert!(second.is_none());
 
         release_sender.send(()).expect("release seek worker");
@@ -1835,4 +1832,3 @@ mod bounded_seek_tests {
         assert!((incoming_sink.volume() - 0.7).abs() < f32::EPSILON);
     }
 }
-
