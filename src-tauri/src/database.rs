@@ -587,12 +587,15 @@ pub struct LibraryStats {
 
 fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
-    if app_dir.exists() {
+    let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+
+    // A database in the new location is authoritative. The app directory alone is not:
+    // Linux logging may create it before database initialization.
+    if app_dir.join("library.db").is_file() {
         return Ok(app_dir);
     }
 
-    let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
-    if legacy_dir.exists() {
+    if !app_dir.exists() && legacy_dir.exists() {
         std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
             format!(
                 "Failed to migrate legacy Tarab data from {} to {}: {}",
@@ -601,17 +604,115 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
                 error
             )
         })?;
-    } else {
-        std::fs::create_dir_all(&app_dir).map_err(|error| {
-            format!(
-                "Failed to create Tarab data directory {}: {}",
-                app_dir.display(),
-                error
-            )
-        })?;
+        return Ok(app_dir);
+    }
+
+    std::fs::create_dir_all(&app_dir).map_err(|error| {
+        format!(
+            "Failed to create Tarab data directory {}: {}",
+            app_dir.display(),
+            error
+        )
+    })?;
+
+    if legacy_dir.exists() {
+        merge_legacy_directory(&legacy_dir, &app_dir)?;
     }
 
     Ok(app_dir)
+}
+
+fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(source_dir)
+        .map_err(|error| {
+            format!(
+                "Failed to read legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|error| {
+            format!(
+                "Failed to enumerate legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?;
+
+    // Move the database last so a failed merge cannot expose a partially migrated database.
+    entries.sort_by_key(|entry| {
+        let name = entry.file_name();
+        (name == "library.db", name)
+    });
+
+    for entry in entries {
+        let source = entry.path();
+        let destination = destination_dir.join(entry.file_name());
+        let source_type = std::fs::symlink_metadata(&source)
+            .map_err(|error| format!("Failed to inspect {}: {}", source.display(), error))?
+            .file_type();
+        let destination_type = match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => Some(metadata.file_type()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration destination {}: {}",
+                    destination.display(),
+                    error
+                ));
+            }
+        };
+
+        if source_type.is_dir() {
+            match destination_type {
+                Some(file_type) if file_type.is_dir() => {
+                    merge_legacy_directory(&source, &destination)?;
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "Cannot migrate {} because {} already exists and is not a directory",
+                        source.display(),
+                        destination.display()
+                    ));
+                }
+                None => {
+                    std::fs::rename(&source, &destination).map_err(|error| {
+                        format!(
+                            "Failed to migrate legacy Tarab data from {} to {}: {}",
+                            source.display(),
+                            destination.display(),
+                            error
+                        )
+                    })?;
+                }
+            }
+        } else {
+            if destination_type.is_some() {
+                return Err(format!(
+                    "Cannot migrate {} because {} already exists",
+                    source.display(),
+                    destination.display()
+                ));
+            }
+            std::fs::rename(&source, &destination).map_err(|error| {
+                format!(
+                    "Failed to migrate legacy Tarab data from {} to {}: {}",
+                    source.display(),
+                    destination.display(),
+                    error
+                )
+            })?;
+        }
+    }
+
+    std::fs::remove_dir(source_dir).map_err(|error| {
+        format!(
+            "Failed to remove migrated legacy Tarab data directory {}: {}",
+            source_dir.display(),
+            error
+        )
+    })
 }
 
 pub(crate) fn get_database_path() -> Result<PathBuf, String> {
@@ -1038,6 +1139,67 @@ mod tests {
             b"log"
         );
         assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn existing_database_is_authoritative_over_legacy_database() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-authoritative-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("library.db"), b"current").expect("seed current database");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let migrated = prepare_app_directory(&base_dir).expect("keep current database");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(
+            std::fs::read(migrated.join("library.db")).expect("read current database"),
+            b"current"
+        );
+        assert_eq!(
+            std::fs::read(legacy_dir.join("library.db")).expect("read legacy database"),
+            b"legacy"
+        );
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_migration_preserves_conflicting_files_and_reports_error() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-conflict-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"current").expect("seed current settings");
+        std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
+        std::fs::write(legacy_dir.join("library.db"), b"legacy").expect("seed legacy database");
+
+        let result = prepare_app_directory(&base_dir);
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(app_dir.join("settings.json")).expect("read current settings"),
+            b"current"
+        );
+        assert_eq!(
+            std::fs::read(legacy_dir.join("settings.json")).expect("read legacy settings"),
+            b"legacy"
+        );
+        assert_eq!(
+            std::fs::read(legacy_dir.join("library.db")).expect("read legacy database"),
+            b"legacy"
+        );
 
         let _ = std::fs::remove_dir_all(base_dir);
     }
