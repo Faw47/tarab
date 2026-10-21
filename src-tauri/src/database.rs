@@ -924,6 +924,71 @@ mod tests {
     }
 
     #[test]
+    fn album_and_artist_aggregate_payloads_use_track_summaries() {
+        let db = test_db();
+        let mut track = sample_track("aggregate-payload");
+        track.has_cover_art = true;
+        track.cover_art_hash = Some("aggregate-cover".to_string());
+        track.blurhash = Some("aggregate-blurhash".to_string());
+        db.upsert_tracks_batch(&[track]).expect("seed aggregate track");
+
+        let album = db
+            .get_album_aggregates()
+            .expect("load album aggregates")
+            .pop()
+            .expect("album aggregate");
+        let artist = db
+            .get_artist_aggregates()
+            .expect("load artist aggregates")
+            .pop()
+            .expect("artist aggregate");
+
+        for aggregate in [
+            serde_json::to_value(album).expect("serialize album aggregate"),
+            serde_json::to_value(artist).expect("serialize artist aggregate"),
+        ] {
+            let representative = aggregate["representative"]
+                .as_object()
+                .expect("representative object");
+            for field in [
+                "year",
+                "trackNumber",
+                "discNumber",
+                "duration",
+                "filePath",
+                "dateAdded",
+                "playCount",
+                "lastPlayed",
+                "rating",
+                "fileFormat",
+                "bitrate",
+                "sampleRate",
+                "fileSize",
+                "albumArtist",
+            ] {
+                assert!(
+                    !representative.contains_key(field),
+                    "aggregate representative should omit full-track field {field}"
+                );
+            }
+            for field in [
+                "id",
+                "title",
+                "artist",
+                "album",
+                "hasCoverArt",
+                "coverArtHash",
+                "blurhash",
+            ] {
+                assert!(
+                    representative.contains_key(field),
+                    "aggregate representative needs card field {field}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn public_track_id_resolves_without_exposing_the_path() {
         let db = test_db();
         let track = sample_track("public-link");
