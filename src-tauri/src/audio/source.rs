@@ -1,6 +1,8 @@
 use super::time_stretch::PitchPreservingSource;
 use super::*;
 use rodio::source::SeekError;
+use symphonia::core::codecs::{CodecParameters, CODEC_TYPE_OPUS};
+use symphonia_adapter_libopus::OpusDecoder;
 
 pub(super) struct PlaybackStart<'a> {
     pub(super) file_path: &'a str,
@@ -17,6 +19,30 @@ const MAX_AUDIO_SAMPLE_RATE: u32 = 384_000;
 pub(super) const MAX_DECODED_SAMPLES_PER_PACKET: usize = 16_777_216;
 
 type OpenedDecoder = (Box<dyn FormatReader>, Box<dyn SymphoniaDecoder>, f64);
+
+fn ensure_supported_opus_channel_count(channel_count: usize) -> Result<(), String> {
+    if (1..=2).contains(&channel_count) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Unsupported Opus stream with {channel_count} channels; Tarab currently supports mono and stereo Opus only"
+        ))
+    }
+}
+
+fn make_decoder(
+    codec_params: &CodecParameters,
+    decoder_options: &DecoderOptions,
+) -> std::result::Result<Box<dyn SymphoniaDecoder>, symphonia::core::errors::Error> {
+    if codec_params.codec == CODEC_TYPE_OPUS {
+        Ok(Box::new(<OpusDecoder as SymphoniaDecoder>::try_new(
+            codec_params,
+            decoder_options,
+        )?))
+    } else {
+        symphonia::default::get_codecs().make(codec_params, decoder_options)
+    }
+}
 
 fn open_decoder_for_file(file_path: &str) -> Result<OpenedDecoder, String> {
     crate::parse_guard::guard(file_path, || open_decoder_for_file_unguarded(file_path))?
@@ -48,8 +74,15 @@ fn open_decoder_for_file_unguarded(file_path: &str) -> Result<OpenedDecoder, Str
     let track = reader
         .default_track()
         .ok_or_else(|| "no default track".to_string())?;
-    let decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+    if track.codec_params.codec == CODEC_TYPE_OPUS {
+        let channel_count = track
+            .codec_params
+            .channels
+            .map(|channels| channels.count())
+            .ok_or_else(|| "Opus stream does not declare a channel count".to_string())?;
+        ensure_supported_opus_channel_count(channel_count)?;
+    }
+    let decoder = make_decoder(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("decoder error: {}", e))?;
 
     let duration = if let (Some(tb), Some(frames)) =
@@ -600,6 +633,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
+    use symphonia::core::audio::Channels;
 
     /// A 16-bit stereo PCM WAV whose left channel counts up and right channel counts down.
     fn stereo_wav(frames: u16) -> Vec<u8> {
@@ -633,6 +667,28 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tarab-source-{name}-{nonce}.wav"));
         std::fs::write(&path, stereo_wav(frames)).expect("write wav");
         path
+    }
+
+    #[test]
+    fn opus_channel_support_is_limited_to_mono_and_stereo() {
+        assert!(ensure_supported_opus_channel_count(1).is_ok());
+        assert!(ensure_supported_opus_channel_count(2).is_ok());
+        let error = ensure_supported_opus_channel_count(6).expect_err("reject 5.1 Opus");
+        assert!(error.contains("6 channels"));
+        assert!(error.contains("mono and stereo Opus only"));
+    }
+
+    #[test]
+    fn opus_codec_uses_the_libopus_adapter() {
+        let mut params = CodecParameters::new();
+        params
+            .for_codec(CODEC_TYPE_OPUS)
+            .with_sample_rate(48_000)
+            .with_channels(Channels::FRONT_LEFT | Channels::FRONT_RIGHT);
+
+        let decoder =
+            make_decoder(&params, &DecoderOptions::default()).expect("create the Opus decoder");
+        assert_eq!(decoder.codec_params().codec, CODEC_TYPE_OPUS);
     }
 
     struct CountingDecoder {
@@ -696,8 +752,7 @@ mod tests {
         let params = source.decoder.codec_params().clone();
         let decode_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         source.decoder = Box::new(CountingDecoder {
-            inner: symphonia::default::get_codecs()
-                .make(&params, &DecoderOptions::default())
+            inner: make_decoder(&params, &DecoderOptions::default())
                 .expect("create counting decoder inner"),
             decode_calls: decode_calls.clone(),
         });

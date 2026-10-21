@@ -9,9 +9,8 @@ use walkdir::WalkDir;
 
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
-pub const SUPPORTED_EXTENSIONS: [&str; 9] = [
-    "mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "alac", "wma",
-];
+pub const SUPPORTED_EXTENSIONS: [&str; 8] =
+    ["mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "opus"];
 const MAX_SCAN_DEPTH: usize = 64;
 const MAX_SCAN_ENTRIES: usize = 1_000_000;
 const MAX_SCAN_AUDIO_BYTES: u64 = 10 * 1024 * 1024 * 1024 * 1024;
@@ -321,6 +320,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tarab-library-{}-{}", name, nonce));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn supported_extensions_match_decoder_capabilities() {
+        assert_eq!(
+            SUPPORTED_EXTENSIONS,
+            ["mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "opus"]
+        );
+        assert!(is_supported_audio_path(Path::new("track.opus")));
+        assert!(!is_supported_audio_path(Path::new("track.alac")));
+        assert!(!is_supported_audio_path(Path::new("track.wma")));
     }
 
     #[test]

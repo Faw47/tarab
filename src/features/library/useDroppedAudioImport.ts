@@ -22,6 +22,25 @@ const LAST_SCAN_KEY = 'tarab-last-scan-v1';
 const METADATA_BATCH_SIZE = 200;
 const ART_BATCH_SIZE = 120;
 
+export const SUPPORTED_DROPPED_AUDIO_EXTENSIONS = [
+  'mp3',
+  'flac',
+  'wav',
+  'ogg',
+  'm4a',
+  'aac',
+  'aiff',
+  'opus',
+] as const;
+
+export function isSupportedDroppedAudioPath(path: string): boolean {
+  const extension = path.split('.').pop()?.toLowerCase();
+  return (
+    extension !== undefined &&
+    (SUPPORTED_DROPPED_AUDIO_EXTENSIONS as readonly string[]).includes(extension)
+  );
+}
+
 const cleanFolderPath = (folder: string): string => normalizePath(folder).replace(/\/+$/, '');
 
 export function mergeDroppedLibraryFolders(
@@ -78,7 +97,6 @@ export function useDroppedAudioImport({
   const [showDropOverlay, setShowDropOverlay] = useState(false);
 
   useEffect(() => {
-    const audioExt = new Set(['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'aiff', 'alac']);
     const normalizeDir = (p: string) => {
       const norm = p.replace(/\\/g, '/');
       const idx = norm.lastIndexOf('/');
@@ -99,8 +117,7 @@ export function useDroppedAudioImport({
       files.forEach((file) => {
         const path = (file as FileWithPath).path;
         if (!path) return;
-        const ext = path.split('.').pop()?.toLowerCase();
-        if (ext && audioExt.has(ext)) {
+        if (isSupportedDroppedAudioPath(path)) {
           dirs.add(normalizeDir(path));
         }
       });
