@@ -671,8 +671,10 @@ fn database_has_user_data(path: &Path) -> Option<bool> {
     }
 
     for table_name in table_names {
-        if matches!(table_name.as_str(), "schema_version" | "cache_metadata" | "tracks_fts" | "lyrics_fts")
-            || table_name.starts_with("tracks_fts_")
+        if matches!(
+            table_name.as_str(),
+            "schema_version" | "cache_metadata" | "tracks_fts" | "lyrics_fts"
+        ) || table_name.starts_with("tracks_fts_")
             || table_name.starts_with("lyrics_fts_")
         {
             continue;
