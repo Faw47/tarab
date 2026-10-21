@@ -136,7 +136,6 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
                 self.input.clear();
             }
             self.output.extend(self.stretcher.pull(OUTPUT_SAMPLES));
-
         }
 
         !self.output.is_empty()
