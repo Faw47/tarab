@@ -33,7 +33,6 @@ export function useAutostartIntegration() {
     };
 
     const readOs = async (expectedRevision: number) => {
-      console.info('[autostart-debug] readOs called', expectedRevision);
       try {
         updateFromOs(await isEnabled(), expectedRevision);
       } catch (error) {
@@ -74,7 +73,6 @@ export function useAutostartIntegration() {
     };
 
     const start = () => {
-      console.info('[autostart-debug] start callback', { started, cancelled });
       if (started || cancelled) return;
       started = true;
 
@@ -91,7 +89,6 @@ export function useAutostartIntegration() {
     };
 
     const hydrated = useSettingsStore.persist.hasHydrated();
-    console.info('[autostart-debug] effect hydration check', hydrated);
     const stopHydration = useSettingsStore.persist.onFinishHydration(start);
     if (hydrated) start();
     window.addEventListener('focus', refresh);

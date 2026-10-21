@@ -25,7 +25,6 @@ import { useAppStartupEffects } from './useAppStartupEffects';
 describe('app autostart lifecycle', () => {
   afterEach(() => {
     cleanup();
-    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
