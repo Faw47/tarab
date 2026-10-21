@@ -69,6 +69,22 @@ describe('loadTracksForShuffle', () => {
     });
   });
 
+  it('keeps queued shuffle entries lightweight until metadata is needed', async () => {
+    mockedFetchPage.mockResolvedValueOnce([makeTrack('a')]);
+
+    const [track] = await loadTracksForShuffle({ loadedTracks: [], totalTracks: 1 });
+
+    expect(track).toMatchObject({
+      id: 'a',
+      title: '',
+      artist: '',
+      album: '',
+      filePath: '',
+      hasCoverArt: false,
+      coverArtHash: null,
+    });
+  });
+
   it('stops when a short page is returned', async () => {
     mockedFetchPage.mockResolvedValueOnce([makeTrack('a')]);
 
