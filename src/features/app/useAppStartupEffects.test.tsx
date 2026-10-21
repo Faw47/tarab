@@ -1,6 +1,62 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { settingsStoreMock, resetMockSettingsStore } = vi.hoisted(() => {
+  type SettingsState = {
+    autostartEnabled: boolean;
+    desktopStatusIconEnabled: boolean;
+    setAutostartEnabled: (enabled: boolean) => void;
+  };
+  type Listener = (state: SettingsState, previous: SettingsState) => void;
+
+  let state: SettingsState;
+  let hydrated = true;
+  const listeners = new Set<Listener>();
+  const hydrationListeners = new Set<() => void>();
+  const setState = (partial: Partial<SettingsState>) => {
+    const previous = state;
+    state = { ...state, ...partial };
+    for (const listener of listeners) listener(state, previous);
+  };
+  const createState = (): SettingsState => ({
+    autostartEnabled: false,
+    desktopStatusIconEnabled: true,
+    setAutostartEnabled: (enabled) => setState({ autostartEnabled: enabled }),
+  });
+  state = createState();
+
+  const settingsStoreMock = {
+    getState: () => state,
+    setState,
+    subscribe: (listener: Listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    persist: {
+      hasHydrated: () => hydrated,
+      onFinishHydration: (listener: () => void) => {
+        hydrationListeners.add(listener);
+        return () => hydrationListeners.delete(listener);
+      },
+      rehydrate: async () => {
+        hydrated = true;
+        for (const listener of [...hydrationListeners]) listener();
+        return state;
+      },
+    },
+  };
+  const resetMockSettingsStore = () => {
+    hydrated = true;
+    listeners.clear();
+    hydrationListeners.clear();
+    state = createState();
+  };
+
+  return { settingsStoreMock, resetMockSettingsStore };
+});
+
+vi.mock('../../store/settings-store', () => ({ useSettingsStore: settingsStoreMock }));
+
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: vi.fn(async () => undefined) }),
 }));
@@ -42,10 +98,8 @@ describe('app autostart lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
-  beforeEach(async () => {
-    await useSettingsStore.persist.rehydrate();
-    await waitFor(() => expect(useSettingsStore.persist.hasHydrated()).toBe(true));
-    useSettingsStore.setState({ autostartEnabled: false });
+  beforeEach(() => {
+    resetMockSettingsStore();
     autostartCalls.isEnabled = 0;
     autostartCalls.enable = 0;
     autostartCalls.disable = 0;
