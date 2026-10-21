@@ -4,7 +4,7 @@ import { PlaybackCoordinator } from '../../../lib/playback-actions';
 import { getLyricsForTrack, writeLyricsForTrack, writeTags } from '../../../lib/tauri-commands';
 import { usePlayerStore } from '../../../store/player-store';
 import type { Track } from '../../../types';
-import { lyricsEquivalent } from '../LyricsEditor';
+import { LyricsEditor, lyricsEquivalent } from '../LyricsEditor';
 import { TagEditorModal } from '../TagEditorModal';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -169,11 +169,35 @@ describe('TagEditorModal unsaved changes (FE-25)', () => {
 });
 
 describe('LyricsEditor preview ownership (LD-04)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePlayerStore.setState({ currentTrack: null, isPlaying: false, hasActivePlayback: false });
+  });
+
   it('passes the selected Track to PlaybackCoordinator from the lyrics editor', async () => {
     renderLyricsTab();
     fireEvent.click(await screen.findByRole('button', { name: 'Play' }));
     await waitFor(() => expect(previewFileMock).toHaveBeenCalledExactlyOnceWith(track));
     expect(PlaybackCoordinator.previewFile).toBe(previewFileMock);
+  });
+
+  it('uses the latest Track metadata when the file path stays the same', async () => {
+    const updatedTrack = { ...track, title: 'Updated title' };
+    const renderEditor = (selectedTrack: Track) => (
+      <LyricsEditor
+        track={selectedTrack}
+        trackPath={selectedTrack.filePath}
+        lyricsContent=""
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        isSaving={false}
+      />
+    );
+    const view = render(renderEditor(track));
+    view.rerender(renderEditor(updatedTrack));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(previewFileMock).toHaveBeenCalledExactlyOnceWith(updatedTrack));
   });
 });
 
