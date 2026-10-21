@@ -134,4 +134,36 @@ describe('useAppCommandActions shuffle all', () => {
     });
     expect(options).toMatchObject({ queueIndex: 0, shuffleEnabled: true });
   });
+  it('plays a palette search result with the matching results queued in order', async () => {
+    const secondTrack: Track = {
+      ...firstTrack,
+      id: '/music/b.flac',
+      title: 'B',
+      filePath: '/music/b.flac',
+    };
+    let playSearchResult: ((track: Track, results: Track[]) => Promise<void>) | null = null;
+
+    function Harness() {
+      const actions = useAppCommandActions({
+        totalTracks: 2,
+        isScanning: false,
+        rescanAll: async () => undefined,
+        addToQueue: () => undefined,
+        openTagEditor: () => undefined,
+      });
+      playSearchResult = actions.handlePlaySearchResult;
+      return null;
+    }
+
+    render(<Harness />);
+    await act(async () => {
+      await playSearchResult?.(secondTrack, [firstTrack, secondTrack]);
+    });
+
+    expect(startPlaybackMock).toHaveBeenCalledWith(secondTrack, {
+      queue: [firstTrack, secondTrack],
+      queueIndex: 1,
+      shuffleEnabled: false,
+    });
+  });
 });
