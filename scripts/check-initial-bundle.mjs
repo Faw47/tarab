@@ -6,19 +6,51 @@ const distDir = resolve('dist');
 const manifestPath = resolve(distDir, '.vite/manifest.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const entries = [
-  { label: 'main', key: 'src/main.tsx', rawBudget: 1_100_000, gzipBudget: 350_000 },
+  { label: 'main', htmlPath: 'index.html', rawBudget: 1_100_000, gzipBudget: 350_000 },
   {
     label: 'mini-player',
-    key: 'src/mini-player.tsx',
+    htmlPath: 'mini-player.html',
     rawBudget: 500_000,
     gzipBudget: 180_000,
   },
 ];
 
-function getInitialJavaScriptFiles(entryKey) {
+function getEntryKeys(htmlPath, label) {
+  const html = readFileSync(resolve(distDir, htmlPath), 'utf8');
+  const scriptSources = [...html.matchAll(/<script\b([^>]*)>/gi)]
+    .filter(([, attributes]) => /\btype=["']module["']/i.test(attributes))
+    .map(([, attributes]) => attributes.match(/\bsrc=["']([^"']+)["']/i)?.[1])
+    .filter((source) => typeof source === 'string');
+
+  const keys = scriptSources.map((source) => {
+    const assetPath = source
+      .split(/[?#]/, 1)[0]
+      .replaceAll('\\', '/')
+      .replace(/^\.?\//, '')
+      .replace(/^\/+/, '');
+    const key = Object.entries(manifest).find(
+      ([, chunk]) => chunk.file?.replaceAll('\\', '/') === assetPath,
+    )?.[0];
+
+    if (!key) {
+      throw new Error(
+        `${label} HTML entry points to JavaScript missing from the Vite manifest: "${source}"`,
+      );
+    }
+    return key;
+  });
+
+  if (keys.length === 0) {
+    throw new Error(`${label} HTML entry has no module script source`);
+  }
+
+  return { html, keys };
+}
+
+function getInitialJavaScriptFiles(entryKeys, label) {
   const visited = new Set();
   const files = new Set();
-  const pending = [entryKey];
+  const pending = [...entryKeys];
 
   while (pending.length > 0) {
     const key = pending.pop();
@@ -27,7 +59,7 @@ function getInitialJavaScriptFiles(entryKey) {
 
     const chunk = manifest[key];
     if (!chunk) {
-      throw new Error(`Initial bundle manifest is missing entry or import "${key}"`);
+      throw new Error(`${label} bundle manifest is missing import "${key}"`);
     }
 
     if (typeof chunk.file === 'string' && /\.m?js$/i.test(chunk.file)) {
@@ -44,7 +76,7 @@ function getInitialJavaScriptFiles(entryKey) {
   }
 
   if (files.size === 0) {
-    throw new Error(`Initial bundle entry "${entryKey}" has no JavaScript files`);
+    throw new Error(`${label} initial bundle has no JavaScript files`);
   }
 
   return [...files];
@@ -56,7 +88,8 @@ function formatBytes(bytes) {
 
 let failed = false;
 for (const entry of entries) {
-  const files = getInitialJavaScriptFiles(entry.key);
+  const { html, keys } = getEntryKeys(entry.htmlPath, entry.label);
+  const files = getInitialJavaScriptFiles(keys, entry.label);
   const rawBytes = files.reduce((total, path) => total + readFileSync(path).byteLength, 0);
   const gzipBytes = files.reduce(
     (total, path) => total + gzipSync(readFileSync(path)).byteLength,
@@ -74,12 +107,9 @@ for (const entry of entries) {
     console.error(`${entry.label} initial JS ${exceeded.join(' and ')} budget exceeded`);
     failed = true;
   }
-}
 
-for (const path of ['index.html', 'mini-player.html']) {
-  const html = readFileSync(resolve(distDir, path), 'utf8');
   if (/rel="modulepreload"[^>]+three-stack/.test(html)) {
-    console.error(`${path} eagerly preloads the optional Three.js bundle`);
+    console.error(`${entry.htmlPath} eagerly preloads the optional Three.js bundle`);
     failed = true;
   }
 }
