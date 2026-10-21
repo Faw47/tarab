@@ -768,21 +768,21 @@ impl Database {
         } else {
             format!("{}/", normalized_folder)
         };
-        // Escape special LIKE characters with a backslash
-        let escaped = normalized
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_pattern = format!("{}%", escaped);
         let tx = conn.transaction()?;
         tx.execute(
-            "DELETE FROM lyrics_index WHERE track_id = ?1 OR track_id LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM lyrics_index
+             WHERE track_id = ?1
+                OR substr(track_id, 1, length(?2)) COLLATE BINARY = ?2",
+            params![normalized_folder, normalized],
         )?;
-        // Query using normalized paths only (database should have normalized paths)
+        // Query using normalized paths only (database should have normalized paths).
+        // The binary prefix preserves case-sensitive siblings and the trailing slash prevents
+        // matching names such as "/music/folder-backup".
         let count = tx.execute(
-            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM tracks
+             WHERE file_path = ?1
+                OR substr(file_path, 1, length(?2)) COLLATE BINARY = ?2",
+            params![normalized_folder, normalized],
         )?;
         tx.commit()?;
         Ok(count)
