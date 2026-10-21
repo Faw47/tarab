@@ -2308,11 +2308,7 @@ mod tests {
             ));
         }
         authorize_transient_file(&state, &abandoned).expect("authorize pending track");
-        assert!(mark_playback_generation(
-            &mut state.write(),
-            11,
-            &abandoned,
-        ));
+        assert!(mark_playback_generation(&mut state.write(), 11, &abandoned,));
         assert!(ensure_path_allowed_by_state(&abandoned, &state.read(), "test").is_ok());
 
         {
