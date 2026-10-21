@@ -277,6 +277,7 @@ where
 pub(super) struct SymphoniaSource {
     decoder: Box<dyn SymphoniaDecoder>,
     format: Box<dyn FormatReader>,
+    track_id: u32,
     file_path: String,
     buffer: Vec<f32>,
     // Reused for every packet so decoding does not allocate on the mixer thread.
@@ -290,6 +291,14 @@ pub(super) struct SymphoniaSource {
     sample_rate: u32,
 }
 
+fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
+    if packet.track_id() == selected_track_id {
+        Some(packet)
+    } else {
+        None
+    }
+}
+
 impl SymphoniaSource {
     pub(super) fn new(
         decoder: Box<dyn SymphoniaDecoder>,
@@ -298,10 +307,12 @@ impl SymphoniaSource {
     ) -> Option<Self> {
         let channels = decoder.codec_params().channels?.count() as u16;
         let sample_rate = decoder.codec_params().sample_rate?;
+        let track_id = format.default_track()?.id;
 
         Some(Self {
             decoder,
             format,
+            track_id,
             file_path,
             buffer: Vec::new(),
             scratch: None,
@@ -340,6 +351,9 @@ impl SymphoniaSource {
                 }
             };
 
+            let Some(packet) = packet_for_track(packet, self.track_id) else {
+                continue;
+            };
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
                     Ok(result) => result,
@@ -619,6 +633,88 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tarab-source-{name}-{nonce}.wav"));
         std::fs::write(&path, stereo_wav(frames)).expect("write wav");
         path
+    }
+
+    struct CountingDecoder {
+        inner: Box<dyn SymphoniaDecoder>,
+        decode_calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SymphoniaDecoder for CountingDecoder {
+        fn try_new(
+            _params: &symphonia::core::codecs::CodecParameters,
+            _options: &DecoderOptions,
+        ) -> symphonia::core::errors::Result<Self>
+        where
+            Self: Sized,
+        {
+            unreachable!("CountingDecoder wraps an existing decoder")
+        }
+
+        fn supported_codecs() -> &'static [symphonia::core::codecs::CodecDescriptor]
+        where
+            Self: Sized,
+        {
+            &[]
+        }
+
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+
+        fn codec_params(&self) -> &symphonia::core::codecs::CodecParameters {
+            self.inner.codec_params()
+        }
+
+        fn decode(
+            &mut self,
+            packet: &Packet,
+        ) -> symphonia::core::errors::Result<symphonia::core::audio::AudioBufferRef<'_>> {
+            self.decode_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.decode(packet)
+        }
+
+        fn finalize(&mut self) -> symphonia::core::codecs::FinalizeResult {
+            self.inner.finalize()
+        }
+
+        fn last_decoded(&self) -> symphonia::core::audio::AudioBufferRef<'_> {
+            self.inner.last_decoded()
+        }
+    }
+
+    #[test]
+    fn refill_skips_seek_buffered_foreign_track_packets_before_decoding() {
+        let path = write_temp_wav("foreign-track", 8);
+        let (mut source, _, _) =
+            prepare_source_with_seek(path.to_str().expect("utf-8 path"), 0.0, seek_decoder)
+                .expect("prepare raw decoder source");
+
+        // Exhaust the reader so refill can only see the packet retained from seek.
+        let _: Vec<f32> = source.by_ref().collect();
+        let params = source.decoder.codec_params().clone();
+        let decode_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        source.decoder = Box::new(CountingDecoder {
+            inner: symphonia::default::get_codecs()
+                .make(&params, &DecoderOptions::default())
+                .expect("create counting decoder inner"),
+            decode_calls: decode_calls.clone(),
+        });
+        source.pending_packet = Some(Packet::new_from_slice(
+            source.track_id.wrapping_add(1),
+            0,
+            0,
+            &[0_u8],
+        ));
+
+        assert!(source.refill().is_none());
+        assert_eq!(
+            decode_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign packets retained by seek must never reach the decoder"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
