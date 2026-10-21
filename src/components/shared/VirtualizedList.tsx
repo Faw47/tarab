@@ -93,6 +93,7 @@ export function VirtualizedList<T>({
   return (
     <div
       ref={containerRef}
+      role="list"
       {...containerProps}
       onScroll={onScroll}
       className={className}
@@ -108,6 +109,9 @@ export function VirtualizedList<T>({
         {virtualItems.map((virtualItem: VirtualItem) => (
           <div
             key={virtualItem.key}
+            role="listitem"
+            aria-setsize={items.length}
+            aria-posinset={virtualItem.index + 1}
             style={{
               position: 'absolute',
               top: 0,
