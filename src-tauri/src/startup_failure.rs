@@ -332,5 +332,4 @@ mod tests {
             "startup diagnostics should use a home-relative path: {details}"
         );
     }
-
 }
