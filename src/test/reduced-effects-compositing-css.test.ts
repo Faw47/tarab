@@ -10,11 +10,12 @@ describe('liquid glass compositing policy', () => {
     expect(css).toContain('[class*="backdrop-blur-"]');
     expect(css).toContain('[style*="backdrop-filter"]');
     expect(css).toContain('backdrop-filter: none !important;');
+    expect(css).toContain('-webkit-backdrop-filter: none !important;');
   });
 
   it('removes descendant blur when a surface already has backdrop filtering', () => {
     expect(css).toMatch(
-      /:where\(\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*:where\(\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*\{[\s\S]*?backdrop-filter:\s*none\s*!important;/,
+      /:where\(\s*\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*:where\(\s*\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*\{[\s\S]*?backdrop-filter:\s*none\s*!important;/,
     );
   });
 
