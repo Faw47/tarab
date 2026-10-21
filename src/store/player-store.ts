@@ -250,9 +250,7 @@ export const usePlayerStore = create<PlayerState>()(
             const queue =
               targetIndex >= 0
                 ? state.queue.map((entry, index) =>
-                    index === targetIndex
-                      ? { ...track, _queueId: entry._queueId }
-                      : entry,
+                    index === targetIndex ? { ...track, _queueId: entry._queueId } : entry,
                   )
                 : state.queue;
             const currentTrack =
