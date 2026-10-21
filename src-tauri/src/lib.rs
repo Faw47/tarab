@@ -463,30 +463,30 @@ pub fn run() {
         Ok(app) => {
             startup_failure::flush_early_diagnostics();
             app.run(|_app_handle, _event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
-                if !shutdown::exit_approved(_app_handle) {
-                    api.prevent_exit();
-                    shutdown::request_quit(_app_handle);
+                if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
+                    if !shutdown::exit_approved(_app_handle) {
+                        api.prevent_exit();
+                        shutdown::request_quit(_app_handle);
+                    }
                 }
-            }
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
-                if let Some(intents) =
-                    _app_handle.try_state::<launch_intents::SharedLaunchIntents>()
-                {
-                    for url in urls {
-                        if let Ok(path) = url.to_file_path() {
-                            if let Err(_error) =
-                                launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
-                            {
-                                log::warn!(
-                                    "Ignored macOS file-open request that could not be resolved"
-                                );
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::Opened { urls } = _event {
+                    if let Some(intents) =
+                        _app_handle.try_state::<launch_intents::SharedLaunchIntents>()
+                    {
+                        for url in urls {
+                            if let Ok(path) = url.to_file_path() {
+                                if let Err(_error) =
+                                    launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
+                                {
+                                    log::warn!(
+                                        "Ignored macOS file-open request that could not be resolved"
+                                    );
+                                }
                             }
                         }
                     }
                 }
-            }
             })
         },
         Err(error) => startup_failure::report_build_failure(&error.to_string()),
