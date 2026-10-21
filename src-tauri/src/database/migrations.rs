@@ -640,7 +640,9 @@ impl Database {
 
         // This is intentionally non-unique: Windows path cleanup runs after migrations and can
         // collapse rows that differ only by separator spelling before the next database open.
-        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_tracks_public_id ON tracks(public_id);")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_public_id ON tracks(public_id);",
+        )?;
         Ok(())
     }
 
