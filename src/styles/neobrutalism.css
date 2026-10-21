@@ -594,9 +594,8 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #595959;
-  position: absolute;
-  right: 16px;
-  top: 20px;
+  display: inline-block;
+  margin-bottom: 0.5rem;
 }
 
 [data-theme="neobrutalism"] .neo-cover-album {
