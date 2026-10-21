@@ -1,9 +1,5 @@
 import { useCallback } from 'react';
-import {
-  playAdjacentTrack,
-  startPlayback,
-  toggleCurrentPlayback,
-} from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { getSmartShuffleQueue, revealInFileManager } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
@@ -59,7 +55,7 @@ export function useAppCommandActions({
     const first = shuffled[0];
     if (!first) return;
     try {
-      await startPlayback(first, {
+      await PlaybackCoordinator.start(first, {
         queue: shuffled,
         queueIndex: 0,
         shuffleEnabled: true,
@@ -70,15 +66,15 @@ export function useAppCommandActions({
   }, [libraryTracks, totalTracks]);
 
   const handleTogglePlayback = useCallback(async () => {
-    await toggleCurrentPlayback();
+    await PlaybackCoordinator.toggle();
   }, []);
 
   const handleNextTrack = useCallback(async () => {
-    await playAdjacentTrack('next');
+    await PlaybackCoordinator.next();
   }, []);
 
   const handlePreviousTrack = useCallback(async () => {
-    await playAdjacentTrack('previous');
+    await PlaybackCoordinator.previous();
   }, []);
 
   const handleRescan = useCallback(async () => {

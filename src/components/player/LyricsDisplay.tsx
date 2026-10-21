@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useSmoothTime } from '../../hooks/useSmoothTime';
 import { getCurrentLineIndex, getDisplayLines } from '../../lib/lyrics-parser';
 import { useRenderLog } from '../../lib/performance';
-import { seekToPosition } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { getCoverArtPalette } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
@@ -191,7 +191,7 @@ export const LyricsDisplay = memo(
       if (startTimeMs < 0) return;
       const positionSecs = startTimeMs / 1000;
       try {
-        await seekToPosition(positionSecs);
+        await PlaybackCoordinator.seek(positionSecs);
       } catch (error) {
         reportError('Failed to seek', { source: 'lyrics-display', error });
       }
@@ -201,7 +201,7 @@ export const LyricsDisplay = memo(
       e.stopPropagation();
       const positionSecs = startTimeMs / 1000;
       try {
-        await seekToPosition(positionSecs);
+        await PlaybackCoordinator.seek(positionSecs);
       } catch (error) {
         reportError('Failed to seek', { source: 'lyrics-display', error });
       }

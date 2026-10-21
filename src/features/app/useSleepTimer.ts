@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { pauseCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 
 interface UseSleepTimerOptions {
@@ -26,7 +26,7 @@ export function useSleepTimer({ setIsPlaying }: UseSleepTimerOptions) {
       setSleepDeadline(deadline);
       sleepTimeoutRef.current = setTimeout(async () => {
         try {
-          await pauseCurrentPlayback();
+          await PlaybackCoordinator.pause();
         } catch (err) {
           reportError('Failed to pause for sleep timer', { source: 'app', error: err });
         } finally {

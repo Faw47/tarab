@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useSmoothTimeSubscription } from '../../contexts/smooth-time';
 import { formatTime } from '../../lib/format-time';
 import { useRenderLog } from '../../lib/performance';
-import { seekToPosition } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
@@ -125,7 +125,7 @@ export const PlayerProgressBar = memo(
       activePointerRef.current = null;
       setIsSeeking(false);
       try {
-        await seekToPosition(value);
+        await PlaybackCoordinator.seek(value);
       } catch (e) {
         reportError('Failed to seek playback', { source: 'player-progress', error: e });
       }
@@ -204,7 +204,7 @@ export const PlayerProgressBar = memo(
         }
         seekValueRef.current = next;
         applySeekVisual(next);
-        void seekToPosition(next).catch((err) =>
+        void PlaybackCoordinator.seek(next).catch((err) =>
           reportError('Failed to seek playback', {
             source: 'player-progress-keyboard',
             error: err,
@@ -252,7 +252,7 @@ export const PlayerProgressBar = memo(
 
         if (!isSeekingRef.current) {
           try {
-            await seekToPosition(val);
+            await PlaybackCoordinator.seek(val);
           } catch (err) {
             reportError('Failed to seek playback', { source: 'player-progress', error: err });
           }
@@ -266,7 +266,7 @@ export const PlayerProgressBar = memo(
       isSeekingRef.current = false;
       setIsSeeking(false);
       try {
-        await seekToPosition(seekValueRef.current);
+        await PlaybackCoordinator.seek(seekValueRef.current);
       } catch (err) {
         reportError('Failed to seek playback', { source: 'player-progress', error: err });
       }
@@ -278,7 +278,7 @@ export const PlayerProgressBar = memo(
         if (!isSeekingRef.current) return;
         isSeekingRef.current = false;
         setIsSeeking(false);
-        void seekToPosition(seekValueRef.current).catch((err) =>
+        void PlaybackCoordinator.seek(seekValueRef.current).catch((err) =>
           reportError('Failed to seek playback', { source: 'player-progress', error: err }),
         );
       };

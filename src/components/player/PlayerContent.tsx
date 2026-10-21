@@ -29,7 +29,7 @@ import { useCoverArt } from '../../hooks/useCoverArt';
 import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
 import { lazyWithRetry } from '../../lib/lazy-with-retry';
 import { useRenderLog } from '../../lib/performance';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
 import {
@@ -183,7 +183,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   const handleTogglePlay = useCallback(async () => {
     try {
       if (!currentTrack) return;
-      await toggleCurrentPlayback();
+      await PlaybackCoordinator.toggle();
     } catch (e) {
       reportError('Failed to toggle playback', { source: 'player-content', error: e });
     }
@@ -191,7 +191,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const handlePrevious = useCallback(async () => {
     try {
-      await playAdjacentTrack('previous');
+      await PlaybackCoordinator.previous();
     } catch (e) {
       reportError('Failed to play previous track', { source: 'player-content', error: e });
     }
@@ -199,7 +199,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const handleNext = useCallback(async () => {
     try {
-      await playAdjacentTrack('next');
+      await PlaybackCoordinator.next();
     } catch (e) {
       reportError('Failed to play next track', { source: 'player-content', error: e });
     }

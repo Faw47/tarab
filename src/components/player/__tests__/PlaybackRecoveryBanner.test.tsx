@@ -6,11 +6,17 @@ import type { Track } from '../../../types';
 import { PlaybackRecoveryBanner, playbackFailureTitle } from '../PlaybackRecoveryBanner';
 
 const { playAdjacentTrackMock, startPlaybackMock, revealMock } = vi.hoisted(() => ({
-  playAdjacentTrackMock: vi.fn(async () => undefined),
+  playAdjacentTrackMock: vi.fn(
+    async (_direction: 'next' | 'previous', ..._options: unknown[]) => undefined,
+  ),
   startPlaybackMock: vi.fn(async () => 1),
   revealMock: vi.fn(async () => undefined),
 }));
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    next: (...args: unknown[]) => playAdjacentTrackMock('next', ...args),
+    start: startPlaybackMock,
+  },
   playAdjacentTrack: playAdjacentTrackMock,
   startPlayback: startPlaybackMock,
 }));

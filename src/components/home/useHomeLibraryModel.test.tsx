@@ -12,6 +12,9 @@ vi.mock('../../features/library/useLibraryData', () => ({
 }));
 
 vi.mock('../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    start: (...args: unknown[]) => startPlayback(...args),
+  },
   startPlayback: (...args: unknown[]) => startPlayback(...args),
 }));
 

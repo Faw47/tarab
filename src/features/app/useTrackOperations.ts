@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { type Dispatch, type SetStateAction, useCallback } from 'react';
 import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
-import { pauseCurrentPlayback, stopCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import {
   dbDeleteTracks,
@@ -190,8 +190,8 @@ export function useTrackOperations({
 
       if (currentTrackRemoved) {
         try {
-          await pauseCurrentPlayback();
-          await stopCurrentPlayback();
+          await PlaybackCoordinator.pause();
+          await PlaybackCoordinator.stop();
         } catch (err) {
           reportError('Failed to stop playback before removal', { source: 'app', error: err });
         }

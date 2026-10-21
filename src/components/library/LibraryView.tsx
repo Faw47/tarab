@@ -26,7 +26,7 @@ import { prefetchCoverArtBatch } from '../../hooks/useCoverArt';
 import { getAlbumArtist } from '../../lib/album-key';
 import { coverArtUrl } from '../../lib/cover-art-url';
 import { useRenderLog } from '../../lib/performance';
-import { startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import { generateCoverArtHashes } from '../../lib/tauri-commands';
 import { sortAlbumTracks } from '../../lib/track-order';
@@ -988,7 +988,7 @@ export const LibraryView = memo(function LibraryView({
         const queue = detailScope ? detailTracks : visibleTracks;
         const queueIndex = queue.findIndex((entry) => entry.id === track.id);
 
-        await startPlayback(track, {
+        await PlaybackCoordinator.start(track, {
           queue,
           queueIndex: queueIndex >= 0 ? queueIndex : 0,
         });
@@ -1008,7 +1008,7 @@ export const LibraryView = memo(function LibraryView({
       const albumTracks = sortAlbumTracks(await fetchAlbumTracks(track.album, albumArtist));
       if (albumTracks.length === 0) return;
 
-      await startPlayback(albumTracks[0], {
+      await PlaybackCoordinator.start(albumTracks[0], {
         queue: albumTracks,
         queueIndex: 0,
         shuffleEnabled: false,

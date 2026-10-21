@@ -7,6 +7,7 @@ import { QueueView } from '../QueueView';
 
 vi.mock('../../shared/CoverArtImage', () => ({ CoverArtImage: () => null }));
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { start: vi.fn(), toggle: vi.fn() },
   startPlayback: vi.fn(),
   toggleCurrentPlayback: vi.fn(),
 }));

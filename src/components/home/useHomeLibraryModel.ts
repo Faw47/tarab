@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useLibraryData } from '../../features/library/useLibraryData';
 import { getAlbumKey } from '../../lib/album-key';
-import { startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { sortAlbumTracks } from '../../lib/track-order';
 import type { Track } from '../../types';
@@ -37,7 +37,11 @@ export function useHomeLibraryModel() {
     const ordered = sortAlbumTracks(albumTracks);
     if (!ordered.length) return;
     try {
-      await startPlayback(ordered[0], { queue: ordered, queueIndex: 0, shuffleEnabled: false });
+      await PlaybackCoordinator.start(ordered[0], {
+        queue: ordered,
+        queueIndex: 0,
+        shuffleEnabled: false,
+      });
     } catch (error) {
       reportError('Could not play the album', { source: 'home-view', error });
     }

@@ -1,4 +1,4 @@
-import { playAdjacentTrack, toggleCurrentPlayback } from '../lib/playback-actions';
+import { PlaybackCoordinator } from '../lib/playback-actions';
 import { globalShortcuts } from './globalShortcuts';
 import { logger } from './logger';
 
@@ -28,17 +28,17 @@ export const globalShortcutsManager = {
       {
         action: 'playPause',
         shortcut: config.playPause,
-        run: () => runShortcutAction('playPause', toggleCurrentPlayback),
+        run: () => runShortcutAction('playPause', PlaybackCoordinator.toggle),
       },
       {
         action: 'next',
         shortcut: config.next,
-        run: () => runShortcutAction('next', () => playAdjacentTrack('next')),
+        run: () => runShortcutAction('next', () => PlaybackCoordinator.next()),
       },
       {
         action: 'previous',
         shortcut: config.previous,
-        run: () => runShortcutAction('previous', () => playAdjacentTrack('previous')),
+        run: () => runShortcutAction('previous', () => PlaybackCoordinator.previous()),
       },
     ] as const;
 

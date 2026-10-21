@@ -19,7 +19,10 @@ const { startPlaybackMock, removeTracksMutation, reorderTracksMock, state } = vi
   state: { summaries: [] as unknown[], detail: null as unknown },
 }));
 
-vi.mock('../../../lib/playback-actions', () => ({ startPlayback: startPlaybackMock }));
+vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { start: startPlaybackMock },
+  startPlayback: startPlaybackMock,
+}));
 vi.mock('../../../features/playlists/queries', () => ({
   usePlaylistsQuery: () => ({ data: state.summaries, isError: false, isLoading: false }),
   usePlaylistDetailQuery: (id: string | null) => ({

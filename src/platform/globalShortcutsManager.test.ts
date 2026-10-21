@@ -9,7 +9,7 @@ const {
   warnMock,
 } = vi.hoisted(() => ({
   errorMock: vi.fn(),
-  playAdjacentTrackMock: vi.fn(async () => null),
+  playAdjacentTrackMock: vi.fn(async (_direction: 'next' | 'previous') => null),
   registerMock: vi.fn(async () => true),
   toggleCurrentPlaybackMock: vi.fn(async () => undefined),
   unregisterAllMock: vi.fn(async () => undefined),
@@ -33,6 +33,11 @@ vi.mock('./logger', () => ({
 }));
 
 vi.mock('../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    next: () => playAdjacentTrackMock('next'),
+    previous: () => playAdjacentTrackMock('previous'),
+    toggle: toggleCurrentPlaybackMock,
+  },
   playAdjacentTrack: playAdjacentTrackMock,
   toggleCurrentPlayback: toggleCurrentPlaybackMock,
 }));

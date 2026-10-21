@@ -60,7 +60,9 @@ const {
     pauseCurrentPlaybackMock: vi.fn(async () => undefined),
     resumeCurrentPlaybackMock: vi.fn(async () => undefined),
     toggleCurrentPlaybackMock: vi.fn(async () => undefined),
-    playAdjacentTrackMock: vi.fn(async () => undefined),
+    playAdjacentTrackMock: vi.fn(
+      async (_direction: 'next' | 'previous', _options?: unknown) => undefined,
+    ),
     seekToPositionMock: vi.fn(async () => undefined),
   };
 });
@@ -93,6 +95,14 @@ vi.mock('../../../lib/tauri-commands', () => ({
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    pause: pauseCurrentPlaybackMock,
+    resume: resumeCurrentPlaybackMock,
+    toggle: toggleCurrentPlaybackMock,
+    next: (...args: unknown[]) => playAdjacentTrackMock('next', ...args),
+    previous: (...args: unknown[]) => playAdjacentTrackMock('previous', ...args),
+    seek: seekToPositionMock,
+  },
   pauseCurrentPlayback: pauseCurrentPlaybackMock,
   resumeCurrentPlayback: resumeCurrentPlaybackMock,
   toggleCurrentPlayback: toggleCurrentPlaybackMock,

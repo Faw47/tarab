@@ -1,13 +1,7 @@
 import { emitTo } from '@tauri-apps/api/event';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
-import {
-  pauseCurrentPlayback,
-  playAdjacentTrack,
-  resumeCurrentPlayback,
-  seekToPosition,
-  toggleCurrentPlayback,
-} from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import {
   desktopCancelQuit,
@@ -359,23 +353,23 @@ export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
 
           switch (event.payload) {
             case 'toggle-play':
-              await toggleCurrentPlayback();
+              await PlaybackCoordinator.toggle();
               return;
             case 'play':
               if (!usePlayerStore.getState().isPlaying) {
-                await resumeCurrentPlayback();
+                await PlaybackCoordinator.resume();
               }
               return;
             case 'pause':
               if (usePlayerStore.getState().isPlaying) {
-                await pauseCurrentPlayback();
+                await PlaybackCoordinator.pause();
               }
               return;
             case 'next':
-              await playAdjacentTrack('next');
+              await PlaybackCoordinator.next();
               return;
             case 'previous':
-              await playAdjacentTrack('previous');
+              await PlaybackCoordinator.previous();
               return;
             case 'toggle-shuffle':
               usePlayerStore.getState().toggleShuffle();
@@ -415,7 +409,7 @@ export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
     EVENT_DESKTOP_SEEK,
     (event) => {
       if (!miniWindowEnabled) return;
-      void seekToPosition(event.payload.positionSecs).catch((error) => {
+      void PlaybackCoordinator.seek(event.payload.positionSecs).catch((error) => {
         reportError('Failed to seek from mini window', {
           source: 'desktop-bridge',
           error,

@@ -1,7 +1,7 @@
 import { AlertTriangle } from 'lucide-react';
 import { memo, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { playAdjacentTrack, startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { revealInFileManager } from '../../lib/tauri-commands';
 import { cn } from '../../lib/utils';
@@ -53,7 +53,7 @@ export const PlaybackRecoveryBanner = memo(function PlaybackRecoveryBanner({
     const track = usePlayerStore.getState().currentTrack;
     if (!track) return;
     try {
-      await startPlayback(track, { startPos: usePlayerStore.getState().currentTime });
+      await PlaybackCoordinator.start(track, { startPos: usePlayerStore.getState().currentTime });
       setPlaybackError(null);
     } catch (error) {
       reportError('Playback retry failed', { source: 'playback-recovery', error });
@@ -62,7 +62,7 @@ export const PlaybackRecoveryBanner = memo(function PlaybackRecoveryBanner({
 
   const handleSkip = useCallback(async () => {
     try {
-      await playAdjacentTrack('next');
+      await PlaybackCoordinator.next();
       setPlaybackError(null);
     } catch (error) {
       reportError('Could not skip to the next track', { source: 'playback-recovery', error });
@@ -82,7 +82,7 @@ export const PlaybackRecoveryBanner = memo(function PlaybackRecoveryBanner({
   const handleRemove = useCallback(async () => {
     const failedTrack = usePlayerStore.getState().currentTrack;
     try {
-      await playAdjacentTrack('next');
+      await PlaybackCoordinator.next();
     } catch {
       // The failed item can still be removed when there is no playable next item.
     }

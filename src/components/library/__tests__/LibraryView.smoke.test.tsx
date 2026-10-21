@@ -68,6 +68,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { start: vi.fn() },
   startPlayback: vi.fn(),
 }));
 
