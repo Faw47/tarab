@@ -930,7 +930,8 @@ mod tests {
         track.has_cover_art = true;
         track.cover_art_hash = Some("aggregate-cover".to_string());
         track.blurhash = Some("aggregate-blurhash".to_string());
-        db.upsert_tracks_batch(&[track]).expect("seed aggregate track");
+        db.upsert_tracks_batch(&[track])
+            .expect("seed aggregate track");
 
         let album = db
             .get_album_aggregates()
