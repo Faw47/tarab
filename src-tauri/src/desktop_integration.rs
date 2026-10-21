@@ -162,14 +162,14 @@ pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>
 
     let menu_handles = build_platform_menu(app)
         .map_err(|e| {
-            eprintln!("Failed to initialize app menu: {}", e);
+            log::error!("Failed to initialize app menu");
             e
         })
         .ok()
         .flatten();
     let tray_handles = build_tray_menu(&app_handle)
         .map_err(|e| {
-            eprintln!("Failed to initialize tray menu: {}", e);
+            log::error!("Failed to initialize tray menu");
             e
         })
         .ok();
@@ -415,7 +415,7 @@ pub fn desktop_sync_media_session(
 fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
     let encoded = data?;
     if encoded.len() > MAX_MEDIA_ARTWORK_BASE64_LEN {
-        eprintln!(
+        log::warn!(
             "Ignoring media artwork payload of {} bytes (limit {})",
             encoded.len(),
             MAX_MEDIA_ARTWORK_BASE64_LEN
@@ -426,7 +426,7 @@ fn decode_optional_artwork(data: Option<&String>) -> Option<Vec<u8>> {
     match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(bytes) => Some(bytes),
         Err(err) => {
-            eprintln!("Failed to decode media artwork payload: {}", err);
+            log::warn!("Failed to decode media artwork payload");
             None
         }
     }
@@ -547,7 +547,7 @@ fn build_app_menu(app: &AppHandle<Wry>) -> tauri::Result<DesktopMenuHandles> {
         Some(main) => {
             main.set_menu(menu)?;
         }
-        None => eprintln!("Main window not found; the app menu was not attached"),
+        None => log::warn!("Main window not found; the app menu was not attached"),
     }
 
     Ok(DesktopMenuHandles {
@@ -661,39 +661,34 @@ fn register_media_shortcuts(app: &AppHandle<Wry>) {
     ];
 
     let mut failures = 0usize;
-    let mut first_error: Option<String> = None;
     for (shortcut, action) in media_shortcuts {
-        if let Err(err) =
-            app.global_shortcut()
-                .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
-                    if event.state != ShortcutState::Pressed {
+        if app
+            .global_shortcut()
+            .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+
+                if let Some(state) = app_handle.try_state::<DesktopIntegrationState>() {
+                    if !state.native_ui.lock().media_keys_enabled {
                         return;
                     }
+                }
 
-                    if let Some(state) = app_handle.try_state::<DesktopIntegrationState>() {
-                        if !state.native_ui.lock().media_keys_enabled {
-                            return;
-                        }
-                    }
-
-                    emit_desktop_control_action(app_handle, action);
-                })
+                emit_desktop_control_action(app_handle, action);
+            })
+            .is_err()
         {
             // Media key registration can fail on some hosts (e.g. unavailable
             // watcher support). Do not fail app startup; keep tray/menu/media
             // session features active.
             failures += 1;
-            if first_error.is_none() {
-                first_error = Some(err.to_string());
-            }
         }
     }
 
     if failures > 0 {
-        eprintln!(
-            "Media key global shortcuts unavailable ({} registration failures; first error: {}). Continuing without global media-key hooks.",
-            failures,
-            first_error.unwrap_or_else(|| "unknown".to_string())
+        log::warn!(
+            "Media key global shortcuts unavailable ({failures} registration failures); continuing without global media-key hooks"
         );
     }
 }
@@ -706,8 +701,8 @@ fn setup_media_session_handler(app: &AppHandle<Wry>) {
             app_name: app.package_info().name.clone(),
         });
 
-    if let Err(err) = init {
-        eprintln!("Failed to initialize media session: {}", err);
+    if init.is_err() {
+        log::error!("Failed to initialize media session");
     }
 
     let app_handle = app.clone();

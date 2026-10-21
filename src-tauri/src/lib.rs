@@ -393,7 +393,7 @@ pub fn run() {
             };
             let playlist_bootstrap_db = database.clone();
             app.manage(database);
-            eprintln!("[startup] db_init_ms={:.1}", db_init_ms);
+            log::info!("[startup] db_init_ms={:.1}", db_init_ms);
 
             // Create image cache
             app.manage(shared_image_cache.clone());
@@ -405,11 +405,8 @@ pub fn run() {
             // Manage allowlisted library roots for filesystem operations
             let library_roots: SharedLibraryRoots = match load_library_roots_state(app.handle()) {
                 Ok(state) => state,
-                Err(err) => {
-                    eprintln!(
-                        "Failed to load library grants; file access remains blocked: {}",
-                        err
-                    );
+                Err(_err) => {
+                    log::error!("Failed to load library grants; file access remains blocked");
                     file_ops::create_library_roots_state()
                 }
             };
@@ -431,12 +428,12 @@ pub fn run() {
             // Blocking file and database work: a blocking-pool thread, not an async worker.
             tauri::async_runtime::spawn_blocking(move || {
                 let start = Instant::now();
-                if let Err(err) =
+                if let Err(_err) =
                     playlist::bootstrap_playlist_storage(playlist_handle, playlist_bootstrap_db)
                 {
-                    eprintln!("Playlist migration bootstrap failed: {}", err);
+                    log::error!("Playlist migration bootstrap failed");
                 } else {
-                    eprintln!(
+                    log::info!(
                         "[startup] playlist_bootstrap_ms={:.1}",
                         start.elapsed().as_secs_f64() * 1000.0
                     );
@@ -444,10 +441,10 @@ pub fn run() {
             });
 
             let desktop_start = Instant::now();
-            if let Err(err) = desktop_integration::setup(app) {
-                eprintln!("Desktop integration setup failed: {}", err);
+            if let Err(_err) = desktop_integration::setup(app) {
+                log::error!("Desktop integration setup failed");
             }
-            eprintln!(
+            log::info!(
                 "[startup] desktop_integration_ms={:.1}",
                 desktop_start.elapsed().as_secs_f64() * 1000.0
             );
@@ -460,7 +457,7 @@ pub fn run() {
                 let _ = window.set_decorations(false);
             }
 
-            eprintln!(
+            log::info!(
                 "[startup] setup_total_ms={:.1}",
                 setup_start.elapsed().as_secs_f64() * 1000.0
             );
@@ -512,10 +509,10 @@ pub fn run() {
                 {
                     for url in urls {
                         if let Ok(path) = url.to_file_path() {
-                            if let Err(error) =
+                            if let Err(_error) =
                                 launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
                             {
-                                eprintln!("Ignored macOS file-open request: {}", error);
+                                log::warn!("Ignored macOS file-open request that could not be resolved");
                             }
                         }
                     }

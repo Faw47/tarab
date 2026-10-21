@@ -34,6 +34,7 @@ symphonia = { version = "0.5", features = ["aac", "aiff", "alac", "flac", "mp3",
 symphonia-adapter-libopus = "0.2.9"
 
 # Metadata extraction
+log = "0.4"
 lofty = "0.21"
 
 # File system

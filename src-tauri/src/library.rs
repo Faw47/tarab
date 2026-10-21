@@ -108,8 +108,8 @@ fn is_supported_audio_path(path: &Path) -> bool {
 fn is_allowed_scan_file(path: &Path, roots: &[PathBuf]) -> bool {
     match ensure_existing_path_allowed(path, roots, "scan library file") {
         Ok(_) => true,
-        Err(err) => {
-            eprintln!("Skipped library file during scan: {}", err);
+        Err(_err) => {
+            log::warn!("Skipped a library entry during scan");
             false
         }
     }

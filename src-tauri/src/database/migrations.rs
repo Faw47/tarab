@@ -403,10 +403,7 @@ impl Database {
             |row| row.get(0),
         )?;
         if duplicate_memberships > 0 {
-            eprintln!(
-                "migrate_v4: detected {} duplicate playlist membership rows; preserving one per (playlist_id, track_id)",
-                duplicate_memberships
-            );
+            log::warn!("migrate_v4 found {duplicate_memberships} duplicate playlist memberships; preserving one per pair");
         }
 
         conn.execute_batch(

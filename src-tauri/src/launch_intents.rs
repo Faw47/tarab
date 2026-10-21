@@ -138,8 +138,8 @@ pub fn queue_cli_arguments(app: &AppHandle, state: &SharedLaunchIntents, argumen
         if argument.contains("://") || argument.starts_with('-') {
             continue;
         }
-        if let Err(error) = queue_file_path(app, state, Path::new(argument)) {
-            eprintln!("Ignored file-open argument: {}", error);
+        if let Err(_error) = queue_file_path(app, state, Path::new(argument)) {
+            log::warn!("Ignored file-open argument that could not be resolved");
         }
     }
 }
