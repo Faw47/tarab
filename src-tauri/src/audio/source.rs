@@ -74,7 +74,7 @@ pub(super) fn prepare_source(
     requested_start: f64,
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
-) -> Result<(PitchPreservingSource<SymphoniaSource>, f64, f64), String> {
+) -> Result<(PitchPreservingSource<BufferedSymphoniaSource>, f64, f64), String> {
     let (source, duration, actual_start) = crate::parse_guard::guard(file_path, || {
         prepare_source_with_seek(file_path, requested_start, seek_decoder)
     })??;
@@ -82,10 +82,16 @@ pub(super) fn prepare_source(
         let state = state.lock();
         (state.speed_control.clone(), state.booster.clone())
     };
-    let yield_to_mixer = Arc::clone(&source.yield_to_mixer);
-    let mut source =
-        PitchPreservingSource::new(source, speed_control, booster, emitted_samples.clone())?;
-    source.set_yield_to_mixer(yield_to_mixer);
+    let underrun_signal = Arc::new(AtomicBool::new(false));
+    let buffered_source =
+        BufferedSymphoniaSource::new(source, Arc::clone(&underrun_signal))?;
+    let mut source = PitchPreservingSource::new(
+        buffered_source,
+        speed_control,
+        booster,
+        emitted_samples.clone(),
+    )?;
+    source.set_underrun_signal(underrun_signal);
     Ok((source, duration, actual_start))
 }
 
@@ -454,6 +460,410 @@ impl SymphoniaSource {
     }
 }
 
+
+const PREFETCH_CHUNK_SAMPLES: usize = 4_096;
+const PREFETCH_QUEUE_CHUNKS: usize = 64;
+const PREFETCH_STARTUP_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+const PREFETCH_COMMAND_POLL: std::time::Duration = std::time::Duration::from_millis(2);
+
+enum PrefetchCommand {
+    Seek {
+        generation: u64,
+        position: std::time::Duration,
+        response: std::sync::mpsc::SyncSender<Result<(), String>>,
+    },
+}
+
+enum PrefetchMessage {
+    Samples { generation: u64, samples: Vec<f32> },
+    End { generation: u64 },
+}
+
+enum PrefetchSend {
+    Sent,
+    Superseded,
+    Command(PrefetchCommand),
+    Closed,
+}
+
+trait PrefetchableSource: Source<Item = f32> + Send + 'static {
+    fn seek_for_prefetch(&mut self, position: std::time::Duration) -> Result<(), String>;
+    fn take_synthetic_sample(&self) -> bool;
+}
+
+impl PrefetchableSource for SymphoniaSource {
+    fn seek_for_prefetch(&mut self, position: std::time::Duration) -> Result<(), String> {
+        self.seek_to(position.as_secs_f64())
+    }
+
+    fn take_synthetic_sample(&self) -> bool {
+        self.yield_to_mixer.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// Fills a bounded chunk off the device callback. Synthetic samples only mark the end of a
+/// foreign-packet batch; they are omitted while the producer continues scanning.
+fn read_prefetch_chunk<S: PrefetchableSource>(source: &mut S) -> (Vec<f32>, bool) {
+    let mut samples = Vec::with_capacity(PREFETCH_CHUNK_SAMPLES);
+    while samples.len() < PREFETCH_CHUNK_SAMPLES {
+        match source.next() {
+            Some(sample) if source.take_synthetic_sample() => {
+                let _ = sample;
+            }
+            Some(sample) => samples.push(sample),
+            None => return (samples, true),
+        }
+    }
+    (samples, false)
+}
+
+fn send_prefetch_message(
+    sender: &std::sync::mpsc::SyncSender<PrefetchMessage>,
+    commands: &std::sync::mpsc::Receiver<PrefetchCommand>,
+    generation: &AtomicU64,
+    expected_generation: u64,
+    mut message: PrefetchMessage,
+) -> PrefetchSend {
+    loop {
+        if generation.load(Ordering::Acquire) != expected_generation {
+            return PrefetchSend::Superseded;
+        }
+        match sender.try_send(message) {
+            Ok(()) => return PrefetchSend::Sent,
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return PrefetchSend::Closed,
+            Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                message = returned;
+                match commands.recv_timeout(PREFETCH_COMMAND_POLL) {
+                    Ok(command) => return PrefetchSend::Command(command),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        return PrefetchSend::Closed;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_prefetch_worker<S: PrefetchableSource>(
+    mut source: S,
+    commands: std::sync::mpsc::Receiver<PrefetchCommand>,
+    output: std::sync::mpsc::SyncSender<PrefetchMessage>,
+    active_generation: Arc<AtomicU64>,
+) {
+    let mut generation = 0;
+    let mut finished = false;
+    let mut pending_command = None;
+
+    loop {
+        let command = if pending_command.is_some() {
+            pending_command.take()
+        } else if active_generation.load(Ordering::Acquire) != generation || finished {
+            match commands.recv() {
+                Ok(command) => Some(command),
+                Err(_) => return,
+            }
+        } else {
+            match commands.try_recv() {
+                Ok(command) => Some(command),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            }
+        };
+
+        if let Some(PrefetchCommand::Seek {
+            generation: seek_generation,
+            position,
+            response,
+        }) = command
+        {
+            if let Err(error) = source.seek_for_prefetch(position) {
+                let _ = response.send(Err(error));
+                return;
+            }
+            generation = seek_generation;
+            finished = false;
+            let (samples, reached_end) = read_prefetch_chunk(&mut source);
+
+            if !samples.is_empty() {
+                match send_prefetch_message(
+                    &output,
+                    &commands,
+                    &active_generation,
+                    generation,
+                    PrefetchMessage::Samples {
+                        generation,
+                        samples,
+                    },
+                ) {
+                    PrefetchSend::Sent => {}
+                    PrefetchSend::Superseded => {
+                        let _ = response.send(Err("seek superseded".to_string()));
+                        continue;
+                    }
+                    PrefetchSend::Command(command) => {
+                        let _ = response.send(Err("seek superseded".to_string()));
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchSend::Closed => {
+                        let _ = response.send(Err("decoder source closed".to_string()));
+                        return;
+                    }
+                }
+            }
+
+            if reached_end {
+                match send_prefetch_message(
+                    &output,
+                    &commands,
+                    &active_generation,
+                    generation,
+                    PrefetchMessage::End { generation },
+                ) {
+                    PrefetchSend::Sent => {}
+                    PrefetchSend::Superseded => {
+                        let _ = response.send(Err("seek superseded".to_string()));
+                        continue;
+                    }
+                    PrefetchSend::Command(command) => {
+                        let _ = response.send(Err("seek superseded".to_string()));
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchSend::Closed => {
+                        let _ = response.send(Err("decoder source closed".to_string()));
+                        return;
+                    }
+                }
+            }
+
+            let _ = response.send(Ok(()));
+            finished = reached_end;
+            continue;
+        }
+
+        if finished {
+            continue;
+        }
+
+        let (samples, reached_end) = read_prefetch_chunk(&mut source);
+        if !samples.is_empty() {
+            match send_prefetch_message(
+                &output,
+                &commands,
+                &active_generation,
+                generation,
+                PrefetchMessage::Samples {
+                    generation,
+                    samples,
+                },
+            ) {
+                PrefetchSend::Sent => {}
+                PrefetchSend::Superseded => continue,
+                PrefetchSend::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchSend::Closed => return,
+            }
+        }
+
+        if reached_end {
+            match send_prefetch_message(
+                &output,
+                &commands,
+                &active_generation,
+                generation,
+                PrefetchMessage::End { generation },
+            ) {
+                PrefetchSend::Sent => {}
+                PrefetchSend::Superseded => continue,
+                PrefetchSend::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchSend::Closed => return,
+            }
+        }
+        finished = reached_end;
+    }
+}
+
+/// A bounded decoded-sample queue keeps packet reads and decoder work away from Rodio's output
+/// callback. The callback only copies already-decoded samples or marks a brief buffer underrun.
+pub(super) struct BufferedSymphoniaSource {
+    commands: std::sync::mpsc::Sender<PrefetchCommand>,
+    output: std::sync::mpsc::Receiver<PrefetchMessage>,
+    generation: Arc<AtomicU64>,
+    underrun_signal: Arc<AtomicBool>,
+    pending: Vec<f32>,
+    pending_pos: usize,
+    channels: u16,
+    sample_rate: u32,
+    ended: bool,
+}
+
+impl BufferedSymphoniaSource {
+    fn new<S: PrefetchableSource>(
+        source: S,
+        underrun_signal: Arc<AtomicBool>,
+    ) -> Result<Self, String> {
+        let channels = source.channels();
+        let sample_rate = source.sample_rate();
+        let generation = Arc::new(AtomicU64::new(0));
+        let worker_generation = Arc::clone(&generation);
+        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+        let (output_sender, output_receiver) =
+            std::sync::mpsc::sync_channel(PREFETCH_QUEUE_CHUNKS);
+
+        std::thread::Builder::new()
+            .name("tarab-decoder-prefetch".to_string())
+            .spawn(move || {
+                run_prefetch_worker(
+                    source,
+                    command_receiver,
+                    output_sender,
+                    worker_generation,
+                );
+            })
+            .map_err(|error| format!("failed to start decoder prefetch: {error}"))?;
+
+        let (pending, ended) = match output_receiver.recv_timeout(PREFETCH_STARTUP_WAIT) {
+            Ok(PrefetchMessage::Samples {
+                generation: 0,
+                samples,
+            }) => (samples, false),
+            Ok(PrefetchMessage::End { generation: 0 }) => (Vec::new(), true),
+            Ok(_) => (Vec::new(), false),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (Vec::new(), false),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => (Vec::new(), true),
+        };
+
+        Ok(Self {
+            commands: command_sender,
+            output: output_receiver,
+            generation,
+            underrun_signal,
+            pending,
+            pending_pos: 0,
+            channels,
+            sample_rate,
+            ended,
+        })
+    }
+
+    fn receive_next_chunk(&mut self) -> bool {
+        let generation = self.generation.load(Ordering::Acquire);
+        loop {
+            match self.output.try_recv() {
+                Ok(PrefetchMessage::Samples {
+                    generation: message_generation,
+                    samples,
+                }) if message_generation == generation => {
+                    if samples.is_empty() {
+                        continue;
+                    }
+                    self.pending = samples;
+                    self.pending_pos = 0;
+                    return true;
+                }
+                Ok(PrefetchMessage::End {
+                    generation: message_generation,
+                }) if message_generation == generation => {
+                    self.ended = true;
+                    return false;
+                }
+                Ok(_) => continue,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ended = true;
+                    return false;
+                }
+            }
+        }
+    }
+}
+
+impl Iterator for BufferedSymphoniaSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pending_pos >= self.pending.len() {
+            if self.ended {
+                return None;
+            }
+            if !self.receive_next_chunk() {
+                if self.ended {
+                    return None;
+                }
+                self.underrun_signal.store(true, Ordering::Release);
+                return Some(0.0);
+            }
+        }
+
+        let sample = self.pending[self.pending_pos];
+        self.pending_pos += 1;
+        Some(sample)
+    }
+}
+
+impl Source for BufferedSymphoniaSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    fn try_seek(
+        &mut self,
+        position: std::time::Duration,
+    ) -> Result<(), rodio::source::SeekError> {
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        self.pending.clear();
+        self.pending_pos = 0;
+        self.ended = false;
+        self.underrun_signal.store(false, Ordering::Release);
+
+        // Remove queued samples from the old position before asking the producer to seek. New
+        // samples are not sent until the producer receives the command.
+        while self.output.try_recv().is_ok() {}
+
+        let (response_sender, response_receiver) = std::sync::mpsc::sync_channel(1);
+        self.commands
+            .send(PrefetchCommand::Seek {
+                generation,
+                position,
+                response: response_sender,
+            })
+            .map_err(|error| {
+                rodio::source::SeekError::Other(Box::new(std::io::Error::other(
+                    error.to_string(),
+                )))
+            })?;
+
+        match response_receiver.recv() {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(rodio::source::SeekError::Other(Box::new(
+                std::io::Error::other(error),
+            ))),
+            Err(error) => Err(rodio::source::SeekError::Other(Box::new(
+                std::io::Error::other(error.to_string()),
+            ))),
+        }
+    }
+}
+
 pub(super) fn apply_booster(sample: f32, gain: f32) -> f32 {
     if sample.is_nan() || gain.is_nan() {
         return 0.0;
@@ -712,6 +1122,97 @@ mod tests {
         fn last_decoded(&self) -> symphonia::core::audio::AudioBufferRef<'_> {
             self.inner.last_decoded()
         }
+    }
+
+    struct PrefetchProbeSource {
+        foreign_batches: usize,
+        samples_left: usize,
+        synthetic_sample: Arc<AtomicBool>,
+        last_read_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
+    }
+
+    impl Iterator for PrefetchProbeSource {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Ok(mut thread) = self.last_read_thread.lock() {
+                *thread = Some(std::thread::current().id());
+            }
+            if self.foreign_batches > 0 {
+                self.foreign_batches -= 1;
+                self.synthetic_sample.store(true, Ordering::Release);
+                return Some(0.0);
+            }
+            if self.samples_left == 0 {
+                return None;
+            }
+            self.samples_left -= 1;
+            Some(0.25)
+        }
+    }
+
+    impl Source for PrefetchProbeSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> u16 {
+            2
+        }
+
+        fn sample_rate(&self) -> u32 {
+            44_100
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+
+        fn try_seek(&mut self, _position: Duration) -> Result<(), SeekError> {
+            Ok(())
+        }
+    }
+
+    impl PrefetchableSource for PrefetchProbeSource {
+        fn seek_for_prefetch(&mut self, _position: Duration) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn take_synthetic_sample(&self) -> bool {
+            self.synthetic_sample.swap(false, Ordering::AcqRel)
+        }
+    }
+
+    #[test]
+    fn callback_pulls_prefilled_audio_after_foreign_packet_batches() {
+        let read_thread = Arc::new(std::sync::Mutex::new(None));
+        let source = PrefetchProbeSource {
+            foreign_batches: 8,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::clone(&read_thread),
+        };
+        let underrun = Arc::new(AtomicBool::new(false));
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun)).expect("start prefetch");
+
+        let producer_thread = read_thread
+            .lock()
+            .expect("read thread lock")
+            .expect("producer decoded before playback started");
+        assert_ne!(producer_thread, std::thread::current().id());
+
+        // One modeled 512-frame stereo callback only drains the prefilled queue.
+        let output: Vec<_> = (0..1_024)
+            .map(|_| buffered.next().expect("prefilled sample"))
+            .collect();
+        assert!(output.iter().all(|sample| (*sample - 0.25).abs() < f32::EPSILON));
+        assert_eq!(
+            *read_thread.lock().expect("read thread lock"),
+            Some(producer_thread),
+            "callback pulls must not call into the decoder source"
+        );
+        assert!(!underrun.load(Ordering::Acquire));
     }
 
     #[test]
