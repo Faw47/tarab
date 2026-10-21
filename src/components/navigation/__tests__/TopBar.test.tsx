@@ -56,3 +56,22 @@ describe('neo search metadata direction (FE-22)', () => {
     expect(screen.getByRole('textbox', { name: 'Search library' })).toHaveAttribute('dir', 'auto');
   });
 });
+
+
+describe('command palette discovery (FE-35)', () => {
+  it('offers a top-bar button for opening the command palette', () => {
+    render(
+      <TopBar
+        navMode="topNav"
+        currentView="home"
+        onNavigate={vi.fn()}
+        searchQuery=""
+        onSearchChange={vi.fn()}
+        isScanning={false}
+        scanProgress={0}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /open command palette/i })).toBeInTheDocument();
+  });
+});
