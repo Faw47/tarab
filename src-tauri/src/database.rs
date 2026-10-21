@@ -1219,6 +1219,35 @@ mod tests {
     }
 
     #[test]
+    fn reconcile_folder_scan_does_not_delete_tracks_from_ascii_case_distinct_folder() {
+        let db = test_db();
+        let mut scanned_folder_track = sample_track("scanned-folder");
+        scanned_folder_track.id = "/Music/Rock/missing.mp3".to_string();
+        scanned_folder_track.file_path = scanned_folder_track.id.clone();
+        let mut case_distinct_track = sample_track("case-distinct-folder");
+        case_distinct_track.id = "/music/rock/kept.mp3".to_string();
+        case_distinct_track.file_path = case_distinct_track.id.clone();
+        db.upsert_tracks_batch(&[scanned_folder_track.clone(), case_distinct_track.clone()])
+            .expect("seed tracks");
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/Music/Rock".to_string(),
+                discovered_paths: Vec::new(),
+                tracks: Vec::new(),
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile case-sensitive folder");
+
+        assert_eq!(result.missing_count, 1);
+        let stored = db
+            .get_tracks_by_ids(&[scanned_folder_track.id, case_distinct_track.id.clone()])
+            .expect("read reconciled tracks");
+        assert!(stored.iter().any(|track| track.id == case_distinct_track.id));
+    }
+
+    #[test]
     fn reconcile_folder_scan_preserves_user_fields_and_unreadable_discovered_rows() {
         let db = test_db();
         let mut updated = sample_track("updated");
