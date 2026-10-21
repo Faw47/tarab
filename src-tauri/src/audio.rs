@@ -2198,6 +2198,8 @@ mod bounded_seek_tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
         let (sink, _queue) = Sink::new_idle();
+        sink.append(rodio::source::SineWave::new(440.0));
+        assert!(!sink.empty());
         let sink = Arc::new(sink);
         let mut current_sink = Some(Arc::clone(&sink));
         let mut crossfade = None;
@@ -2224,7 +2226,7 @@ mod bounded_seek_tests {
         assert!(pending.is_empty());
         assert!(pending_path.lock().is_none());
         assert!(current_sink.is_none());
-        assert!(sink.is_paused());
+        assert!(sink.empty());
         assert_eq!(active_counter.load(Ordering::Relaxed), 0);
         assert!(stream_bundle.is_none());
         let playback = state.lock();
