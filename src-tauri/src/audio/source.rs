@@ -83,9 +83,11 @@ pub(super) fn prepare_source(
         (state.speed_control.clone(), state.booster.clone())
     };
     let real_content_started = Arc::clone(&source.real_content_started);
+    let yield_to_mixer = Arc::clone(&source.yield_to_mixer);
     let mut source =
         PitchPreservingSource::new(source, speed_control, booster, emitted_samples.clone())?;
     source.set_real_content_started(real_content_started);
+    source.set_yield_to_mixer(yield_to_mixer);
     Ok((source, duration, actual_start))
 }
 
@@ -292,6 +294,7 @@ pub(super) struct SymphoniaSource {
     channels: u16,
     sample_rate: u32,
     real_content_started: Arc<AtomicBool>,
+    yield_to_mixer: Arc<AtomicBool>,
 }
 
 fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
@@ -332,6 +335,7 @@ impl SymphoniaSource {
             channels,
             sample_rate,
             real_content_started: Arc::new(AtomicBool::new(false)),
+            yield_to_mixer: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -490,12 +494,16 @@ impl Iterator for SymphoniaSource {
         if self.buf_pos >= self.buffer.len() {
             match self.refill()? {
                 RefillResult::SamplesReady => {}
-                RefillResult::YieldToMixer => return Some(0.0),
+                RefillResult::YieldToMixer => {
+                    self.yield_to_mixer.store(true, Ordering::Release);
+                    return Some(0.0);
+                }
             }
         }
 
         let sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
+        self.yield_to_mixer.store(false, Ordering::Release);
         self.real_content_started.store(true, Ordering::Release);
         Some(sample)
     }
