@@ -625,11 +625,12 @@ impl Database {
 
         let rows = {
             let mut statement = conn.prepare("SELECT id, file_path FROM tracks")?;
-            statement
+            let rows = statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?
-                .collect::<SqliteResult<Vec<_>>>()?
+                .collect::<SqliteResult<Vec<_>>>()?;
+            rows
         };
         let mut update = conn.prepare_cached("UPDATE tracks SET public_id = ?1 WHERE id = ?2")?;
         for (id, file_path) in rows {
