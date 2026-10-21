@@ -389,6 +389,11 @@ pub fn load_library_roots_state(app: &AppHandle) -> Result<SharedLibraryRoots, S
         roots,
         grants,
         transient_files: Vec::new(),
+        active_transient_file: None,
+        pending_transient_file_grants: HashMap::new(),
+        preloaded_queue_entry: None,
+        active_playback_generation: None,
+        pending_playback_generation: None,
         transient_playback_generation: 0,
         grants_version: 0,
     })))

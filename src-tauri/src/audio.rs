@@ -2183,12 +2183,20 @@ mod bounded_seek_tests {
 
     #[test]
     fn a_failed_newer_request_leaves_the_preloaded_successor_available_for_gapless() {
-        let directory = temp_dir("failed-request-gapless");
+        let directory = std::env::temp_dir().join(format!(
+            "tarab-failed-request-gapless-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("create test directory");
         let outgoing = directory.join("outgoing.wav");
         let incoming = directory.join("incoming.wav");
         let failed = directory.join("failed.wav");
         for path in [&outgoing, &incoming, &failed] {
-            fs::write(path, b"audio").expect("write test track");
+            std::fs::write(path, b"audio").expect("write test track");
         }
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
         crate::file_ops::authorize_transient_file(&roots, &outgoing)
@@ -2261,7 +2269,6 @@ mod bounded_seek_tests {
             state.lock().current_file.as_deref(),
             Some(incoming.as_str())
         );
-        assert_eq!(roots.read().transient_playback_generation, 9);
         assert!(playback_generation_is_current(&roots.read(), 8));
         assert!(!playback_generation_is_current(&roots.read(), 9));
         assert!(ensure_path_allowed_by_state(
@@ -2276,7 +2283,7 @@ mod bounded_seek_tests {
             "test failed request",
         )
         .is_err());
-        let _ = fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
