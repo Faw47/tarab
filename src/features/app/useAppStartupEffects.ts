@@ -18,7 +18,7 @@ interface UseAppStartupEffectsOptions {
 
 export function useAppStartupEffects({ currentView, preloadModules }: UseAppStartupEffectsOptions) {
   const startupLoggedRef = useRef(false);
-  const autostartSyncInFlightRef = useRef(false);
+  const firstLibraryRenderRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +55,6 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
       window.removeEventListener('focus', onFocus);
     };
   }, []);
-  const firstLibraryRenderRef = useRef(false);
 
   useEffect(() => {
     type IdleWindow = Window & {
