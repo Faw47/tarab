@@ -25,7 +25,7 @@ pub(super) fn normalized_progress(elapsed: Duration, duration: Duration) -> f32 
 
 pub(super) fn crossfade_elapsed(
     start: Instant,
-    _paused_at: Option<Instant>,
+    paused_at: Option<Instant>,
     now: Instant,
 ) -> Duration {
     paused_at.unwrap_or(now).saturating_duration_since(start)
@@ -122,11 +122,7 @@ mod tests {
         let resumed_start = resume_crossfade_clock(start, Some(paused_at), resumed_at);
 
         assert_eq!(
-            crossfade_elapsed(
-                resumed_start,
-                None,
-                resumed_at + Duration::from_millis(500)
-            ),
+            crossfade_elapsed(resumed_start, None, resumed_at + Duration::from_millis(500)),
             Duration::from_millis(750)
         );
     }
