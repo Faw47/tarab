@@ -961,7 +961,9 @@ mod tests {
             .prepare("EXPLAIN QUERY PLAN SELECT id FROM tracks WHERE public_id = ?1")
             .expect("prepare public ID lookup plan");
         let details = statement
-            .query_map(rusqlite::params!["c".repeat(64)], |row| row.get::<_, String>(3))
+            .query_map(rusqlite::params!["c".repeat(64)], |row| {
+                row.get::<_, String>(3)
+            })
             .expect("query public ID lookup plan")
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("collect public ID lookup plan");
@@ -1042,10 +1044,8 @@ mod tests {
     fn migration_v11_backfills_and_indexes_existing_public_track_ids() {
         let db = test_db();
         let conn = Connection::open_in_memory().expect("open legacy database");
-        conn.execute_batch(
-            "CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT NOT NULL);",
-        )
-        .expect("create legacy tracks table");
+        conn.execute_batch("CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT NOT NULL);")
+            .expect("create legacy tracks table");
         let file_path = "/tmp/legacy-public-track.mp3";
         conn.execute(
             "INSERT INTO tracks (id, file_path) VALUES (?1, ?2)",
