@@ -1,4 +1,5 @@
 import { normalizePath } from '../../lib/path-utils';
+import type { DbTrackPageCursor } from '../../lib/tauri-commands';
 import {
   dbGetAlbumAggregates,
   dbGetArtistAggregates,
@@ -13,7 +14,6 @@ import {
   dbSearchTracks,
   searchLyrics,
 } from '../../lib/tauri-commands';
-import type { DbTrackPageCursor } from '../../lib/tauri-commands';
 import {
   DbAlbumAggregateArraySchema,
   DbArtistAggregateArraySchema,
