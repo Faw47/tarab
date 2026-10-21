@@ -1,4 +1,5 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isEnabled } from '@tauri-apps/plugin-autostart';
 import { useEffect, useRef } from 'react';
 import type { NavView } from '../../components/navigation';
 import { recordPerfBudget } from '../../lib/performance';
@@ -17,6 +18,42 @@ interface UseAppStartupEffectsOptions {
 
 export function useAppStartupEffects({ currentView, preloadModules }: UseAppStartupEffectsOptions) {
   const startupLoggedRef = useRef(false);
+  const autostartSyncInFlightRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncAutostartFromSystem = async () => {
+      if (autostartSyncInFlightRef.current) return;
+      autostartSyncInFlightRef.current = true;
+      try {
+        const enabled = await isEnabled();
+        if (cancelled) return;
+        const settings = useSettingsStore.getState();
+        if (settings.autostartEnabled !== enabled) {
+          settings.setAutostartEnabled(enabled);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          reportError('Failed to read open at login setting', {
+            source: 'app-startup',
+            error,
+          });
+        }
+      } finally {
+        autostartSyncInFlightRef.current = false;
+      }
+    };
+
+    const onFocus = () => {
+      void syncAutostartFromSystem();
+    };
+    void syncAutostartFromSystem();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
   const firstLibraryRenderRef = useRef(false);
 
   useEffect(() => {
