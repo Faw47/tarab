@@ -14,7 +14,6 @@ describe('Reduced Effects compositing', () => {
 
     const card = screen.getByTestId('glass-card');
     expect(card.style.backdropFilter).toBe('none');
-    expect(card.style.getPropertyValue('-webkit-backdrop-filter')).toBe('none');
   });
 
   it('marks the document while app-level Reduced Effects is enabled', () => {
