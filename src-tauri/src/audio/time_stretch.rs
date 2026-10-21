@@ -3,7 +3,7 @@ use super::state::{BoosterGain, SpeedControl};
 use rodio::source::SeekError;
 use rodio::Source;
 use std::num::{NonZeroU16, NonZeroU32};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use wsola::TimeStretch;
 
@@ -17,6 +17,7 @@ pub(super) struct PitchPreservingSource<S> {
     speed_control: SpeedControl,
     booster: BoosterGain,
     emitted_samples: Arc<AtomicU64>,
+    real_content_started: Arc<AtomicBool>,
     channels: usize,
     input: Vec<f32>,
     output: Vec<f32>,
@@ -50,6 +51,7 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             speed_control,
             booster,
             emitted_samples,
+            real_content_started: Arc::new(AtomicBool::new(true)),
             channels,
             input: Vec::with_capacity(INPUT_FRAMES * channels),
             output: Vec::with_capacity(OUTPUT_SAMPLES),
@@ -59,6 +61,14 @@ impl<S: Source<Item = f32>> PitchPreservingSource<S> {
             input_finished: false,
             drained: false,
         })
+    }
+
+    pub(super) fn set_real_content_started(&mut self, started: Arc<AtomicBool>) {
+        self.real_content_started = started;
+    }
+
+    pub(super) fn real_content_started(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.real_content_started)
     }
 
     fn refill_output(&mut self) -> bool {
