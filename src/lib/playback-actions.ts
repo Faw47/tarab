@@ -198,7 +198,9 @@ const playAdjacentTrackOnce = async (
 
     if (previous.restartCurrent) {
       const intervention = getPlaybackInterventionEpoch();
-      const track = await hydrateQueueTrackMetadata(previous.track);
+      const track = previous.track._lazyQueueEntry
+        ? await hydrateQueueTrackMetadata(previous.track)
+        : previous.track;
       if (getPlaybackInterventionEpoch() !== intervention) return null;
 
       const freshState = usePlayerStore.getState();
@@ -218,7 +220,9 @@ const playAdjacentTrackOnce = async (
 
     notePlaybackIntervention();
     const intervention = getPlaybackInterventionEpoch();
-    const track = await hydrateQueueTrackMetadata(previous.track);
+    const track = previous.track._lazyQueueEntry
+      ? await hydrateQueueTrackMetadata(previous.track)
+      : previous.track;
     if (getPlaybackInterventionEpoch() !== intervention) return null;
     const index = findQueueEntryIndex(track);
     if (index < 0) return null;
@@ -244,7 +248,9 @@ const playAdjacentTrackOnce = async (
 
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
-  const track = await hydrateQueueTrackMetadata(next.track);
+  const track = next.track._lazyQueueEntry
+    ? await hydrateQueueTrackMetadata(next.track)
+    : next.track;
   if (getPlaybackInterventionEpoch() !== intervention) return null;
   const index = findQueueEntryIndex(track);
   if (index < 0) return null;
