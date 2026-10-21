@@ -225,8 +225,11 @@ mod tests {
             fs::write(&path, serde_json::to_vec(&values).unwrap()).unwrap();
             assert_eq!(read_image_cache_limit_mb(&path).unwrap(), Some(expected));
         }
-        fs::write(&path, br#"{"tarab-settings":{"state":{"cacheSizeLimitMb":"bad"}}}"#)
-            .unwrap();
+        fs::write(
+            &path,
+            br#"{"tarab-settings":{"state":{"cacheSizeLimitMb":"bad"}}}"#,
+        )
+        .unwrap();
         assert_eq!(read_image_cache_limit_mb(&path).unwrap(), None);
         let _ = fs::remove_dir_all(root);
     }

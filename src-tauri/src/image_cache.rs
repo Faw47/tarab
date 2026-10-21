@@ -248,9 +248,9 @@ impl ImageCache {
 
     /// Both IPC and the cover-art protocol share the bounded memory cache.
     pub fn get_thumbnail(&self, hash: &str, size: &str) -> Result<Option<String>, String> {
-        Ok(self.get_thumbnail_bytes(hash, size)?.map(|bytes| {
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
-        }))
+        Ok(self
+            .get_thumbnail_bytes(hash, size)?
+            .map(|bytes| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)))
     }
 
     pub fn get_thumbnail_bytes(&self, hash: &str, size: &str) -> Result<Option<Vec<u8>>, String> {
@@ -447,11 +447,13 @@ impl ImageCache {
                     let name = entry.file_name().to_string_lossy().into_owned();
                     let hash = name.split('_').next().unwrap_or(&name).to_string();
                     let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
-                    let group = groups.entry(hash.clone()).or_insert_with(|| ThumbnailGroup {
-                        hash,
-                        accessed: modified,
-                        files: Vec::new(),
-                    });
+                    let group = groups
+                        .entry(hash.clone())
+                        .or_insert_with(|| ThumbnailGroup {
+                            hash,
+                            accessed: modified,
+                            files: Vec::new(),
+                        });
                     group.accessed = group.accessed.max(modified);
                     group.files.push((entry.path(), metadata.len()));
                     current_size = current_size.saturating_add(metadata.len());
