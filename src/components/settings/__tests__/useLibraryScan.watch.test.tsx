@@ -10,7 +10,7 @@ import {
 } from '../library-watch-targets';
 import { useLibraryScan } from '../useLibraryScan';
 
-const { listeners, scanLibraryMock, reconcileMock } = vi.hoisted(() => ({
+const { listeners, scanLibraryMock, batchMetadataMock, reconcileMock } = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => unknown>(),
   scanLibraryMock: vi.fn(),
   batchMetadataMock: vi.fn(),
