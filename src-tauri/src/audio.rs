@@ -1096,36 +1096,36 @@ impl AudioManager {
                                         source2,
                                         real_content_started,
                                         move || {
-                                        let committed = commit_gapless_handoff(
-                                            &state_emit,
-                                            &handoff_cancelled_for_callback,
-                                            &active_slot,
-                                            Arc::clone(&cnt_next),
-                                            &next_clone,
-                                            next_generation,
-                                            duration2,
-                                            actual_start2,
-                                            sr2,
-                                            ch2,
-                                        );
-                                        if !committed {
-                                            return;
-                                        }
-                                        let ended = PlaybackEndedPayload {
-                                            path: Some(out_clone),
-                                            generation: outgoing_generation,
-                                            seamless: true,
-                                            next_generation: Some(next_generation),
-                                            next_path: Some(next_clone.clone()),
-                                        };
-                                        // The audio thread emits after the commands already queued.
-                                        let _ = handoff_sender.send(
-                                            AudioCommand::GaplessHandoffStarted {
-                                                ended,
+                                            let committed = commit_gapless_handoff(
+                                                &state_emit,
+                                                &handoff_cancelled_for_callback,
+                                                &active_slot,
+                                                Arc::clone(&cnt_next),
+                                                &next_clone,
                                                 next_generation,
-                                                next_path: next_clone,
-                                            },
-                                        );
+                                                duration2,
+                                                actual_start2,
+                                                sr2,
+                                                ch2,
+                                            );
+                                            if !committed {
+                                                return;
+                                            }
+                                            let ended = PlaybackEndedPayload {
+                                                path: Some(out_clone),
+                                                generation: outgoing_generation,
+                                                seamless: true,
+                                                next_generation: Some(next_generation),
+                                                next_path: Some(next_clone.clone()),
+                                            };
+                                            // The audio thread emits after the commands already queued.
+                                            let _ = handoff_sender.send(
+                                                AudioCommand::GaplessHandoffStarted {
+                                                    ended,
+                                                    next_generation,
+                                                    next_path: next_clone,
+                                                },
+                                            );
                                         },
                                     );
 
