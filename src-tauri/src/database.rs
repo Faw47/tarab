@@ -1309,6 +1309,50 @@ mod tests {
     }
 
     #[test]
+    fn library_stats_read_is_not_blocked_by_the_writer_connection() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let base_dir =
+            std::env::temp_dir().join(format!("tarab-ar20-readers-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&base_dir).expect("create database directory");
+        let database =
+            Arc::new(Database::new(base_dir.join("library.db")).expect("create test database"));
+
+        let writer = database.conn.lock();
+        let reader_database = Arc::clone(&database);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            started_tx.send(()).expect("signal reader start");
+            let result = reader_database.get_library_stats();
+            finished_tx.send(result).expect("send read result");
+        });
+
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reader thread should start");
+        let finished_without_writer = matches!(
+            finished_rx.recv_timeout(Duration::from_millis(500)),
+            Ok(Ok(_))
+        );
+
+        drop(writer);
+        reader.join().expect("join reader thread");
+        drop(database);
+        let _ = std::fs::remove_dir_all(&base_dir);
+
+        assert!(
+            finished_without_writer,
+            "library reads should use a read connection instead of waiting for the writer mutex"
+        );
+    }
+
+    #[test]
     fn legacy_storage_directory_is_migrated_to_app_identifier() {
         let base_dir = std::env::temp_dir().join(format!(
             "tarab-storage-migration-{}",
