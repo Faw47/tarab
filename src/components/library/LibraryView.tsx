@@ -543,6 +543,7 @@ export const LibraryArtistsGrid = memo(function LibraryArtistsGrid({
   return (
     <VirtualizedGrid
       items={items}
+      ariaLabel="Library artists"
       minColumnWidth={ARTIST_ALBUM_GRID_MIN_COLUMN}
       overscan={2}
       className="h-[70vh]"
@@ -562,6 +563,7 @@ export const LibraryAlbumsGrid = memo(function LibraryAlbumsGrid({
   return (
     <VirtualizedGrid
       items={items}
+      ariaLabel="Library albums"
       minColumnWidth={ARTIST_ALBUM_GRID_MIN_COLUMN}
       overscan={2}
       className="h-[70vh]"
