@@ -108,11 +108,6 @@ impl Database {
             ));
         }
         let folder_prefix = format!("{}/", trimmed);
-        let escaped_prefix = folder_prefix
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_pattern = format!("{}%", escaped_prefix);
 
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
@@ -122,11 +117,12 @@ impl Database {
                         has_cover_art, cover_art_hash, blurhash, date_added, play_count, last_played, rating
                         ,track_number, disc_number, file_format, bitrate, sample_rate, file_size
                  FROM tracks
-                 WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
+                 WHERE file_path = ?1
+                    OR substr(file_path, 1, length(?2)) = ?2 COLLATE BINARY",
             )?;
             let rows = stmt
                 .query_map(
-                    params![normalized_folder, like_pattern],
+                    params![normalized_folder, folder_prefix],
                     Self::map_db_track_row,
                 )?
                 .collect::<SqliteResult<Vec<_>>>()?;
@@ -772,21 +768,21 @@ impl Database {
         } else {
             format!("{}/", normalized_folder)
         };
-        // Escape special LIKE characters with a backslash
-        let escaped = normalized
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let like_pattern = format!("{}%", escaped);
         let tx = conn.transaction()?;
         tx.execute(
-            "DELETE FROM lyrics_index WHERE track_id = ?1 OR track_id LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM lyrics_index
+             WHERE track_id = ?1
+                OR substr(track_id, 1, length(?2)) COLLATE BINARY = ?2",
+            params![normalized_folder, normalized],
         )?;
-        // Query using normalized paths only (database should have normalized paths)
+        // Query using normalized paths only (database should have normalized paths).
+        // The binary prefix preserves case-sensitive siblings and the trailing slash prevents
+        // matching names such as "/music/folder-backup".
         let count = tx.execute(
-            "DELETE FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\'",
-            params![normalized_folder, like_pattern],
+            "DELETE FROM tracks
+             WHERE file_path = ?1
+                OR substr(file_path, 1, length(?2)) COLLATE BINARY = ?2",
+            params![normalized_folder, normalized],
         )?;
         tx.commit()?;
         Ok(count)

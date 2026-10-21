@@ -1160,22 +1160,45 @@ mod tests {
     }
 
     #[test]
-    fn deleting_tracks_by_folder_cleans_lyrics_index() {
+    fn deleting_tracks_by_folder_cleans_lyrics_and_preserves_case_siblings() {
         let db = test_db();
         let mut inside = sample_track("inside");
         inside.id = "/tmp/folder/inside.mp3".to_string();
         inside.file_path = inside.id.clone();
+        let mut case_distinct = sample_track("case-distinct");
+        case_distinct.id = "/tmp/FOLDER/sibling.mp3".to_string();
+        case_distinct.file_path = case_distinct.id.clone();
+        let mut prefix_sibling = sample_track("prefix-sibling");
+        prefix_sibling.id = "/tmp/folder-backup/sibling.mp3".to_string();
+        prefix_sibling.file_path = prefix_sibling.id.clone();
         let mut outside = sample_track("outside");
         outside.id = "/tmp/other/outside.mp3".to_string();
         outside.file_path = outside.id.clone();
-        db.upsert_tracks_batch(&[inside.clone(), outside.clone()])
-            .expect("seed tracks");
+        db.upsert_tracks_batch(&[
+            inside.clone(),
+            case_distinct.clone(),
+            prefix_sibling.clone(),
+            outside.clone(),
+        ])
+        .expect("seed tracks");
         db.upsert_lyrics_index_batch(&[
             LyricsIndexEntry {
                 track_id: inside.id.clone(),
                 lyrics_path: "/tmp/folder/inside.lrc".to_string(),
                 lyrics_mtime: 1,
                 content: "inside".to_string(),
+            },
+            LyricsIndexEntry {
+                track_id: case_distinct.id.clone(),
+                lyrics_path: "/tmp/FOLDER/sibling.lrc".to_string(),
+                lyrics_mtime: 1,
+                content: "case distinct".to_string(),
+            },
+            LyricsIndexEntry {
+                track_id: prefix_sibling.id.clone(),
+                lyrics_path: "/tmp/folder-backup/sibling.lrc".to_string(),
+                lyrics_mtime: 1,
+                content: "prefix sibling".to_string(),
             },
             LyricsIndexEntry {
                 track_id: outside.id.clone(),
@@ -1191,14 +1214,18 @@ mod tests {
                 .expect("delete folder"),
             1
         );
+        assert_eq!(db.get_track_count().expect("count surviving tracks"), 3);
 
-        let ids = db
+        let mut ids = db
             .get_lyrics_index_meta()
             .expect("read lyrics index")
             .into_iter()
             .map(|entry| entry.track_id)
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec![outside.id]);
+        ids.sort();
+        let mut expected = vec![case_distinct.id, prefix_sibling.id, outside.id];
+        expected.sort();
+        assert_eq!(ids, expected);
     }
 
     #[test]
@@ -1216,6 +1243,38 @@ mod tests {
         }
 
         assert_eq!(db.get_track_count().expect("track count"), 1);
+    }
+
+    #[test]
+    fn reconcile_folder_scan_does_not_delete_tracks_from_ascii_case_distinct_folder() {
+        let db = test_db();
+        let mut scanned_folder_track = sample_track("scanned-folder");
+        scanned_folder_track.id = "/Music/Rock/missing.mp3".to_string();
+        scanned_folder_track.file_path = scanned_folder_track.id.clone();
+        let mut case_distinct_track = sample_track("case-distinct-folder");
+        case_distinct_track.id = "/music/rock/kept.mp3".to_string();
+        case_distinct_track.file_path = case_distinct_track.id.clone();
+        db.upsert_tracks_batch(&[scanned_folder_track.clone(), case_distinct_track.clone()])
+            .expect("seed tracks");
+
+        let result = db
+            .reconcile_folder_scan(ScanReconcileRequest {
+                folder_path: "/Music/Rock".to_string(),
+                discovered_paths: Vec::new(),
+                tracks: Vec::new(),
+                traversal_complete: true,
+                errors: Vec::new(),
+            })
+            .expect("reconcile case-sensitive folder");
+
+        assert_eq!(result.missing_count, 1);
+        let stored = db
+            .get_tracks_by_ids(&[scanned_folder_track.id, case_distinct_track.id.clone()])
+            .expect("read reconciled tracks");
+        let case_distinct_track_is_kept = stored
+            .iter()
+            .any(|track| track.id == case_distinct_track.id);
+        assert!(case_distinct_track_is_kept);
     }
 
     #[test]
