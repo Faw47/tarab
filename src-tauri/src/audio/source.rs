@@ -539,10 +539,7 @@ pub(super) struct GaplessHandoffSource<S> {
 }
 
 impl<S> GaplessHandoffSource<S> {
-    pub(super) fn new(
-        inner: S,
-        on_first_sample: impl FnOnce() -> bool + Send + 'static,
-    ) -> Self {
+    pub(super) fn new(inner: S, on_first_sample: impl FnOnce() -> bool + Send + 'static) -> Self {
         Self {
             inner,
             on_first_sample: Some(Box::new(on_first_sample)),

@@ -135,17 +135,13 @@ fn prepared_sources_and_gapless_handoffs_reject_superseded_generations() {
 
 #[test]
 fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() {
-    let crossfade = audio_command_arm(
-        "AudioCommand::CrossfadeTo",
-    );
+    let crossfade = audio_command_arm("AudioCommand::CrossfadeTo");
     assert!(
         crossfade.contains("play_with_source") && crossfade.contains("&roots_for_audio"),
         "crossfade source installation must commit its current generation and transient grant atomically"
     );
 
-    let gapless = audio_command_arm(
-        "AudioCommand::GaplessHandoffStarted",
-    );
+    let gapless = audio_command_arm("AudioCommand::GaplessHandoffStarted");
     let stop_arm = audio_command_arm("AudioCommand::Stop");
     assert!(
         stop_arm.contains("clear_transient_file_grants_at_generation"),

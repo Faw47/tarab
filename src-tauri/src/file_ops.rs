@@ -763,10 +763,7 @@ fn prune_superseded_transient_file_grants(
     });
 }
 
-pub(crate) fn playback_generation_is_current(
-    state: &LibraryRootsState,
-    generation: u64,
-) -> bool {
+pub(crate) fn playback_generation_is_current(state: &LibraryRootsState, generation: u64) -> bool {
     if let Some(pending) = state.pending_playback_generation {
         pending == generation && state.transient_playback_generation == generation
     } else {
@@ -2108,7 +2105,6 @@ mod tests {
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
         let _ = fs::remove_dir_all(outside);
     }
-
 
     #[test]
     fn superseded_pending_transient_grant_is_revoked_by_newer_library_request() {
