@@ -1,5 +1,5 @@
-import { FolderOpen, HardDrive, Layout, Monitor, Volume2 } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
+import { FolderOpen, HardDrive, Layout, Monitor, Volume2 } from 'lucide-react';
 import {
   memo,
   type ReactNode,
