@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
-import {
   getCommandPaletteShortcutLabel,
   getDirectionalShortcutLabel,
 } from '../../lib/platform-shortcuts';
 import type { AppTheme } from '../../store/settings-store';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 
 interface KeyboardShortcutsDialogProps {
   theme: AppTheme;
