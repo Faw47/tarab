@@ -30,7 +30,7 @@ function frontendSources(dir) {
       if (['__tests__', 'test', 'tests', 'stories'].includes(entry.name)) return [];
       return frontendSources(path);
     }
-    if (!['.ts', '.tsx', '.js', '.jsx'].some((extension) => entry.name.endsWith(extension))) return [];
+    if (!['.ts', '.tsx', '.js', '.jsx'].some((extension) => entry.name.endsWith(extension)))\n      return [];
     if (entry.name.includes('.test.') || entry.name.includes('.stories.')) return [];
     if (entry.name === 'tauri-commands.ts') return [];
     return [readFileSync(path, 'utf8')];
