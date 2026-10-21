@@ -114,9 +114,7 @@ describe('useLibraryScan watcher', () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
 
-    expect(scanLibraryMock.mock.calls.map((call) => call[0])).toEqual([
-      '/music-link/Artist/Album',
-    ]);
+    expect(scanLibraryMock.mock.calls.map((call) => call[0])).toEqual(['/music-link/Artist/Album']);
   });
 
   it('rescans only the folder that changed, not the whole library root', async () => {
