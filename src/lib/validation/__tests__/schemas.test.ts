@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DbAlbumAggregateArraySchema, DbArtistAggregateArraySchema, DbTrackSchema } from '../library';
+import {
+  DbAlbumAggregateArraySchema,
+  DbArtistAggregateArraySchema,
+  DbTrackSchema,
+} from '../library';
 import { PlaylistSummarySchema } from '../playlist';
 import { LyricsSearchResultSchema, SearchResultSchema } from '../search';
 import { SettingsSchema } from '../settings';
@@ -118,17 +122,21 @@ describe('Zod Schemas', () => {
         blurhash: null,
       };
 
-      const album = DbAlbumAggregateArraySchema.parse([{
-        album: 'Album',
-        artist: 'Artist',
-        trackCount: 1,
-        representative,
-      }]);
-      const artist = DbArtistAggregateArraySchema.parse([{
-        artist: 'Artist',
-        trackCount: 1,
-        representative,
-      }]);
+      const album = DbAlbumAggregateArraySchema.parse([
+        {
+          album: 'Album',
+          artist: 'Artist',
+          trackCount: 1,
+          representative,
+        },
+      ]);
+      const artist = DbArtistAggregateArraySchema.parse([
+        {
+          artist: 'Artist',
+          trackCount: 1,
+          representative,
+        },
+      ]);
 
       expect(album[0].representative).toEqual(representative);
       expect(artist[0].representative).toEqual(representative);
