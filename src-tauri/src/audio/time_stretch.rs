@@ -5,7 +5,6 @@ use rodio::Source;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use wsola::TimeStretch;
 
 const INPUT_FRAMES: usize = 1_024;
