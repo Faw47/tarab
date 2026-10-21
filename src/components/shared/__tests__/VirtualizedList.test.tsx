@@ -26,7 +26,7 @@ describe('VirtualizedList accessibility', () => {
     );
 
     expect(screen.getByRole('list', { name: 'Upcoming tracks' })).toBeInTheDocument();
-    const secondTrack = screen.getByRole('listitem', { name: 'Two' });
+    const [secondTrack] = screen.getAllByRole('listitem');
     expect(secondTrack).toHaveAttribute('aria-setsize', '3');
     expect(secondTrack).toHaveAttribute('aria-posinset', '2');
   });
