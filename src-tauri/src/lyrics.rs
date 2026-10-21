@@ -215,19 +215,6 @@ pub async fn get_lyrics_for_track(
     Ok(None)
 }
 
-#[tauri::command]
-pub async fn fetch_lrclib_lyrics(
-    file_path: String,
-    artist: String,
-    title: String,
-    album: String,
-    duration: f64,
-    settings_state: State<'_, SharedFixedStore>,
-) -> Result<Option<String>, String> {
-    let _ = file_path;
-    fetch_lrclib(&artist, &title, &album, duration, settings_state.inner()).await
-}
-
 /// Writes the sidecar through a staged copy and fsync, so it runs off the main thread.
 #[tauri::command]
 pub async fn write_lyrics_for_track(

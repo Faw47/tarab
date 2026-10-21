@@ -23,14 +23,43 @@ const frontendCommands = new Set(
   ),
 );
 
-const backendOnlyCommands = new Set([
-  'clear_progress',
-  'get_cover_art_with_blurhash',
-  'update_progress',
-]);
+function frontendSources(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (['__tests__', 'test', 'tests', 'stories'].includes(entry.name)) return [];
+      return frontendSources(path);
+    }
+    if (!['.ts', '.tsx', '.js', '.jsx'].some((extension) => entry.name.endsWith(extension)))
+      return [];
+    if (entry.name.includes('.test.') || entry.name.includes('.stories.')) return [];
+    if (entry.name === 'tauri-commands.ts') return [];
+    return [readFileSync(path, 'utf8')];
+  });
+}
+
+const frontendUsageSource = frontendSources('src').join(' ');
+const frontendIdentifiers = new Set(frontendUsageSource.split(/[^A-Za-z0-9_$]+/));
+const frontendWrapperNames = [
+  ...frontendSource.matchAll(/export +const +([A-Za-z_$][A-Za-z0-9_$]*) +=/g),
+]
+  .filter((match) => {
+    const start = match.index ?? 0;
+    const remainder = frontendSource.slice(start + match[0].length);
+    const body = remainder.split(String.fromCharCode(10) + 'export ')[0];
+    return body.includes('invoke(') || body.includes('invoke<');
+  })
+  .map((match) => match[1]);
+const unusedFrontendWrappers = frontendWrapperNames
+  .filter((name) => !frontendIdentifiers.has(name))
+  .sort();
+
+if (unusedFrontendWrappers.length) {
+  throw new Error(`Unused Tauri IPC wrappers: ${unusedFrontendWrappers.join(', ')}`);
+}
 
 const missingFrontendWrappers = [...backendCommands]
-  .filter((command) => !frontendCommands.has(command) && !backendOnlyCommands.has(command))
+  .filter((command) => !frontendCommands.has(command))
   .sort();
 const missingBackendCommands = [...frontendCommands]
   .filter((command) => !backendCommands.has(command))

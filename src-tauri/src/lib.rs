@@ -17,10 +17,6 @@ mod session;
 mod shutdown;
 mod startup_failure;
 mod tageditor;
-#[cfg(target_os = "windows")]
-mod taskbar;
-mod vibrancy;
-mod waveform;
 
 use audio::{create_audio_manager, SharedAudioManager};
 use database::create_database;
@@ -33,7 +29,6 @@ use std::time::Instant;
 use tauri::http;
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
-use waveform::{create_waveform_generator, SharedWaveformGenerator};
 
 const MAX_IMAGE_READ_BYTES: u64 = 25 * 1024 * 1024;
 
@@ -234,8 +229,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_media::init())
-        .plugin(tauri_plugin_liquid_glass::init());
+        .plugin(tauri_plugin_media::init());
 
     let app_command_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         // Audio commands
@@ -245,10 +239,7 @@ pub fn run() {
         audio::resume_playback,
         audio::stop_playback,
         audio::seek_playback,
-        audio::get_playback_position,
-        audio::get_duration,
         audio::set_volume,
-        audio::set_volume_ramp,
         audio::set_playback_speed,
         audio::set_crossfade_duration,
         audio::set_audio_booster,
@@ -263,17 +254,13 @@ pub fn run() {
         // Metadata commands
         metadata::get_track_metadata,
         metadata::get_cover_art,
-        metadata::get_cover_art_with_blurhash,
         metadata::resolve_cover_art,
         metadata::get_cover_art_palette,
         metadata::get_batch_metadata,
-        metadata::get_batch_metadata_with_art,
-        metadata::get_batch_cover_art,
         metadata::generate_cover_art_hashes,
         metadata::get_cover_art_data,
         // Lyrics commands
         lyrics::get_lyrics_for_track,
-        lyrics::fetch_lrclib_lyrics,
         lyrics::write_lyrics_for_track,
         lyrics::search_lyrics,
         lyrics::sync_lyrics_index,
@@ -291,7 +278,6 @@ pub fn run() {
         playlist::sync_playlist,
         playlist::remove_missing_from_playlist,
         playlist::reset_playlists_data,
-        playlist::get_playlists_data_path,
         playlist::reveal_playlists_data_folder,
         // Tag editor commands
         tageditor::read_full_tags,
@@ -299,7 +285,6 @@ pub fn run() {
         tageditor::write_tags_batch,
         tageditor::remove_cover_art,
         // Database commands
-        database::db_get_all_tracks,
         database::db_get_tracks_by_ids,
         database::db_get_track_by_public_id,
         database::db_get_tracks_by_album_artist,
@@ -318,25 +303,14 @@ pub fn run() {
         database::db_set_track_rating,
         database::db_get_recently_added,
         database::db_get_most_played,
-        database::get_smart_shuffle_queue,
         database::db_get_library_stats,
         database::db_delete_tracks,
-        database::db_rename_track_path,
         database::db_delete_tracks_by_folder,
         // Image cache commands
-        image_cache::cache_generate_thumbnail,
-        image_cache::cache_get_thumbnail,
         image_cache::cache_get_thumbnail_bytes,
-        image_cache::cache_has_thumbnail,
         image_cache::cache_get_stats,
         image_cache::cache_clear,
         image_cache::cache_enforce_limit,
-        // Waveform commands
-        waveform::waveform_generate,
-        waveform::waveform_cancel,
-        waveform::waveform_has,
-        waveform::waveform_get_stats,
-        waveform::waveform_clear_cache,
         // File operations
         file_ops::rename_file,
         file_ops::move_file,
@@ -358,13 +332,10 @@ pub fn run() {
         get_initial_deep_links,
         // Session
         session::load_playback_session,
-        session::save_playback_session,
         audio::list_audio_output_devices,
         audio::set_audio_output_device,
         audio::preload_next_track,
         // Desktop integration commands
-        desktop_integration::desktop_open_mini_window,
-        desktop_integration::desktop_close_mini_window,
         desktop_integration::desktop_toggle_mini_window,
         desktop_integration::desktop_focus_main_window,
         desktop_integration::desktop_quit_application,
@@ -372,10 +343,6 @@ pub fn run() {
         desktop_integration::desktop_set_native_ui_state,
         desktop_integration::desktop_sync_media_session,
         library_watcher::watch_library_paths,
-        #[cfg(target_os = "windows")]
-        taskbar::update_progress,
-        #[cfg(target_os = "windows")]
-        taskbar::clear_progress,
     ];
 
     let app = builder
@@ -393,10 +360,6 @@ pub fn run() {
 
             // Create image cache
             app.manage(shared_image_cache.clone());
-
-            // Create waveform generator
-            let waveform_gen: SharedWaveformGenerator = create_waveform_generator();
-            app.manage(waveform_gen);
 
             // Manage allowlisted library roots for filesystem operations
             let library_roots: SharedLibraryRoots = match load_library_roots_state(app.handle()) {

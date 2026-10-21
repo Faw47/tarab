@@ -76,7 +76,7 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
     );
 
     for signature in [
-        "pub async fn get_cover_art_with_blurhash(",
+        "async fn get_cover_art_with_blurhash(",
         "pub async fn resolve_cover_art(",
         "pub async fn get_cover_art_data(",
         "pub async fn get_cover_art_palette(",
@@ -86,6 +86,12 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
             "{signature} must honor the exact in-memory file grant"
         );
     }
+
+    let cover_art_command = command_body(METADATA, "pub async fn get_cover_art(");
+    assert!(
+        cover_art_command.contains("get_cover_art_with_blurhash"),
+        "the registered cover-art command must keep using the guarded private helper"
+    );
 
     for signature in ["pub fn crossfade_to_track(", "pub fn preload_next_track("] {
         assert!(

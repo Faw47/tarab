@@ -57,28 +57,8 @@ export const seekPlayback = async (positionSecs: number): Promise<void> => {
   return invoke('seek_playback', { positionSecs });
 };
 
-export const getPlaybackPosition = async (): Promise<number> => {
-  return invoke('get_playback_position');
-};
-
-export const getDuration = async (): Promise<number> => {
-  return invoke('get_duration');
-};
-
 export const setVolume = async (volume: number): Promise<void> => {
   return invoke('set_volume', { volume });
-};
-
-export const setVolumeRamp = async (
-  from: number,
-  to: number,
-  durationMs: number,
-): Promise<void> => {
-  return invoke('set_volume_ramp', {
-    from,
-    to,
-    durationMs: Math.max(0, Math.round(durationMs)),
-  });
 };
 
 export const setPlaybackSpeed = async (speed: number): Promise<void> => {
@@ -117,10 +97,6 @@ export interface PlaybackSessionPayload {
 
 export const loadPlaybackSession = async (): Promise<PlaybackSessionPayload | null> => {
   return invoke('load_playback_session');
-};
-
-export const savePlaybackSession = async (session: PlaybackSessionPayload): Promise<void> => {
-  return invoke('save_playback_session', { session });
 };
 
 type FixedStoreName = 'settings' | 'player' | 'player-queue';
@@ -403,36 +379,8 @@ export interface BatchTrackMetadata {
   file_size: number | null;
 }
 
-export interface BatchTrackMetadataWithArt {
-  title: string;
-  artist: string;
-  album_artist?: string | null;
-  album: string;
-  year: number | null;
-  track_number: number | null;
-  disc_number: number | null;
-  duration_secs: number;
-  file_path: string;
-  cover_art: string | null;
-  blurhash: string | null;
-  file_format: string;
-  bitrate: number | null;
-  sample_rate: number | null;
-  file_size: number | null;
-}
-
 export const getBatchMetadata = async (filePaths: string[]): Promise<BatchTrackMetadata[]> => {
   return ipcBatchLimit(() => invoke('get_batch_metadata', { filePaths }));
-};
-
-export const getBatchMetadataWithArt = async (
-  filePaths: string[],
-): Promise<BatchTrackMetadataWithArt[]> => {
-  return ipcBatchLimit(() => invoke('get_batch_metadata_with_art', { filePaths }));
-};
-
-export const getBatchCoverArt = async (filePaths: string[]): Promise<[string, string | null][]> => {
-  return ipcBatchLimit(() => invoke('get_batch_cover_art', { filePaths }));
 };
 
 export const generateCoverArtHashes = async (
@@ -447,10 +395,6 @@ export const generateCoverArtHashes = async (
   });
 };
 
-export const getSmartShuffleQueue = async (trackIds: string[]): Promise<string[]> => {
-  return invoke('get_smart_shuffle_queue', { trackIds });
-};
-
 // Lyrics commands
 export const getLyricsForTrack = async (
   trackPath: string,
@@ -463,22 +407,6 @@ export const getLyricsForTrack = async (
   return invoke('get_lyrics_for_track', {
     trackPath,
     autoLyrics,
-    artist,
-    title,
-    album,
-    duration,
-  });
-};
-
-export const fetchLrclibLyrics = async (
-  filePath: string,
-  artist: string,
-  title: string,
-  album: string,
-  duration: number,
-): Promise<string | null> => {
-  return invoke('fetch_lrclib_lyrics', {
-    filePath,
     artist,
     title,
     album,
@@ -595,10 +523,6 @@ export const removeMissingFromPlaylist = async (playlistId: string): Promise<Pla
 
 export const resetPlaylistsData = async (): Promise<void> => {
   return invoke('reset_playlists_data');
-};
-
-export const getPlaylistsDataPath = async (): Promise<string> => {
-  return invoke('get_playlists_data_path');
 };
 
 export const revealPlaylistsDataFolder = async (): Promise<void> => {
@@ -734,10 +658,6 @@ export interface LibraryStats {
   albumCount: number;
   totalPlays: number;
 }
-
-export const dbGetAllTracks = async (): Promise<DbTrack[]> => {
-  return invoke('db_get_all_tracks');
-};
 
 export const dbGetTracksByIds = async (ids: string[]): Promise<DbTrack[]> => {
   return invoke('db_get_tracks_by_ids', { ids });
@@ -884,10 +804,6 @@ export const dbDeleteTracks = async (ids: string[]): Promise<number> => {
   return invoke('db_delete_tracks', { ids });
 };
 
-export const dbRenameTrackPath = async (oldPath: string, newPath: string): Promise<void> => {
-  return invoke('db_rename_track_path', { oldPath, newPath });
-};
-
 export const dbDeleteTracksByFolder = async (folderPath: string): Promise<number> => {
   return invoke('db_delete_tracks_by_folder', { folderPath });
 };
@@ -899,21 +815,6 @@ export interface CacheStats {
   fileCount: number;
   oldestFile: number | null;
 }
-
-export const cacheGenerateThumbnail = async (imageDataBase64: string): Promise<string> => {
-  return invoke('cache_generate_thumbnail', { imageData: imageDataBase64 });
-};
-
-export const cacheGetThumbnail = async (
-  hash: string,
-  size: 'small' | 'medium' | 'large',
-): Promise<string | null> => {
-  return invoke('cache_get_thumbnail', { hash, size });
-};
-
-export const cacheHasThumbnail = async (hash: string): Promise<boolean> => {
-  return invoke('cache_has_thumbnail', { hash });
-};
 
 export const cacheGetThumbnailBytes = async (
   hash: string,
@@ -934,50 +835,7 @@ export const cacheEnforceLimit = async (limitMb?: number): Promise<number> => {
   return invoke('cache_enforce_limit', { limitMb });
 };
 
-// ========== Waveform Commands ==========
-
-export interface WaveformData {
-  peaks: number[];
-  durationSecs: number;
-  sampleRate: number;
-  samplesPerSecond: number;
-}
-
-export interface WaveformCacheStats {
-  memoryCount: number;
-  diskCount: number;
-  totalSizeBytes: number;
-}
-
-export const waveformGenerate = async (filePath: string): Promise<WaveformData> => {
-  return invoke('waveform_generate', { filePath });
-};
-
-export const waveformCancel = async (filePath: string): Promise<void> => {
-  return invoke('waveform_cancel', { filePath });
-};
-
-export const waveformHas = async (filePath: string): Promise<boolean> => {
-  return invoke('waveform_has', { filePath });
-};
-
-export const waveformGetStats = async (): Promise<WaveformCacheStats> => {
-  return invoke('waveform_get_stats');
-};
-
-export const waveformClearCache = async (): Promise<number> => {
-  return invoke('waveform_clear_cache');
-};
-
 // ========== Desktop Integration Commands ==========
-
-export const desktopOpenMiniWindow = async (): Promise<void> => {
-  return invoke('desktop_open_mini_window');
-};
-
-export const desktopCloseMiniWindow = async (): Promise<void> => {
-  return invoke('desktop_close_mini_window');
-};
 
 export const desktopToggleMiniWindow = async (): Promise<void> => {
   return invoke('desktop_toggle_mini_window');

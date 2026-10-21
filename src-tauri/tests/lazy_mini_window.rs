@@ -35,23 +35,21 @@ fn mini_window_mutations_are_async_and_toggle_is_serialized() {
         source.contains("mini_window_creation_lock: AsyncMutex<()>"),
         "mini-window operations must use an async lock so synchronous UI commands never block the main thread"
     );
-
-    let open = command_body("desktop_open_mini_window");
     assert!(
-        open.find(".mini_window_creation_lock.lock().await") < open.find("open_mini_window_locked"),
-        "opening must hold the async gate before checking or creating the webview"
-    );
-
-    let close = command_body("desktop_close_mini_window");
-    assert!(
-        close.contains(".mini_window_creation_lock.lock().await")
-            && close.contains("hide_mini_window_locked"),
-        "closing must serialize with in-progress creation"
+        !source.contains("pub async fn desktop_open_mini_window(")
+            && !source.contains("pub async fn desktop_close_mini_window("),
+        "open and close are private transitions controlled through the toggle command"
     );
 
     let toggle = command_body("desktop_toggle_mini_window");
+    let lock_position = toggle
+        .find(".mini_window_creation_lock.lock().await")
+        .expect("toggle acquires the async gate");
+    let visibility_position = toggle
+        .find(".is_visible()")
+        .expect("toggle reads visibility");
     assert!(
-        toggle.find(".mini_window_creation_lock.lock().await") < toggle.find(".is_visible()"),
+        lock_position < visibility_position,
         "toggle must read visibility and apply its transition under the same gate"
     );
     assert!(

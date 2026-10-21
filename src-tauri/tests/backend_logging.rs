@@ -34,7 +34,6 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
         include_str!("../vendor/tauri-plugin-media/src/desktop.rs"),
     ),
     ("shutdown.rs", include_str!("../src/shutdown.rs")),
-    ("vibrancy.rs", include_str!("../src/vibrancy.rs")),
 ];
 
 #[test]

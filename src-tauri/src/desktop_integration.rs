@@ -303,25 +303,6 @@ fn hide_mini_window_locked(app: &AppHandle<Wry>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
-    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
-        return Err("Desktop integration state is unavailable".to_string());
-    };
-    let _creation_lock = state.mini_window_creation_lock.lock().await;
-    open_mini_window_locked(&app, &state)
-}
-
-/// Hides the mini player webview so it can be shown again (does not destroy the window).
-#[tauri::command]
-pub async fn desktop_close_mini_window(app: AppHandle) -> Result<(), String> {
-    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
-        return Ok(());
-    };
-    let _creation_lock = state.mini_window_creation_lock.lock().await;
-    hide_mini_window_locked(&app)
-}
-
-#[tauri::command]
 pub async fn desktop_toggle_mini_window(app: AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<DesktopIntegrationState>() else {
         return Err("Desktop integration state is unavailable".to_string());

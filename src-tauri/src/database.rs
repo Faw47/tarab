@@ -21,7 +21,6 @@ mod tracks;
 const CURRENT_SCHEMA_VERSION: i32 = 12;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
-const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
 const READ_CONNECTION_POOL_SIZE: usize = 3;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -1005,25 +1004,6 @@ fn ensure_upsert_tracks_allowed(tracks: &[DbTrack], roots: &[PathBuf]) -> Result
 }
 
 #[tauri::command]
-pub async fn db_get_all_tracks(
-    db: tauri::State<'_, SharedDatabase>,
-) -> Result<Vec<DbTrack>, String> {
-    let db = db.inner().clone();
-    spawn_blocking(move || {
-        let count = db.get_track_count().map_err(|e| e.to_string())?;
-        if count > DB_GET_ALL_TRACKS_HARD_LIMIT {
-            return Err(format!(
-                "db_get_all_tracks is disabled for libraries larger than {} tracks (current: {}); use db_get_tracks_paginated instead",
-                DB_GET_ALL_TRACKS_HARD_LIMIT, count
-            ));
-        }
-        db.get_all_tracks().map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
 pub async fn db_get_tracks_by_ids(
     ids: Vec<String>,
     db: tauri::State<'_, SharedDatabase>,
@@ -1274,18 +1254,6 @@ pub async fn db_get_queue_track_references(
 }
 
 #[tauri::command]
-pub async fn get_smart_shuffle_queue(
-    track_ids: Vec<String>,
-    db: tauri::State<'_, SharedDatabase>,
-) -> Result<Vec<String>, String> {
-    let db = db.inner().clone();
-    spawn_blocking(move || db.get_smart_shuffle_queue(track_ids))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn db_get_library_stats(
     db: tauri::State<'_, SharedDatabase>,
 ) -> Result<LibraryStats, String> {
@@ -1303,19 +1271,6 @@ pub async fn db_delete_tracks(
 ) -> Result<usize, String> {
     let db = db.inner().clone();
     spawn_blocking(move || db.delete_tracks(&ids))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn db_rename_track_path(
-    old_path: String,
-    new_path: String,
-    db: tauri::State<'_, SharedDatabase>,
-) -> Result<(), String> {
-    let db = db.inner().clone();
-    spawn_blocking(move || db.rename_track_path(&old_path, &new_path))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
