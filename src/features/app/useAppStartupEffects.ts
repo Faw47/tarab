@@ -57,11 +57,17 @@ export function useAppStartupEffects({ currentView, preloadModules }: UseAppStar
     };
 
     const persist = useSettingsStore.persist;
-    const unsubscribeHydration = persist.hasHydrated()
-      ? undefined
-      : persist.onFinishHydration(() => {
-          void syncAutostartFromSystem();
-        });
+    let unsubscribeHydration: (() => void) | undefined;
+    const onHydrationFinished = () => {
+      if (cancelled) return;
+      unsubscribeHydration?.();
+      unsubscribeHydration = undefined;
+      void syncAutostartFromSystem();
+    };
+    if (!persist.hasHydrated()) {
+      unsubscribeHydration = persist.onFinishHydration(onHydrationFinished);
+      if (persist.hasHydrated()) onHydrationFinished();
+    }
 
     const onFocus = () => {
       void syncAutostartFromSystem();
