@@ -16,7 +16,7 @@ describe('createLazyQueueTrack', () => {
       album: '',
       year: null,
       duration: 201.5,
-      filePath: '/music/song.mp3',
+      filePath: '',
       hasCoverArt: false,
       coverArtHash: null,
       dateAdded: 0,
