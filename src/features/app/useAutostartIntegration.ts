@@ -8,25 +8,26 @@ export function useAutostartIntegration() {
   useEffect(() => {
     let cancelled = false;
     let started = false;
-    let readingOs = false;
+    let syncingFromOs = false;
+    let intentRevision = 0;
     let unsubscribe = () => {};
     let pending = Promise.resolve();
 
-    const updateFromOs = (enabled: boolean) => {
-      if (cancelled) return;
-      readingOs = true;
+    const updateFromOs = (enabled: boolean, expectedRevision: number) => {
+      if (cancelled || intentRevision !== expectedRevision) return;
+      syncingFromOs = true;
       try {
         if (useSettingsStore.getState().autostartEnabled !== enabled) {
           useSettingsStore.getState().setAutostartEnabled(enabled);
         }
       } finally {
-        readingOs = false;
+        syncingFromOs = false;
       }
     };
 
-    const readOs = async () => {
+    const readOs = async (expectedRevision: number) => {
       try {
-        updateFromOs(await isEnabled());
+        updateFromOs(await isEnabled(), expectedRevision);
       } catch (error) {
         if (!cancelled) {
           reportError('Failed to read open at login setting', { source: 'app-autostart', error });
@@ -40,32 +41,42 @@ export function useAutostartIntegration() {
       });
     };
 
+    const applyUserSetting = (enabled: boolean, revision: number) => {
+      enqueue(async () => {
+        if (revision !== intentRevision) return;
+        try {
+          if (enabled) await enable();
+          else await disable();
+        } catch (error) {
+          // A newer user choice wins over a slow result from either the OS read or this write.
+          await readOs(revision);
+          if (!cancelled && revision === intentRevision) {
+            reportError('Failed to sync open at login', { source: 'app-autostart', error });
+          }
+        }
+      });
+    };
+
     const refresh = () => {
-      if (started) enqueue(readOs);
+      if (!started) return;
+      const revision = intentRevision;
+      enqueue(() => readOs(revision));
     };
 
     const start = () => {
       if (started || cancelled) return;
       started = true;
-      enqueue(async () => {
-        await readOs();
-        if (cancelled) return;
-        unsubscribe = useSettingsStore.subscribe((state, previous) => {
-          if (readingOs || state.autostartEnabled === previous.autostartEnabled) return;
-          const enabled = state.autostartEnabled;
-          enqueue(async () => {
-            try {
-              if (enabled) await enable();
-              else await disable();
-            } catch (error) {
-              await readOs();
-              if (!cancelled) {
-                reportError('Failed to sync open at login', { source: 'app-autostart', error });
-              }
-            }
-          });
-        });
+
+      // Subscribe before the first asynchronous OS read so a user toggle cannot be lost.
+      unsubscribe = useSettingsStore.subscribe((state, previous) => {
+        if (syncingFromOs || state.autostartEnabled === previous.autostartEnabled) return;
+        const enabled = state.autostartEnabled;
+        const revision = ++intentRevision;
+        applyUserSetting(enabled, revision);
       });
+
+      const revision = intentRevision;
+      enqueue(() => readOs(revision));
     };
 
     const stopHydration = useSettingsStore.persist.onFinishHydration(start);
