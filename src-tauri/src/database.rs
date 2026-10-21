@@ -472,9 +472,7 @@ impl Database {
         Ok(ordered.into_iter().map(|(id, _)| id).collect())
     }
 
-    fn interleave_smart_shuffle_by_artist(
-        ordered: Vec<(String, String)>,
-    ) -> Vec<(String, String)> {
+    fn interleave_smart_shuffle_by_artist(ordered: Vec<(String, String)>) -> Vec<(String, String)> {
         if ordered.len() < 2 {
             return ordered;
         }
@@ -497,8 +495,7 @@ impl Database {
             artist_buckets[bucket_index].push(rank);
         }
 
-        let mut available =
-            std::collections::BTreeSet::<(usize, usize)>::new();
+        let mut available = std::collections::BTreeSet::<(usize, usize)>::new();
         for (artist_index, bucket) in artist_buckets.iter().enumerate() {
             if let Some(rank) = bucket.first() {
                 available.insert((*rank, artist_index));
@@ -524,8 +521,7 @@ impl Database {
             interleaved.push((id.clone(), artist.clone()));
 
             bucket_cursors[artist_index] += 1;
-            if let Some(next_rank) =
-                artist_buckets[artist_index].get(bucket_cursors[artist_index])
+            if let Some(next_rank) = artist_buckets[artist_index].get(bucket_cursors[artist_index])
             {
                 available.insert((*next_rank, artist_index));
             }
