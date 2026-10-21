@@ -137,21 +137,21 @@ export const SettingsShell = memo(function SettingsShell({
           <div
             className={cn(
               'flex min-w-0 items-center justify-between gap-3',
-              isNeobrutalism && 'neo-settings-heading-row',
+              isNeobrutalism && 'neo-settings-heading-layout md:flex-col md:items-stretch',
             )}
           >
             <h1
               className={cn(
                 'mb-1 min-w-0 flex-1 text-text-primary',
                 isNeobrutalism
-                  ? 'border-b-2 border-black pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-black md:text-[2rem]'
+                  ? 'border-b-2 border-black pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-black md:w-full md:text-[2rem]'
                   : 'text-2xl font-bold',
               )}
             >
               Settings
             </h1>
             {isNeobrutalism && appVersion && (
-              <span className="neo-version-badge">TARAB V{appVersion}</span>
+              <span className="neo-version-badge md:self-end">TARAB V{appVersion}</span>
             )}
           </div>
           <p
