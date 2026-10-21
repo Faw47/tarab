@@ -1243,8 +1243,7 @@ impl AudioManager {
                                 if pending.as_deref() == Some(next_path.as_str()) {
                                     *pending = None;
                                 }
-                                pending_gapless_cancels
-                                    .retain(|(path, _, _)| path != &next_path);
+                                pending_gapless_cancels.retain(|(path, _, _)| path != &next_path);
                             }
                             command @ (AudioCommand::SetOutputDevice(_)
                             | AudioCommand::RecoverOutput) => {
@@ -2205,11 +2204,8 @@ mod bounded_seek_tests {
         let mut volume_ramp = None;
         let mut stream_bundle = None;
 
-        let (_, _, _, _, _, handoff_pending) = snapshot_playback_for_output_replacement(
-            &state,
-            &mut pending,
-            &active_emitted,
-        );
+        let (_, _, _, _, _, handoff_pending) =
+            snapshot_playback_for_output_replacement(&state, &mut pending, &active_emitted);
         assert!(handoff_pending);
 
         stop_after_failed_output_replacement(
