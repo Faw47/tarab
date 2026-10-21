@@ -38,6 +38,7 @@ describe.each(['liquid-glass', 'neobrutalism'] as const)('queue bidi metadata (%
       expect(label.closest('[dir="auto"]')).not.toBeNull();
     expect(artists.some((label) => label.tagName === 'BDI')).toBe(true);
     expect(albums.every((label) => label.tagName === 'BDI')).toBe(true);
+  });
 
   it('hydrates restored lazy history metadata in each theme', async () => {
     const historyEntry: Track = {
@@ -72,6 +73,5 @@ describe.each(['liquid-glass', 'neobrutalism'] as const)('queue bidi metadata (%
 
     expect(await screen.findByText('Loaded history title')).toBeInTheDocument();
     expect(fetchLibraryTrackById).toHaveBeenCalledWith('history-path');
-  });
   });
 });
