@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 29 |
+| NATIVE_VALIDATION_REQUIRED | 30 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 63 |
+| PENDING | 62 |
 | **Total** | **160** |
 
 ## Findings
@@ -142,7 +142,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-23 | P3 | Pausing during a crossfade lets the fade finish while paused | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39533624096 failed specifically on `crossfade_progress_clock_stays_frozen_while_paused`. G2: all five hosted CI jobs pass at head 15bfc13c5b5687663b25adf77a50e33b8318fe1e (run 39582579783). G3: independent adversarial review found no blocker at the same head. Native playback check remains open: pause during a crossfade and verify progress/fade freeze until resume. | 15bfc13 | #38 |
 | PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-25 | P3 | Decoder does not filter packets by track ID | PENDING | - | Audit confidence POSSIBLE. | - | - |
-| PB-26 | P3 | Scanner accepts formats the decoder cannot play; Opus is not scanned | PENDING | - | Audit confidence LIKELY. | - | - |
+| PB-26 | P3 | Scanner accepts formats the decoder cannot play; Opus is not scanned | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39547455662 reproduced the Opus scan and release-config mismatch. G2: all five hosted jobs pass at head 74e1f201d938904cbf0efefc97a62b2cdc643370 (run 39576088088). G3: independent review found no remaining decoder or format-parity blocker at that head. Native check remains open: play mono/stereo Opus and M4A, and confirm multichannel Opus is rejected with the expected error. | 74e1f20 | #45 |
 | PB-32 | P3 | Volume booster hard-clips and is not persisted | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: tests-only predecessor run 39537516639 reproduced clipping and session-persistence failures. G2: all five hosted jobs passed at head 85cd8f21b1a0332ffad62f581adbd40b4bb545d4 (run 39554901506). G3: independent review found no blocker at that head. Native check: verify boosted audio stays smooth without hard clipping and booster level persists after restart on a desktop device. | 85cd8f2 | #39 |
 | QA-27 | P3 | Track duration underestimated by up to one second | ALREADY_RESOLVED | n/a / n/a / n/a | Earlier PB-08 playback fix replaced the extra time-base division with `t.seconds as f64 + t.frac` in `src-tauri/src/audio/source.rs` (duration calculation). Verified against the current source; not newly tested here. | 8ab471d | #4 |
 | LD-04 | P3 | `PlaybackCoordinator` contract is only partly enforced: generation setter is not monotonic and editor preview bypasses the current track | PENDING | partial G1 pass / G2 frontend pass / G3 renderer pass | Monotonic generations merged in #19. Corrective #20 at afe4559 guards stale success/failure at the synchronous UI boundary and invalidates queued adjacent requests after newer Play/Stop/preview. Fourteen added test cases; independent review found the queued-intent and rejection-settlement gaps, both reproduced red and corrected. Native commands already in flight and editor-preview state ownership remain unresolved. | 145d037, 0e2da73, afe4559 | #19, #20 |
