@@ -124,6 +124,33 @@ fn stop_after_failed_recovery(
     volume_ramp: &mut Option<VolumeRampState>,
     stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
 ) {
+    stop_after_failed_output_replacement(
+        state,
+        pending_gapless_path,
+        pending_gapless_cancels,
+        active_emitted,
+        crossfade_state,
+        current_sink,
+        volume_ramp,
+        stream_bundle,
+        true,
+    );
+}
+
+/// Stop playback only when a canceled queued handoff would otherwise leave audio and state out of
+/// sync. Manual device switches retain the old output stream; recovery drops the failed stream.
+#[allow(clippy::too_many_arguments)]
+fn stop_after_failed_output_replacement(
+    state: &Arc<Mutex<PlaybackState>>,
+    pending_gapless_path: &Arc<Mutex<Option<String>>>,
+    pending_gapless_cancels: &mut Vec<PendingGaplessHandoff>,
+    active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
+    crossfade_state: &mut Option<CrossfadeState>,
+    current_sink: &mut Option<Arc<Sink>>,
+    volume_ramp: &mut Option<VolumeRampState>,
+    stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
+    drop_stream: bool,
+) {
     *pending_gapless_path.lock() = None;
     cancel_gapless_handoffs(pending_gapless_cancels);
     if let Some(active) = crossfade_state.take() {
@@ -134,7 +161,9 @@ fn stop_after_failed_recovery(
     }
     reset_active_counter(active_emitted);
     *volume_ramp = None;
-    *stream_bundle = None;
+    if drop_stream {
+        *stream_bundle = None;
+    }
     let mut state = state.lock();
     state.is_playing = false;
     state.is_paused = false;
@@ -1237,6 +1266,8 @@ impl AudioManager {
                                             )
                                         };
 
+                                        let mut cancelled_queued_handoff = false;
+                                        let mut replacement_error = None;
                                         let replacement = if had_playback {
                                             initial_path.as_ref().and_then(|path| {
                                                 let emitted_for_initial =
@@ -1276,6 +1307,8 @@ impl AudioManager {
                                                 // candidate decoder opened. Cancel and snapshot under
                                                 // the same state lock the callback uses, then rebuild
                                                 // for the committed track if it changed.
+                                                let had_queued_gapless_source =
+                                                    pending_gapless_path_thread.lock().is_some();
                                                 let (
                                                     generation,
                                                     active_path,
@@ -1287,11 +1320,20 @@ impl AudioManager {
                                                     &mut pending_gapless_cancels,
                                                     &active_emitted_for_audio,
                                                 );
+                                                cancelled_queued_handoff = had_queued_gapless_source;
                                                 *pending_gapless_path_thread.lock() = None;
                                                 if !still_playing {
+                                                    replacement_error = Some(
+                                                        "Playback stopped during output device replacement"
+                                                            .to_string(),
+                                                    );
                                                     return None;
                                                 }
                                                 let Some(active_path) = active_path else {
+                                                    replacement_error = Some(
+                                                        "No active playback source remained during output device replacement"
+                                                            .to_string(),
+                                                    );
                                                     return None;
                                                 };
 
@@ -1321,22 +1363,7 @@ impl AudioManager {
                                                         ) {
                                                             Ok(prepared) => prepared,
                                                             Err(error) => {
-                                                                emit_playback_error(
-                                                                    &app_for_audio,
-                                                                    &active_path,
-                                                                    generation,
-                                                                    "deviceSwitch",
-                                                                    error.clone(),
-                                                                    true,
-                                                                );
-                                                                emit_playback_transition(
-                                                                    &app_for_audio,
-                                                                    generation,
-                                                                    PlaybackTransition::DeviceSwitchFailed,
-                                                                    Some(active_path.clone()),
-                                                                    Some(error),
-                                                                    true,
-                                                                );
+                                                                replacement_error = Some(error);
                                                                 return None;
                                                             }
                                                         };
@@ -1348,7 +1375,7 @@ impl AudioManager {
                                                     )
                                                 };
 
-                                                let sink = play_with_source(
+                                                let Some(sink) = play_with_source(
                                                     &new_stream_bundle.1,
                                                     source,
                                                     &state_clone,
@@ -1361,7 +1388,13 @@ impl AudioManager {
                                                         start_paused: was_paused,
                                                     },
                                                     &[],
-                                                )?;
+                                                ) else {
+                                                    replacement_error = Some(
+                                                        "Failed to initialize the replacement audio sink"
+                                                            .to_string(),
+                                                    );
+                                                    return None;
+                                                };
                                                 Some((sink, emitted_for_replacement))
                                             })
                                         } else {
@@ -1369,8 +1402,8 @@ impl AudioManager {
                                         };
 
                                         if had_playback && replacement.is_none() {
-                                            if recovering {
-                                                stop_after_failed_recovery(
+                                            if recovering || cancelled_queued_handoff {
+                                                stop_after_failed_output_replacement(
                                                     &state_clone,
                                                     &pending_gapless_path_thread,
                                                     &mut pending_gapless_cancels,
@@ -1379,6 +1412,27 @@ impl AudioManager {
                                                     &mut current_sink,
                                                     &mut volume_ramp,
                                                     &mut stream_bundle,
+                                                    recovering,
+                                                );
+                                            }
+                                            if let Some(error) = replacement_error {
+                                                let (generation, current_file) =
+                                                    playback_identity(&state_clone);
+                                                emit_playback_error(
+                                                    &app_for_audio,
+                                                    current_file.clone().unwrap_or_default(),
+                                                    generation,
+                                                    "deviceSwitch",
+                                                    error.clone(),
+                                                    true,
+                                                );
+                                                emit_playback_transition(
+                                                    &app_for_audio,
+                                                    generation,
+                                                    PlaybackTransition::DeviceSwitchFailed,
+                                                    current_file,
+                                                    Some(error),
+                                                    true,
                                                 );
                                             }
                                             continue;
@@ -2078,6 +2132,53 @@ mod bounded_seek_tests {
         assert!(pending.is_empty());
         assert!(!committed);
         assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
+    }
+
+    #[test]
+    fn failed_output_replacement_stops_audio_after_cancelling_a_queued_handoff() {
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        {
+            let mut playback = state.lock();
+            playback.current_file = Some("outgoing.wav".to_string());
+            playback.generation = 7;
+            playback.is_playing = true;
+            playback.is_paused = true;
+        }
+        let active_counter = Arc::new(AtomicU64::new(123));
+        let active_emitted = Arc::new(Mutex::new(Arc::clone(&active_counter)));
+        let pending_path = Arc::new(Mutex::new(Some("incoming.wav".to_string())));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let (sink, _queue) = Sink::new_idle();
+        let sink = Arc::new(sink);
+        let mut current_sink = Some(Arc::clone(&sink));
+        let mut crossfade = None;
+        let mut volume_ramp = None;
+        let mut stream_bundle = None;
+
+        stop_after_failed_output_replacement(
+            &state,
+            &pending_path,
+            &mut pending,
+            &active_emitted,
+            &mut crossfade,
+            &mut current_sink,
+            &mut volume_ramp,
+            &mut stream_bundle,
+            false,
+        );
+
+        assert!(cancelled.load(Ordering::Acquire));
+        assert!(pending.is_empty());
+        assert!(pending_path.lock().is_none());
+        assert!(current_sink.is_none());
+        assert!(sink.is_paused());
+        assert_eq!(active_counter.load(Ordering::Relaxed), 0);
+        assert!(stream_bundle.is_none());
+        let playback = state.lock();
+        assert!(!playback.is_playing);
+        assert!(!playback.is_paused);
+        assert_eq!(playback.current_file.as_deref(), Some("outgoing.wav"));
     }
 
     #[test]
