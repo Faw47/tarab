@@ -14,12 +14,12 @@ describe('liquid glass compositing policy', () => {
 
   it('removes descendant blur when a surface already has backdrop filtering', () => {
     expect(css).toMatch(
-      /:where\\(\\[\\s\\S]*?backdrop-blur-[\\s\\S]*?\\)\\s*:where\\(\\[\\s\\S]*?backdrop-blur-[\\s\\S]*?\\)\\s*\\{[\\s\\S]*?backdrop-filter:\\s*none\\s*!important;/,
+      /:where\(\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*:where\(\[\s\S]*?backdrop-blur-[\s\S]*?\)\s*\{[\s\S]*?backdrop-filter:\s*none\s*!important;/,
     );
   });
 
   it('stops the full-viewport grain layer in Reduced Effects mode', () => {
-    expect(css).toMatch(/:root\\[data-reduced-effects=/);
-    expect(css).toMatch(/\\.app-shell-grain::after\\s*\\{[^}]*opacity:\\s*0[^}]*animation:\\s*none/);
+    expect(css).toMatch(/:root\[data-reduced-effects=/);
+    expect(css).toMatch(/\.app-shell-grain::after\s*\{[^}]*opacity:\s*0[^}]*animation:\s*none/);
   });
 });
