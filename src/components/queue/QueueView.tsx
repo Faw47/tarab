@@ -725,7 +725,7 @@ export const QueueView = memo(
                     {historyVisible.map((track, historyIndex) => {
                       const absoluteIndex = activeIndex - 1 - historyIndex;
                       return (
-                        <HistoryRow
+                        <HydratedHistoryRow
                           key={track._queueId || `${track.id}-${absoluteIndex}`}
                           track={track}
                           onReplay={() => {
