@@ -1,5 +1,6 @@
 use base64::Engine;
 use parking_lot::Mutex;
+use tauri::async_runtime::Mutex as AsyncMutex;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use tauri::image::Image;
@@ -153,7 +154,7 @@ struct DesktopTrayHandles {
 
 pub struct DesktopIntegrationState {
     native_ui: Mutex<DesktopNativeUiStatePayload>,
-    mini_window_creation_lock: Mutex<()>,
+    mini_window_creation_lock: AsyncMutex<()>,
     menu_handles: Option<DesktopMenuHandles>,
     tray_handles: Option<DesktopTrayHandles>,
 }
@@ -175,7 +176,7 @@ pub fn setup(app: &mut tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error>
 
     app.manage(DesktopIntegrationState {
         native_ui: Mutex::new(DesktopNativeUiStatePayload::default()),
-        mini_window_creation_lock: Mutex::new(()),
+        mini_window_creation_lock: AsyncMutex::new(()),
         menu_handles,
         tray_handles,
     });
@@ -238,13 +239,10 @@ pub fn desktop_should_start_minimized(app: AppHandle) -> bool {
     should_start_minimized(&std::env::args().collect::<Vec<_>>(), tray_available)
 }
 
-#[tauri::command]
-pub async fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
-    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
-        return Err("Desktop integration state is unavailable".to_string());
-    };
-    let _creation_lock = state.mini_window_creation_lock.lock();
-
+fn open_mini_window_locked(
+    app: &AppHandle<Wry>,
+    state: &DesktopIntegrationState,
+) -> Result<(), String> {
     if !state.native_ui.lock().mini_window_enabled {
         return Err("Mini player window is disabled by settings".to_string());
     }
@@ -252,7 +250,7 @@ pub async fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
     let window = match app.get_webview_window(MINI_WINDOW_LABEL) {
         Some(window) => window,
         None => WebviewWindowBuilder::new(
-            &app,
+            app,
             MINI_WINDOW_LABEL,
             WebviewUrl::App("mini-player.html".into()),
         )
@@ -297,40 +295,84 @@ pub async fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Hides the mini player webview so it can be shown again (does not destroy the window).
-#[tauri::command]
-pub fn desktop_close_mini_window(app: AppHandle) -> Result<(), String> {
-    if let Some(state) = app.try_state::<DesktopIntegrationState>() {
-        let _creation_lock = state.mini_window_creation_lock.lock();
-        if let Some(window) = app.get_webview_window(MINI_WINDOW_LABEL) {
-            window.hide().map_err(|e| e.to_string())?;
-        }
+fn hide_mini_window_locked(app: &AppHandle<Wry>) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(MINI_WINDOW_LABEL) {
+        window.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub async fn desktop_toggle_mini_window(app: AppHandle) -> Result<(), String> {
-    {
-        let Some(state) = app.try_state::<DesktopIntegrationState>() else {
-            return Err("Desktop integration state is unavailable".to_string());
-        };
-
-        if !state.native_ui.lock().mini_window_enabled {
-            return Err("Mini player window is disabled by settings".to_string());
-        }
-    }
-
-    let Some(window) = app.get_webview_window(MINI_WINDOW_LABEL) else {
-        return desktop_open_mini_window(app).await;
+pub async fn desktop_open_mini_window(app: AppHandle) -> Result<(), String> {
+    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
+        return Err("Desktop integration state is unavailable".to_string());
     };
+    let _creation_lock = state.mini_window_creation_lock.lock().await;
+    open_mini_window_locked(&app, &state)
+}
 
-    let visible = window.is_visible().map_err(|e| e.to_string())?;
-    if visible {
-        desktop_close_mini_window(app)
-    } else {
-        desktop_open_mini_window(app).await
+/// Hides the mini player webview so it can be shown again (does not destroy the window).
+#[tauri::command]
+pub async fn desktop_close_mini_window(app: AppHandle) -> Result<(), String> {
+    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
+        return Ok(());
+    };
+    let _creation_lock = state.mini_window_creation_lock.lock().await;
+    hide_mini_window_locked(&app)
+}
+
+#[tauri::command]
+pub async fn desktop_toggle_mini_window(app: AppHandle) -> Result<(), String> {
+    let Some(state) = app.try_state::<DesktopIntegrationState>() else {
+        return Err("Desktop integration state is unavailable".to_string());
+    };
+    let _creation_lock = state.mini_window_creation_lock.lock().await;
+    if !state.native_ui.lock().mini_window_enabled {
+        return Err("Mini player window is disabled by settings".to_string());
     }
+
+    if let Some(window) = app.get_webview_window(MINI_WINDOW_LABEL) {
+        if window.is_visible().map_err(|e| e.to_string())? {
+            hide_mini_window_locked(&app)
+        } else {
+            open_mini_window_locked(&app, &state)
+        }
+    } else {
+        open_mini_window_locked(&app, &state)
+    }
+}
+
+#[tauri::command]
+pub fn desktop_focus_main_window(app: AppHandle) -> Result<(), String> {
+    focus_main_window(&app)
+}
+
+#[tauri::command]
+pub fn desktop_quit_application(app: AppHandle) -> Result<(), String> {
+    crate::shutdown::approve_exit(&app);
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn desktop_set_native_ui_state(
+    payload: DesktopNativeUiStatePayload,
+    app: AppHandle,
+    state: tauri::State<'_, DesktopIntegrationState>,
+) -> Result<(), String> {
+    let _creation_lock = state.mini_window_creation_lock.lock().await;
+    {
+        let mut native = state.native_ui.lock();
+        *native = payload.clone();
+    }
+
+    apply_native_ui_state(&state);
+
+    if !payload.mini_window_enabled {
+        let _ = hide_mini_window_locked(&app);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
