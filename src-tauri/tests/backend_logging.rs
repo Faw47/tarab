@@ -5,9 +5,18 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
     ("audio/device.rs", include_str!("../src/audio/device.rs")),
     ("audio/source.rs", include_str!("../src/audio/source.rs")),
     ("database.rs", include_str!("../src/database.rs")),
-    ("database/migrations.rs", include_str!("../src/database/migrations.rs")),
-    ("desktop_integration.rs", include_str!("../src/desktop_integration.rs")),
-    ("launch_intents.rs", include_str!("../src/launch_intents.rs")),
+    (
+        "database/migrations.rs",
+        include_str!("../src/database/migrations.rs"),
+    ),
+    (
+        "desktop_integration.rs",
+        include_str!("../src/desktop_integration.rs"),
+    ),
+    (
+        "launch_intents.rs",
+        include_str!("../src/launch_intents.rs"),
+    ),
     ("lib.rs", include_str!("../src/lib.rs")),
     ("library.rs", include_str!("../src/library.rs")),
     ("library_watcher.rs", include_str!("../src/library_watcher.rs")),
