@@ -44,25 +44,49 @@ fn runtime_diagnostics_use_the_configured_logger() {
         })
         .collect();
 
-    let bootstrap_cache_fallbacks = direct_stderr
+    let bootstrap_diagnostics = [
+        (
+            "database.rs",
+            "Could not prepare preferred app directory; using fallback",
+        ),
+        (
+            "database/migrations.rs",
+            "Database migration found duplicate playlist memberships; preserving one per pair",
+        ),
+    ];
+    let cache_fallbacks = direct_stderr
         .iter()
         .filter(|(path, _, line)| {
-            path == "database.rs"
+            path.as_str() == "database.rs"
                 && line.contains("Could not prepare preferred app directory; using fallback")
+        })
+        .count();
+    let migration_warnings = direct_stderr
+        .iter()
+        .filter(|(path, _, line)| {
+            path.as_str() == "database/migrations.rs"
+                && line.contains(
+                    "Database migration found duplicate playlist memberships; preserving one per pair",
+                )
         })
         .count();
     let unexpected_stderr: Vec<String> = direct_stderr
         .iter()
         .filter(|(path, _, line)| {
-            !(path == "database.rs"
-                && line.contains("Could not prepare preferred app directory; using fallback"))
+            !bootstrap_diagnostics.iter().any(|(allowed_path, marker)| {
+                path.as_str() == *allowed_path && line.contains(*marker)
+            })
         })
         .map(|(path, line_number, _)| format!("{path}:{line_number}"))
         .collect();
 
     assert_eq!(
-        bootstrap_cache_fallbacks, 1,
+        cache_fallbacks, 1,
         "the pre-logger cache fallback should retain one generic bootstrap diagnostic"
+    );
+    assert_eq!(
+        migration_warnings, 1,
+        "the pre-logger database migration should retain one generic bootstrap diagnostic"
     );
     assert!(
         unexpected_stderr.is_empty(),
