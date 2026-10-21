@@ -14,17 +14,11 @@ mod migrations;
 mod playlists;
 mod tracks;
 
-const CURRENT_SCHEMA_VERSION: i32 = 9;
+const CURRENT_SCHEMA_VERSION: i32 = 10;
 const PLAYLIST_MUTATION_RESULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const PATH_NORMALIZATION_CLEANUP_KEY: &str = "path-normalization-cleanup-v1";
 const DB_GET_ALL_TRACKS_HARD_LIMIT: i64 = 50_000;
 
-fn escape_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
 const APP_STORAGE_DIRECTORY: &str = "com.fawaz.tarab";
 const LEGACY_STORAGE_DIRECTORY: &str = "music-player";
 
@@ -167,6 +161,20 @@ pub struct SearchResult {
     pub file_path: String,
     pub cover_art_hash: Option<String>,
     pub blurhash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum TrackPageCursorValue {
+    Text(String),
+    Number(f64),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackPageCursor {
+    pub id: String,
+    pub value: TrackPageCursorValue,
 }
 
 #[derive(Debug, Clone)]
@@ -615,17 +623,19 @@ pub async fn db_get_artist_aggregates(
 
 #[tauri::command]
 pub async fn db_get_tracks_paginated(
-    offset: u32,
+    cursor: Option<TrackPageCursor>,
     limit: u32,
     sort_by: String,
     sort_order: String,
     db: tauri::State<'_, SharedDatabase>,
 ) -> Result<Vec<DbTrack>, String> {
     let db = db.inner().clone();
-    spawn_blocking(move || db.get_tracks_paginated(offset, limit, &sort_by, &sort_order))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    spawn_blocking(move || {
+        db.get_tracks_paginated(cursor.as_ref(), limit, &sort_by, &sort_order)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1323,10 +1333,18 @@ mod tests {
         db.upsert_tracks_batch(&tracks).expect("seed tracks");
 
         let mut seen = Vec::new();
-        for page in 0..4 {
+        let mut cursor = None;
+        loop {
             let rows = db
-                .get_tracks_paginated(page * 2, 2, "title", "asc")
+                .get_tracks_paginated(cursor.as_ref(), 2, "title", "asc")
                 .expect("page");
+            if rows.is_empty() {
+                break;
+            }
+            cursor = rows.last().map(|track| TrackPageCursor {
+                id: track.id.clone(),
+                value: TrackPageCursorValue::Text(track.title.clone()),
+            });
             seen.extend(rows.into_iter().map(|track| (track.title, track.id)));
         }
 
@@ -1338,6 +1356,84 @@ mod tests {
         sorted.sort();
         assert_eq!(order, sorted, "titles are ordered case-insensitively");
         assert_eq!(seen.first().map(|(title, _)| title.as_str()), Some("Alpha"));
+    }
+
+    #[test]
+    fn paginated_tracks_keyset_pages_descending_with_stable_ties() {
+        let db = test_db();
+        let titles = ["Beta", "same", "Same", "Alpha"];
+        let tracks: Vec<DbTrack> = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                let mut track = sample_track(&format!("desc{index}"));
+                track.title = title.to_string();
+                track
+            })
+            .collect();
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let rows = db
+                .get_tracks_paginated(cursor.as_ref(), 1, "title", "desc")
+                .expect("page");
+            if rows.is_empty() {
+                break;
+            }
+            cursor = rows.last().map(|track| TrackPageCursor {
+                id: track.id.clone(),
+                value: TrackPageCursorValue::Text(track.title.clone()),
+            });
+            seen.extend(rows.into_iter().map(|track| (track.title, track.id)));
+        }
+
+        let mut expected: Vec<(String, String)> = tracks
+            .iter()
+            .map(|track| (track.title.clone(), track.id.clone()))
+            .collect();
+        expected.sort_by(|left, right| {
+            right
+                .0
+                .to_lowercase()
+                .cmp(&left.0.to_lowercase())
+                .then_with(|| right.1.cmp(&left.1))
+        });
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn paginated_tracks_keyset_pages_numeric_values() {
+        let db = test_db();
+        let mut tracks = Vec::new();
+        for (id, date_added) in [("recent", 30), ("oldest", 10), ("middle", 20)] {
+            let mut track = sample_track(id);
+            track.date_added = date_added;
+            tracks.push(track);
+        }
+        db.upsert_tracks_batch(&tracks).expect("seed tracks");
+
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let rows = db
+                .get_tracks_paginated(cursor.as_ref(), 1, "dateAdded", "asc")
+                .expect("page");
+            if rows.is_empty() {
+                break;
+            }
+            cursor = rows.last().map(|track| TrackPageCursor {
+                id: track.id.clone(),
+                value: TrackPageCursorValue::Number(track.date_added as f64),
+            });
+            seen.extend(rows.into_iter().map(|track| track.id));
+        }
+
+        assert_eq!(
+            seen,
+            vec!["oldest".to_string(), "middle".to_string(), "recent".to_string()]
+        );
     }
 
     #[test]
@@ -1814,6 +1910,12 @@ mod tests {
             !indexes.iter().any(|name| name == "idx_tracks_file_path"),
             "file_path UNIQUE already provides an index; redundant index remains: {indexes:?}"
         );
+        assert!(
+            indexes
+                .iter()
+                .any(|name| name == "idx_tracks_file_path_nocase"),
+            "folder range queries need the case-insensitive path index: {indexes:?}"
+        );
     }
 
     #[test]
@@ -1872,29 +1974,62 @@ mod tests {
     }
 
     #[test]
+    fn folder_path_ranges_keep_literal_metacharacters_and_exclude_siblings() {
+        let db = test_db();
+        let mut inside = sample_track("inside-literal-folder");
+        inside.id = "/music/100%_Jazz/01.flac".to_string();
+        inside.file_path = inside.id.clone();
+        let mut prefix_sibling = sample_track("prefix-sibling");
+        prefix_sibling.id = "/music/100%_Jazz0/02.flac".to_string();
+        prefix_sibling.file_path = prefix_sibling.id.clone();
+        let mut wildcard_lookalike = sample_track("wildcard-lookalike");
+        wildcard_lookalike.id = "/music/100X_Jazz/03.flac".to_string();
+        wildcard_lookalike.file_path = wildcard_lookalike.id.clone();
+        db.upsert_tracks_batch(&[inside.clone(), prefix_sibling.clone(), wildcard_lookalike.clone()])
+            .expect("seed folder tracks");
+
+        assert_eq!(
+            db.get_track_ids_by_folder("/music/100%_Jazz")
+                .expect("read folder track IDs"),
+            vec![inside.id.clone()]
+        );
+        assert_eq!(
+            db.delete_tracks_by_folder("/music/100%_Jazz")
+                .expect("delete folder tracks"),
+            1
+        );
+        let remaining = db
+            .get_tracks_by_ids(&[prefix_sibling.id.clone(), wildcard_lookalike.id.clone()])
+            .expect("read sibling tracks");
+        assert_eq!(remaining.len(), 2);
+    }
+
+    #[test]
     fn folder_prefix_search_uses_an_index_instead_of_scanning_paths() {
         let db = test_db();
         let conn = db.conn.lock();
         let mut statement = conn
             .prepare(
-                r#"EXPLAIN QUERY PLAN
-                   SELECT file_path FROM tracks
-                   WHERE file_path LIKE ?1 ESCAPE '\'"#,
+                "EXPLAIN QUERY PLAN
+                 SELECT file_path FROM tracks
+                 WHERE file_path = ?1 COLLATE BINARY
+                    OR (file_path >= ?2 COLLATE NOCASE AND file_path < ?3 COLLATE NOCASE)",
             )
-            .expect("prepare folder LIKE query plan");
+            .expect("prepare folder range query plan");
         let details = statement
-            .query_map(rusqlite::params!["/tmp/music/album/%"], |row| {
-                row.get::<_, String>(3)
-            })
-            .expect("query folder LIKE plan")
+            .query_map(
+                rusqlite::params!["/tmp/music/album", "/tmp/music/album/", "/tmp/music/album0"],
+                |row| row.get::<_, String>(3),
+            )
+            .expect("query folder range plan")
             .collect::<rusqlite::Result<Vec<_>>>()
-            .expect("collect folder LIKE plan");
+            .expect("collect folder range plan");
 
         assert!(
             details
                 .iter()
-                .any(|detail| detail.contains("SEARCH tracks USING INDEX")),
-            "folder prefix should use the file_path index: {details:?}"
+                .any(|detail| detail.contains("idx_tracks_file_path_nocase")),
+            "folder prefix should use the case-insensitive path index: {details:?}"
         );
     }
 
