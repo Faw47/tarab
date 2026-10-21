@@ -536,10 +536,6 @@ pub(super) struct GaplessHandoffSource<S> {
 }
 
 impl<S> GaplessHandoffSource<S> {
-    pub(super) fn new(inner: S, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
-        Self::new_after_real_content(inner, Arc::new(AtomicBool::new(true)), on_first_sample)
-    }
-
     pub(super) fn new_after_real_content(
         inner: S,
         real_content_started: Arc<AtomicBool>,
@@ -741,7 +737,7 @@ mod tests {
         let callback_count = Arc::new(AtomicUsize::new(0));
         let callback_count_for_handoff = Arc::clone(&callback_count);
         let mut handoff = GaplessHandoffSource::new_after_real_content(
-            std::iter::repeat(0.0).take(2),
+            std::iter::repeat_n(0.0, 2),
             Arc::clone(&content_started),
             move || {
                 callback_count_for_handoff.fetch_add(1, Ordering::Relaxed);
@@ -881,9 +877,13 @@ mod tests {
                 .expect("prepare source");
         let handoff_count = Arc::new(AtomicUsize::new(0));
         let handoff_count_for_callback = Arc::clone(&handoff_count);
-        let mut source = GaplessHandoffSource::new(source, move || {
-            handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
-        });
+        let mut source = GaplessHandoffSource::new_after_real_content(
+            source,
+            Arc::new(AtomicBool::new(true)),
+            move || {
+                handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
+            },
+        );
 
         let _ = source.next().expect("first sample starts handoff");
         source
