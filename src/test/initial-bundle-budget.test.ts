@@ -121,9 +121,7 @@ describe('initial bundle budget', () => {
       const result = runBundleCheck(root);
       expect(result.error).toBeUndefined();
       expect(result.status).not.toBe(0);
-      expect(result.stdout + '\n' + result.stderr).toMatch(
-        /mini-player.*raw.*budget/i,
-      );
+      expect(result.stdout + '\n' + result.stderr).toMatch(/mini-player.*raw.*budget/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
