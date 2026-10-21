@@ -60,6 +60,17 @@ const GlassSystemContext = createContext<GlassSystemContextValue>({
   theme: 'default',
 });
 
+const reducedEffectsProviders = new Set<symbol>();
+
+function syncDocumentReducedEffects() {
+  if (typeof document === 'undefined') return;
+  if (reducedEffectsProviders.size > 0) {
+    document.documentElement.dataset.reducedEffects = 'true';
+  } else {
+    delete document.documentElement.dataset.reducedEffects;
+  }
+}
+
 export interface GlassSystemProviderProps {
   children: ReactNode;
   reducedEffects?: boolean;
@@ -71,10 +82,23 @@ export const GlassSystemProvider = memo(function GlassSystemProvider({
   reducedEffects,
   theme = 'default',
 }: GlassSystemProviderProps) {
+  const providerId = useRef(Symbol('glass-system-provider'));
   const value = useMemo<GlassSystemContextValue>(
     () => ({ reducedEffects: reducedEffects ?? null, theme }),
     [reducedEffects, theme],
   );
+
+  useEffect(() => {
+    const id = providerId.current;
+    if (reducedEffects) reducedEffectsProviders.add(id);
+    else reducedEffectsProviders.delete(id);
+    syncDocumentReducedEffects();
+
+    return () => {
+      reducedEffectsProviders.delete(id);
+      syncDocumentReducedEffects();
+    };
+  }, [reducedEffects]);
 
   return <GlassSystemContext.Provider value={value}>{children}</GlassSystemContext.Provider>;
 });
@@ -511,19 +535,28 @@ const GlassCardBase = forwardRef<HTMLDivElement, GlassCardProps>(
 
     const baseStyle = useMemo(() => {
       const layerPromotion = promoteLayer ? { willChange: 'transform' as const } : undefined;
+      const glassStyle =
+        intensity === 'deep'
+          ? getGlassDeepStyle(radius, tint, layerPromotion)
+          : intensity === 'subtle'
+            ? getGlassSubtleStyle(radius, tint, layerPromotion)
+            : getGlassStyle(radius, tint, layerPromotion);
 
-      if (intensity === 'deep') return getGlassDeepStyle(radius, tint, layerPromotion);
-      if (intensity === 'subtle') return getGlassSubtleStyle(radius, tint, layerPromotion);
-      return getGlassStyle(radius, tint, layerPromotion);
-    }, [intensity, promoteLayer, radius, tint]);
+      return finalReducedEffects
+        ? { ...glassStyle, backdropFilter: 'none', WebkitBackdropFilter: 'none' }
+        : glassStyle;
+    }, [finalReducedEffects, intensity, promoteLayer, radius, tint]);
 
     const mergedStyle = useMemo(
       () => ({
         ...baseStyle,
         ...style,
+        ...(finalReducedEffects
+          ? { backdropFilter: 'none', WebkitBackdropFilter: 'none' }
+          : {}),
         '--glass-sheen-color': sheenColor,
       }),
-      [baseStyle, sheenColor, style],
+      [baseStyle, finalReducedEffects, sheenColor, style],
     );
 
     return (
