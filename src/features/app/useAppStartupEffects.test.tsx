@@ -1,11 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@tauri-apps/plugin-autostart', () => ({
-  isEnabled: vi.fn(),
-  enable: vi.fn(),
-  disable: vi.fn(),
-}));
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: vi.fn(async () => undefined) }),
 }));
@@ -17,10 +12,16 @@ vi.mock('../../lib/report-error', () => ({
   reportError: vi.fn(),
 }));
 
-import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { reportError } from '../../lib/report-error';
 import { useSettingsStore } from '../../store/settings-store';
 import { useAppStartupEffects } from './useAppStartupEffects';
+import type { AutostartApi } from './useAutostartIntegration';
+
+const autostartApi: AutostartApi = {
+  isEnabled: vi.fn(),
+  enable: vi.fn(),
+  disable: vi.fn(),
+};
 
 describe('app autostart lifecycle', () => {
   afterEach(() => {
@@ -32,9 +33,9 @@ describe('app autostart lifecycle', () => {
     await useSettingsStore.persist.rehydrate();
     await waitFor(() => expect(useSettingsStore.persist.hasHydrated()).toBe(true));
     useSettingsStore.setState({ autostartEnabled: false });
-    vi.mocked(isEnabled).mockReset().mockResolvedValue(true);
-    vi.mocked(enable).mockReset().mockResolvedValue(undefined);
-    vi.mocked(disable).mockReset().mockResolvedValue(undefined);
+    vi.mocked(autostartApi.isEnabled).mockReset().mockResolvedValue(true);
+    vi.mocked(autostartApi.enable).mockReset().mockResolvedValue(undefined);
+    vi.mocked(autostartApi.disable).mockReset().mockResolvedValue(undefined);
     vi.stubGlobal('performance', {
       mark: vi.fn(),
       now: () => 0,
@@ -43,29 +44,31 @@ describe('app autostart lifecycle', () => {
   });
 
   const mount = () =>
-    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+    renderHook(() =>
+      useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn(), autostartApi }),
+    );
 
   it('reads OS state at app startup without mounting the settings page', async () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
-    expect(enable).not.toHaveBeenCalled();
-    expect(disable).not.toHaveBeenCalled();
+    expect(autostartApi.enable).not.toHaveBeenCalled();
+    expect(autostartApi.disable).not.toHaveBeenCalled();
   });
 
   it('refreshes external changes on window focus without reverting the OS', async () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
-    vi.mocked(isEnabled).mockResolvedValue(false);
+    vi.mocked(autostartApi.isEnabled).mockResolvedValue(false);
     act(() => window.dispatchEvent(new Event('focus')));
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(false));
-    expect(enable).not.toHaveBeenCalled();
-    expect(disable).not.toHaveBeenCalled();
+    expect(autostartApi.enable).not.toHaveBeenCalled();
+    expect(autostartApi.disable).not.toHaveBeenCalled();
   });
 
   it('applies changes while the settings page is absent and reconciles failures', async () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
-    vi.mocked(disable).mockRejectedValue(new Error('permission denied'));
+    vi.mocked(autostartApi.disable).mockRejectedValue(new Error('permission denied'));
     act(() => useSettingsStore.getState().setAutostartEnabled(false));
     await waitFor(() =>
       expect(reportError).toHaveBeenCalledWith(
@@ -74,21 +77,21 @@ describe('app autostart lifecycle', () => {
       ),
     );
     expect(useSettingsStore.getState().autostartEnabled).toBe(true);
-    expect(enable).not.toHaveBeenCalled();
+    expect(autostartApi.enable).not.toHaveBeenCalled();
   });
 
   it('keeps a user toggle made while the initial OS read is pending', async () => {
     let finish: (enabled: boolean) => void = () => undefined;
-    vi.mocked(isEnabled).mockImplementationOnce(
+    vi.mocked(autostartApi.isEnabled).mockImplementationOnce(
       () =>
         new Promise<boolean>((resolve) => {
           finish = resolve;
         }),
     );
     mount();
-    await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(autostartApi.isEnabled).toHaveBeenCalledTimes(1));
     act(() => useSettingsStore.getState().setAutostartEnabled(true));
-    await waitFor(() => expect(enable).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(autostartApi.enable).toHaveBeenCalledTimes(1));
     await act(async () => finish(false));
     expect(useSettingsStore.getState().autostartEnabled).toBe(true);
   });
@@ -97,16 +100,16 @@ describe('app autostart lifecycle', () => {
     mount();
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
     let finish: (enabled: boolean) => void = () => undefined;
-    vi.mocked(isEnabled).mockImplementationOnce(
+    vi.mocked(autostartApi.isEnabled).mockImplementationOnce(
       () =>
         new Promise<boolean>((resolve) => {
           finish = resolve;
         }),
     );
     act(() => window.dispatchEvent(new Event('focus')));
-    await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(autostartApi.isEnabled).toHaveBeenCalledTimes(2));
     act(() => useSettingsStore.getState().setAutostartEnabled(false));
-    await waitFor(() => expect(disable).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(autostartApi.disable).toHaveBeenCalledTimes(1));
     await act(async () => finish(true));
     expect(useSettingsStore.getState().autostartEnabled).toBe(false);
   });

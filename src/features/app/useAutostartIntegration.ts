@@ -4,7 +4,15 @@ import { reportError } from '../../lib/report-error';
 import { useSettingsStore } from '../../store/settings-store';
 
 /** The OS owns login registration; app-wide observation starts after settings hydration. */
-export function useAutostartIntegration() {
+export interface AutostartApi {
+  isEnabled: () => Promise<boolean>;
+  enable: () => Promise<void>;
+  disable: () => Promise<void>;
+}
+
+const defaultAutostartApi: AutostartApi = { isEnabled, enable, disable };
+
+export function useAutostartIntegration(api: AutostartApi = defaultAutostartApi) {
   useEffect(() => {
     let cancelled = false;
     let started = false;
@@ -34,7 +42,7 @@ export function useAutostartIntegration() {
 
     const readOs = async (expectedRevision: number) => {
       try {
-        updateFromOs(await isEnabled(), expectedRevision);
+        updateFromOs(await api.isEnabled(), expectedRevision);
       } catch (error) {
         if (!cancelled) {
           reportError('Failed to read open at login setting', { source: 'app-autostart', error });
@@ -52,8 +60,8 @@ export function useAutostartIntegration() {
       enqueue(async () => {
         if (revision !== intentRevision) return;
         try {
-          if (enabled) await enable();
-          else await disable();
+          if (enabled) await api.enable();
+          else await api.disable();
           if (revision === intentRevision) appliedIntentRevision = revision;
         } catch (error) {
           // A newer user choice wins over a slow result from either the OS read or this write.
