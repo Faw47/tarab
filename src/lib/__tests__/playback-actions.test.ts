@@ -131,9 +131,9 @@ describe('overlapping source requests', () => {
     expect(playTrackMock).toHaveBeenCalledWith('/music/second.mp3');
     expect(usePlayerStore.getState().queue[1]).toMatchObject({
       filePath: '/music/second.mp3',
-      _lazyQueueEntry: undefined,
       _queueId: 'queue-second',
     });
+    expect(usePlayerStore.getState().queue[1]._lazyQueueEntry).toBeUndefined();
     expect(usePlayerStore.getState().queueIndex).toBe(1);
   });
 
