@@ -60,7 +60,7 @@ describe('useLibraryData sorting', () => {
       expect(result.current.tracks).toHaveLength(3);
     });
     expect(fetchPageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ offset: 0, sortBy: 'title', sortOrder: 'asc' }),
+      expect.objectContaining({ cursor: null, sortBy: 'title', sortOrder: 'asc' }),
     );
     expect(result.current.getFilteredTracks().map((item) => item.id)).toEqual(['b', 'a', 'c']);
   });
@@ -80,7 +80,7 @@ describe('useLibraryData sorting', () => {
 
     await waitFor(() => {
       expect(fetchPageMock).toHaveBeenCalledWith(
-        expect.objectContaining({ offset: 0, sortBy: 'artist', sortOrder: 'asc' }),
+        expect.objectContaining({ cursor: null, sortBy: 'artist', sortOrder: 'asc' }),
       );
     });
   });
