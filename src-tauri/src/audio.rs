@@ -1552,7 +1552,6 @@ impl AudioManager {
                             true,
                         );
                     }
-                } else {
                 }
             }
         });
