@@ -74,6 +74,7 @@ pub(super) fn prepare_source(
     requested_start: f64,
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
+    seek_coordinator: &SeekCoordinator,
 ) -> Result<(PitchPreservingSource<BufferedSymphoniaSource>, f64, f64), String> {
     let (source, duration, actual_start) = crate::parse_guard::guard(file_path, || {
         prepare_source_with_seek(file_path, requested_start, seek_decoder)
@@ -83,7 +84,11 @@ pub(super) fn prepare_source(
         (state.speed_control.clone(), state.booster.clone())
     };
     let underrun_signal = Arc::new(AtomicBool::new(false));
-    let buffered_source = BufferedSymphoniaSource::new(source, Arc::clone(&underrun_signal))?;
+    let buffered_source = BufferedSymphoniaSource::new(
+        source,
+        Arc::clone(&underrun_signal),
+        seek_coordinator.clone(),
+    )?;
     let mut source = PitchPreservingSource::new(
         buffered_source,
         speed_control,
@@ -464,11 +469,70 @@ const PREFETCH_QUEUE_CHUNKS: usize = 64;
 const PREFETCH_STARTUP_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 const PREFETCH_COMMAND_POLL: std::time::Duration = std::time::Duration::from_millis(2);
 
+#[derive(Clone)]
+pub(super) struct SeekCoordinator {
+    inner: Arc<SeekCoordinatorInner>,
+}
+struct SeekCoordinatorInner {
+    next_request_id: AtomicU64,
+    completion_sender: std::sync::mpsc::Sender<SeekCompletion>,
+    completion_receiver: parking_lot::Mutex<std::sync::mpsc::Receiver<SeekCompletion>>,
+}
+struct SeekCompletion {
+    request_id: u64,
+    result: Result<(), String>,
+}
+impl SeekCoordinator {
+    pub(super) fn new() -> Self {
+        let (completion_sender, completion_receiver) = std::sync::mpsc::channel();
+        Self {
+            inner: Arc::new(SeekCoordinatorInner {
+                next_request_id: AtomicU64::new(0),
+                completion_sender,
+                completion_receiver: parking_lot::Mutex::new(completion_receiver),
+            }),
+        }
+    }
+    pub(super) fn current_request_id(&self) -> u64 {
+        self.inner.next_request_id.load(Ordering::Acquire)
+    }
+    fn begin_request(&self) -> u64 {
+        self.inner.next_request_id.fetch_add(1, Ordering::AcqRel) + 1
+    }
+    fn complete(&self, request_id: u64, result: Result<(), String>) {
+        let _ = self.inner.completion_sender.send(SeekCompletion { request_id, result });
+    }
+    pub(super) fn wait_for(
+        &self,
+        request_id: u64,
+        timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + timeout;
+        let receiver = self.inner.completion_receiver.lock();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err("decoder seek timed out".to_string());
+            }
+            match receiver.recv_timeout(remaining) {
+                Ok(completion) if completion.request_id == request_id => return completion.result,
+                Ok(_) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err("decoder seek timed out".to_string());
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("decoder seek completion channel closed".to_string());
+                }
+            }
+        }
+    }
+}
+
 enum PrefetchCommand {
     Seek {
         generation: u64,
+        request_id: u64,
         position: std::time::Duration,
-        result: std::sync::mpsc::SyncSender<Result<(), String>>,
     },
 }
 
@@ -581,6 +645,7 @@ fn run_prefetch_worker<S: PrefetchableSource>(
     commands: std::sync::mpsc::Receiver<PrefetchCommand>,
     output: std::sync::mpsc::SyncSender<PrefetchMessage>,
     active_generation: Arc<AtomicU64>,
+    seek_coordinator: SeekCoordinator,
 ) {
     let mut generation = 0;
     let mut finished = false;
@@ -604,32 +669,35 @@ fn run_prefetch_worker<S: PrefetchableSource>(
 
         if let Some(PrefetchCommand::Seek {
             generation: seek_generation,
+            request_id,
             position,
-            result,
         }) = command
         {
             if seek_generation != active_generation.load(Ordering::Acquire) {
-                let _ = result.send(Err("decoder seek was superseded".to_string()));
+                seek_coordinator.complete(
+                    request_id,
+                    Err("decoder seek was superseded".to_string()),
+                );
                 continue;
             }
             generation = seek_generation;
             let seek_result = source.seek_for_prefetch(position);
             if active_generation.load(Ordering::Acquire) != generation {
-                let _ = result.send(Err("decoder seek was superseded".to_string()));
+                seek_coordinator.complete(
+                    request_id,
+                    Err("decoder seek was superseded".to_string()),
+                );
                 continue;
             }
             if let Err(error) = seek_result {
                 eprintln!("Decoder seek failed during prefetch: {error}");
-                let _ = result.send(Err(error));
+                seek_coordinator.complete(request_id, Err(error));
                 // Do not send End: a failed seek is an error, not normal track exhaustion. The
                 // playback controller receives the error and rebuilds the decoder off the callback.
                 finished = true;
                 continue;
             }
-            if result.send(Ok(())).is_err() {
-                // The playback controller gave up (for example, its bounded seek timed out).
-                // Keep producing from the requested position until the source is dropped.
-            }
+            seek_coordinator.complete(request_id, Ok(()));
 
             finished = false;
             let (samples, reached_end) =
@@ -753,6 +821,7 @@ pub(super) struct BufferedSymphoniaSource {
     commands: std::sync::mpsc::Sender<PrefetchCommand>,
     output: std::sync::mpsc::Receiver<PrefetchMessage>,
     generation: Arc<AtomicU64>,
+    seek_coordinator: SeekCoordinator,
     underrun_signal: Arc<AtomicBool>,
     pending: Vec<f32>,
     pending_pos: usize,
@@ -765,18 +834,26 @@ impl BufferedSymphoniaSource {
     fn new<S: PrefetchableSource>(
         source: S,
         underrun_signal: Arc<AtomicBool>,
+        seek_coordinator: SeekCoordinator,
     ) -> Result<Self, String> {
         let channels = source.channels();
         let sample_rate = source.sample_rate();
         let generation = Arc::new(AtomicU64::new(0));
         let worker_generation = Arc::clone(&generation);
+        let worker_seek_coordinator = seek_coordinator.clone();
         let (command_sender, command_receiver) = std::sync::mpsc::channel();
         let (output_sender, output_receiver) = std::sync::mpsc::sync_channel(PREFETCH_QUEUE_CHUNKS);
 
         std::thread::Builder::new()
             .name("tarab-decoder-prefetch".to_string())
             .spawn(move || {
-                run_prefetch_worker(source, command_receiver, output_sender, worker_generation);
+                run_prefetch_worker(
+                    source,
+                    command_receiver,
+                    output_sender,
+                    worker_generation,
+                    worker_seek_coordinator,
+                );
             })
             .map_err(|error| format!("failed to start decoder prefetch: {error}"))?;
 
@@ -795,6 +872,7 @@ impl BufferedSymphoniaSource {
             commands: command_sender,
             output: output_receiver,
             generation,
+            seek_coordinator,
             underrun_signal,
             pending,
             pending_pos: 0,
@@ -883,34 +961,24 @@ impl Source for BufferedSymphoniaSource {
             .generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
+        let request_id = self.seek_coordinator.begin_request();
         self.pending.clear();
         self.pending_pos = 0;
         self.ended = false;
         self.underrun_signal.store(false, Ordering::Release);
 
-        // Publish the new generation before enqueueing the request so the worker discards any
-        // old-position chunk that finishes concurrently. This runs inside the bounded seek worker,
-        // not Rodio's device callback. Wait only for the decoder reposition result, not for refill,
-        // so an actual seek failure reaches the playback controller and triggers its rebuild path.
-        let (result_sender, result_receiver) = std::sync::mpsc::sync_channel(1);
+        // Rodio may call Source::try_seek from its output callback. Only enqueue decoder work here;
+        // the bounded playback seek worker waits for completion outside that callback.
         self.commands
             .send(PrefetchCommand::Seek {
                 generation,
+                request_id,
                 position,
-                result: result_sender,
             })
             .map_err(|error| {
                 rodio::source::SeekError::Other(Box::new(std::io::Error::other(error.to_string())))
             })?;
-        match result_receiver.recv() {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(rodio::source::SeekError::Other(Box::new(
-                std::io::Error::other(error),
-            ))),
-            Err(error) => Err(rodio::source::SeekError::Other(Box::new(
-                std::io::Error::other(format!("decoder seek worker stopped: {error}")),
-            ))),
-        }
+        Ok(())
     }
 }
 
