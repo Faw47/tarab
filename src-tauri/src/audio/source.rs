@@ -1712,13 +1712,23 @@ mod tests {
                 Duration::from_secs(1),
             )
             .expect("decoder worker should seek the wrapped source");
-        let sample = source.next().expect("sample after seek");
+        let mut sample = source.next().expect("sample after seek");
+        let progress_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while counter.load(Ordering::Relaxed) == 0
+            && std::time::Instant::now() < progress_deadline
+        {
+            sample = source.next().expect("source should remain open after seeking");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let _ = std::fs::remove_file(&path);
 
-        // WSOLA changes individual window samples; the raw decoder seek test above checks the
-        // exact target frame, while this verifies the wrapped source resumes after seeking.
+        // WSOLA can return a brief underrun while the decoder refills after seek. The raw decoder
+        // test checks the exact target frame; this verifies the wrapped source resumes progress.
         assert!(sample.is_finite());
-        assert!(counter.load(Ordering::Relaxed) > 0);
+        assert!(
+            counter.load(Ordering::Relaxed) > 0,
+            "wrapped playback should resume progress after the seek"
+        );
         assert_eq!(handoff_count.load(Ordering::Relaxed), 1);
     }
     #[test]
