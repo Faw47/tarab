@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { FloatingDock, type NavView } from '../../components/navigation';
 import type { AppTheme } from '../../store/settings-store';
+import type { Track } from '../../types';
 
 export const preloadGlobalCommandPalette = () =>
   import('../../components/navigation/GlobalCommandPalette').then((module) => ({
@@ -28,6 +29,8 @@ interface AppTransientSurfacesProps {
   onTogglePlayback: () => Promise<void>;
   onNextTrack: () => Promise<void>;
   onPreviousTrack: () => Promise<void>;
+  onPlaySearchResult: (track: Track, results: Track[]) => Promise<void>;
+  onOpenLibrarySearch: (query: string) => void;
   onRescanLibrary: () => Promise<void>;
   onOpenFullPlayer: () => void;
   onCloseFullPlayer: () => void;
@@ -47,6 +50,8 @@ export function AppTransientSurfaces({
   onTogglePlayback,
   onNextTrack,
   onPreviousTrack,
+  onPlaySearchResult,
+  onOpenLibrarySearch,
   onRescanLibrary,
   onOpenFullPlayer,
   onCloseFullPlayer,
@@ -101,6 +106,8 @@ export function AppTransientSurfaces({
           onTogglePlayback={onTogglePlayback}
           onNextTrack={onNextTrack}
           onPreviousTrack={onPreviousTrack}
+          onPlaySearchResult={onPlaySearchResult}
+          onOpenLibrarySearch={onOpenLibrarySearch}
           onRescanLibrary={onRescanLibrary}
           onOpenFullPlayer={onOpenFullPlayer}
           hasCurrentTrack={hasCurrentTrack}

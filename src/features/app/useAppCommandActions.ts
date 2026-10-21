@@ -64,6 +64,25 @@ export function useAppCommandActions({
     await toggleCurrentPlayback();
   }, []);
 
+  const handlePlaySearchResult = useCallback(async (track: Track, results: Track[]) => {
+    notePlaybackIntervention();
+    const queue = results.some((candidate) => candidate.id === track.id) ? results : [track];
+    const queueIndex = queue.findIndex((candidate) => candidate.id === track.id);
+
+    try {
+      await startPlayback(track, {
+        queue,
+        queueIndex,
+        shuffleEnabled: false,
+      });
+    } catch (error) {
+      reportError('Failed to play search result', {
+        source: 'app-command-actions',
+        error,
+      });
+    }
+  }, []);
+
   const handleNextTrack = useCallback(async () => {
     await playAdjacentTrack('next');
   }, []);
@@ -111,6 +130,7 @@ export function useAppCommandActions({
   return {
     handleShuffleAll,
     handleTogglePlayback,
+    handlePlaySearchResult,
     handleNextTrack,
     handlePreviousTrack,
     handleRescan,

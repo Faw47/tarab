@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
   Shuffle,
+  TerminalSquare,
   X,
 } from 'lucide-react';
 import {
@@ -24,6 +25,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { getCommandPaletteShortcutLabel } from '@/lib/platform-shortcuts';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { LibraryIcon, QueueIcon, TagIcon } from '../ui/Icons';
@@ -474,6 +476,7 @@ export const TopBar = memo(function TopBar({
   canGoBack = false,
   className,
 }: TopBarProps) {
+  const commandPaletteLabel = `Open command palette (${getCommandPaletteShortcutLabel()})`;
   const desktopSearchInputRef = useRef<HTMLInputElement>(null);
   const compactSearchInputRef = useRef<HTMLInputElement>(null);
   // Resolves to the search input shown at the current width. The window is never narrower than
@@ -760,6 +763,12 @@ export const TopBar = memo(function TopBar({
           style={chromeNoDragStyle}
         >
           <StatusIndicator status={status} />
+
+          <ActionIconButton
+            label={commandPaletteLabel}
+            icon={<TerminalSquare className="h-4 w-4" />}
+            onClick={() => window.dispatchEvent(new Event('tarab:open-command-palette'))}
+          />
 
           {showShuffle && onShuffleAll && (
             <ActionIconButton
