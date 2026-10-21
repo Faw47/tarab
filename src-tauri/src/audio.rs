@@ -2119,11 +2119,7 @@ mod bounded_seek_tests {
         ));
         crate::file_ops::authorize_transient_file(&roots, Path::new(&incoming))
             .expect("authorize incoming track");
-        replace_preloaded_queue_entry(
-            &mut roots.write(),
-            Some(8),
-            Some(Path::new(&incoming)),
-        );
+        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new(&incoming)));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![(incoming.clone(), Arc::clone(&cancelled))];
@@ -2182,11 +2178,7 @@ mod bounded_seek_tests {
         ));
         crate::file_ops::authorize_transient_file(&roots, Path::new(&incoming))
             .expect("authorize incoming track");
-        replace_preloaded_queue_entry(
-            &mut roots.write(),
-            Some(8),
-            Some(Path::new(&incoming)),
-        );
+        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new(&incoming)));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![(incoming.clone(), Arc::clone(&cancelled))];
