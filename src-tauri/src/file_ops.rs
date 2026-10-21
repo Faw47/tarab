@@ -1878,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn transient_authority_tracks_the_active_queue_entry_and_is_released_on_stop() {
+    fn transient_authority_follows_queue_transitions_and_is_released_on_stop() {
         let library = temp_dir("transient-library");
         let outside = temp_dir("transient-outside");
         let persistent = library.join("library.mp3");
@@ -1893,6 +1893,7 @@ mod tests {
         authorize_transient_file(&state, &active).expect("authorize active track");
         authorize_transient_file(&state, &pending).expect("authorize pending track");
 
+        // A is active, so its authorization remains while B's pending grant is dropped.
         {
             let mut state = state.write();
             retain_transient_file_for_queue_entry(&mut state, &active);
@@ -1900,6 +1901,7 @@ mod tests {
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
+        // A handoff to a persistent library entry revokes the old transient grant.
         {
             let mut state = state.write();
             retain_transient_file_for_queue_entry(&mut state, &persistent);
@@ -1907,13 +1909,20 @@ mod tests {
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
         assert!(ensure_path_allowed_by_state(&persistent, &state.read(), "test").is_ok());
 
-        authorize_transient_file(&state, &active).expect("reauthorize active track");
+        // A newly authorized transient B becomes the sole allowed file after a handoff.
+        authorize_transient_file(&state, &pending).expect("authorize next transient track");
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry(&mut state, &active);
-            clear_transient_file_grants(&mut state);
+            retain_transient_file_for_queue_entry(&mut state, &pending);
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_ok());
+
+        {
+            let mut state = state.write();
+            clear_transient_file_grants(&mut state);
+        }
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
         let _ = fs::remove_dir_all(library);
         let _ = fs::remove_dir_all(outside);
