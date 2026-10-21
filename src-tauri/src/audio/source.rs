@@ -291,11 +291,26 @@ pub(super) struct SymphoniaSource {
     sample_rate: u32,
 }
 
-fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
+enum TrackPacket {
+    Selected(Packet),
+    Skipped,
+    Exhausted,
+}
+
+fn packet_for_track(
+    packet: Packet,
+    selected_track_id: u32,
+    attempts: &mut usize,
+) -> TrackPacket {
     if packet.track_id() == selected_track_id {
-        Some(packet)
+        return TrackPacket::Selected(packet);
+    }
+
+    *attempts = attempts.saturating_add(1);
+    if *attempts >= MAX_REFILL_ATTEMPTS {
+        TrackPacket::Exhausted
     } else {
-        None
+        TrackPacket::Skipped
     }
 }
 
@@ -351,8 +366,16 @@ impl SymphoniaSource {
                 }
             };
 
-            let Some(packet) = packet_for_track(packet, self.track_id) else {
-                continue;
+            let packet = match packet_for_track(packet, self.track_id, &mut attempts) {
+                TrackPacket::Selected(packet) => packet,
+                TrackPacket::Skipped => continue,
+                TrackPacket::Exhausted => {
+                    eprintln!(
+                        "Decoder refill exceeded {} attempts for {}",
+                        MAX_REFILL_ATTEMPTS, self.file_path
+                    );
+                    return None;
+                }
             };
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
@@ -682,6 +705,25 @@ mod tests {
         fn last_decoded(&self) -> symphonia::core::audio::AudioBufferRef<'_> {
             self.inner.last_decoded()
         }
+    }
+
+    #[test]
+    fn refill_bounds_consecutive_foreign_track_packets() {
+        let mut attempts = 0;
+        for _ in 0..MAX_REFILL_ATTEMPTS - 1 {
+            let packet = Packet::new_from_slice(2, 0, 0, &[0_u8]);
+            assert!(matches!(
+                packet_for_track(packet, 1, &mut attempts),
+                TrackPacket::Skipped
+            ));
+        }
+
+        let final_packet = Packet::new_from_slice(2, 0, 0, &[0_u8]);
+        assert!(matches!(
+            packet_for_track(final_packet, 1, &mut attempts),
+            TrackPacket::Exhausted
+        ));
+        assert_eq!(attempts, MAX_REFILL_ATTEMPTS);
     }
 
     #[test]
