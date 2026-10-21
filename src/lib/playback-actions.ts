@@ -5,6 +5,7 @@ import {
   setActivePlaybackGeneration,
 } from '../features/app/playback-generation';
 import { usePlayerStore } from '../store/player-store';
+import { fetchLibraryTrackById } from '../features/library/api';
 import type { Track } from '../types';
 import {
   crossfadeToTrack,
@@ -162,6 +163,22 @@ export const startEditorPreview = async (filePath: string): Promise<void> => {
  * `automatic` (the queue advancing after a track ended) repeats the track instead. `entry` plays
  * that already previewed next entry, since a second shuffle preview picks a different one.
  */
+async function hydrateQueueTrackMetadata(track: Track): Promise<Track> {
+  if (!track._lazyQueueEntry) return track;
+  const hydrated = await fetchLibraryTrackById(track.id);
+  if (!hydrated) throw new Error('Queue track no longer exists in the library');
+  const result = { ...hydrated, _queueId: track._queueId };
+  usePlayerStore.getState().hydrateQueueTrack(result);
+  return result;
+}
+
+const findQueueEntryIndex = (track: Track): number => {
+  const queue = usePlayerStore.getState().queue;
+  return track._queueId
+    ? queue.findIndex((entry) => entry._queueId === track._queueId)
+    : queue.findIndex((entry) => entry.id === track.id);
+};
+
 const playAdjacentTrackOnce = async (
   direction: 'next' | 'previous',
   options?: { automatic?: boolean; entry?: { track: Track; index: number } },
@@ -173,28 +190,41 @@ const playAdjacentTrackOnce = async (
     if (!previous) return null;
 
     if (previous.restartCurrent) {
+      const track = await hydrateQueueTrackMetadata(previous.track);
       if (state.hasActivePlayback) {
         await seekToPosition(0);
-        return previous.track;
+        return track;
       }
-      await startPlayback(previous.track, { queueIndex: previous.index, startPos: 0 });
-      return previous.track;
+      await startPlayback(track, {
+        queue: usePlayerStore.getState().queue,
+        queueIndex: findQueueEntryIndex(track),
+        startPos: 0,
+      });
+      return track;
     }
 
     notePlaybackIntervention();
     const intervention = getPlaybackInterventionEpoch();
+    const track = await hydrateQueueTrackMetadata(previous.track);
+    if (getPlaybackInterventionEpoch() !== intervention) return null;
+    const index = findQueueEntryIndex(track);
+    if (index < 0) return null;
     const generation = currentPlaybackResult(
-      await settlePlaybackCommand(playTrack(previous.track.filePath)),
+      await settlePlaybackCommand(playTrack(track.filePath)),
       intervention,
     );
     if (generation === null) return null;
     setActivePlaybackGeneration(generation);
     const freshState = usePlayerStore.getState();
-    freshState.activateTrackAtIndex(previous.index, { backward: true });
-    freshState.setDuration(previous.track.duration);
+    const currentIndex = findQueueEntryIndex(track);
+    const activated = currentIndex >= 0
+      ? freshState.activateTrackAtIndex(currentIndex, { backward: true })
+      : null;
+    if (!activated) freshState.setCurrentTrack(track);
+    freshState.setDuration(track.duration);
     freshState.setIsPlaying(true);
     freshState.setHasActivePlayback(true);
-    return previous.track;
+    return track;
   }
 
   const next = options?.entry ?? state.previewNext({ ignoreRepeatOne: !options?.automatic });
@@ -202,18 +232,24 @@ const playAdjacentTrackOnce = async (
 
   notePlaybackIntervention();
   const intervention = getPlaybackInterventionEpoch();
+  const track = await hydrateQueueTrackMetadata(next.track);
+  if (getPlaybackInterventionEpoch() !== intervention) return null;
+  const index = findQueueEntryIndex(track);
+  if (index < 0) return null;
   const generation = currentPlaybackResult(
-    await settlePlaybackCommand(playTrack(next.track.filePath)),
+    await settlePlaybackCommand(playTrack(track.filePath)),
     intervention,
   );
   if (generation === null) return null;
   setActivePlaybackGeneration(generation);
   const freshState = usePlayerStore.getState();
-  freshState.activateTrackAtIndex(next.index);
-  freshState.setDuration(next.track.duration);
+  const currentIndex = findQueueEntryIndex(track);
+  const activated = currentIndex >= 0 ? freshState.activateTrackAtIndex(currentIndex) : null;
+  if (!activated) freshState.setCurrentTrack(track);
+  freshState.setDuration(track.duration);
   freshState.setIsPlaying(true);
   freshState.setHasActivePlayback(true);
-  return next.track;
+  return track;
 };
 
 // Read the next queue entry only after the previous adjacent transition has committed.
