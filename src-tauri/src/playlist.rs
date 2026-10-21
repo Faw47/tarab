@@ -11,8 +11,6 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::WalkDir;
 
-const UNSUPPORTED_GENRE_RULE_MESSAGE: &str =
-    "ByGenre rules are not supported by the current track schema.";
 pub struct PlaylistGuard {
     lock: Mutex<()>,
 }
@@ -394,18 +392,6 @@ fn deserialize_rules(raw: &Option<String>) -> Option<Vec<SmartPlaylistRule>> {
         .and_then(|value| serde_json::from_str::<Vec<SmartPlaylistRule>>(value).ok())
 }
 
-fn validate_supported_smart_rules(rules: &Option<Vec<SmartPlaylistRule>>) -> Result<(), String> {
-    if rules.as_ref().is_some_and(|rules| {
-        rules
-            .iter()
-            .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }))
-    }) {
-        Err(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
-    } else {
-        Ok(())
-    }
-}
-
 fn to_entry(track: &DbTrack, position: usize) -> PlaylistEntry {
     PlaylistEntry {
         track_id: track.id.clone(),
@@ -444,7 +430,14 @@ fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) ->
             let needle = album.trim().to_lowercase();
             !needle.is_empty() && track.album.to_lowercase().contains(&needle)
         }
-        SmartPlaylistRule::ByGenre { .. } => false,
+        SmartPlaylistRule::ByGenre { genre } => {
+            let needle = genre.trim().to_lowercase();
+            !needle.is_empty()
+                && track
+                    .genre
+                    .as_ref()
+                    .is_some_and(|value| value.to_lowercase().contains(&needle))
+        },
         SmartPlaylistRule::ByYear {
             start_year,
             end_year,
@@ -462,10 +455,6 @@ fn resolve_smart_tracks(
     rules: &[SmartPlaylistRule],
 ) -> (Vec<DbTrack>, Option<String>) {
     let now_ms = to_i64(now_millis_u64().unwrap_or(0));
-    let has_unsupported_genre = rules
-        .iter()
-        .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }));
-
     let filtered = all_tracks
         .iter()
         .filter(|track| {
@@ -476,13 +465,7 @@ fn resolve_smart_tracks(
         .cloned()
         .collect::<Vec<_>>();
 
-    let sync_error = if has_unsupported_genre {
-        Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string())
-    } else {
-        None
-    };
-
-    (filtered, sync_error)
+    (filtered, None)
 }
 
 fn resolve_folder_tracks(all_tracks: &[DbTrack], folder_path: &str) -> Vec<DbTrack> {
@@ -1287,17 +1270,6 @@ fn sync_playlist_blocking(
         }
     }
 
-    if matches!(playlist_type, PlaylistType::Smart) {
-        if let Some(rules) = deserialize_rules(&playlist.smart_rules) {
-            let has_unsupported_genre = rules
-                .iter()
-                .any(|rule| matches!(rule, SmartPlaylistRule::ByGenre { .. }));
-            if has_unsupported_genre {
-                sync_error = Some(UNSUPPORTED_GENRE_RULE_MESSAGE.to_string());
-            }
-        }
-    }
-
     let now = to_i64(now_millis_u64()?);
     db.set_playlist_sync_state(&playlist_id, Some(now), sync_error.as_deref(), now)
         .map_err(|e| e.to_string())?;
@@ -1552,6 +1524,7 @@ mod tests {
             artist: artist.to_string(),
             album_artist: None,
             album: album.to_string(),
+            genre: None,
             year,
             duration,
             file_path: format!("/tmp/{}.mp3", id),
