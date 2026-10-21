@@ -22,7 +22,7 @@ const {
   seekPlaybackMock,
   resumePlaybackMock,
 } = vi.hoisted(() => ({
-  fetchLibraryTrackByIdMock: vi.fn(async () => null),
+  fetchLibraryTrackByIdMock: vi.fn(async (_id: string): Promise<Track | null> => null),
   playTrackMock: vi.fn(async (_filePath: string, _startPos?: number): Promise<number> => 1),
   stopPlaybackMock: vi.fn(async (): Promise<void> => undefined),
   pausePlaybackMock: vi.fn(async (): Promise<void> => undefined),
