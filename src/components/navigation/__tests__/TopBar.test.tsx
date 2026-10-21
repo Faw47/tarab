@@ -93,3 +93,40 @@ describe('command palette discovery (FE-35)', () => {
     );
   });
 });
+
+describe('keyboard shortcuts discovery (FE-36)', () => {
+  it('offers both top bars a button that opens the keyboard shortcuts sheet', () => {
+    const dispatchEvent = vi.spyOn(window, 'dispatchEvent');
+
+    render(
+      <div>
+        <TopBar
+          navMode="topNav"
+          currentView="home"
+          onNavigate={vi.fn()}
+          searchQuery=""
+          onSearchChange={vi.fn()}
+          isScanning={false}
+          scanProgress={0}
+        />
+        <TopBarNeo
+          navMode="topNav"
+          currentView="home"
+          onNavigate={vi.fn()}
+          searchQuery=""
+          onSearchChange={vi.fn()}
+          isScanning={false}
+          scanProgress={0}
+        />
+      </div>,
+    );
+
+    const buttons = screen.getAllByRole('button', { name: /keyboard shortcuts/i });
+    expect(buttons).toHaveLength(2);
+    buttons.forEach((button) => fireEvent.click(button));
+    expect(dispatchEvent).toHaveBeenCalledTimes(2);
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'tarab:open-keyboard-shortcuts' }),
+    );
+  });
+});
