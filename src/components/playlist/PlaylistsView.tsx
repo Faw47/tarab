@@ -24,6 +24,7 @@ import {
   useUpdatePlaylistMutation,
 } from '../../features/playlists/mutations';
 import { usePlaylistDetailQuery, usePlaylistsQuery } from '../../features/playlists/queries';
+import { formatCountLabel } from '../../lib/format-count';
 import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
@@ -45,8 +46,7 @@ const PLAYLIST_TYPE_LABELS: Record<PlaylistType, string> = {
 /** Plain label for a playlist type (the raw values are internal names such as FolderSync). */
 export const playlistTypeLabel = (type: PlaylistType): string => PLAYLIST_TYPE_LABELS[type] ?? type;
 
-export const trackCountLabel = (count: number): string =>
-  `${count.toLocaleString()} ${count === 1 ? 'track' : 'tracks'}`;
+export const trackCountLabel = (count: number): string => formatCountLabel(count, 'track');
 
 /** Above this many rows the tracklist is virtualized; a fixed row height keeps it simple. */
 export const VIRTUALIZE_ENTRIES_ABOVE = 150;
