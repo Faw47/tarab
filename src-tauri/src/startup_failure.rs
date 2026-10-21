@@ -126,7 +126,7 @@ fn log_note(message: &str) -> String {
 
 /// Shows why the Tauri application could not be built.
 pub fn report_build_failure(error: &str) {
-    eprintln!("error while building Tauri application: {error}");
+    log::error!("error while building Tauri application: {error}");
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("Tarab could not start")

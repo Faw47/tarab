@@ -25,6 +25,14 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
     ),
     ("metadata.rs", include_str!("../src/metadata.rs")),
     ("session.rs", include_str!("../src/session.rs")),
+    (
+        "startup_failure.rs",
+        include_str!("../src/startup_failure.rs"),
+    ),
+    (
+        "vendor/tauri-plugin-media/src/desktop.rs",
+        include_str!("../vendor/tauri-plugin-media/src/desktop.rs"),
+    ),
     ("shutdown.rs", include_str!("../src/shutdown.rs")),
     ("vibrancy.rs", include_str!("../src/vibrancy.rs")),
 ];
@@ -44,10 +52,17 @@ fn runtime_diagnostics_use_the_configured_logger() {
         })
         .collect();
 
-    let bootstrap_diagnostics = [(
-        "database/migrations.rs",
-        "Duplicate playlist memberships were collapsed during migration",
-    )];
+    let bootstrap_diagnostics = [
+        (
+            "database/migrations.rs",
+            "Duplicate playlist memberships were collapsed during migration",
+        ),
+        (
+            "startup_failure.rs",
+            "Failed to prepare Tarab data directory before startup",
+        ),
+        ("startup_failure.rs", "{database_error}"),
+    ];
     let cache_fallbacks = direct_stderr
         .iter()
         .filter(|(path, _, line)| {

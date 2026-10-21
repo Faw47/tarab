@@ -79,7 +79,7 @@ impl<R: Runtime> Media<R> {
     {
         match self.controller() {
             Ok(mut controller) => controller.set_event_handler(Box::new(handler)),
-            Err(err) => eprintln!("failed to set media event handler: {}", err),
+            Err(err) => log::error!("failed to set media event handler: {}", err),
         }
     }
 
