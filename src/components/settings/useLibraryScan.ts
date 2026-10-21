@@ -209,6 +209,7 @@ async function scanSingleFolder({
     artist: meta.artist || 'Unknown Artist',
     albumArtist: meta.album_artist ?? null,
     album: meta.album || 'Unknown Album',
+    genre: meta.genre ?? null,
     year: meta.year,
     trackNumber: meta.track_number,
     discNumber: meta.disc_number,
