@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 67 |
+| FIXED_VERIFIED | 68 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
 | NATIVE_VALIDATION_REQUIRED | 32 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 58 |
+| PENDING | 57 |
 | **Total** | **160** |
 
 ## Findings
@@ -151,7 +151,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-20 | P3 | Quit and window close do not save the latest state | NATIVE_VALIDATION_REQUIRED | G1 renderer PASS / G2 all platforms PASS / G3 PASS | Fresh capture, debounce cancellation and native quit handshake; failure/retry and latest navigation covered. Final callback correction independently re-reviewed (18 tests). Tray hiding preserved; ten-second renderer fallback. Native close/quit/tray/logout acceptance remains. | 96296c9 | [#26](https://github.com/Faw47/tarab/pull/26) |
 | PB-30 | P3 | In development builds, session restore never completes and saving never starts | FIXED_VERIFIED | PASS / PASS / PASS | StrictMode test hydrates after the fix (failed before); a completed restore never re-runs (test). | 3356937 | #2 |
 | PB-16 | P3 | Playlist reorder resets every entry's added date and rewrites the whole list from client state | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| PB-17 | P3 | Playlist mutation IDs never protect an actual retry | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-17 | P3 | Playlist mutation IDs never protect an actual retry | FIXED_VERIFIED | PASS / PASS / PASS | G1 test-only run 39586055476 failed the evicted retry regression on Windows, macOS, and Linux after 170, 178, and 177 other Rust tests passed. G2: all five hosted CI jobs pass at head 5372c820e6061d8771cc851b25f16e5dadf7a0ef (run 39556017260). G3: independent review found no code blocker at that head. This SQLite/UI persistence change has no native audio-device gate. | 5372c82 | #43 |
 | PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | DUPLICATE | - | Merged into AR-05 by the audit; see AR-05. The mini progress bar still jumps every 2 s (no interpolation), not addressed. | - | - |
 | PB-27 | P3 | LRC parser edge cases | FIXED_VERIFIED | G1 four enhanced-gap regressions RED to GREEN / G2 frontend PASS / G3 PASS | Offset/fraction/plain-gap fixes reconciled; enhanced empty and word-only markers now retained through offsets, repeated tags, normalization and current-line resolution. Independent regression comparison clean. Native lyric appearance/audio are separate, unclaimed checks. | 727485a, dde89c2, 496fd54 + lyrics continuation | #11, #22; lyrics continuation |
 | PB-33 | P3 | Folder reconcile prefix match is case-insensitive | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39558141565 reproduced case-insensitive deletion on Linux and macOS. G2: all five jobs passed at head 9574916420c734d0052566b69407dac05d7286de (run 39579601128). G3: independent review found no remaining code blocker at that head. Native filesystem acceptance remains open for case-distinct folders and deletion/reconciliation. | 9574916 | #46 |
