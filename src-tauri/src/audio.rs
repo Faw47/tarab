@@ -331,7 +331,7 @@ fn apply_volume_ramp_step(
 }
 
 impl AudioManager {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, library_roots: SharedLibraryRoots) -> Self {
         let (sender, receiver) = channel::<AudioCommand>();
         let playback_state = Arc::new(Mutex::new(PlaybackState::default()));
         let emitted_samples = Arc::new(AtomicU64::new(0));
@@ -404,6 +404,7 @@ impl AudioManager {
 
         // Spawn dedicated audio thread
         let app_for_audio = app.clone();
+        let roots_for_audio = library_roots.clone();
         let active_emitted_for_audio = Arc::clone(&active_emitted_samples);
         let pending_gapless_path = Arc::new(Mutex::new(None::<String>));
         let pending_gapless_path_thread = Arc::clone(&pending_gapless_path);
@@ -652,6 +653,13 @@ impl AudioManager {
                                             },
                                             &gapless_cancellation_tokens,
                                         ) {
+                                            {
+                                                let mut roots = roots_for_audio.write();
+                                                retain_transient_file_for_queue_entry(
+                                                    &mut roots,
+                                                    Path::new(&file_path),
+                                                );
+                                            }
                                             pending_gapless_cancels.clear();
                                             if should_fallback_to_play {
                                                 if let Some(sink) = current_sink.take() {
@@ -1166,6 +1174,13 @@ impl AudioManager {
                                         && state.current_file.as_deref() == Some(next_path.as_str())
                                 };
                                 if is_still_current {
+                                    {
+                                        let mut roots = roots_for_audio.write();
+                                        retain_transient_file_for_queue_entry(
+                                            &mut roots,
+                                            Path::new(&next_path),
+                                        );
+                                    }
                                     let _ = app_for_audio.emit("playback-ended", ended);
                                     emit_playback_transition(
                                         &app_for_audio,
@@ -1608,8 +1623,11 @@ fn next_playback_generation(counter: &AtomicU64) -> u64 {
 
 pub type SharedAudioManager = Arc<AudioManager>;
 
-pub fn create_audio_manager(app: AppHandle) -> SharedAudioManager {
-    Arc::new(AudioManager::new(app))
+pub fn create_audio_manager(
+    app: AppHandle,
+    library_roots: SharedLibraryRoots,
+) -> SharedAudioManager {
+    Arc::new(AudioManager::new(app, library_roots))
 }
 
 fn ensure_audio_file_allowed(

@@ -10,6 +10,21 @@ fn command_body<'a>(source: &'a str, signature: &str) -> &'a str {
     &source[start..end]
 }
 
+fn audio_command_arm(signature: &str) -> &str {
+    let command_loop = AUDIO
+        .find("match receiver.recv_timeout")
+        .expect("audio command loop");
+    let start = command_loop
+        + AUDIO[command_loop..]
+            .find(signature)
+            .expect("audio command arm");
+    let end = AUDIO[start..]
+        .find("\n                            AudioCommand::")
+        .map(|offset| start + offset)
+        .unwrap_or(AUDIO.len());
+    &AUDIO[start..end]
+}
+
 #[test]
 fn play_once_access_lasts_with_the_active_queue_entry() {
     let play_command = command_body(AUDIO, "pub fn play_track(");
@@ -49,13 +64,26 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
         );
     }
 
-    for signature in [
-        "pub fn crossfade_to_track(",
-        "pub fn preload_next_track(",
-    ] {
+    for signature in ["pub fn crossfade_to_track(", "pub fn preload_next_track("] {
         assert!(
             command_body(AUDIO, signature).contains("ensure_audio_file_allowed"),
             "{signature} must validate with transient file access"
         );
     }
+}
+
+#[test]
+fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() {
+    let crossfade = audio_command_arm("AudioCommand::CrossfadeTo {\n                                file_path,");
+    assert!(
+        crossfade.contains("retain_transient_file_for_queue_entry"),
+        "a successfully started crossfade must retain only its incoming track grant"
+    );
+
+    let gapless = audio_command_arm("AudioCommand::GaplessHandoffStarted {\n                                ended,");
+    assert!(
+        gapless.contains("if is_still_current")
+            && gapless.contains("retain_transient_file_for_queue_entry"),
+        "a committed gapless handoff must update grants only for the current track"
+    );
 }
