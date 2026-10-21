@@ -1,6 +1,4 @@
-import { clsx } from 'clsx';
-import { memo, useCallback, useRef, useState } from 'react';
-import { seekToPosition } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';
 import { useSettingsStore } from '../../store/settings-store';
@@ -54,7 +52,7 @@ export const HidingProgressBar = memo(
     const seek = useCallback(
       async (t: number) => {
         try {
-          await seekToPosition(Math.max(0, Math.min(duration || 0, t)));
+          await PlaybackCoordinator.seek(Math.max(0, Math.min(duration || 0, t)));
         } catch (e) {
           reportError('Could not seek', { source: 'hiding-progress-bar', error: e });
         }

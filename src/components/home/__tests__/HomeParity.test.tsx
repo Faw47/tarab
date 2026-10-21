@@ -20,6 +20,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (path: string) => path,
 }));
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    next: () => playAdjacentTrackMock('next'),
+    previous: () => playAdjacentTrackMock('previous'),
+    toggle: toggleCurrentPlaybackMock,
+    start: vi.fn(async () => 1),
+  },
   playAdjacentTrack: playAdjacentTrackMock,
   toggleCurrentPlayback: toggleCurrentPlaybackMock,
   startPlayback: vi.fn(async () => 1),

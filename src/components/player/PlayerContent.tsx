@@ -1,35 +1,4 @@
-import { clsx } from 'clsx';
-import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
-  ChevronDown,
-  ChevronRight,
-  Edit3,
-  Eye,
-  EyeOff,
-  FolderOpen,
-  Headphones,
-  ListPlus,
-  Mic2,
-  MoreHorizontal,
-  Pause,
-  Play,
-  Repeat,
-  Repeat1,
-  Shuffle,
-  SkipBack,
-  SkipForward,
-  Sliders,
-  User,
-} from 'lucide-react';
-import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useCoverArt } from '../../hooks/useCoverArt';
-import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
-import { lazyWithRetry } from '../../lib/lazy-with-retry';
-import { useRenderLog } from '../../lib/performance';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
 import {
@@ -183,7 +152,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
   const handleTogglePlay = useCallback(async () => {
     try {
       if (!currentTrack) return;
-      await toggleCurrentPlayback();
+      await PlaybackCoordinator.toggle();
     } catch (e) {
       reportError('Failed to toggle playback', { source: 'player-content', error: e });
     }
@@ -191,7 +160,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const handlePrevious = useCallback(async () => {
     try {
-      await playAdjacentTrack('previous');
+      await PlaybackCoordinator.previous();
     } catch (e) {
       reportError('Failed to play previous track', { source: 'player-content', error: e });
     }
@@ -199,7 +168,7 @@ export const PlayerContent = memo(({ onClose }: PlayerContentProps) => {
 
   const handleNext = useCallback(async () => {
     try {
-      await playAdjacentTrack('next');
+      await PlaybackCoordinator.next();
     } catch (e) {
       reportError('Failed to play next track', { source: 'player-content', error: e });
     }

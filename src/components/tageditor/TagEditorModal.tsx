@@ -865,9 +865,10 @@ export const TagEditorModal = memo(
                       onRemoveExtendedField={handleRemoveExtendedField}
                     />
 
-                    {activeTab === 'lyrics' && !isBatchEdit && (
+                    {activeTab === 'lyrics' && !isBatchEdit && tracks[0] && (
                       <div className="panel rounded-2xl p-4 border border-white/10">
                         <LyricsEditor
+                          track={tracks[0]!}
                           trackPath={trackPath}
                           lyricsContent={lyricsContent}
                           onChange={setLyricsContent}

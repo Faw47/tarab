@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { seekToPosition } from '../../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../../lib/playback-actions';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
 import { HidingProgressBar } from '../HidingProgressBar';
 
+const { seekToPositionMock } = vi.hoisted(() => ({
+  seekToPositionMock: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../../lib/playback-actions', () => ({
-  seekToPosition: vi.fn(async () => undefined),
+  PlaybackCoordinator: { seek: seekToPositionMock },
+  seekToPosition: seekToPositionMock,
 }));
 
 vi.mock('../../ui/liquid-glass', async (importOriginal) => {
@@ -25,7 +30,7 @@ describe('HidingProgressBar', () => {
         value: MouseEvent,
       });
     }
-    vi.mocked(seekToPosition).mockClear();
+    vi.mocked(PlaybackCoordinator.seek).mockClear();
     usePlayerStore.setState({ currentTime: 60, duration: 240 });
     useSettingsStore.setState({ reducedEffects: false });
   });
@@ -53,7 +58,7 @@ describe('HidingProgressBar', () => {
       ['End', 240],
     ] as const) {
       fireEvent.keyDown(slider, { key });
-      expect(seekToPosition).toHaveBeenLastCalledWith(expected);
+      expect(PlaybackCoordinator.seek).toHaveBeenLastCalledWith(expected);
     }
   });
 
@@ -88,11 +93,11 @@ describe('HidingProgressBar', () => {
     fireEvent.pointerMove(slider, { pointerId: 7, clientX: 300 });
 
     expect(slider).toHaveAttribute('aria-valuenow', '120');
-    expect(seekToPosition).not.toHaveBeenCalled();
+    expect(PlaybackCoordinator.seek).not.toHaveBeenCalled();
 
     fireEvent.pointerUp(slider, { pointerId: 7, clientX: 400 });
 
-    expect(seekToPosition).toHaveBeenCalledTimes(1);
-    expect(seekToPosition).toHaveBeenCalledWith(180);
+    expect(PlaybackCoordinator.seek).toHaveBeenCalledTimes(1);
+    expect(PlaybackCoordinator.seek).toHaveBeenCalledWith(180);
   });
 });

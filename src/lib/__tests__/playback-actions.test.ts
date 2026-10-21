@@ -240,6 +240,42 @@ describe('overlapping source requests', () => {
     expect(usePlayerStore.getState().isPlaying).toBe(false);
   });
 
+  it('sets the previewed track as current for lyric editing', async () => {
+    const previewTrack = track('preview');
+    usePlayerStore.setState({
+      currentTrack: track('previous'),
+      currentTime: 12,
+      isPlaying: false,
+      hasActivePlayback: false,
+    });
+
+    await startEditorPreview(previewTrack);
+
+    const state = usePlayerStore.getState();
+    expect(state.currentTrack?.id).toBe('preview');
+    expect(state.currentTrack?.filePath).toBe(previewTrack.filePath);
+    expect(state.currentTime).toBe(0);
+    expect(state.isPlaying).toBe(true);
+  });
+
+  it('sets the previewed track as current for lyric editing', async () => {
+    const previewTrack = track('preview');
+    usePlayerStore.setState({
+      currentTrack: track('previous'),
+      currentTime: 12,
+      isPlaying: false,
+      hasActivePlayback: false,
+    });
+
+    await startEditorPreview(previewTrack);
+
+    const state = usePlayerStore.getState();
+    expect(state.currentTrack?.id).toBe('preview');
+    expect(state.currentTrack?.filePath).toBe(previewTrack.filePath);
+    expect(state.currentTime).toBe(0);
+    expect(state.isPlaying).toBe(true);
+  });
+
   it('does not reset a newer track when an editor preview finishes late', async () => {
     let finishPreview: (generation: number) => void = () => undefined;
     playTrackMock.mockImplementationOnce(
@@ -249,7 +285,7 @@ describe('overlapping source requests', () => {
         }),
     );
 
-    const preview = startEditorPreview('/music/preview.mp3');
+    const preview = startEditorPreview(track('preview', { filePath: '/music/preview.mp3' }));
     await startPlayback(track('newer'));
     finishPreview(8);
     await preview;
@@ -279,7 +315,7 @@ describe('overlapping source requests', () => {
     const operations = {
       start: () => startPlayback(track('older')),
       next: () => playAdjacentTrack('next'),
-      preview: () => startEditorPreview('/music/preview.mp3'),
+      preview: () => startEditorPreview(track('preview', { filePath: '/music/preview.mp3' })),
       pause: pauseCurrentPlayback,
       resume: resumeCurrentPlayback,
       seek: () => seekToPosition(75),

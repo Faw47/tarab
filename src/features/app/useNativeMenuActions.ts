@@ -1,10 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { toast } from 'sonner';
-import type { NavView } from '../../components/navigation';
-import { useTauriEvent } from '../../hooks/useTauriEvent';
-import { isSameOrSubPath, normalizePath } from '../../lib/path-utils';
-import { seekToPosition } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import { selectLibraryFolder } from '../../lib/tauri-commands';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
@@ -66,7 +61,7 @@ export function useNativeMenuActions({
       if (action === 'playback.seek-backward' || action === 'playback.seek-forward') {
         const state = usePlayerStore.getState();
         const delta = action === 'playback.seek-forward' ? 10 : -10;
-        void seekToPosition(Math.max(0, Math.min(state.duration, state.currentTime + delta)));
+        void PlaybackCoordinator.seek(Math.max(0, Math.min(state.duration, state.currentTime + delta)));
         return;
       }
       if (action === 'file.add-folder') {

@@ -1,5 +1,4 @@
-import { useAsyncCleanup } from '../../hooks/useAsyncCleanup';
-import { startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { dbGetTrackByPublicId } from '../../lib/tauri-commands';
 import { deepLinks } from '../../platform/deepLinks';
@@ -60,7 +59,7 @@ export function useDeepLinkBridge({ onSearch }: UseDeepLinkBridgeOptions) {
                 reportError('The linked track is not in this library', { source: 'deep-link' });
                 return;
               }
-              return startPlayback(mapDbTrackToTrack(track));
+              return PlaybackCoordinator.start(mapDbTrackToTrack(track));
             })
             .catch((error) => {
               reportError('Failed to open the linked track', { source: 'deep-link', error });

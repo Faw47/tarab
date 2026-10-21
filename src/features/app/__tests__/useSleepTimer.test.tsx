@@ -8,6 +8,7 @@ const { pauseCurrentPlaybackMock, reportErrorMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { pause: pauseCurrentPlaybackMock },
   pauseCurrentPlayback: pauseCurrentPlaybackMock,
 }));
 

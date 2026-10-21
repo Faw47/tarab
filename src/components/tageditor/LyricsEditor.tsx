@@ -1,29 +1,7 @@
-import { clsx } from 'clsx';
-import {
-  AlertCircle,
-  Check,
-  Edit2,
-  Loader2,
-  Pause,
-  Play,
-  Plus,
-  Repeat1,
-  RotateCcw,
-  Save,
-  Trash2,
-  X,
-} from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { formatTime } from '../../lib/format-time';
-import {
-  pauseCurrentPlayback,
-  resumeCurrentPlayback,
-  seekToPosition,
-  startEditorPreview,
-} from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { usePlayerStore } from '../../store/player-store';
+import type { Track } from '../../types';
 
 interface LyricLine {
   id: string;
@@ -32,6 +10,7 @@ interface LyricLine {
 }
 
 interface LyricsEditorProps {
+  track: Track;
   trackPath: string;
   lyricsContent: string;
   onChange: (content: string) => void;
@@ -156,7 +135,7 @@ export const lyricsEquivalent = (a: string, b: string): boolean => {
 const REPEAT_DURATION = 5; // seconds
 
 export const LyricsEditor = memo(
-  ({ trackPath, lyricsContent, onChange, onSave, isSaving }: LyricsEditorProps) => {
+  ({ track, trackPath, lyricsContent, onChange, onSave, isSaving }: LyricsEditorProps) => {
     const { currentTrack, isPlaying, currentTime, duration, setCurrentTime, hasActivePlayback } =
       usePlayerStore(
         useShallow((s) => ({
@@ -259,7 +238,7 @@ export const LyricsEditor = memo(
       if (isSeekingRef.current) return;
 
       isSeekingRef.current = true;
-      seekToPosition(repeatRange.start)
+      PlaybackCoordinator.seek(repeatRange.start)
         .catch((e) => {
           console.error('Repeat seek failed:', e);
           showError('Failed to repeat');
@@ -323,14 +302,14 @@ export const LyricsEditor = memo(
     const handleTogglePlay = useCallback(async () => {
       try {
         if (!isCurrentTrack) {
-          await startEditorPreview(trackPath);
+          await PlaybackCoordinator.previewFile(track);
         } else if (isPlaying) {
-          await pauseCurrentPlayback();
+          await PlaybackCoordinator.pause();
         } else {
           if (!hasActivePlayback) {
-            await startEditorPreview(trackPath);
+            await PlaybackCoordinator.previewFile(track);
           } else {
-            await resumeCurrentPlayback();
+            await PlaybackCoordinator.resume();
           }
         }
       } catch (e) {
@@ -375,7 +354,7 @@ export const LyricsEditor = memo(
           return;
         }
         try {
-          await seekToPosition(time);
+          await PlaybackCoordinator.seek(time);
         } catch (e) {
           console.error('Failed to seek:', e);
           showError('Failed to seek');

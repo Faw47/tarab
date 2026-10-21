@@ -1,24 +1,6 @@
 import clsx from 'clsx';
 // CSSProperties removed
-import {
-  ChevronLeft,
-  ChevronUp,
-  Mic2,
-  Pause,
-  Play,
-  Repeat,
-  Repeat1,
-  SkipBack,
-  SkipForward,
-  Volume2,
-  VolumeX,
-} from 'lucide-react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useSmoothTimeSubscription, useSmoothTimeValue } from '../../contexts/smooth-time';
-import { useDismissable } from '../../hooks/useDismissable';
-import { useRenderLog } from '../../lib/performance';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';
 import { applyVolume, isMuted, toggleMute } from '../../lib/volume';
@@ -117,19 +99,19 @@ export const MiniPlayer = memo(
       );
 
     const handleTogglePlay = useCallback(() => {
-      toggleCurrentPlayback().catch((error) =>
+      PlaybackCoordinator.toggle().catch((error) =>
         reportError('Failed to toggle playback', { source: 'mini-player', error }),
       );
     }, []);
 
     const handleNext = useCallback(() => {
-      playAdjacentTrack('next').catch((error) =>
+      PlaybackCoordinator.next().catch((error) =>
         reportError('Failed to play the next track', { source: 'mini-player', error }),
       );
     }, []);
 
     const handlePrevious = useCallback(() => {
-      playAdjacentTrack('previous').catch((error) =>
+      PlaybackCoordinator.previous().catch((error) =>
         reportError('Failed to play the previous track', { source: 'mini-player', error }),
       );
     }, []);

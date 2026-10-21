@@ -1,5 +1,4 @@
-import { useCallback, useMemo } from 'react';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { useHomeLibraryModel } from './useHomeLibraryModel';
 
@@ -26,21 +25,21 @@ export function useHomeController(hasCurrentTrack: boolean, source: 'home-view' 
   const handleTogglePlay = useCallback(async () => {
     if (!hasCurrentTrack) return;
     try {
-      await toggleCurrentPlayback();
+      await PlaybackCoordinator.toggle();
     } catch (error) {
       reportError('Could not play or pause', { source, error });
     }
   }, [hasCurrentTrack, source]);
   const handlePrevious = useCallback(async () => {
     try {
-      await playAdjacentTrack('previous');
+      await PlaybackCoordinator.previous();
     } catch (error) {
       reportError('Could not play the previous track', { source, error });
     }
   }, [source]);
   const handleNext = useCallback(async () => {
     try {
-      await playAdjacentTrack('next');
+      await PlaybackCoordinator.next();
     } catch (error) {
       reportError('Could not play the next track', { source, error });
     }

@@ -1,7 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
-import { useTauriEvent } from '../../hooks/useTauriEvent';
-import { startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import {
   getTrackMetadata,
@@ -100,7 +97,7 @@ export function useLaunchFileIntents({
           await scanFolder(resolved.libraryGrant.path);
         }
         const metadata = await getTrackMetadata(resolved.filePath);
-        await startPlayback(toTrack(metadata));
+        await PlaybackCoordinator.start(toTrack(metadata));
       } catch (error) {
         reportError('Failed to open the selected audio file', { source: 'file-open', error });
       } finally {

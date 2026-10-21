@@ -18,7 +18,8 @@ vi.mock('../../../lib/tauri-commands', () => ({
   listLibraryGrants: mocks.grants,
   getTrackMetadata: mocks.metadata,
 }));
-vi.mock('../../../lib/playback-actions', () => ({ startPlayback: mocks.play }));
+vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { start: mocks.play }, startPlayback: mocks.play }));
 vi.mock('../../../lib/report-error', () => ({ reportError: mocks.report }));
 
 const intent = {

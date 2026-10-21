@@ -93,6 +93,14 @@ vi.mock('../../../lib/tauri-commands', () => ({
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    pause: pauseCurrentPlaybackMock,
+    resume: resumeCurrentPlaybackMock,
+    toggle: toggleCurrentPlaybackMock,
+    next: (...args: unknown[]) => playAdjacentTrackMock('next', ...args),
+    previous: (...args: unknown[]) => playAdjacentTrackMock('previous', ...args),
+    seek: seekToPositionMock,
+  },
   pauseCurrentPlayback: pauseCurrentPlaybackMock,
   resumeCurrentPlayback: resumeCurrentPlaybackMock,
   toggleCurrentPlayback: toggleCurrentPlaybackMock,

@@ -18,7 +18,8 @@ vi.mock('../../../platform/deepLinks', () => ({
 vi.mock('../../../platform/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock('../../../lib/playback-actions', () => ({ startPlayback: vi.fn() }));
+vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { start: vi.fn() }, startPlayback: vi.fn() }));
 vi.mock('../../../lib/tauri-commands', () => ({ dbGetTrackByPublicId: vi.fn() }));
 vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn() }));
 vi.mock('../../library/api', () => ({ mapDbTrackToTrack: vi.fn() }));

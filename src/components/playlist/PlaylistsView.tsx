@@ -1,30 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  ListMusic,
-  Pencil,
-  Pin,
-  PinOff,
-  Play,
-  Plus,
-  RefreshCw,
-  Trash2,
-  TriangleAlert,
-} from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import {
-  useCreatePlaylistMutation,
-  useDeletePlaylistMutation,
-  usePinPlaylistMutation,
-  useRelinkPlaylistTrackMutation,
-  useRemoveMissingTracksMutation,
-  useRemoveTracksMutation,
-  useReorderPlaylistTracksMutation,
-  useSyncPlaylistMutation,
-  useUpdatePlaylistMutation,
-} from '../../features/playlists/mutations';
-import { usePlaylistDetailQuery, usePlaylistsQuery } from '../../features/playlists/queries';
-import { startPlayback } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';
 import { dialog } from '../../platform/dialog';
@@ -204,7 +178,7 @@ export function PlaylistsView() {
     const index = playableTracks.findIndex((track) => track.id === entry.trackId);
     const track = playableTracks[index];
     if (!track) return;
-    void startPlayback(track, { queue: playableTracks, queueIndex: index }).catch((error) =>
+    void PlaybackCoordinator.start(track, { queue: playableTracks, queueIndex: index }).catch((error) =>
       reportError('Could not play the track', { source: 'playlists-view', error }),
     );
   };
@@ -432,7 +406,7 @@ export function PlaylistsView() {
                           onClick={() => {
                             const first = playableTracks[0];
                             if (first) {
-                              void startPlayback(first, {
+                              void PlaybackCoordinator.start(first, {
                                 queue: playableTracks,
                                 queueIndex: 0,
                               });

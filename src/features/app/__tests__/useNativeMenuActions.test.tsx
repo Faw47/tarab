@@ -26,7 +26,8 @@ vi.mock('sonner', () => ({ toast: { error: toastErrorMock } }));
 vi.mock('../../../platform/dialog', () => ({ dialog: { openAudioFiles: openAudioFilesMock } }));
 vi.mock('../../../lib/track-refresh', () => ({ refreshTracksByFilePaths: refreshMock }));
 vi.mock('../../../lib/tauri-commands', () => ({ selectLibraryFolder: vi.fn(async () => null) }));
-vi.mock('../../../lib/playback-actions', () => ({ seekToPosition: vi.fn() }));
+vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: { seek: vi.fn() }, seekToPosition: vi.fn() }));
 vi.mock('../../../lib/report-error', () => ({
   reportError: reportErrorMock,
   logError: vi.fn(),

@@ -11,6 +11,10 @@ const { playAdjacentTrackMock, startPlaybackMock, revealMock } = vi.hoisted(() =
   revealMock: vi.fn(async () => undefined),
 }));
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    next: (...args: unknown[]) => playAdjacentTrackMock('next', ...args),
+    start: startPlaybackMock,
+  },
   playAdjacentTrack: playAdjacentTrackMock,
   startPlayback: startPlaybackMock,
 }));

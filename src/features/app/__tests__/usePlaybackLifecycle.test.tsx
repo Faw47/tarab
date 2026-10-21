@@ -65,6 +65,14 @@ vi.mock('../../../lib/tauri-commands', () => ({
 }));
 
 vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    crossfadeTo: crossfadeToTrackMock,
+    next: (options?: unknown) =>
+      options === undefined
+        ? playAdjacentTrackMock('next')
+        : playAdjacentTrackMock('next', options),
+    preloadNext: preloadNextTrackMock,
+  },
   crossfadeToSource: crossfadeToTrackMock,
   playAdjacentTrack: playAdjacentTrackMock,
   preloadGaplessSource: preloadNextTrackMock,

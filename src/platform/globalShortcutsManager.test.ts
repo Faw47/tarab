@@ -33,6 +33,11 @@ vi.mock('./logger', () => ({
 }));
 
 vi.mock('../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    next: () => playAdjacentTrackMock('next'),
+    previous: () => playAdjacentTrackMock('previous'),
+    toggle: toggleCurrentPlaybackMock,
+  },
   playAdjacentTrack: playAdjacentTrackMock,
   toggleCurrentPlayback: toggleCurrentPlaybackMock,
 }));

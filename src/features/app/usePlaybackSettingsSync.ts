@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { switchAudioOutputDevice } from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { setCrossfadeDuration } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
@@ -33,7 +32,7 @@ export function usePlaybackSettingsSync() {
   }, [crossfadeSeconds]);
 
   useEffect(() => {
-    void switchAudioOutputDevice(outputDevice).catch((err) =>
+    void PlaybackCoordinator.switchOutputDevice(outputDevice).catch((err) =>
       console.error('Failed to set audio output device:', err),
     );
   }, [outputDevice]);

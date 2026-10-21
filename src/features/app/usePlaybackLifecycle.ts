@@ -1,10 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { useTauriEvent } from '../../hooks/useTauriEvent';
-import {
-  crossfadeToSource,
-  playAdjacentTrack,
-  preloadGaplessSource,
-} from '../../lib/playback-actions';
+import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import { dbUpdatePlayStats } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
@@ -130,7 +124,7 @@ async function advanceQueueAutomatically(
 
   const epoch = getPlaybackInterventionEpoch();
   try {
-    const advanced = await playAdjacentTrack('next', { automatic: true, entry: next });
+    const advanced = await PlaybackCoordinator.next({ automatic: true, entry: next });
     if (advanced === null) {
       // A newer user action canceled the pending advance; do not register stale auto-play.
       autoAdvanceRef.current = null;
@@ -139,7 +133,7 @@ async function advanceQueueAutomatically(
     autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
   } catch (error) {
     autoAdvanceRef.current = null;
-    // playAdjacentTrack marks one intervention itself; any other means the user acted.
+    // PlaybackCoordinator.next marks one intervention itself; any other means the user acted.
     const userActed = getPlaybackInterventionEpoch() !== epoch + 1;
     const state = usePlayerStore.getState();
     if (!userActed && canAutoSkip(skipped, state.queue.length)) {
@@ -242,7 +236,7 @@ export function usePlaybackLifecycle() {
             if (next) {
               const entry: PreloadedGaplessEntry = { track: next.track, index: next.index };
               preloadedGaplessRef.current = entry;
-              void preloadGaplessSource(next.track.filePath).catch((error) => {
+              void PlaybackCoordinator.preloadNext(next.track.filePath).catch((error) => {
                 if (preloadedGaplessRef.current === entry) {
                   preloadedGaplessRef.current = null;
                 }
@@ -273,7 +267,7 @@ export function usePlaybackLifecycle() {
         };
 
         try {
-          const generation = await crossfadeToSource(next.track.filePath, crossfadeSeconds);
+          const generation = await PlaybackCoordinator.crossfadeTo(next.track.filePath, crossfadeSeconds);
           if (pendingCrossfadeRef.current) {
             pendingCrossfadeRef.current.generation = generation;
           }

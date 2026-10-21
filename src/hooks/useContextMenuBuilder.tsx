@@ -1,9 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { Edit2, FolderOpen, Library, ListMusic, ListPlus, Play, Star, Trash2 } from 'lucide-react';
-import { useMemo } from 'react';
-import type { ContextMenuItem } from '../components/shared/ContextMenu';
-import { invalidateLibraryForMutation } from '../features/library/mutations';
-import { startPlayback } from '../lib/playback-actions';
+import { PlaybackCoordinator } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
 import { dbSetTrackRating } from '../lib/tauri-commands';
 import type { Track } from '../types';
@@ -52,7 +48,7 @@ export function useContextMenuBuilder({
                 if (tracksToPlay.length === 0) return;
                 const [first] = tracksToPlay;
                 try {
-                  await startPlayback(first, {
+                  await PlaybackCoordinator.start(first, {
                     queue: tracksToPlay,
                     queueIndex: 0,
                   });

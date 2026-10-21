@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { playAdjacentTrack, toggleCurrentPlayback } from '../lib/playback-actions';
+import { PlaybackCoordinator } from '../lib/playback-actions';
 import { reportError } from '../lib/report-error';
 import { stepVolume, toggleMute } from '../lib/volume';
 import { usePlayerStore } from '../store/player-store';
@@ -75,7 +74,7 @@ export const useKeyboardShortcuts = ({
           const { currentTrack: track } = state;
           if (track) {
             try {
-              await toggleCurrentPlayback();
+              await PlaybackCoordinator.toggle();
             } catch (error) {
               reportError('Playback toggle failed', { source: 'app', error });
             }
@@ -87,7 +86,7 @@ export const useKeyboardShortcuts = ({
           if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
             try {
-              await playAdjacentTrack('next');
+              await PlaybackCoordinator.next();
             } catch (error) {
               reportError('Failed to play next track', { source: 'app', error });
             }
@@ -98,7 +97,7 @@ export const useKeyboardShortcuts = ({
           if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
             try {
-              await playAdjacentTrack('previous');
+              await PlaybackCoordinator.previous();
             } catch (error) {
               reportError('Failed to play previous track', { source: 'app', error });
             }

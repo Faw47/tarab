@@ -142,20 +142,7 @@ export const preloadGaplessSource = (filePath: string | null): Promise<number | 
 export const switchAudioOutputDevice = (deviceId: string): Promise<void> =>
   setAudioOutputDevice(deviceId);
 
-export const startEditorPreview = async (filePath: string): Promise<void> => {
-  notePlaybackIntervention();
-  const intervention = getPlaybackInterventionEpoch();
-  const generation = currentPlaybackResult(
-    await settlePlaybackCommand(playTrack(filePath)),
-    intervention,
-  );
-  if (generation === null) return;
-  setActivePlaybackGeneration(generation);
-  const state = usePlayerStore.getState();
-  state.setCurrentTime(0);
-  state.setIsPlaying(true);
-  state.setHasActivePlayback(true);
-};
+export const startEditorPreview = (track: Track): Promise<void> => startPlayback(track);
 
 /**
  * Plays the previous or next queue entry. A user-initiated Next moves on under Repeat One;
@@ -265,7 +252,7 @@ export const PlaybackCoordinator = Object.freeze({
   toggle: toggleCurrentPlayback,
   stop: stopCurrentPlayback,
   seek: seekToPosition,
-  next: () => playAdjacentTrack('next'),
+  next: (options?: Parameters<typeof playAdjacentTrack>[1]) => playAdjacentTrack('next', options),
   previous: () => playAdjacentTrack('previous'),
   crossfadeTo: crossfadeToSource,
   preloadNext: preloadGaplessSource,
