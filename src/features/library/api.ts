@@ -21,6 +21,7 @@ import {
   LibraryStatsSchema,
   TrackCountSchema,
 } from '../../lib/validation/library';
+import type { ValidatedDbTrackAggregateRepresentative } from '../../lib/validation/library';
 import {
   LyricsSearchResultArraySchema,
   SearchResultArraySchema,
@@ -92,6 +93,29 @@ export const mapDbTrackToTrack = (track: {
     lastPlayed: track.lastPlayed ?? null,
   };
 };
+
+const mapAggregateRepresentativeToTrack = (
+  track: ValidatedDbTrackAggregateRepresentative,
+  albumArtist: string | null = null,
+): Track => ({
+  id: normalizePath(track.id),
+  title: track.title,
+  artist: track.artist,
+  albumArtist,
+  album: track.album,
+  year: track.year,
+  trackNumber: null,
+  discNumber: null,
+  duration: track.duration,
+  filePath: normalizePath(track.filePath),
+  hasCoverArt: track.hasCoverArt,
+  coverArtHash: track.coverArtHash,
+  blurhash: track.blurhash,
+  dateAdded: 0,
+  playCount: 0,
+  lastPlayed: null,
+  rating: null,
+});
 
 export const mapSearchResultToTrack = (result: SearchLike): Track => ({
   id: normalizePath(result.id),
@@ -174,7 +198,7 @@ export async function fetchAlbumAggregates() {
     album: aggregate.album,
     artist: aggregate.artist,
     count: aggregate.trackCount,
-    track: mapDbTrackToTrack(aggregate.representative),
+    track: mapAggregateRepresentativeToTrack(aggregate.representative, aggregate.artist),
   }));
 }
 
@@ -183,7 +207,7 @@ export async function fetchArtistAggregates() {
   return raw.map((aggregate) => ({
     artist: aggregate.artist,
     count: aggregate.trackCount,
-    tracks: [mapDbTrackToTrack(aggregate.representative)],
+    tracks: [mapAggregateRepresentativeToTrack(aggregate.representative)],
   }));
 }
 
