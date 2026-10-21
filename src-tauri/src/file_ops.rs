@@ -2431,7 +2431,9 @@ mod tests {
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &first, 10
             ));
-            assert!(clear_transient_file_grants_through_generation(&mut roots, 12));
+            assert!(clear_transient_file_grants_through_generation(
+                &mut roots, 12
+            ));
             assert!(!retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &first, 11
             ));
@@ -2454,7 +2456,9 @@ mod tests {
 
         {
             let mut roots = state.write();
-            assert!(clear_transient_file_grants_through_generation(&mut roots, 14));
+            assert!(clear_transient_file_grants_through_generation(
+                &mut roots, 14
+            ));
             assert!(!retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &next, 13
             ));
