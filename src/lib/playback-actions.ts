@@ -4,8 +4,8 @@ import {
   notePlaybackIntervention,
   setActivePlaybackGeneration,
 } from '../features/app/playback-generation';
-import { usePlayerStore } from '../store/player-store';
 import { fetchLibraryTrackById } from '../features/library/api';
+import { usePlayerStore } from '../store/player-store';
 import type { Track } from '../types';
 import {
   crossfadeToTrack,
@@ -163,7 +163,7 @@ export const startEditorPreview = async (filePath: string): Promise<void> => {
  * `automatic` (the queue advancing after a track ended) repeats the track instead. `entry` plays
  * that already previewed next entry, since a second shuffle preview picks a different one.
  */
-async function hydrateQueueTrackMetadata(track: Track): Promise<Track> {
+export async function hydrateQueueTrackMetadata(track: Track): Promise<Track> {
   if (!track._lazyQueueEntry) return track;
   const hydrated = await fetchLibraryTrackById(track.id);
   if (!hydrated) throw new Error('Queue track no longer exists in the library');
@@ -190,14 +190,20 @@ const playAdjacentTrackOnce = async (
     if (!previous) return null;
 
     if (previous.restartCurrent) {
+      const intervention = getPlaybackInterventionEpoch();
       const track = await hydrateQueueTrackMetadata(previous.track);
-      if (state.hasActivePlayback) {
+      if (getPlaybackInterventionEpoch() !== intervention) return null;
+
+      const freshState = usePlayerStore.getState();
+      const index = findQueueEntryIndex(track);
+      if (index < 0) return null;
+      if (freshState.hasActivePlayback) {
         await seekToPosition(0);
         return track;
       }
       await startPlayback(track, {
-        queue: usePlayerStore.getState().queue,
-        queueIndex: findQueueEntryIndex(track),
+        queue: freshState.queue,
+        queueIndex: index,
         startPos: 0,
       });
       return track;
