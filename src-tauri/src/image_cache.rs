@@ -150,7 +150,10 @@ impl ImageCache {
 
     #[cfg(test)]
     pub(crate) fn with_dir(cache_dir: PathBuf) -> Self {
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            max_cache_size_mb: AtomicU64::new(MAX_CACHE_SIZE_MB),
+        }
     }
 
     /// Generate hash from image data for cache key
