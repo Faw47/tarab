@@ -61,6 +61,7 @@ export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
   const statusIconEnabled = useSettingsStore((s) => s.desktopStatusIconEnabled);
   const mediaKeysEnabled = useSettingsStore((s) => s.desktopMediaKeysEnabled);
   const miniWindowEnabled = useSettingsStore((s) => s.desktopMiniWindowEnabled);
+  const theme = useSettingsStore((s) => s.theme);
   const hideToStatusIconOnClose = useSettingsStore((s) => s.hideToStatusIconOnClose);
 
   const lastActionRef = useRef<{ action: DesktopControlAction; at: number } | null>(null);
@@ -146,6 +147,7 @@ export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
       duration: player.duration > 0 ? player.duration : (player.currentTrack?.duration ?? 0),
       hasPrevious: Boolean(player.previewPrevious()),
       hasNext: Boolean(player.previewNext()),
+      theme: useSettingsStore.getState().theme,
     };
   }, []);
 
@@ -157,7 +159,7 @@ export function useDesktopIntegration(flushSessionSave: () => Promise<void>) {
     } catch {
       // Mini surface may not be open.
     }
-  }, [getDesktopSnapshot, miniWindowEnabled]);
+  }, [getDesktopSnapshot, miniWindowEnabled, theme]);
 
   const syncDesktopNativeUi = useCallback(async () => {
     const player = usePlayerStore.getState();

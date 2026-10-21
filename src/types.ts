@@ -271,6 +271,7 @@ export interface DesktopPlaybackSnapshot {
   duration: number;
   hasPrevious: boolean;
   hasNext: boolean;
+  theme?: 'liquid-glass' | 'neobrutalism';
 }
 
 export interface DesktopNativeUiState {
