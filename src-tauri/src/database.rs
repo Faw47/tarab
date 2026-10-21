@@ -1083,23 +1083,41 @@ mod tests {
 
     #[test]
     fn schema_migration_adds_genre_for_existing_tracks() {
-        let db = test_db();
-        let track = sample_track("genre-migration");
-        db.upsert_tracks_batch(std::slice::from_ref(&track))
-            .expect("seed legacy track");
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (11);
+             CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 file_path TEXT NOT NULL
+             );
+             INSERT INTO tracks (id, title, file_path)
+                 VALUES ('legacy-track', 'Legacy track', '/music/legacy.mp3');
+             CREATE TABLE lyrics_fts (content TEXT);",
+        )
+        .expect("create schema-v11 database");
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
 
         db.run_migrations().expect("apply pending migrations");
 
         let conn = db.conn.lock();
         let (title, genre): (String, Option<String>) = conn
             .query_row(
-                "SELECT title, genre FROM tracks WHERE id = ?1",
-                [&track.id],
+                "SELECT title, genre FROM tracks WHERE id = 'legacy-track'",
+                [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("read migrated track");
-        assert_eq!(title, track.title);
+        assert_eq!(title, "Legacy track");
         assert_eq!(genre, None);
+
+        let version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 12);
     }
 
     #[test]
