@@ -9,9 +9,8 @@ use walkdir::WalkDir;
 
 use crate::file_ops::{ensure_existing_path_allowed, SharedLibraryRoots};
 
-pub const SUPPORTED_EXTENSIONS: [&str; 9] = [
-    "mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "alac", "wma",
-];
+// Keep aligned with the enabled Symphonia codecs/containers and bundle associations.
+pub const SUPPORTED_EXTENSIONS: [&str; 6] = ["mp3", "flac", "wav", "ogg", "m4a", "aac"];
 const MAX_SCAN_DEPTH: usize = 64;
 const MAX_SCAN_ENTRIES: usize = 1_000_000;
 const MAX_SCAN_AUDIO_BYTES: u64 = 10 * 1024 * 1024 * 1024 * 1024;
@@ -428,5 +427,52 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cancelled"));
         let _ = fs::remove_dir_all(allowed_root);
+    }
+
+    #[test]
+    fn scan_rejects_suffixes_without_enabled_container_support() {
+        for extension in ["wma", "alac", "aiff", "opus"] {
+            assert!(
+                !is_supported_audio_path(Path::new(&format!("track.{extension}"))),
+                "unsupported suffix {extension} must not enter scans"
+            );
+        }
+    }
+
+    #[test]
+    fn supported_suffixes_and_file_associations_stay_aligned() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("Tauri config");
+        let mut associations: Vec<&str> = config["bundle"]["fileAssociations"]
+            .as_array()
+            .expect("associations")
+            .iter()
+            .flat_map(|association| association["ext"].as_array().expect("extensions"))
+            .map(|extension| extension.as_str().expect("extension"))
+            .collect();
+        let mut scanned = SUPPORTED_EXTENSIONS.to_vec();
+        associations.sort_unstable();
+        scanned.sort_unstable();
+        assert_eq!(associations, scanned);
+    }
+
+    #[test]
+    fn enabled_decoder_registry_documents_codec_limits() {
+        use symphonia::core::codecs::{
+            CODEC_TYPE_AAC, CODEC_TYPE_ALAC, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_OPUS,
+            CODEC_TYPE_VORBIS,
+        };
+
+        let codecs = symphonia::default::get_codecs();
+        for codec in [
+            CODEC_TYPE_AAC,
+            CODEC_TYPE_FLAC,
+            CODEC_TYPE_MP3,
+            CODEC_TYPE_VORBIS,
+        ] {
+            assert!(codecs.get_codec(codec).is_some());
+        }
+        assert!(codecs.get_codec(CODEC_TYPE_ALAC).is_none());
+        assert!(codecs.get_codec(CODEC_TYPE_OPUS).is_none());
     }
 }
