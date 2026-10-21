@@ -157,7 +157,6 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
     );
 }
 
-
 const FILE_OPS: &str = include_str!("../src/file_ops.rs");
 
 #[test]
@@ -178,7 +177,9 @@ fn failed_newer_playback_request_restores_the_active_generation() {
 
 #[test]
 fn gapless_commit_rechecks_seek_cancellation_after_taking_the_state_lock() {
-    let commit_start = AUDIO.find("fn commit_gapless_handoff(").expect("gapless commit");
+    let commit_start = AUDIO
+        .find("fn commit_gapless_handoff(")
+        .expect("gapless commit");
     let commit_end = AUDIO[commit_start..]
         .find("\nfn reset_active_counter")
         .map(|offset| commit_start + offset)
