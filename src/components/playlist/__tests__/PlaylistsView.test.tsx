@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaylistDetail, PlaylistEntry, PlaylistSummary } from '../../../types';
 import { PlaylistsView, playlistTypeLabel, trackCountLabel } from '../PlaylistsView';
 
-const { startPlaybackMock, state } = vi.hoisted(() => ({
+const { startPlaybackMock, reorderTracksMock, state } = vi.hoisted(() => ({
   startPlaybackMock: vi.fn(async () => 1),
+  reorderTracksMock: vi.fn(async () => undefined),
   state: { summaries: [] as unknown[], detail: null as unknown },
 }));
 
@@ -29,7 +30,11 @@ vi.mock('../../../features/playlists/mutations', () => {
     useRelinkPlaylistTrackMutation: mutation,
     useRemoveMissingTracksMutation: mutation,
     useRemoveTracksMutation: mutation,
-    useReorderPlaylistTracksMutation: mutation,
+    useReorderPlaylistTracksMutation: () => ({
+      mutate: vi.fn(),
+      mutateAsync: reorderTracksMock,
+      isPending: false,
+    }),
     useSyncPlaylistMutation: mutation,
     useUpdatePlaylistMutation: mutation,
   };
@@ -94,6 +99,29 @@ describe('PlaylistsView (FE-26)', () => {
     expect(screen.getByRole('region', { name: 'Playlist details' })).not.toHaveAttribute(
       'aria-live',
     );
+  });
+
+  it('does not offer manual reorder controls for smart playlists', () => {
+    setPlaylist([entry(0)], 'Smart');
+    render(<PlaylistsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Road trip/ }));
+
+    expect(screen.queryByRole('button', { name: 'Move Song 1 up' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move Song 1 down' })).toBeNull();
+  });
+
+  it('sends the order snapshot used for a manual reorder', () => {
+    setPlaylist([entry(0), entry(1)], 'Manual');
+    render(<PlaylistsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Road trip/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Song 1 up' }));
+
+    expect(reorderTracksMock).toHaveBeenCalledWith({
+      playlistId: 'p1',
+      expectedTrackIds: ['t0', 't1'],
+      trackIds: ['t1', 't0'],
+    });
   });
 
   it('virtualizes long playlists', () => {

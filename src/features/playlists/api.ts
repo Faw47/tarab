@@ -92,9 +92,10 @@ export async function relinkPlaylistTrack(
 export async function reorderPlaylistTracks(
   playlistId: string,
   trackIds: string[],
+  expectedTrackIds: string[],
   mutationId?: string,
 ) {
-  const raw = await tauriReorderPlaylistTracks(playlistId, trackIds, mutationId);
+  const raw = await tauriReorderPlaylistTracks(playlistId, trackIds, expectedTrackIds, mutationId);
   return PlaylistMutationResultSchema.parse(raw);
 }
 

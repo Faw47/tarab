@@ -1103,12 +1103,20 @@ pub async fn reorder_playlist_tracks(
     db: tauri::State<'_, SharedDatabase>,
     playlist_id: String,
     track_ids: Vec<String>,
+    expected_track_ids: Vec<String>,
     mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let guard = guard.inner().clone();
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        reorder_playlist_tracks_blocking(guard, db, playlist_id, track_ids, mutation_id)
+        reorder_playlist_tracks_blocking(
+            guard,
+            db,
+            playlist_id,
+            track_ids,
+            expected_track_ids,
+            mutation_id,
+        )
     })
     .await
     .map_err(|error| format!("Playlist task failed: {error}"))?
@@ -1119,6 +1127,7 @@ fn reorder_playlist_tracks_blocking(
     db: SharedDatabase,
     playlist_id: String,
     track_ids: Vec<String>,
+    expected_track_ids: Vec<String>,
     mutation_id: String,
 ) -> Result<PlaylistDetail, String> {
     let _lock = guard.lock.lock();
@@ -1128,7 +1137,7 @@ fn reorder_playlist_tracks_blocking(
     }
 
     let now = to_i64(now_millis_u64()?);
-    db.set_playlist_tracks(&playlist_id, &track_ids, now)
+    db.reorder_playlist_tracks(&playlist_id, &track_ids, &expected_track_ids, now)
         .map_err(|e| e.to_string())?;
 
     let detail = get_playlist_detail_internal(&db, &playlist_id)?;
@@ -1569,5 +1578,302 @@ mod tests {
         assert!(!entry.available);
         assert_eq!(entry.track_id, "x");
         assert_eq!(entry.position, 1);
+    }
+
+    fn seed_manual_playlist_for_reorder(track_ids: &[&str]) -> SharedDatabase {
+        let db: SharedDatabase =
+            Arc::new(crate::database::Database::in_memory_for_tests().expect("in-memory database"));
+        db.create_playlist(&DbPlaylist {
+            id: "reorder-test".to_string(),
+            name: "Reorder test".to_string(),
+            playlist_type: "manual".to_string(),
+            folder_path: None,
+            smart_rules: None,
+            created_at: 1,
+            updated_at: 1,
+            is_pinned: false,
+            pinned_at: None,
+            last_synced_at: None,
+            sync_error: None,
+        })
+        .expect("create playlist");
+        let ids = track_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect::<Vec<_>>();
+        db.set_playlist_tracks("reorder-test", &ids, 1_000)
+            .expect("seed playlist entries");
+        db
+    }
+
+    #[test]
+    fn reorder_preserves_each_entry_added_at_timestamp() {
+        let db = seed_manual_playlist_for_reorder(&["a", "b"]);
+        db.set_playlist_track_added_at_for_test("reorder-test", "a", 1_111)
+            .expect("set first entry timestamp");
+        db.set_playlist_track_added_at_for_test("reorder-test", "b", 2_222)
+            .expect("set second entry timestamp");
+
+        let result = reorder_playlist_tracks_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["b".to_string(), "a".to_string()],
+            vec!["a".to_string(), "b".to_string()],
+            "reorder-preserve-dates".to_string(),
+        );
+
+        assert!(result.is_ok(), "reorder should succeed");
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read playlist rows"),
+            vec![("b".to_string(), 0, 2_222), ("a".to_string(), 1, 1_111)]
+        );
+    }
+
+    #[test]
+    fn reorder_rejects_stale_order_without_overwriting_a_newer_order() {
+        let db = seed_manual_playlist_for_reorder(&["a", "b"]);
+        let initial_order = vec!["a".to_string(), "b".to_string()];
+        let newer_order = vec!["b".to_string(), "a".to_string()];
+
+        db.reorder_playlist_tracks("reorder-test", &newer_order, &initial_order, 2_000)
+            .expect("newer reorder should succeed");
+        let stale_retry =
+            db.reorder_playlist_tracks("reorder-test", &initial_order, &initial_order, 3_000);
+
+        assert!(
+            stale_retry.is_err(),
+            "reorder based on the old order must be rejected"
+        );
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read playlist rows"),
+            vec![("b".to_string(), 0, 1_000), ("a".to_string(), 1, 1_000)]
+        );
+        assert_eq!(
+            db.get_playlist_by_id("reorder-test")
+                .expect("read playlist")
+                .expect("playlist exists")
+                .updated_at,
+            2_000,
+            "rejected stale reorder must preserve the newer update timestamp"
+        );
+    }
+
+    #[test]
+    fn reorder_retry_returns_the_original_result_without_reapplying() {
+        let db = seed_manual_playlist_for_reorder(&["a", "b"]);
+        let guard = create_playlist_guard();
+        let initial_order = vec!["a".to_string(), "b".to_string()];
+        let reordered = vec!["b".to_string(), "a".to_string()];
+
+        let first = reorder_playlist_tracks_blocking(
+            Arc::clone(&guard),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            reordered.clone(),
+            initial_order.clone(),
+            "same-reorder".to_string(),
+        )
+        .expect("first reorder");
+
+        let later = reorder_playlist_tracks_blocking(
+            Arc::clone(&guard),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            initial_order.clone(),
+            reordered.clone(),
+            "later-reorder".to_string(),
+        )
+        .expect("later reorder");
+
+        let retry = reorder_playlist_tracks_blocking(
+            guard,
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            reordered.clone(),
+            initial_order,
+            "same-reorder".to_string(),
+        )
+        .expect("retry original reorder");
+
+        assert_eq!(first.track_ids, reordered);
+        assert_eq!(later.track_ids, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            retry.track_ids,
+            vec!["b".to_string(), "a".to_string()],
+            "a retry returns the original response"
+        );
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read current playlist")
+                .iter()
+                .map(|row| row.0.clone())
+                .collect::<Vec<_>>(),
+            vec!["a".to_string(), "b".to_string()],
+            "a retry must not reapply its earlier reorder"
+        );
+    }
+
+    #[test]
+    fn concurrent_reorders_from_the_same_snapshot_allow_only_one_write() {
+        let db = seed_manual_playlist_for_reorder(&["a", "b", "c"]);
+        let guard = create_playlist_guard();
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let initial = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let first_target = vec!["b".to_string(), "a".to_string(), "c".to_string()];
+        let second_target = vec!["a".to_string(), "c".to_string(), "b".to_string()];
+
+        let first_guard = Arc::clone(&guard);
+        let first_db = Arc::clone(&db);
+        let first_barrier = Arc::clone(&barrier);
+        let first_expected = initial.clone();
+        let first_target_for_thread = first_target.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            reorder_playlist_tracks_blocking(
+                first_guard,
+                first_db,
+                "reorder-test".to_string(),
+                first_target_for_thread,
+                first_expected,
+                "concurrent-first".to_string(),
+            )
+        });
+
+        let second_guard = Arc::clone(&guard);
+        let second_db = Arc::clone(&db);
+        let second_barrier = Arc::clone(&barrier);
+        let second_expected = initial;
+        let second_target_for_thread = second_target.clone();
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            reorder_playlist_tracks_blocking(
+                second_guard,
+                second_db,
+                "reorder-test".to_string(),
+                second_target_for_thread,
+                second_expected,
+                "concurrent-second".to_string(),
+            )
+        });
+
+        barrier.wait();
+        let first_result = first.join().expect("join first reorder");
+        let second_result = second.join().expect("join second reorder");
+        assert_ne!(
+            first_result.is_ok(),
+            second_result.is_ok(),
+            "exactly one request from the shared stale snapshot should succeed"
+        );
+
+        let final_order = db
+            .playlist_track_rows_for_test("reorder-test")
+            .expect("read final playlist order")
+            .iter()
+            .map(|row| row.0.clone())
+            .collect::<Vec<_>>();
+        let winning_target = if first_result.is_ok() {
+            first_target
+        } else {
+            second_target
+        };
+        assert_eq!(final_order, winning_target);
+    }
+
+    #[test]
+    fn reorder_rejects_stale_membership_without_mutating_playlist() {
+        let db = seed_manual_playlist_for_reorder(&["a", "b"]);
+        let before = db
+            .playlist_track_rows_for_test("reorder-test")
+            .expect("read initial playlist rows");
+        let result = reorder_playlist_tracks_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string(), "stale".to_string()],
+            vec!["a".to_string(), "b".to_string()],
+            "reorder-stale-membership".to_string(),
+        );
+
+        assert!(result.is_err(), "stale reorder must be rejected");
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read playlist rows after rejection"),
+            before
+        );
+        assert_eq!(
+            db.get_playlist_by_id("reorder-test")
+                .expect("read playlist")
+                .expect("playlist exists")
+                .updated_at,
+            1_000,
+            "rejected reorder must not update the playlist timestamp"
+        );
+    }
+
+    #[test]
+    fn reorder_rejects_duplicate_track_ids_without_mutating_playlist() {
+        let db = seed_manual_playlist_for_reorder(&["a"]);
+        let before = db
+            .playlist_track_rows_for_test("reorder-test")
+            .expect("read initial playlist rows");
+        let result = reorder_playlist_tracks_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "reorder-test".to_string(),
+            vec!["a".to_string(), "a".to_string()],
+            vec!["a".to_string()],
+            "reorder-duplicate-id".to_string(),
+        );
+
+        assert!(result.is_err(), "duplicate track IDs must be rejected");
+        assert_eq!(
+            db.playlist_track_rows_for_test("reorder-test")
+                .expect("read playlist rows after rejection"),
+            before
+        );
+    }
+
+    #[test]
+    fn reorder_rejects_non_manual_playlists() {
+        let db: SharedDatabase =
+            Arc::new(crate::database::Database::in_memory_for_tests().expect("in-memory database"));
+        db.create_playlist(&DbPlaylist {
+            id: "smart-reorder-test".to_string(),
+            name: "Smart playlist".to_string(),
+            playlist_type: "smart".to_string(),
+            folder_path: None,
+            smart_rules: None,
+            created_at: 1,
+            updated_at: 1,
+            is_pinned: false,
+            pinned_at: None,
+            last_synced_at: None,
+            sync_error: None,
+        })
+        .expect("create smart playlist");
+        db.set_playlist_tracks("smart-reorder-test", &["a".to_string()], 1_000)
+            .expect("seed smart playlist rows");
+
+        let result = reorder_playlist_tracks_blocking(
+            create_playlist_guard(),
+            Arc::clone(&db),
+            "smart-reorder-test".to_string(),
+            vec!["a".to_string()],
+            vec!["a".to_string()],
+            "reorder-smart-playlist".to_string(),
+        );
+
+        assert!(
+            result.is_err(),
+            "smart playlists are not manually reorderable"
+        );
+        assert_eq!(
+            db.playlist_track_rows_for_test("smart-reorder-test")
+                .expect("read playlist rows"),
+            vec![("a".to_string(), 0, 1_000)]
+        );
     }
 }

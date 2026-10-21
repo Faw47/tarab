@@ -577,9 +577,10 @@ export const relinkPlaylistTrack = async (
 export const reorderPlaylistTracks = async (
   playlistId: string,
   trackIds: string[],
+  expectedTrackIds: string[],
   mutationId: string = crypto.randomUUID(),
 ): Promise<PlaylistDetail> => {
-  return invoke('reorder_playlist_tracks', { playlistId, trackIds, mutationId });
+  return invoke('reorder_playlist_tracks', { playlistId, trackIds, expectedTrackIds, mutationId });
 };
 
 export const syncPlaylist = async (playlistId: string): Promise<PlaylistDetail> => {
