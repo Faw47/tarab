@@ -200,7 +200,14 @@ describe('usePlaybackLifecycle', () => {
       queue: [active, lazy],
       queueIndex: 0,
     });
-    hydrateQueueTrackMetadataMock.mockResolvedValueOnce(queue[1]);
+    hydrateQueueTrackMetadataMock.mockImplementationOnce(async (track) => {
+      const hydrated = queue[1];
+      usePlayerStore.getState().hydrateQueueTrack({
+        ...hydrated,
+        _queueId: track._queueId,
+      });
+      return hydrated;
+    });
 
     render(<Harness />);
     await waitFor(() => {
@@ -239,7 +246,14 @@ describe('usePlaybackLifecycle', () => {
       queueIndex: 0,
     });
     useSettingsStore.setState({ crossfadeSeconds: 0, gapless: true });
-    hydrateQueueTrackMetadataMock.mockResolvedValueOnce(queue[1]);
+    hydrateQueueTrackMetadataMock.mockImplementationOnce(async (track) => {
+      const hydrated = queue[1];
+      usePlayerStore.getState().hydrateQueueTrack({
+        ...hydrated,
+        _queueId: track._queueId,
+      });
+      return hydrated;
+    });
 
     render(<Harness />);
     await waitFor(() => {
