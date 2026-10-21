@@ -19,7 +19,9 @@ export function useAutostartIntegration() {
         cancelled ||
         intentRevision !== expectedRevision ||
         appliedIntentRevision !== expectedRevision
-      ) return;
+      ) {
+        return;
+      }
       syncingFromOs = true;
       try {
         if (useSettingsStore.getState().autostartEnabled !== enabled) {
