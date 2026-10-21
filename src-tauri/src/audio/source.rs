@@ -1,6 +1,8 @@
 use super::time_stretch::PitchPreservingSource;
 use super::*;
 use rodio::source::SeekError;
+use symphonia::core::codecs::{CodecParameters, CODEC_TYPE_OPUS};
+use symphonia_adapter_libopus::OpusDecoder;
 
 pub(super) struct PlaybackStart<'a> {
     pub(super) file_path: &'a str,
