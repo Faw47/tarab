@@ -69,4 +69,24 @@ describe('PillMiniPlayer', () => {
 
     expect(container.querySelector('.animate-breathe')).not.toBeInTheDocument();
   });
+  it('keeps Play separate from expansion', () => {
+    const onExpand = vi.fn();
+
+    render(<PillMiniPlayer onExpand={onExpand} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+
+    expect(toggleCurrentPlaybackMock).toHaveBeenCalledTimes(1);
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it('keeps the breathe animation when reduced effects are disabled', () => {
+    usePlayerStore.setState({ isPlaying: true });
+    const props = { onExpand: vi.fn(), reducedEffects: false };
+
+    const { container } = render(<PillMiniPlayer {...props} />);
+
+    expect(container.querySelector('.animate-breathe')).toBeInTheDocument();
+  });
+
 });
