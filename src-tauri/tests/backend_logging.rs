@@ -19,7 +19,10 @@ const RUNTIME_SOURCES: &[(&str, &str)] = &[
     ),
     ("lib.rs", include_str!("../src/lib.rs")),
     ("library.rs", include_str!("../src/library.rs")),
-    ("library_watcher.rs", include_str!("../src/library_watcher.rs")),
+    (
+        "library_watcher.rs",
+        include_str!("../src/library_watcher.rs"),
+    ),
     ("metadata.rs", include_str!("../src/metadata.rs")),
     ("session.rs", include_str!("../src/session.rs")),
     ("shutdown.rs", include_str!("../src/shutdown.rs")),
