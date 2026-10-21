@@ -2262,6 +2262,8 @@ mod bounded_seek_tests {
             Some(incoming.as_str())
         );
         assert_eq!(roots.read().transient_playback_generation, 9);
+        assert!(playback_generation_is_current(&roots.read(), 8));
+        assert!(!playback_generation_is_current(&roots.read(), 9));
         assert!(ensure_path_allowed_by_state(
             Path::new(&incoming),
             &roots.read(),

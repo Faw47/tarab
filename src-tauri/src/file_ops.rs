@@ -858,7 +858,15 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     state.pending_playback_generation = None;
     state.pending_transient_file_grants.clear();
 
-    if is_pending_request || is_gapless_successor {
+    if is_pending_request {
+        let has_newer_preload = state
+            .preloaded_queue_entry
+            .as_ref()
+            .is_some_and(|(preloaded_generation, _)| *preloaded_generation > generation);
+        if !has_newer_preload {
+            state.preloaded_queue_entry = None;
+        }
+    } else if is_gapless_successor {
         state.preloaded_queue_entry = None;
     }
 
@@ -2135,6 +2143,55 @@ mod tests {
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
         let _ = fs::remove_dir_all(library);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn a_successful_play_preserves_a_newer_preload_and_its_transient_grant() {
+        let outside = temp_dir("newer-preload-during-play");
+        let active = outside.join("active.mp3");
+        let requested = outside.join("requested.mp3");
+        let successor = outside.join("successor.mp3");
+        for path in [&active, &requested, &successor] {
+            fs::write(path, b"audio").expect("write test track");
+        }
+
+        let state = create_library_roots_state();
+        authorize_transient_file(&state, &active).expect("authorize active track");
+        authorize_transient_file(&state, &requested).expect("authorize pending Play");
+        authorize_transient_file(&state, &successor).expect("authorize newer preload");
+        {
+            let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 7, &active));
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &active, 7
+            ));
+            assert!(mark_playback_generation(&mut roots, 8, &requested));
+            replace_preloaded_queue_entry(&mut roots, Some(9), Some(&successor));
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &requested, 8
+            ));
+        }
+
+        assert!(ensure_path_allowed_by_state(&successor, &state.read(), "test").is_ok());
+        {
+            let roots = state.read();
+            assert_eq!(
+                roots.preloaded_queue_entry,
+                Some((
+                    9,
+                    fs::canonicalize(&successor).expect("canonical successor"),
+                ))
+            );
+        }
+        {
+            let mut roots = state.write();
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &successor, 9
+            ));
+        }
+        assert!(ensure_path_allowed_by_state(&requested, &state.read(), "test").is_err());
+        assert!(ensure_path_allowed_by_state(&successor, &state.read(), "test").is_ok());
         let _ = fs::remove_dir_all(outside);
     }
 

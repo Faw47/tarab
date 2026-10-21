@@ -219,4 +219,8 @@ fn failed_play_keeps_the_exact_preloaded_gapless_entry_available() {
         AUDIO.contains("replace_preloaded_queue_entry"),
         "preload and clear commands must update transient file ownership"
     );
+    assert!(
+        FILE_OPS.contains("*preloaded_generation > generation"),
+        "a preload queued after a Play request must survive that Play's successful commit"
+    );
 }
