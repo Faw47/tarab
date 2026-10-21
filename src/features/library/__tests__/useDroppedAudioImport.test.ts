@@ -11,10 +11,7 @@ vi.mock('../../../lib/tauri-commands', () => ({
   syncLyricsIndex: vi.fn(),
 }));
 
-import {
-  isSupportedDroppedAudioPath,
-  mergeDroppedLibraryFolders,
-} from '../useDroppedAudioImport';
+import { isSupportedDroppedAudioPath, mergeDroppedLibraryFolders } from '../useDroppedAudioImport';
 
 describe('isSupportedDroppedAudioPath', () => {
   it('accepts decoder-supported formats and rejects unsupported extensions', () => {
