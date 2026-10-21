@@ -1,6 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '../../../types';
+import { notePlaybackIntervention } from '../playback-generation';
 import { useAppCommandActions } from '../useAppCommandActions';
 
 const { fetchLibraryTrackByIdMock, getShuffleAllQueueMock, startPlaybackMock } = vi.hoisted(() => ({
@@ -60,6 +61,43 @@ describe('useAppCommandActions shuffle all', () => {
       { id: '/music/b.flac', duration: 210 },
     ]);
     fetchLibraryTrackByIdMock.mockResolvedValue(firstTrack);
+  });
+
+  it('does not start a stale shuffle after a newer playback intent', async () => {
+    let resolveQueue: (references: Array<{ id: string; duration: number }>) => void = () =>
+      undefined;
+    getShuffleAllQueueMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveQueue = resolve;
+      }),
+    );
+
+    let shuffleAll: (() => Promise<void>) | null = null;
+    function Harness() {
+      const actions = useAppCommandActions({
+        totalTracks: 2,
+        isScanning: false,
+        rescanAll: async () => undefined,
+        addToQueue: () => undefined,
+        openTagEditor: () => undefined,
+      });
+      shuffleAll = actions.handleShuffleAll;
+      return null;
+    }
+
+    render(<Harness />);
+    let pending: Promise<void> | undefined;
+    await act(async () => {
+      pending = shuffleAll?.();
+    });
+    notePlaybackIntervention();
+    resolveQueue([{ id: '/music/a.flac', duration: 180 }]);
+    await act(async () => {
+      await pending;
+    });
+
+    expect(fetchLibraryTrackByIdMock).not.toHaveBeenCalled();
+    expect(startPlaybackMock).not.toHaveBeenCalled();
   });
 
   it('requests a server-side shuffle and hydrates only the first track', async () => {
