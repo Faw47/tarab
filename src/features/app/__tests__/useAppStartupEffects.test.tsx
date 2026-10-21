@@ -128,6 +128,28 @@ describe('useAppStartupEffects', () => {
     await waitFor(() => expect(setAutostartMock).toHaveBeenCalledWith(true), { timeout: 1000 });
   });
 
+  it('rechecks the system login setting after settings hydration completes', async () => {
+    hydratedMock.mockReturnValue(false);
+    let resolveInitial: ((enabled: boolean) => void) | undefined;
+    isEnabledMock
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+        resolveInitial = resolve;
+      }))
+      .mockResolvedValueOnce(true);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+    await waitFor(() => expect(isEnabledMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      hydratedMock.mockReturnValue(true);
+      for (const listener of [...hydrationListeners]) listener();
+      resolveInitial?.(false);
+    });
+
+    await waitFor(() => expect(isEnabledMock).toHaveBeenCalledTimes(2));
+    expect(setAutostartMock).toHaveBeenLastCalledWith(true);
+  });
+
   it('keeps the main window hidden on autostart with an enabled status icon', async () => {
     minimizedMock.mockResolvedValue(true);
 
