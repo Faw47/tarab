@@ -2211,10 +2211,6 @@ mod bounded_seek_tests {
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
         crate::file_ops::authorize_transient_file(&roots, &outgoing)
             .expect("authorize outgoing transient track");
-        crate::file_ops::authorize_transient_file(&roots, &incoming)
-            .expect("authorize preloaded transient track");
-        crate::file_ops::authorize_transient_file(&roots, &failed)
-            .expect("authorize failed transient request");
         let outgoing = outgoing.to_string_lossy().into_owned();
         let incoming = incoming.to_string_lossy().into_owned();
         let failed = failed.to_string_lossy().into_owned();
@@ -2228,7 +2224,11 @@ mod bounded_seek_tests {
             Path::new(&outgoing),
             7,
         ));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&incoming))
+            .expect("authorize preloaded transient track");
         replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new(&incoming)));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&failed))
+            .expect("authorize failed transient request");
         assert!(mark_playback_generation(
             &mut roots.write(),
             9,
