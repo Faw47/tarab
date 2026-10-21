@@ -151,23 +151,23 @@ NeoVolumeControl.displayName = 'NeoVolumeControl';
 
 const NowPlayingEqualizer = memo(
   ({ isPlaying, reducedEffects }: { isPlaying: boolean; reducedEffects: boolean }) => {
-  return (
-    <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
-            isPlaying && !reducedEffects && 'animate-pulse',
-          )}
-          style={{
-            height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
-            animationDelay: `${i * 0.15}s`,
-          }}
-        />
-      ))}
-    </div>
-  );
+    return (
+      <div className="flex h-8 w-12 items-end gap-[3px] overflow-hidden" aria-hidden="true">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              'flex-1 border-t-2 border-black bg-[var(--signal-play)]',
+              isPlaying && !reducedEffects && 'animate-pulse',
+            )}
+            style={{
+              height: isPlaying ? `${20 + ((i * 17) % 60)}%` : '20%',
+              animationDelay: `${i * 0.15}s`,
+            }}
+          />
+        ))}
+      </div>
+    );
   },
 );
 NowPlayingEqualizer.displayName = 'NowPlayingEqualizer';
