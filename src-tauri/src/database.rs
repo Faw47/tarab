@@ -876,7 +876,7 @@ fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(
     database_artifacts.sort_by_key(|(source, _)| {
         source
             .file_name()
-            .map_or(false, |name| name == "library.db")
+            .is_some_and(|name| name == "library.db")
     });
     let mut moved_artifacts: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (source, destination) in database_artifacts {
