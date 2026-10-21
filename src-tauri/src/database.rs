@@ -1797,4 +1797,114 @@ mod tests {
         assert_eq!(lyrics_entries[0].track_id, slash_path);
         assert_eq!(lyrics_entries[0].lyrics_path, "C:/music/song.lrc");
     }
+
+    #[test]
+    fn migration_drops_the_redundant_file_path_index() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let indexes = conn
+            .prepare("PRAGMA index_list(tracks)")
+            .expect("prepare index list")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query index list")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect index list");
+
+        assert!(
+            !indexes.iter().any(|name| name == "idx_tracks_file_path"),
+            "file_path UNIQUE already provides an index; redundant index remains: {indexes:?}"
+        );
+    }
+
+    #[test]
+    fn fts_update_trigger_only_targets_searchable_columns() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let trigger_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'tracks_au'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("find FTS update trigger");
+
+        assert!(
+            trigger_sql
+                .to_ascii_uppercase()
+                .contains("AFTER UPDATE OF TITLE, ARTIST, ALBUM"),
+            "play-count and rating updates should not rewrite FTS rows: {trigger_sql}"
+        );
+    }
+
+    #[test]
+    fn title_keyset_pages_use_an_ordered_index_without_a_temp_sort() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let mut statement = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM tracks
+                 WHERE (title COLLATE NOCASE, id) > (?1, ?2)
+                 ORDER BY title COLLATE NOCASE ASC, id ASC
+                 LIMIT ?3",
+            )
+            .expect("prepare title keyset query plan");
+        let details = statement
+            .query_map(rusqlite::params!["Alpha", "/tmp/alpha.mp3", 100], |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("query title keyset plan")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect title keyset plan");
+
+        assert!(
+            details.iter().any(|detail| detail.contains("idx_tracks_title_id")),
+            "title keyset should seek through idx_tracks_title_id: {details:?}"
+        );
+        assert!(
+            !details.iter().any(|detail| detail.contains("USE TEMP B-TREE")),
+            "title keyset should not sort each page: {details:?}"
+        );
+    }
+
+    #[test]
+    fn folder_prefix_search_uses_an_index_instead_of_scanning_paths() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let mut statement = conn
+            .prepare(
+                r#"EXPLAIN QUERY PLAN
+                   SELECT file_path FROM tracks
+                   WHERE file_path LIKE ?1 ESCAPE '\'"#,
+            )
+            .expect("prepare folder LIKE query plan");
+        let details = statement
+            .query_map(rusqlite::params!["/tmp/music/album/%"], |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("query folder LIKE plan")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect folder LIKE plan");
+
+        assert!(
+            details.iter().any(|detail| detail.contains("SEARCH tracks USING INDEX")),
+            "folder prefix should use the file_path index: {details:?}"
+        );
+    }
+
+    #[test]
+    fn short_substring_search_does_not_run_the_like_fallback() {
+        let db = test_db();
+        let mut track = sample_track("short-search");
+        track.title = "Black".to_string();
+        db.upsert_tracks_batch(&[track]).expect("seed track");
+
+        let results = db.search_tracks("la", 10).expect("search short substring");
+
+        assert!(
+            results.is_empty(),
+            "two-character no-hit prefixes should not scan all text columns: {results:?}"
+        );
+    }
+
 }
