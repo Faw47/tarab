@@ -14,8 +14,7 @@ vi.mock('../../../lib/volume', () => ({
 }));
 
 vi.mock('../../../store/player-store', () => ({
-  usePlayerStore: (selector: (state: { volume: number }) => unknown) =>
-    selector({ volume: 0.5 }),
+  usePlayerStore: (selector: (state: { volume: number }) => unknown) => selector({ volume: 0.5 }),
 }));
 
 describe('PlayerVolume', () => {
