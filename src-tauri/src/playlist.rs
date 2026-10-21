@@ -802,7 +802,6 @@ fn create_playlist_blocking(
     if trimmed_name.is_empty() {
         return Err("Playlist name is required".to_string());
     }
-    validate_supported_smart_rules(&smart_rules)?;
     if playlist_type == PlaylistType::FolderSync {
         let path = folder_path
             .as_deref()
@@ -888,7 +887,6 @@ fn update_playlist_blocking(
     }
 
     if let Some(next_rules) = smart_rules {
-        validate_supported_smart_rules(&Some(next_rules.clone()))?;
         playlist.smart_rules = serialize_rules(&Some(next_rules));
     }
 
