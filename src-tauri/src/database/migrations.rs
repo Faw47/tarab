@@ -50,8 +50,12 @@ impl Database {
             self.apply_migration_tx(&mut conn, 8, |tx| self.migrate_v8(tx))?;
         }
 
+        if current_version < 9 {
+            self.apply_migration_tx(&mut conn, 9, |tx| self.migrate_v9(tx))?;
+        }
+
         if current_version < CURRENT_SCHEMA_VERSION {
-            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v9(tx))?;
+            self.apply_migration_tx(&mut conn, CURRENT_SCHEMA_VERSION, |tx| self.migrate_v10(tx))?;
         }
 
         // Guard against schema drift: ensure lyrics index schema exists even if
@@ -574,6 +578,40 @@ impl Database {
             );
             CREATE INDEX IF NOT EXISTS idx_playlist_mutation_results_created_at
                 ON playlist_mutation_results(created_at);",
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn migrate_v10(&self, conn: &Connection) -> SqliteResult<()> {
+        conn.execute_batch(
+            r#"
+            DROP INDEX IF EXISTS idx_tracks_file_path;
+            CREATE INDEX IF NOT EXISTS idx_tracks_file_path_nocase
+                ON tracks(file_path COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_lyrics_index_track_id_nocase
+                ON lyrics_index(track_id COLLATE NOCASE);
+
+            DROP TRIGGER IF EXISTS tracks_au;
+            CREATE TRIGGER tracks_au AFTER UPDATE OF title, artist, album ON tracks BEGIN
+                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album)
+                VALUES ('delete', OLD.rowid, OLD.title, OLD.artist, OLD.album);
+                INSERT INTO tracks_fts(rowid, title, artist, album)
+                VALUES (NEW.rowid, NEW.title, NEW.artist, NEW.album);
+            END;
+
+            CREATE INDEX IF NOT EXISTS idx_tracks_title_id
+                ON tracks(title COLLATE NOCASE, id);
+            CREATE INDEX IF NOT EXISTS idx_tracks_artist_id
+                ON tracks(artist COLLATE NOCASE, id);
+            CREATE INDEX IF NOT EXISTS idx_tracks_album_id
+                ON tracks(album COLLATE NOCASE, id);
+            CREATE INDEX IF NOT EXISTS idx_tracks_date_added_id
+                ON tracks(date_added DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_tracks_play_count_id
+                ON tracks(play_count DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_tracks_duration_id
+                ON tracks(duration DESC, id DESC);
+            "#,
         )?;
         Ok(())
     }
