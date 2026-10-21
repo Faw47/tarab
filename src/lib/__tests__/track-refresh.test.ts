@@ -54,6 +54,7 @@ describe('refreshTracksByFilePaths', () => {
         artist: 'Artist',
         album: 'Album',
         album_artist: null,
+        genre: null,
         year: null,
         track_number: null,
         disc_number: null,
