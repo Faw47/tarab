@@ -1091,7 +1091,11 @@ impl AudioManager {
                                     let next_clone = path.clone();
                                     let cnt_next = Arc::clone(&emitted_for_next);
 
-                                    let handoff = GaplessHandoffSource::new(source2, move || {
+                                    let real_content_started = source2.real_content_started();
+                                    let handoff = GaplessHandoffSource::new_after_real_content(
+                                        source2,
+                                        real_content_started,
+                                        move || {
                                         let committed = commit_gapless_handoff(
                                             &state_emit,
                                             &handoff_cancelled_for_callback,
@@ -1122,7 +1126,8 @@ impl AudioManager {
                                                 next_path: next_clone,
                                             },
                                         );
-                                    });
+                                        },
+                                    );
 
                                     pending_gapless_cancels.push((path.clone(), handoff_cancelled));
                                     sink.append(handoff);
