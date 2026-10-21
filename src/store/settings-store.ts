@@ -323,7 +323,7 @@ export const useSettingsStore = create<SettingsState>()(
               ...incoming,
               smartShuffleEnabled: incoming.smartShuffleEnabled ?? true,
               theme: incoming.theme ?? 'liquid-glass',
-              navMode: incoming.navMode ?? 'iconRail',
+              navMode: incoming.navMode ?? 'topNav',
             } as Partial<SettingsState>;
           }
           if ((version ?? 0) < 4) {
