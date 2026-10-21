@@ -542,11 +542,7 @@ pub(super) struct GaplessHandoffSource<S> {
 
 impl<S> GaplessHandoffSource<S> {
     pub(super) fn new(inner: S, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
-        Self::new_after_real_content(
-            inner,
-            Arc::new(AtomicBool::new(true)),
-            on_first_sample,
-        )
+        Self::new_after_real_content(inner, Arc::new(AtomicBool::new(true)), on_first_sample)
     }
 
     pub(super) fn new_after_real_content(
