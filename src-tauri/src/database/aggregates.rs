@@ -7,7 +7,7 @@ impl Database {
         &self,
         ids: &[String],
     ) -> SqliteResult<std::collections::HashMap<String, DbTrackAggregateRepresentative>> {
-        let conn = self.conn.lock();
+        let conn = self.reader_conn();
         let mut representatives = std::collections::HashMap::with_capacity(ids.len());
 
         for chunk in ids.chunks(900) {
@@ -48,7 +48,7 @@ impl Database {
 
     pub fn get_album_aggregates(&self) -> SqliteResult<Vec<DbAlbumAggregate>> {
         let summaries = {
-            let conn = self.conn.lock();
+            let conn = self.reader_conn();
             let mut statement = conn.prepare(
                 "SELECT album,
                         COALESCE(NULLIF(album_artist, ''), artist) AS effective_artist,
@@ -98,7 +98,7 @@ impl Database {
 
     pub fn get_artist_aggregates(&self) -> SqliteResult<Vec<DbArtistAggregate>> {
         let summaries = {
-            let conn = self.conn.lock();
+            let conn = self.reader_conn();
             let mut statement = conn.prepare(
                 "SELECT artist,
                         COUNT(*) AS track_count,
