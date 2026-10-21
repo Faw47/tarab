@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tauri-apps/plugin-autostart', () => ({
   isEnabled: vi.fn(),
@@ -23,6 +23,12 @@ import { useSettingsStore } from '../../store/settings-store';
 import { useAppStartupEffects } from './useAppStartupEffects';
 
 describe('app autostart lifecycle', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(async () => {
     await useSettingsStore.persist.rehydrate();
     useSettingsStore.setState({ autostartEnabled: false });
@@ -79,8 +85,12 @@ describe('app autostart lifecycle', () => {
       return () => undefined;
     });
     mount();
+    expect(finishHydration).toBeDefined();
     expect(isEnabled).not.toHaveBeenCalled();
-    act(() => finishHydration?.());
+    await act(async () => {
+      finishHydration?.();
+      await Promise.resolve();
+    });
     await waitFor(() => expect(useSettingsStore.getState().autostartEnabled).toBe(true));
   });
   it('keeps a user toggle made while the initial OS read is pending', async () => {
