@@ -718,10 +718,7 @@ pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Pa
     }
 }
 
-pub(crate) fn mark_playback_generation(
-    state: &mut LibraryRootsState,
-    generation: u64,
-) -> bool {
+pub(crate) fn mark_playback_generation(state: &mut LibraryRootsState, generation: u64) -> bool {
     if generation < state.transient_playback_generation {
         return false;
     }
@@ -729,10 +726,7 @@ pub(crate) fn mark_playback_generation(
     true
 }
 
-pub(crate) fn playback_generation_is_current(
-    state: &LibraryRootsState,
-    generation: u64,
-) -> bool {
+pub(crate) fn playback_generation_is_current(state: &LibraryRootsState, generation: u64) -> bool {
     state.transient_playback_generation == generation
 }
 
