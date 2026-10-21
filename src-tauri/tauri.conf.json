@@ -95,8 +95,7 @@
       { "ext": ["ogg"], "name": "OGG Audio", "description": "OGG Audio File", "role": "Viewer" },
       { "ext": ["m4a"], "name": "M4A Audio", "description": "M4A Audio File", "role": "Viewer" },
       { "ext": ["aac"], "name": "AAC Audio", "description": "AAC Audio File", "role": "Viewer" },
-      { "ext": ["alac"], "name": "ALAC Audio", "description": "ALAC Audio File", "role": "Viewer" },
-      { "ext": ["wma"], "name": "WMA Audio", "description": "WMA Audio File", "role": "Viewer" }
+      { "ext": ["opus"], "name": "Opus Audio", "description": "Opus Audio File", "role": "Viewer" }
     ]
   }
 }
