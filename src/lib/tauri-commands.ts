@@ -646,6 +646,7 @@ export interface DbTrack {
   artist: string;
   albumArtist?: string | null;
   album: string;
+  genre?: string | null;
   year: number | null;
   trackNumber?: number | null;
   discNumber?: number | null;
