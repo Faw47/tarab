@@ -1,9 +1,5 @@
 import { useCallback } from 'react';
 import {
-  getPlaybackInterventionEpoch,
-  notePlaybackIntervention,
-} from './playback-generation';
-import {
   playAdjacentTrack,
   startPlayback,
   toggleCurrentPlayback,
@@ -14,6 +10,7 @@ import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
 import { fetchLibraryTrackById } from '../library/api';
 import { createLazyQueueTrack } from '../library/loadTracksForShuffle';
+import { getPlaybackInterventionEpoch, notePlaybackIntervention } from './playback-generation';
 
 interface UseAppCommandActionsOptions {
   totalTracks: number;
