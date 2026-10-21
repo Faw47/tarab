@@ -343,9 +343,7 @@ impl Database {
                 .map(|index| format!("?{}", index + 1))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let query = format!(
-                "SELECT id, duration FROM tracks WHERE id IN ({placeholders})"
-            );
+            let query = format!("SELECT id, duration FROM tracks WHERE id IN ({placeholders})");
             let mut statement = conn.prepare(&query)?;
             let rows = statement.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
                 Ok(DbShuffleQueueTrack {
@@ -359,10 +357,7 @@ impl Database {
             }
         }
 
-        Ok(ids
-            .iter()
-            .filter_map(|id| by_id.get(id).cloned())
-            .collect())
+        Ok(ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
     }
 
     pub fn get_shuffle_all_queue(
@@ -390,9 +385,8 @@ impl Database {
             return Ok(tracks);
         }
 
-        let ordered_ids = self.get_smart_shuffle_queue(
-            tracks.iter().map(|track| track.id.clone()).collect(),
-        )?;
+        let ordered_ids =
+            self.get_smart_shuffle_queue(tracks.iter().map(|track| track.id.clone()).collect())?;
         let mut by_id = tracks
             .into_iter()
             .map(|track| (track.id.clone(), track))
@@ -1998,7 +1992,11 @@ mod tests {
                 .iter()
                 .map(|track| track.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["queue-reference-b", "queue-reference-a", "queue-reference-b"]
+            vec![
+                "queue-reference-b",
+                "queue-reference-a",
+                "queue-reference-b"
+            ]
         );
         assert!(references.iter().all(|track| track.duration > 0.0));
     }
@@ -2023,7 +2021,10 @@ mod tests {
                 .expect("shuffle queue references");
             assert_eq!(queue.len(), expected.len());
             assert_eq!(
-                queue.iter().map(|track| track.id.clone()).collect::<std::collections::HashSet<_>>(),
+                queue
+                    .iter()
+                    .map(|track| track.id.clone())
+                    .collect::<std::collections::HashSet<_>>(),
                 expected
             );
             let serialized = serde_json::to_value(&queue[0]).expect("serialize queue reference");
