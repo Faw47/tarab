@@ -176,6 +176,32 @@ fn snapshot_playback_for_seek(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn snapshot_playback_for_output_replacement(
+    state: &Arc<Mutex<PlaybackState>>,
+    pending: &mut Vec<PendingGaplessHandoff>,
+    active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
+) -> (u64, Option<String>, f64, bool, bool) {
+    let state = state.lock();
+    for (_, cancelled) in pending.iter() {
+        // Serialize the snapshot with the handoff callback so the replacement source cannot be
+        // prepared for one track while playback state commits another.
+        cancelled.store(true, Ordering::Release);
+    }
+    pending.clear();
+
+    let emitted = {
+        let counter = active_emitted.lock().clone();
+        counter.load(Ordering::Relaxed)
+    };
+    (
+        state.generation,
+        state.current_file.clone(),
+        position_from_samples(&state, emitted),
+        state.is_paused,
+        state.is_playing,
+    )
+}
+
 fn commit_gapless_handoff(
     state: &Arc<Mutex<PlaybackState>>,
     cancelled: &AtomicBool,
@@ -1191,7 +1217,13 @@ impl AudioManager {
                                 let preferred = preferred_device.as_deref();
                                 match open_output_stream(preferred) {
                                     Ok(new_stream_bundle) => {
-                                        let (active_path, position, was_paused, had_playback) = {
+                                        let (
+                                            initial_path,
+                                            initial_position,
+                                            initial_paused,
+                                            had_playback,
+                                            initial_generation,
+                                        ) = {
                                             let state = state_clone.lock();
                                             let emitted = {
                                                 let counter =
@@ -1203,19 +1235,20 @@ impl AudioManager {
                                                 position_from_samples(&state, emitted),
                                                 state.is_paused,
                                                 state.is_playing,
+                                                state.generation,
                                             )
                                         };
 
                                         let replacement = if had_playback {
-                                            active_path.as_ref().and_then(|path| {
-                                                let emitted_for_replacement =
+                                            initial_path.as_ref().and_then(|path| {
+                                                let emitted_for_initial =
                                                     Arc::new(AtomicU64::new(0));
-                                                let (source, duration, actual_start) =
+                                                let (initial_source, initial_duration, initial_start) =
                                                     match prepare_source(
                                                         path,
-                                                        position,
+                                                        initial_position,
                                                         &state_clone,
-                                                        &emitted_for_replacement,
+                                                        &emitted_for_initial,
                                                     ) {
                                                         Ok(prepared) => prepared,
                                                         Err(error) => {
@@ -1230,27 +1263,102 @@ impl AudioManager {
                                                                 true,
                                                             );
                                                             emit_playback_transition(
-                                                            &app_for_audio,
-                                                            generation,
-                                                            PlaybackTransition::DeviceSwitchFailed,
-                                                            Some(path.clone()),
-                                                            Some(error),
-                                                            true,
-                                                        );
+                                                                &app_for_audio,
+                                                                generation,
+                                                                PlaybackTransition::DeviceSwitchFailed,
+                                                                Some(path.clone()),
+                                                                Some(error),
+                                                                true,
+                                                            );
                                                             return None;
                                                         }
                                                     };
-                                                let current_generation =
-                                                    state_clone.lock().generation;
+
+                                                // A gapless callback may have committed while the
+                                                // candidate decoder opened. Cancel and snapshot under
+                                                // the same state lock the callback uses, then rebuild
+                                                // for the committed track if it changed.
+                                                let (
+                                                    generation,
+                                                    active_path,
+                                                    position,
+                                                    was_paused,
+                                                    still_playing,
+                                                ) = snapshot_playback_for_output_replacement(
+                                                    &state_clone,
+                                                    &mut pending_gapless_cancels,
+                                                    &active_emitted_for_audio,
+                                                );
+                                                *pending_gapless_path_thread.lock() = None;
+                                                if !still_playing {
+                                                    return None;
+                                                }
+                                                let Some(active_path) = active_path else {
+                                                    return None;
+                                                };
+
+                                                let (
+                                                    source,
+                                                    duration,
+                                                    actual_start,
+                                                    emitted_for_replacement,
+                                                ) = if active_path == *path
+                                                    && generation == initial_generation
+                                                {
+                                                    (
+                                                        initial_source,
+                                                        initial_duration,
+                                                        initial_start,
+                                                        emitted_for_initial,
+                                                    )
+                                                } else {
+                                                    let emitted_for_replacement =
+                                                        Arc::new(AtomicU64::new(0));
+                                                    let (source, duration, actual_start) =
+                                                        match prepare_source(
+                                                            &active_path,
+                                                            position,
+                                                            &state_clone,
+                                                            &emitted_for_replacement,
+                                                        ) {
+                                                            Ok(prepared) => prepared,
+                                                            Err(error) => {
+                                                                emit_playback_error(
+                                                                    &app_for_audio,
+                                                                    &active_path,
+                                                                    generation,
+                                                                    "deviceSwitch",
+                                                                    error.clone(),
+                                                                    true,
+                                                                );
+                                                                emit_playback_transition(
+                                                                    &app_for_audio,
+                                                                    generation,
+                                                                    PlaybackTransition::DeviceSwitchFailed,
+                                                                    Some(active_path.clone()),
+                                                                    Some(error),
+                                                                    true,
+                                                                );
+                                                                return None;
+                                                            }
+                                                        };
+                                                    (
+                                                        source,
+                                                        duration,
+                                                        actual_start,
+                                                        emitted_for_replacement,
+                                                    )
+                                                };
+
                                                 let sink = play_with_source(
                                                     &new_stream_bundle.1,
                                                     source,
                                                     &state_clone,
                                                     PlaybackStart {
-                                                        file_path: path,
+                                                        file_path: active_path,
                                                         duration,
                                                         start_secs: actual_start,
-                                                        generation: current_generation,
+                                                        generation,
                                                         initial_volume: None,
                                                         start_paused: was_paused,
                                                     },
@@ -1928,6 +2036,48 @@ mod bounded_seek_tests {
         assert_eq!(generation, 7);
         assert_eq!(path, "outgoing.wav");
         assert_eq!(duration, 12.0);
+        assert!(!committed);
+        assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
+    }
+
+    #[test]
+    fn output_replacement_cancels_gapless_handoff_before_snapshotting_playback() {
+        let state = Arc::new(Mutex::new(PlaybackState::default()));
+        {
+            let mut playback = state.lock();
+            playback.current_file = Some("outgoing.wav".to_string());
+            playback.generation = 7;
+            playback.duration = 12.0;
+            playback.position_sample_rate = 48_000;
+            playback.position_channels = 2;
+            playback.is_playing = true;
+        }
+        let emitted_counter = Arc::new(AtomicU64::new(48_000 * 2 * 3));
+        let emitted = Arc::new(Mutex::new(Arc::clone(&emitted_counter)));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+
+        let (generation, path, position, paused, playing) =
+            snapshot_playback_for_output_replacement(&state, &mut pending, &emitted);
+        let committed = commit_gapless_handoff(
+            &state,
+            &cancelled,
+            &emitted,
+            Arc::new(AtomicU64::new(0)),
+            "incoming.wav",
+            8,
+            20.0,
+            0.0,
+            48_000,
+            2,
+        );
+
+        assert_eq!(generation, 7);
+        assert_eq!(path.as_deref(), Some("outgoing.wav"));
+        assert!((position - 3.0).abs() < 0.001);
+        assert!(!paused);
+        assert!(playing);
+        assert!(pending.is_empty());
         assert!(!committed);
         assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
     }
