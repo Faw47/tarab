@@ -149,6 +149,7 @@ export const QueueView = memo(
 
     const isNeobrutalism = useSettingsStore((s) => s.theme === 'neobrutalism');
     const [showFullHistory, setShowFullHistory] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     const activeIndex = resolveActiveQueueIndex(queue, queueIndex, currentTrack);
     // A removed entry can still be playing. The queue cursor then points immediately
@@ -232,8 +233,12 @@ export const QueueView = memo(
       }
     }, [nowPlayingTrack]);
 
+    const handleDragStart = useCallback(() => setIsDragging(true), []);
+    const handleDragCancel = useCallback(() => setIsDragging(false), []);
+
     const handleDragEnd = useCallback(
       (event: DragEndEvent) => {
+        setIsDragging(false);
         const { active, over } = event;
         if (!over || active.id === over.id) return;
 
@@ -431,6 +436,8 @@ export const QueueView = memo(
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
+                  onDragCancel={handleDragCancel}
                   onDragEnd={handleDragEnd}
                 >
                   <SortableContext
@@ -441,7 +448,8 @@ export const QueueView = memo(
                       <VirtualizedList
                         items={upcomingTracks}
                         itemHeight={UPCOMING_ROW_HEIGHT}
-                        overscan={8}
+                        overscan={isDragging ? upcomingTracks.length : 8}
+                        containerProps={{ 'aria-label': 'Upcoming tracks' }}
                         className="custom-scrollbar h-[56vh] overflow-auto pr-3"
                         getItemKey={(track) => track._queueId || track.id}
                         renderItem={(track, localIndex) => (
@@ -662,6 +670,8 @@ export const QueueView = memo(
                   <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragCancel={handleDragCancel}
                     onDragEnd={handleDragEnd}
                   >
                     <SortableContext
@@ -672,7 +682,8 @@ export const QueueView = memo(
                         <VirtualizedList
                           items={upcomingTracks}
                           itemHeight={UPCOMING_ROW_HEIGHT}
-                          overscan={8}
+                          overscan={isDragging ? upcomingTracks.length : 8}
+                          containerProps={{ 'aria-label': 'Upcoming tracks' }}
                           className="custom-scrollbar h-[50vh] overflow-auto pr-3"
                           getItemKey={(track) => track._queueId || track.id}
                           renderItem={(track, localIndex) => (
