@@ -14,6 +14,22 @@ const recordPerfBudgetMock = vi.hoisted(() => vi.fn());
 const reportErrorMock = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.hoisted(() => vi.fn());
 const hydrationListeners = vi.hoisted(() => new Set<() => void>());
+const { autostartState, setAutostartMock } = vi.hoisted(() => {
+  const autostartState = { enabled: false };
+  return {
+    autostartState,
+    setAutostartMock: vi.fn((enabled: boolean) => {
+      autostartState.enabled = enabled;
+    }),
+  };
+});
+const isEnabledMock = vi.hoisted(() => vi.fn(async () => false));
+
+vi.mock('@tauri-apps/plugin-autostart', () => ({
+  isEnabled: isEnabledMock,
+  enable: vi.fn(async () => undefined),
+  disable: vi.fn(async () => undefined),
+}));
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ show: showMock }),
@@ -32,7 +48,11 @@ vi.mock('../../../store/settings-store', () => ({
         return () => hydrationListeners.delete(listener);
       },
     },
-    getState: () => ({ desktopStatusIconEnabled: iconEnabledMock() }),
+    getState: () => ({
+      desktopStatusIconEnabled: iconEnabledMock(),
+      autostartEnabled: autostartState.enabled,
+      setAutostartEnabled: setAutostartMock,
+    }),
   },
 }));
 
@@ -49,6 +69,8 @@ describe('useAppStartupEffects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hydrationListeners.clear();
+    autostartState.enabled = false;
+    isEnabledMock.mockResolvedValue(false);
     showMock.mockResolvedValue(undefined);
     minimizedMock.mockResolvedValue(false);
     iconEnabledMock.mockReturnValue(true);
@@ -82,6 +104,53 @@ describe('useAppStartupEffects', () => {
 
     await waitFor(() => expect(showMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(preloadModules).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  it('syncs the system login setting while the app is on Home', async () => {
+    isEnabledMock.mockResolvedValue(true);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+
+    await waitFor(() => expect(setAutostartMock).toHaveBeenCalledWith(true), { timeout: 1000 });
+  });
+
+  it('refreshes the system login setting when the app regains focus', async () => {
+    isEnabledMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+    await waitFor(() => expect(isEnabledMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(setAutostartMock).toHaveBeenCalledWith(true), { timeout: 1000 });
+  });
+
+  it('rechecks the system login setting after settings hydration completes', async () => {
+    hydratedMock.mockReturnValue(false);
+    let resolveInitial: ((enabled: boolean) => void) | undefined;
+    isEnabledMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveInitial = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(true);
+
+    renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }));
+    await waitFor(() => expect(isEnabledMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      hydratedMock.mockReturnValue(true);
+      for (const listener of [...hydrationListeners]) listener();
+      resolveInitial?.(false);
+    });
+
+    await waitFor(() => expect(isEnabledMock).toHaveBeenCalledTimes(2));
+    expect(setAutostartMock).toHaveBeenLastCalledWith(true);
   });
 
   it('keeps the main window hidden on autostart with an enabled status icon', async () => {
@@ -148,7 +217,7 @@ describe('useAppStartupEffects', () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(hydrationListeners.size).toBe(1);
+      expect(hydrationListeners.size).toBe(2);
       unmount();
 
       await act(async () => {
@@ -198,14 +267,17 @@ describe('useAppStartupEffects', () => {
     hydratedMock.mockReturnValue(false);
     vi.useFakeTimers();
     try {
-      renderHook(() => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }), {
-        wrapper: StrictMode,
-      });
+      const { unmount } = renderHook(
+        () => useAppStartupEffects({ currentView: 'home', preloadModules: vi.fn() }),
+        { wrapper: StrictMode },
+      );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3200);
       });
 
       expect(showMock).toHaveBeenCalledTimes(1);
+      expect(hydrationListeners.size).toBe(1);
+      unmount();
       expect(hydrationListeners.size).toBe(0);
     } finally {
       vi.useRealTimers();
