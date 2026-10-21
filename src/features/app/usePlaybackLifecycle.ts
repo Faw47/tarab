@@ -269,7 +269,10 @@ export function usePlaybackLifecycle() {
         };
 
         try {
-          const generation = await PlaybackCoordinator.crossfadeTo(next.track.filePath, crossfadeSeconds);
+          const generation = await PlaybackCoordinator.crossfadeTo(
+            next.track.filePath,
+            crossfadeSeconds,
+          );
           if (pendingCrossfadeRef.current) {
             pendingCrossfadeRef.current.generation = generation;
           }

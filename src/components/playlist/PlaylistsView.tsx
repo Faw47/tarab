@@ -204,8 +204,8 @@ export function PlaylistsView() {
     const index = playableTracks.findIndex((track) => track.id === entry.trackId);
     const track = playableTracks[index];
     if (!track) return;
-    void PlaybackCoordinator.start(track, { queue: playableTracks, queueIndex: index }).catch((error) =>
-      reportError('Could not play the track', { source: 'playlists-view', error }),
+    void PlaybackCoordinator.start(track, { queue: playableTracks, queueIndex: index }).catch(
+      (error) => reportError('Could not play the track', { source: 'playlists-view', error }),
     );
   };
 

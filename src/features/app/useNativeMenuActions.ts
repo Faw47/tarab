@@ -66,7 +66,9 @@ export function useNativeMenuActions({
       if (action === 'playback.seek-backward' || action === 'playback.seek-forward') {
         const state = usePlayerStore.getState();
         const delta = action === 'playback.seek-forward' ? 10 : -10;
-        void PlaybackCoordinator.seek(Math.max(0, Math.min(state.duration, state.currentTime + delta)));
+        void PlaybackCoordinator.seek(
+          Math.max(0, Math.min(state.duration, state.currentTime + delta)),
+        );
         return;
       }
       if (action === 'file.add-folder') {

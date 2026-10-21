@@ -37,7 +37,11 @@ export function useHomeLibraryModel() {
     const ordered = sortAlbumTracks(albumTracks);
     if (!ordered.length) return;
     try {
-      await PlaybackCoordinator.start(ordered[0], { queue: ordered, queueIndex: 0, shuffleEnabled: false });
+      await PlaybackCoordinator.start(ordered[0], {
+        queue: ordered,
+        queueIndex: 0,
+        shuffleEnabled: false,
+      });
     } catch (error) {
       reportError('Could not play the album', { source: 'home-view', error });
     }
