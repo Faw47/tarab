@@ -62,7 +62,7 @@ impl Database {
             self.apply_migration_tx(&mut conn, 11, |tx| self.migrate_v11(tx))?;
         }
 
-        if current_version < 12 {
+        if current_version < CURRENT_SCHEMA_VERSION {
             self.apply_migration_tx(&mut conn, 12, |tx| self.migrate_v12(tx))?;
         }
 
