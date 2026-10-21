@@ -308,4 +308,29 @@ mod tests {
         );
         let _ = fs::remove_dir_all(dir);
     }
+    #[test]
+    fn startup_failure_diagnostics_redact_home_directory_prefixes() {
+        let home = dirs::home_dir().expect("home directory");
+        let private_path = home.join("Tarab Private").join("library.db");
+        let message = format!("Could not access {}", private_path.display());
+        let details = startup_diagnostics_text(
+            vec![(log::Level::Error, message.clone())],
+            (log::Level::Error, message),
+        );
+
+        let home_display = home.to_string_lossy();
+        assert!(
+            !details.contains(home_display.as_ref()),
+            "startup diagnostics retained the home directory: {details}"
+        );
+        let suffix = private_path
+            .strip_prefix(&home)
+            .expect("private path is under home")
+            .display();
+        assert!(
+            details.contains(&format!("~{suffix}")),
+            "startup diagnostics should use a home-relative path: {details}"
+        );
+    }
+
 }
