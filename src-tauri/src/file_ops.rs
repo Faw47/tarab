@@ -863,15 +863,7 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     state.pending_playback_generation = None;
     state.pending_transient_file_grants.clear();
 
-    if is_pending_request {
-        let has_newer_preload = state
-            .preloaded_queue_entry
-            .as_ref()
-            .is_some_and(|(preloaded_generation, _)| *preloaded_generation > generation);
-        if !has_newer_preload {
-            state.preloaded_queue_entry = None;
-        }
-    } else if is_gapless_successor {
+    if is_pending_request || is_gapless_successor {
         state.preloaded_queue_entry = None;
     }
 
