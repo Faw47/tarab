@@ -1,5 +1,15 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { FolderOpen, HardDrive, Layout, Monitor, Volume2 } from 'lucide-react';
-import { memo, type ReactNode, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   applyVerticalPillDom,
@@ -28,6 +38,23 @@ export const SettingsShell = memo(function SettingsShell({
   children,
   overlays,
 }: SettingsShellProps) {
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getVersion()
+      .then((version) => {
+        if (active) setAppVersion(version);
+      })
+      .catch(() => {
+        if (active) setAppVersion(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const navConfig = useMemo(
     () =>
       [
@@ -107,17 +134,26 @@ export const SettingsShell = memo(function SettingsShell({
               : 'rounded-2xl border border-white/[0.06] bg-black/20 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_rgba(0,0,0,0.1)]',
           )}
         >
-          <span className={cn('neo-version-badge', !isNeobrutalism && 'hidden')}>TARAB V1.1</span>
-          <h1
+          <div
             className={cn(
-              'mb-1 text-text-primary',
-              isNeobrutalism
-                ? 'border-b-2 border-black pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-black md:text-[2rem]'
-                : 'text-2xl font-bold',
+              'flex min-w-0 items-center justify-between gap-3',
+              isNeobrutalism && 'neo-settings-heading-layout md:flex-col md:items-stretch',
             )}
           >
-            Settings
-          </h1>
+            <h1
+              className={cn(
+                'mb-1 min-w-0 flex-1 text-text-primary',
+                isNeobrutalism
+                  ? 'border-b-2 border-black pb-3 text-3xl font-black uppercase leading-none tracking-[0.08em] text-black md:w-full md:text-[2rem]'
+                  : 'text-2xl font-bold',
+              )}
+            >
+              Settings
+            </h1>
+            {isNeobrutalism && appVersion && (
+              <span className="neo-version-badge md:self-end">TARAB V{appVersion}</span>
+            )}
+          </div>
           <p
             className={cn(
               'text-xs',

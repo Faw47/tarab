@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "core-main",
-  "description": "Main-window core permissions for event listen/unlisten/emit-to routing, startup show, Windows window controls, and liquid-glass support checks/effect application.",
+  "description": "Main-window core permissions for app version reads, event listen/unlisten/emit-to routing, startup show, Windows window controls, and liquid-glass support checks/effect application.",
   "windows": ["main"],
   "permissions": [
+    "core:app:allow-version",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit-to",
