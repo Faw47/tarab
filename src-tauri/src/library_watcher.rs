@@ -227,11 +227,7 @@ pub fn start_watcher<R: Runtime>(
                 let Some(payload) = watch_event_payload(&path, &roots) else {
                     continue;
                 };
-                let _ = app_handle.emit_to(
-                    MAIN_WINDOW_LABEL,
-                    change.event_name(),
-                    payload,
-                );
+                let _ = app_handle.emit_to(MAIN_WINDOW_LABEL, change.event_name(), payload);
             }
         }
     });
@@ -239,10 +235,7 @@ pub fn start_watcher<R: Runtime>(
     Ok(WatcherTask { stop_tx, handle })
 }
 
-fn validate_watch_paths(
-    paths: Vec<String>,
-    roots: &[PathBuf],
-) -> Result<Vec<WatchedRoot>, String> {
+fn validate_watch_paths(paths: Vec<String>, roots: &[PathBuf]) -> Result<Vec<WatchedRoot>, String> {
     let mut allowed_paths = Vec::with_capacity(paths.len());
     for path in paths {
         let canonical =
@@ -353,10 +346,7 @@ mod tests {
         }];
 
         assert_eq!(
-            watch_event_payload(
-                Path::new("/private/var/music/Artist/Album/01.flac"),
-                &roots
-            ),
+            watch_event_payload(Path::new("/private/var/music/Artist/Album/01.flac"), &roots),
             Some(LibraryWatchEventPayload {
                 root_id: "/var/music".to_string(),
                 relative_path: "Artist/Album/01.flac".to_string(),
