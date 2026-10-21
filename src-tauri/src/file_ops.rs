@@ -2163,15 +2163,23 @@ mod tests {
 
         let state = create_library_roots_state();
         authorize_transient_file(&state, &active).expect("authorize active track");
-        authorize_transient_file(&state, &requested).expect("authorize pending Play");
-        authorize_transient_file(&state, &successor).expect("authorize newer preload");
         {
             let mut roots = state.write();
             assert!(mark_playback_generation(&mut roots, 7, &active));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &active, 7
             ));
+        }
+
+        authorize_transient_file(&state, &requested).expect("authorize pending Play");
+        {
+            let mut roots = state.write();
             assert!(mark_playback_generation(&mut roots, 8, &requested));
+        }
+
+        authorize_transient_file(&state, &successor).expect("authorize newer preload");
+        {
+            let mut roots = state.write();
             replace_preloaded_queue_entry(&mut roots, Some(9), Some(&successor));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &requested, 8
@@ -2292,15 +2300,19 @@ mod tests {
         let state = create_library_roots_state();
         state.write().roots = vec![fs::canonicalize(&library).expect("canonical library root")];
         authorize_transient_file(&state, &active).expect("authorize active track");
-        authorize_transient_file(&state, &abandoned).expect("authorize pending track");
         {
             let mut roots = state.write();
             assert!(mark_playback_generation(&mut roots, 10, &active));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &active, 10
             ));
-            assert!(mark_playback_generation(&mut roots, 11, &abandoned));
         }
+        authorize_transient_file(&state, &abandoned).expect("authorize pending track");
+        assert!(mark_playback_generation(
+            &mut state.write(),
+            11,
+            &abandoned,
+        ));
         assert!(ensure_path_allowed_by_state(&abandoned, &state.read(), "test").is_ok());
 
         {
