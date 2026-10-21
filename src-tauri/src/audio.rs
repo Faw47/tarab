@@ -33,9 +33,11 @@ mod state;
 mod time_stretch;
 
 use crossfade::{
-    apply_crossfade_mix, apply_crossfade_step, crossfade_progress, normalized_progress,
+    apply_crossfade_mix, apply_crossfade_step, crossfade_progress,
     CrossfadeState,
 };
+#[cfg(test)]
+use crossfade::normalized_progress;
 use device::{default_output_device_name, ensure_output_stream, open_output_stream, OutputWatch};
 pub use device::{enumerate_output_devices, AudioOutputDeviceInfo};
 pub use events::PlaybackEndedPayload;
@@ -90,7 +92,6 @@ enum AudioCommand {
 pub struct AudioManager {
     command_sender: Sender<AudioCommand>,
     pub playback_state: Arc<Mutex<PlaybackState>>,
-    active_emitted_samples: Arc<Mutex<Arc<AtomicU64>>>,
     next_generation: AtomicU64,
 }
 
@@ -1562,7 +1563,6 @@ impl AudioManager {
         Self {
             command_sender: sender,
             playback_state,
-            active_emitted_samples,
             next_generation: AtomicU64::new(0),
         }
     }
