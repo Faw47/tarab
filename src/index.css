@@ -1066,3 +1066,58 @@ input[type="range"]::-moz-range-thumb {
   opacity: var(--home-spot-o);
   transition: opacity 0.3s ease;
 }
+
+/* FE-45: keep liquid-theme filtering to one surface per ancestry. */
+:root[data-theme="liquid-glass"]
+  :where(
+    [class*="backdrop-blur-"],
+    [class*="backdrop-saturate-"],
+    [style*="backdrop-filter"],
+    .glass-overlay-menu,
+    .library-header-pill,
+    .glass-panel,
+    .glass-panel-subtle,
+    .glass-panel-strong,
+    .glass-button,
+    .glass-input,
+    .adl-liquid-button
+  )
+  :where(
+    [class*="backdrop-blur-"],
+    [class*="backdrop-saturate-"],
+    [style*="backdrop-filter"],
+    .glass-overlay-menu,
+    .library-header-pill,
+    .glass-panel,
+    .glass-panel-subtle,
+    .glass-panel-strong,
+    .glass-button,
+    .glass-input,
+    .adl-liquid-button
+  ) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* App-level Reduced Effects also disables utility and inline glass filters. */
+:root[data-reduced-effects="true"]
+  :is(
+    [class*="backdrop-"],
+    [style*="backdrop-filter"],
+    .glass-overlay-menu,
+    .library-header-pill,
+    .glass-panel,
+    .glass-panel-subtle,
+    .glass-panel-strong,
+    .glass-button,
+    .glass-input,
+    .adl-liquid-button
+  ) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-reduced-effects="true"] .app-shell-grain::after {
+  opacity: 0 !important;
+  animation: none !important;
+}
