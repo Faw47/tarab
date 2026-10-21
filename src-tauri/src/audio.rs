@@ -19,8 +19,8 @@ use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
 use crate::file_ops::{
-    consume_transient_file, ensure_existing_path_allowed, ensure_path_allowed_by_state,
-    SharedLibraryRoots,
+    clear_transient_file_grants, ensure_path_allowed_by_state,
+    retain_transient_file_for_queue_entry, LibraryRootsState, SharedLibraryRoots,
 };
 
 mod crossfade;
@@ -1614,10 +1614,10 @@ pub fn create_audio_manager(app: AppHandle) -> SharedAudioManager {
 
 fn ensure_audio_file_allowed(
     file_path: &str,
-    roots: &[std::path::PathBuf],
+    roots: &LibraryRootsState,
     action: &str,
 ) -> Result<(), String> {
-    ensure_existing_path_allowed(Path::new(file_path), roots, action)?;
+    ensure_path_allowed_by_state(Path::new(file_path), roots, action)?;
     Ok(())
 }
 
@@ -1628,12 +1628,10 @@ pub fn play_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<u64, String> {
-    {
-        let roots = roots_state.inner().read();
-        ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
-    }
+    let mut roots = roots_state.inner().write();
+    ensure_path_allowed_by_state(Path::new(&file_path), &roots, "play audio file")?;
     let generation = state.play(file_path.clone(), start_pos)?;
-    consume_transient_file(roots_state.inner(), Path::new(&file_path));
+    retain_transient_file_for_queue_entry(&mut roots, Path::new(&file_path));
     Ok(generation)
 }
 
@@ -1645,7 +1643,7 @@ pub fn crossfade_to_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<u64, String> {
-    let roots = roots_state.inner().read().roots.clone();
+    let roots = roots_state.inner().read();
     ensure_audio_file_allowed(&file_path, &roots, "crossfade audio file")?;
     state.crossfade_to(file_path, start_pos, duration_secs)
 }
@@ -1661,8 +1659,14 @@ pub fn resume_playback(state: tauri::State<'_, SharedAudioManager>) -> Result<()
 }
 
 #[tauri::command]
-pub fn stop_playback(state: tauri::State<'_, SharedAudioManager>) -> Result<(), String> {
-    state.stop()
+pub fn stop_playback(
+    state: tauri::State<'_, SharedAudioManager>,
+    roots_state: tauri::State<'_, SharedLibraryRoots>,
+) -> Result<(), String> {
+    let mut roots = roots_state.inner().write();
+    state.stop()?;
+    clear_transient_file_grants(&mut roots);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1751,8 +1755,8 @@ pub fn preload_next_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<u64>, String> {
+    let roots = roots_state.inner().read();
     if let Some(path) = file_path.as_deref() {
-        let roots = roots_state.inner().read().roots.clone();
         ensure_audio_file_allowed(path, &roots, "preload audio file")?;
     }
     state.preload_next(file_path)
@@ -1782,10 +1786,14 @@ mod tests {
         let outside_root = temp_dir("outside");
         let outside_file = outside_root.join("outside.mp3");
         fs::write(&outside_file, b"not audio").expect("write outside file");
-        let roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
+        let roots = create_library_roots_state();
+        roots.write().roots = vec![fs::canonicalize(&allowed_root).expect("canonical root")];
 
-        let result =
-            ensure_audio_file_allowed(&outside_file.to_string_lossy(), &roots, "play audio file");
+        let result = ensure_audio_file_allowed(
+            &outside_file.to_string_lossy(),
+            &roots.read(),
+            "play audio file",
+        );
 
         assert!(result.is_err());
         assert!(result

@@ -716,6 +716,25 @@ pub(crate) fn consume_transient_file(roots_state: &SharedLibraryRoots, path: &Pa
     }
 }
 
+pub(crate) fn retain_transient_file_for_queue_entry(state: &mut LibraryRootsState, path: &Path) {
+    let Ok(canonical) = canonicalize_existing_path(path) else {
+        state.transient_files.clear();
+        return;
+    };
+
+    if state.transient_files.contains(&canonical) {
+        state
+            .transient_files
+            .retain(|candidate| candidate == &canonical);
+    } else {
+        state.transient_files.clear();
+    }
+}
+
+pub(crate) fn clear_transient_file_grants(state: &mut LibraryRootsState) {
+    state.transient_files.clear();
+}
+
 #[tauri::command]
 pub async fn revoke_library_grant(
     app: AppHandle,
@@ -1856,6 +1875,48 @@ mod tests {
         consume_transient_file(&state, &allowed);
         assert!(ensure_path_allowed_by_state(&allowed, &state.read(), "test").is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn transient_authority_tracks_the_active_queue_entry_and_is_released_on_stop() {
+        let library = temp_dir("transient-library");
+        let outside = temp_dir("transient-outside");
+        let persistent = library.join("library.mp3");
+        let active = outside.join("active.mp3");
+        let pending = outside.join("pending.mp3");
+        fs::write(&persistent, b"audio").expect("write persistent track");
+        fs::write(&active, b"audio").expect("write active transient track");
+        fs::write(&pending, b"audio").expect("write pending transient track");
+
+        let state = create_library_roots_state();
+        state.write().roots = vec![fs::canonicalize(&library).expect("canonical library root")];
+        authorize_transient_file(&state, &active).expect("authorize active track");
+        authorize_transient_file(&state, &pending).expect("authorize pending track");
+
+        {
+            let mut state = state.write();
+            retain_transient_file_for_queue_entry(&mut state, &active);
+        }
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
+
+        {
+            let mut state = state.write();
+            retain_transient_file_for_queue_entry(&mut state, &persistent);
+        }
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
+        assert!(ensure_path_allowed_by_state(&persistent, &state.read(), "test").is_ok());
+
+        authorize_transient_file(&state, &active).expect("reauthorize active track");
+        {
+            let mut state = state.write();
+            retain_transient_file_for_queue_entry(&mut state, &active);
+            clear_transient_file_grants(&mut state);
+        }
+        assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
+
+        let _ = fs::remove_dir_all(library);
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]
