@@ -33,6 +33,7 @@ export function useAutostartIntegration() {
     };
 
     const readOs = async (expectedRevision: number) => {
+      console.info('[autostart-debug] readOs called', expectedRevision);
       try {
         updateFromOs(await isEnabled(), expectedRevision);
       } catch (error) {
@@ -73,7 +74,7 @@ export function useAutostartIntegration() {
     };
 
     const start = () => {
-      console.info('[autostart-debug] start callback');
+      console.info('[autostart-debug] start callback', { started, cancelled });
       if (started || cancelled) return;
       started = true;
 
