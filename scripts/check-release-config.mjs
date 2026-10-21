@@ -57,12 +57,18 @@ for (const extension of requiredAudioExtensions) {
 
 const sameExtensionSet = (actual, expected) =>
   actual.length === expected.length && expected.every((extension) => actual.includes(extension));
+const rustExtensionsBlock =
+  librarySource.split('pub const SUPPORTED_EXTENSIONS:')[1]?.split('];')[0] ?? '';
 const rustExtensions = Array.from(
-  (librarySource.match(/pub const SUPPORTED_EXTENSIONS: \\[&str; \\d+\\] = \\[([\\s\\S]*?)\\];/)?.[1] ?? '').matchAll(/["']([a-z0-9]+)["']/g),
+  rustExtensionsBlock.matchAll(/["']([a-z0-9]+)["']/g),
   (match) => match[1],
 );
+const droppedExtensionsBlock =
+  droppedImportSource
+    .split('export const SUPPORTED_DROPPED_AUDIO_EXTENSIONS = [')[1]
+    ?.split('] as const')[0] ?? '';
 const droppedExtensions = Array.from(
-  (droppedImportSource.match(/SUPPORTED_DROPPED_AUDIO_EXTENSIONS = \\[([\\s\\S]*?)\\] as const/)?.[1] ?? '').matchAll(/["']([a-z0-9]+)["']/g),
+  droppedExtensionsBlock.matchAll(/["']([a-z0-9]+)["']/g),
   (match) => match[1],
 );
 if (!sameExtensionSet([...fileAssociationExtensions], requiredAudioExtensions)) {
