@@ -1082,6 +1082,40 @@ mod tests {
     }
 
     #[test]
+    fn schema_migration_adds_genre_for_existing_tracks() {
+        let db = test_db();
+        let track = sample_track("genre-migration");
+        db.upsert_tracks_batch(std::slice::from_ref(&track))
+            .expect("seed legacy track");
+
+        db.run_migrations().expect("apply pending migrations");
+
+        let conn = db.conn.lock();
+        let (title, genre): (String, Option<String>) = conn
+            .query_row(
+                "SELECT title, genre FROM tracks WHERE id = ?1",
+                [&track.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated track");
+        assert_eq!(title, track.title);
+        assert_eq!(genre, None);
+    }
+
+    #[test]
+    fn db_track_json_round_trips_genre() {
+        let mut encoded = serde_json::to_value(sample_track("genre-json")).expect("encode track");
+        encoded["genre"] = serde_json::json!("Classical");
+
+        let decoded: DbTrack = serde_json::from_value(encoded).expect("decode track with genre");
+
+        assert_eq!(
+            serde_json::to_value(decoded).expect("encode decoded track")["genre"],
+            "Classical"
+        );
+    }
+
+    #[test]
     fn album_and_artist_aggregate_payloads_use_track_summaries() {
         let db = test_db();
         let mut track = sample_track("aggregate-payload");
