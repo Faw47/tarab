@@ -53,10 +53,10 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 31 |
+| NATIVE_VALIDATION_REQUIRED | 32 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 59 |
+| PENDING | 58 |
 | **Total** | **160** |
 
 ## Findings
@@ -140,7 +140,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | QA-31 | P2 | The IPC contract check validates names only | FIXED_VERIFIED | G1 pass (mutation-tested) / G2 pass / G3 pending | check-ipc-contract also compares invoke argument keys with Rust parameters (camelCased, injected parameters skipped, Option optional) for all 115 calls; renamed or extra keys fail. | 75e44ad | #9 |
 | PB-21 | P3 | Playback speed changes pitch | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: 4-second 440 Hz duration and pitch, live 1.0x to 1.5x, source-progress, and in-place seek regressions pass. Before the fix, the 1.5x duration test failed on sink-rate scaling (run 39538742603); seek-forwarding tests failed with Rodio NotSupported (runs 39540949467 and 39541160067). G2: all five CI jobs passed on 08d15e57 (run 39555966702). G3: independent adversarial review found no code blockers at the exact head. Native audible playback and pitch acceptance remains. | b39bf54, 5037a4a, acf6863, f783252, 3d86327, 691d76e, 08d15e57 | #41 |
 | PB-23 | P3 | Pausing during a crossfade lets the fade finish while paused | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39533624096 failed specifically on `crossfade_progress_clock_stays_frozen_while_paused`. G2: all five hosted CI jobs pass at head 15bfc13c5b5687663b25adf77a50e33b8318fe1e (run 39582579783). G3: independent adversarial review found no blocker at the same head. Native playback check remains open: pause during a crossfade and verify progress/fade freeze until resume. | 15bfc13 | #38 |
-| PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| PB-24 | P3 | Seek while paused may briefly play audio; seek events carry no generation; every seek reopens the file | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39585232551 on the pre-fix parent failed the added `an_open_source_seeks_again_without_reopening_the_decoder` test with Rodio `NotSupported`; 156 other Linux Rust tests passed. G2: all five hosted jobs passed at head 15bfc13c5b5687663b25adf77a50e33b8318fe1e (run 39582579783). G3: independent review found no code blocker at the same head. Native check remains open: confirm paused seeks stay silent and rapid seeks do not apply stale positions. | 15bfc13 | #38 |
 | PB-25 | P3 | Decoder does not filter packets by track ID | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | PB-26 | P3 | Scanner accepts formats the decoder cannot play; Opus is not scanned | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39547455662 reproduced the Opus scan and release-config mismatch. G2: all five hosted jobs pass at head 74e1f201d938904cbf0efefc97a62b2cdc643370 (run 39576088088). G3: independent review found no remaining decoder or format-parity blocker at that head. Native check remains open: play mono/stereo Opus and M4A, and confirm multichannel Opus is rejected with the expected error. | 74e1f20 | #45 |
 | PB-32 | P3 | Volume booster hard-clips and is not persisted | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: tests-only predecessor run 39537516639 reproduced clipping and session-persistence failures. G2: all five hosted jobs passed at head 85cd8f21b1a0332ffad62f581adbd40b4bb545d4 (run 39554901506). G3: independent review found no blocker at that head. Native check: verify boosted audio stays smooth without hard clipping and booster level persists after restart on a desktop device. | 85cd8f2 | #39 |
