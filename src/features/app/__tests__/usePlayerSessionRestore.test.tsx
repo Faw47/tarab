@@ -210,6 +210,7 @@ describe('usePlayerSessionRestore', () => {
       queueIds: ['x', 'a', 'b', 'a'],
       queueIndex: 3,
     });
+    dbGetQueueTrackReferencesMock.mockResolvedValue(['a', 'b'].map(queueReference));
     dbGetTracksByIdsMock.mockResolvedValue(['a', 'b'].map(dbTrack));
 
     render(<Harness />);
