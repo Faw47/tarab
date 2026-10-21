@@ -6,7 +6,12 @@ import { useAppCommandActions } from '../useAppCommandActions';
 const { fetchLibraryTrackByIdMock, getShuffleAllQueueMock, startPlaybackMock } = vi.hoisted(() => ({
   fetchLibraryTrackByIdMock: vi.fn(),
   getShuffleAllQueueMock: vi.fn(),
-  startPlaybackMock: vi.fn(async () => undefined),
+  startPlaybackMock: vi.fn(
+    async (
+      _track: Track,
+      _options: { queue: Track[]; queueIndex: number; shuffleEnabled: boolean },
+    ) => undefined,
+  ),
 }));
 
 vi.mock('../../library/api', () => ({
