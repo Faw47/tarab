@@ -1988,6 +1988,7 @@ mod tests {
         }
         assert!(ensure_path_allowed_by_state(&first, &state.read(), "test").is_err());
 
+        authorize_transient_file(&state, &next).expect("authorize next after stop");
         {
             let mut roots = state.write();
             assert!(retain_transient_file_for_queue_entry_at_generation(

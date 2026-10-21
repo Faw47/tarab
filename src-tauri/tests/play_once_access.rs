@@ -93,6 +93,11 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
         "AudioCommand::GaplessHandoffStarted {\n                                ended,",
     );
     assert!(
+        audio_command_arm("AudioCommand::Stop { generation } =>")
+            .contains("clear_transient_file_grants_at_generation"),
+        "the serialized Stop handler must clear grants using its source generation"
+    );
+    assert!(
         gapless.contains("if is_still_current")
             && gapless.contains("retain_transient_file_for_queue_entry_at_generation"),
         "a committed gapless handoff must update grants only for the current track"
