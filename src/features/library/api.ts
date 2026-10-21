@@ -14,6 +14,7 @@ import {
   dbSearchTracks,
   searchLyrics,
 } from '../../lib/tauri-commands';
+import type { ValidatedDbTrackAggregateRepresentative } from '../../lib/validation/library';
 import {
   DbAlbumAggregateArraySchema,
   DbArtistAggregateArraySchema,
@@ -21,7 +22,6 @@ import {
   LibraryStatsSchema,
   TrackCountSchema,
 } from '../../lib/validation/library';
-import type { ValidatedDbTrackAggregateRepresentative } from '../../lib/validation/library';
 import {
   LyricsSearchResultArraySchema,
   SearchResultArraySchema,
