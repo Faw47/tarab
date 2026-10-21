@@ -516,3 +516,78 @@ impl Database {
 
     // ========== Smart Playlist Queries ==========
 }
+
+
+#[cfg(test)]
+mod pb16_baseline_tests {
+    use super::*;
+
+    #[test]
+    fn set_playlist_tracks_preserves_each_existing_added_at_timestamp() {
+        let db = Database::in_memory_for_tests().expect("in-memory database");
+        db.create_playlist(&crate::database::DbPlaylist {
+            id: "pb16-baseline".to_string(),
+            name: "PB-16 baseline".to_string(),
+            playlist_type: "manual".to_string(),
+            folder_path: None,
+            smart_rules: None,
+            created_at: 1,
+            updated_at: 1,
+            is_pinned: false,
+            pinned_at: None,
+            last_synced_at: None,
+            sync_error: None,
+        })
+        .expect("create playlist");
+        let initial = vec!["a".to_string(), "b".to_string()];
+        db.set_playlist_tracks("pb16-baseline", &initial, 1_000)
+            .expect("seed playlist");
+
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE playlist_tracks SET added_at = 1111 WHERE playlist_id = 'pb16-baseline' AND track_id = 'a'",
+                [],
+            )
+            .expect("set first timestamp");
+            conn.execute(
+                "UPDATE playlist_tracks SET added_at = 2222 WHERE playlist_id = 'pb16-baseline' AND track_id = 'b'",
+                [],
+            )
+            .expect("set second timestamp");
+        }
+
+        db.set_playlist_tracks(
+            "pb16-baseline",
+            &["b".to_string(), "a".to_string()],
+            2_000,
+        )
+        .expect("reorder playlist");
+
+        let conn = db.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT track_id, position, added_at
+                 FROM playlist_tracks
+                 WHERE playlist_id = 'pb16-baseline'
+                 ORDER BY position",
+            )
+            .expect("prepare rows query");
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i32>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .expect("query rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect rows");
+
+        assert_eq!(
+            rows,
+            vec![("b".to_string(), 0, 2222), ("a".to_string(), 1, 1111)]
+        );
+    }
+}
