@@ -57,7 +57,6 @@ describe('neo search metadata direction (FE-22)', () => {
   });
 });
 
-
 describe('command palette discovery (FE-35)', () => {
   it('offers a top-bar button for opening the command palette', () => {
     render(

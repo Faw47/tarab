@@ -46,7 +46,7 @@ const renderPalette = () =>
       hasCurrentTrack
       isPlaying={false}
       isScanning={false}
-      theme="liquid"
+      theme="liquid-glass"
     />,
   );
 
@@ -59,7 +59,7 @@ describe('GlobalCommandPalette FE-35', () => {
   it('shows matching track and album results while searching the library', async () => {
     renderPalette();
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    fireEvent.change(screen.getByPlaceholderText('Type a command…'), {
+    fireEvent.change(screen.getByPlaceholderText(/command/i), {
       target: { value: 'blue train' },
     });
 
@@ -82,7 +82,7 @@ describe('GlobalCommandPalette FE-35', () => {
       if (previous) {
         Object.defineProperty(navigator, 'platform', previous);
       } else {
-        delete (navigator as Navigator & { platform?: string }).platform;
+        Reflect.deleteProperty(navigator, 'platform');
       }
     }
   });
