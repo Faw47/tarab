@@ -42,6 +42,7 @@ export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
       />
       <SettingsRow
         label="Lyric size"
+        description="Choose a relative size from 1 to 100."
         control={
           <SettingsSlider
             label="Fullscreen lyric size"
@@ -49,7 +50,7 @@ export const FullscreenPlayerSection = memo(function FullscreenPlayerSection() {
             max={100}
             step={1}
             value={fullscreenLyricSize}
-            valueLabel={`${fullscreenLyricSize}px`}
+            valueLabel={`${fullscreenLyricSize} / 100`}
             onChange={setFullscreenLyricSize}
           />
         }
