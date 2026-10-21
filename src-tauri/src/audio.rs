@@ -1951,8 +1951,7 @@ mod bounded_seek_tests {
             48_000,
             2,
         ));
-        let (generation, path, _, duration, _) =
-            snapshot_playback_for_seek(&state, &mut pending);
+        let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
 
         assert_eq!(generation, 8);
         assert_eq!(path, "incoming.wav");
