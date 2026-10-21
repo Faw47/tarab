@@ -2091,28 +2091,42 @@ mod bounded_seek_tests {
 
     #[test]
     fn seek_cancels_gapless_handoff_before_snapshotting_the_active_track() {
-        let state = Arc::new(Mutex::new(PlaybackState::default()));
-        {
-            let mut playback = state.lock();
-            playback.current_file = Some("outgoing.wav".to_string());
-            playback.generation = 7;
-            playback.duration = 12.0;
-        }
+        let directory = temp_dir("seek-cancel-gapless");
+        let outgoing = directory.join("outgoing.wav");
+        let incoming = directory.join("incoming.wav");
+        fs::write(&outgoing, b"audio").expect("write outgoing track");
+        fs::write(&incoming, b"audio").expect("write incoming track");
+        let outgoing = outgoing.to_string_lossy().into_owned();
+        let incoming = incoming.to_string_lossy().into_owned();
+        let state = Arc::new(Mutex::new(PlaybackState {
+            current_file: Some(outgoing.clone()),
+            generation: 7,
+            duration: 12.0,
+            ..PlaybackState::default()
+        }));
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&outgoing))
+            .expect("authorize outgoing track");
         assert!(mark_playback_generation(
             &mut roots.write(),
             7,
-            Path::new("outgoing.wav"),
+            Path::new(&outgoing),
         ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots.write(),
-            Path::new("outgoing.wav"),
+            Path::new(&outgoing),
             7,
         ));
-        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new("incoming.wav")));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&incoming))
+            .expect("authorize incoming track");
+        replace_preloaded_queue_entry(
+            &mut roots.write(),
+            Some(8),
+            Some(Path::new(&incoming)),
+        );
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![(incoming.clone(), Arc::clone(&cancelled))];
 
         let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
         let committed = commit_gapless_handoff(
@@ -2121,9 +2135,9 @@ mod bounded_seek_tests {
             &cancelled,
             &emitted,
             Arc::new(AtomicU64::new(0)),
-            "outgoing.wav",
+            &outgoing,
             7,
-            "incoming.wav",
+            &incoming,
             8,
             20.0,
             0.0,
@@ -2132,34 +2146,50 @@ mod bounded_seek_tests {
         );
 
         assert_eq!(generation, 7);
-        assert_eq!(path, "outgoing.wav");
+        assert_eq!(path, outgoing);
         assert_eq!(duration, 12.0);
         assert!(!committed);
-        assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
+        assert_eq!(state.lock().current_file.as_deref(), Some(outgoing.as_str()));
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
     fn seek_snapshot_uses_a_gapless_track_that_committed_first() {
+        let directory = temp_dir("seek-committed-gapless");
+        let outgoing = directory.join("outgoing.wav");
+        let incoming = directory.join("incoming.wav");
+        fs::write(&outgoing, b"audio").expect("write outgoing track");
+        fs::write(&incoming, b"audio").expect("write incoming track");
+        let outgoing = outgoing.to_string_lossy().into_owned();
+        let incoming = incoming.to_string_lossy().into_owned();
         let state = Arc::new(Mutex::new(PlaybackState {
             generation: 7,
-            current_file: Some("outgoing.wav".to_string()),
+            current_file: Some(outgoing.clone()),
             ..PlaybackState::default()
         }));
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&outgoing))
+            .expect("authorize outgoing track");
         assert!(mark_playback_generation(
             &mut roots.write(),
             7,
-            Path::new("outgoing.wav"),
+            Path::new(&outgoing),
         ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots.write(),
-            Path::new("outgoing.wav"),
+            Path::new(&outgoing),
             7,
         ));
-        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new("incoming.wav")));
+        crate::file_ops::authorize_transient_file(&roots, Path::new(&incoming))
+            .expect("authorize incoming track");
+        replace_preloaded_queue_entry(
+            &mut roots.write(),
+            Some(8),
+            Some(Path::new(&incoming)),
+        );
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![(incoming.clone(), Arc::clone(&cancelled))];
 
         assert!(commit_gapless_handoff(
             &roots,
@@ -2167,9 +2197,9 @@ mod bounded_seek_tests {
             &cancelled,
             &emitted,
             Arc::new(AtomicU64::new(0)),
-            "outgoing.wav",
+            &outgoing,
             7,
-            "incoming.wav",
+            &incoming,
             8,
             20.0,
             0.0,
@@ -2179,8 +2209,9 @@ mod bounded_seek_tests {
         let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
 
         assert_eq!(generation, 8);
-        assert_eq!(path, "incoming.wav");
+        assert_eq!(path, incoming);
         assert_eq!(duration, 20.0);
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
