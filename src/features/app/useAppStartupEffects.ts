@@ -1,4 +1,5 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isEnabled } from '@tauri-apps/plugin-autostart';
 import { useEffect, useRef } from 'react';
 import type { NavView } from '../../components/navigation';
 import { recordPerfBudget } from '../../lib/performance';
@@ -18,6 +19,61 @@ interface UseAppStartupEffectsOptions {
 export function useAppStartupEffects({ currentView, preloadModules }: UseAppStartupEffectsOptions) {
   const startupLoggedRef = useRef(false);
   const firstLibraryRenderRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let syncRequested = false;
+
+    const syncAutostartFromSystem = async () => {
+      if (inFlight) {
+        syncRequested = true;
+        return;
+      }
+
+      inFlight = true;
+      try {
+        do {
+          syncRequested = false;
+          try {
+            const enabled = await isEnabled();
+            if (cancelled) return;
+            const settings = useSettingsStore.getState();
+            if (settings.autostartEnabled !== enabled) {
+              settings.setAutostartEnabled(enabled);
+            }
+          } catch (error) {
+            if (!cancelled) {
+              reportError('Failed to read open at login setting', {
+                source: 'app-startup',
+                error,
+              });
+            }
+          }
+        } while (syncRequested && !cancelled);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const persist = useSettingsStore.persist;
+    const unsubscribeHydration = persist.hasHydrated()
+      ? undefined
+      : persist.onFinishHydration(() => {
+          void syncAutostartFromSystem();
+        });
+
+    const onFocus = () => {
+      void syncAutostartFromSystem();
+    };
+    void syncAutostartFromSystem();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      unsubscribeHydration?.();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
 
   useEffect(() => {
     type IdleWindow = Window & {
