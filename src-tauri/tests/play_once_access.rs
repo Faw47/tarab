@@ -205,3 +205,24 @@ fn superseded_requests_drop_transient_grants_by_generation() {
         "a newer request must retire older pending grants even if the newer request fails"
     );
 }
+
+
+#[test]
+fn failed_play_keeps_the_exact_preloaded_gapless_entry_available() {
+    assert!(
+        FILE_OPS.contains("preloaded_queue_entry: Option<(u64, PathBuf)>"),
+        "the queued successor must keep its generation and path while a newer request is pending"
+    );
+    assert!(
+        FILE_OPS.contains("*preloaded_generation == generation"),
+        "a handoff must match the exact entry that was preloaded"
+    );
+    assert!(
+        FILE_OPS.contains("generation > active_generation"),
+        "a queued successor must be compared with the installed track, not a failed request's high-water mark"
+    );
+    assert!(
+        AUDIO.contains("replace_preloaded_queue_entry"),
+        "preload and clear commands must update transient file ownership"
+    );
+}
