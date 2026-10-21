@@ -24,6 +24,19 @@ export const DbTrackSchema = z.object({
   fileSize: z.number().nullable().optional(),
 });
 
+export const DbTrackAggregateRepresentativeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist: z.string(),
+  album: z.string(),
+  year: z.number().nullable(),
+  duration: z.number(),
+  filePath: z.string(),
+  hasCoverArt: z.boolean(),
+  coverArtHash: z.string().nullable(),
+  blurhash: z.string().nullable(),
+});
+
 export const DbTrackArraySchema = z.array(DbTrackSchema);
 export const TrackCountSchema = z.number().int().nonnegative();
 export const AffectedRowCountSchema = z.number().int().nonnegative();
@@ -39,16 +52,17 @@ export const DbAlbumAggregateArraySchema = z.array(
     album: z.string(),
     artist: z.string(),
     trackCount: z.number().int().nonnegative(),
-    representative: DbTrackSchema,
+    representative: DbTrackAggregateRepresentativeSchema,
   }),
 );
 export const DbArtistAggregateArraySchema = z.array(
   z.object({
     artist: z.string(),
     trackCount: z.number().int().nonnegative(),
-    representative: DbTrackSchema,
+    representative: DbTrackAggregateRepresentativeSchema,
   }),
 );
 
 export type ValidatedDbTrack = z.infer<typeof DbTrackSchema>;
+export type ValidatedDbTrackAggregateRepresentative = z.infer<typeof DbTrackAggregateRepresentativeSchema>;
 export type ValidatedLibraryStats = z.infer<typeof LibraryStatsSchema>;
