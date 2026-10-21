@@ -169,10 +169,10 @@ fn stop_after_failed_output_replacement(
     state.is_paused = false;
 }
 
-type PendingGaplessHandoff = (String, Arc<AtomicBool>);
+type PendingGaplessHandoff = (String, u64, Arc<AtomicBool>);
 
 fn cancel_gapless_handoffs(pending: &mut Vec<PendingGaplessHandoff>) {
-    for (_, cancelled) in pending.drain(..) {
+    for (_, _, cancelled) in pending.drain(..) {
         cancelled.store(true, Ordering::Release);
     }
 }
@@ -180,14 +180,8 @@ fn cancel_gapless_handoffs(pending: &mut Vec<PendingGaplessHandoff>) {
 fn pending_gapless_tokens(pending: &[PendingGaplessHandoff]) -> Vec<Arc<AtomicBool>> {
     pending
         .iter()
-        .map(|(_, cancelled)| Arc::clone(cancelled))
+        .map(|(_, _, cancelled)| Arc::clone(cancelled))
         .collect()
-}
-
-fn has_uncancelled_gapless_handoff(pending: &[PendingGaplessHandoff]) -> bool {
-    pending
-        .iter()
-        .any(|(_, cancelled)| !cancelled.load(Ordering::Acquire))
 }
 
 fn snapshot_playback_for_seek(
@@ -195,7 +189,7 @@ fn snapshot_playback_for_seek(
     pending: &mut Vec<PendingGaplessHandoff>,
 ) -> (u64, String, bool, f64, f32) {
     let state = state.lock();
-    for (_, cancelled) in pending.iter() {
+    for (_, _, cancelled) in pending.iter() {
         // The handoff callback takes this same state lock before checking the token. This makes
         // cancellation and the playback snapshot one serialized operation.
         cancelled.store(true, Ordering::Release);
@@ -215,11 +209,16 @@ fn snapshot_playback_for_output_replacement(
     state: &Arc<Mutex<PlaybackState>>,
     pending: &mut Vec<PendingGaplessHandoff>,
     active_emitted: &Arc<Mutex<Arc<AtomicU64>>>,
-) -> (u64, Option<String>, f64, bool, bool) {
+) -> (u64, Option<String>, f64, bool, bool, bool) {
     let state = state.lock();
-    for (_, cancelled) in pending.iter() {
-        // Serialize the snapshot with the handoff callback so the replacement source cannot be
-        // prepared for one track while playback state commits another.
+    let has_uncommitted_queued_handoff = pending.iter().any(|(path, generation, cancelled)| {
+        !cancelled.load(Ordering::Acquire)
+            && (state.generation != *generation
+                || state.current_file.as_deref() != Some(path.as_str()))
+    });
+    for (_, _, cancelled) in pending.iter() {
+        // Serialize the snapshot with the handoff callback so replacement state and handoff
+        // commitment are observed atomically.
         cancelled.store(true, Ordering::Release);
     }
     pending.clear();
@@ -234,6 +233,7 @@ fn snapshot_playback_for_output_replacement(
         position_from_samples(&state, emitted),
         state.is_paused,
         state.is_playing,
+        has_uncommitted_queued_handoff,
     )
 }
 
@@ -1188,7 +1188,11 @@ impl AudioManager {
                                         );
                                     });
 
-                                    pending_gapless_cancels.push((path.clone(), handoff_cancelled));
+                                    pending_gapless_cancels.push((
+                                        path.clone(),
+                                        next_generation,
+                                        handoff_cancelled,
+                                    ));
                                     sink.append(handoff);
                                     *pending_gapless_path_thread.lock() = Some(path);
                                 }
@@ -1239,7 +1243,8 @@ impl AudioManager {
                                 if pending.as_deref() == Some(next_path.as_str()) {
                                     *pending = None;
                                 }
-                                pending_gapless_cancels.retain(|(path, _)| path != &next_path);
+                                pending_gapless_cancels
+                                    .retain(|(path, _, _)| path != &next_path);
                             }
                             command @ (AudioCommand::SetOutputDevice(_)
                             | AudioCommand::RecoverOutput) => {
@@ -1313,26 +1318,19 @@ impl AudioManager {
                                                 // candidate decoder opened. Cancel and snapshot under
                                                 // the same state lock the callback uses, then rebuild
                                                 // for the committed track if it changed.
-                                                // PreloadNext(None) clears the path marker but
-                                                // cannot remove the source already queued in Rodio.
-                                                // The cancellation tokens remain the reliable
-                                                // indicator that a queued handoff may still advance.
-                                                let had_queued_gapless_source =
-                                                    has_uncancelled_gapless_handoff(
-                                                        &pending_gapless_cancels,
-                                                    );
                                                 let (
                                                     generation,
                                                     active_path,
                                                     position,
                                                     was_paused,
                                                     still_playing,
+                                                    has_uncommitted_handoff,
                                                 ) = snapshot_playback_for_output_replacement(
                                                     &state_clone,
                                                     &mut pending_gapless_cancels,
                                                     &active_emitted_for_audio,
                                                 );
-                                                cancelled_queued_handoff = had_queued_gapless_source;
+                                                cancelled_queued_handoff = has_uncommitted_handoff;
                                                 *pending_gapless_path_thread.lock() = None;
                                                 if !still_playing {
                                                     replacement_error = Some(
@@ -2081,7 +2079,7 @@ mod bounded_seek_tests {
         }
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
 
         let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
         let committed = commit_gapless_handoff(
@@ -2119,9 +2117,9 @@ mod bounded_seek_tests {
         let emitted_counter = Arc::new(AtomicU64::new(48_000 * 2 * 3));
         let emitted = Arc::new(Mutex::new(Arc::clone(&emitted_counter)));
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
 
-        let (generation, path, position, paused, playing) =
+        let (generation, path, position, paused, playing, handoff_pending) =
             snapshot_playback_for_output_replacement(&state, &mut pending, &emitted);
         let committed = commit_gapless_handoff(
             &state,
@@ -2141,6 +2139,7 @@ mod bounded_seek_tests {
         assert!((position - 3.0).abs() < 0.001);
         assert!(!paused);
         assert!(playing);
+        assert!(handoff_pending);
         assert!(pending.is_empty());
         assert!(!committed);
         assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
@@ -2161,7 +2160,7 @@ mod bounded_seek_tests {
         // A queue edit may clear this path marker even though Rodio still owns the source.
         let pending_path = Arc::new(Mutex::new(None));
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
         assert!(has_uncancelled_gapless_handoff(&pending));
         let (sink, _queue) = Sink::new_idle();
         let sink = Arc::new(sink);
@@ -2169,6 +2168,13 @@ mod bounded_seek_tests {
         let mut crossfade = None;
         let mut volume_ramp = None;
         let mut stream_bundle = None;
+
+        let (_, _, _, _, _, handoff_pending) = snapshot_playback_for_output_replacement(
+            &state,
+            &mut pending,
+            &active_emitted,
+        );
+        assert!(handoff_pending);
 
         stop_after_failed_output_replacement(
             &state,
@@ -2200,7 +2206,7 @@ mod bounded_seek_tests {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
-        let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
+        let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
 
         assert!(commit_gapless_handoff(
             &state,
