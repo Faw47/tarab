@@ -474,7 +474,11 @@ impl Database {
         let tracks = match cursor {
             Some(cursor) => stmt
                 .query_map(
-                    params![cursor_value.expect("cursor value validated"), cursor.id.as_str(), limit],
+                    params![
+                        cursor_value.expect("cursor value validated"),
+                        cursor.id.as_str(),
+                        limit
+                    ],
                     Self::map_db_track_row,
                 )?
                 .collect::<SqliteResult<Vec<_>>>()?,
@@ -783,10 +787,9 @@ impl Database {
              ORDER BY file_path COLLATE NOCASE ASC",
         )?;
         let ids = stmt
-            .query_map(
-                params![normalized, path_prefix, path_upper_bound],
-                |row| row.get::<_, String>(0),
-            )?
+            .query_map(params![normalized, path_prefix, path_upper_bound], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<SqliteResult<Vec<_>>>()?;
 
         Ok(ids)
