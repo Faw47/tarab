@@ -21,6 +21,7 @@ import { useReactivePalette } from '../../hooks/useReactivePalette';
 import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { coverArtUrl } from '../../lib/cover-art-url';
 import { formatTime } from '../../lib/format-time';
+import { useSettingsStore } from '../../store/settings-store';
 import type { DesktopControlAction, DesktopPlaybackSnapshot } from '../../types';
 import { Button } from '../ui/button';
 import { cn } from '../ui/liquid-glass';
@@ -45,6 +46,9 @@ export const DesktopMiniWindowSurface = ({
   initialSnapshot = EMPTY_SNAPSHOT,
 }: DesktopMiniWindowSurfaceProps) => {
   const [snapshot, setSnapshot] = useState<DesktopPlaybackSnapshot>(initialSnapshot);
+  const storedTheme = useSettingsStore((s) => s.theme);
+  const theme = snapshot.theme ?? storedTheme;
+  const isNeoTheme = theme === 'neobrutalism';
   const [seekState, setSeekState] = useState<{ isSeeking: boolean; valueSecs: number }>({
     isSeeking: false,
     valueSecs: 0,
@@ -139,6 +143,28 @@ export const DesktopMiniWindowSurface = ({
   const trackTitle = snapshot.track?.title ?? 'No track';
   const trackArtist = snapshot.track?.artist ?? 'Tarab';
   const hasTrack = Boolean(snapshot.track);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  const getControlStyle = (enabled: boolean): CSSProperties =>
+    ({
+      '--adl-liquid-bg': isNeoTheme
+        ? 'var(--neo-panel)'
+        : enabled
+          ? 'rgba(255,255,255,0.10)'
+          : 'rgba(255,255,255,0.05)',
+      '--adl-liquid-bg-hover': isNeoTheme ? 'var(--neo-utility-hover)' : 'rgba(255,255,255,0.18)',
+      '--adl-liquid-border': isNeoTheme ? 'var(--neo-ink)' : 'rgba(255,255,255,0.10)',
+      '--adl-liquid-text': isNeoTheme
+        ? enabled
+          ? 'var(--type-primary)'
+          : 'var(--type-subdued)'
+        : enabled
+          ? 'rgba(255,255,255,0.88)'
+          : 'rgba(255,255,255,0.28)',
+    }) as CSSProperties;
   const shellVars = useMemo(
     () =>
       ({
@@ -154,17 +180,31 @@ export const DesktopMiniWindowSurface = ({
 
   return (
     <div
-      className="box-border h-[92px] w-[320px] overflow-hidden text-white antialiased"
+      data-mini-window-surface
+      data-theme={theme}
+      className={cn(
+        'box-border h-[92px] w-[320px] overflow-hidden antialiased',
+        isNeoTheme ? 'text-[var(--type-primary)]' : 'text-white',
+      )}
       style={shellVars}
     >
       <div
-        className="relative h-full w-full rounded-2xl border border-white/12"
-        style={{
-          background: `
-            radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--mini-accent) 18%, white 10%) 0%, transparent 38%),
-            linear-gradient(135deg, color-mix(in srgb, var(--mini-shell-a) 55%, black 45%) 0%, rgba(8, 9, 14, 0.96) 100%)
-          `,
-        }}
+        className={cn(
+          'relative h-full w-full',
+          isNeoTheme
+            ? 'rounded-none border-[3px] border-[var(--neo-ink)] bg-[var(--surface-shell)]'
+            : 'rounded-2xl border border-white/12',
+        )}
+        style={
+          isNeoTheme
+            ? undefined
+            : {
+                background: `
+                  radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--mini-accent) 18%, white 10%) 0%, transparent 38%),
+                  linear-gradient(135deg, color-mix(in srgb, var(--mini-shell-a) 55%, black 45%) 0%, rgba(8, 9, 14, 0.96) 100%)
+                `,
+              }
+        }
       >
         {/* Full-card drag target behind UI; interactive bits opt in with pointer-events-auto + no-drag */}
         <div
@@ -173,11 +213,18 @@ export const DesktopMiniWindowSurface = ({
           onPointerDown={handleWindowDragPointerDown}
           aria-hidden
         />
-        <div className="pointer-events-none absolute inset-0 z-[2] rounded-2xl bg-black/18 backdrop-blur-xl" />
+        {!isNeoTheme && (
+          <div className="pointer-events-none absolute inset-0 z-[2] rounded-2xl bg-black/18 backdrop-blur-xl" />
+        )}
 
         <div className="relative z-10 flex h-full items-center gap-2 px-2 py-1.5 pointer-events-none">
           <div
-            className="relative h-[52px] w-[52px] shrink-0 cursor-grab overflow-hidden rounded-xl border border-white/12 bg-white/6 active:cursor-grabbing pointer-events-auto"
+            className={cn(
+              'relative h-[52px] w-[52px] shrink-0 cursor-grab overflow-hidden active:cursor-grabbing pointer-events-auto',
+              isNeoTheme
+                ? 'rounded-none border-2 border-black bg-[var(--neo-panel)]'
+                : 'rounded-xl border border-white/12 bg-white/6',
+            )}
             data-tauri-drag-region
             onPointerDown={handleWindowDragPointerDown}
             onDoubleClick={() => {
@@ -193,7 +240,14 @@ export const DesktopMiniWindowSurface = ({
                 draggable={false}
               />
             ) : (
-              <div className="h-full w-full bg-gradient-to-br from-white/12 to-transparent" />
+              <div
+                className={cn(
+                  'h-full w-full',
+                  isNeoTheme
+                    ? 'bg-[var(--neo-muted)]'
+                    : 'bg-gradient-to-br from-white/12 to-transparent',
+                )}
+              />
             )}
           </div>
 
@@ -207,21 +261,40 @@ export const DesktopMiniWindowSurface = ({
               }}
               title="Drag to move · double-click for main window"
             >
-              <p className="truncate text-[12px] font-semibold leading-tight text-white">
+              <p
+                className={cn(
+                  'truncate text-[12px] font-semibold leading-tight',
+                  isNeoTheme ? 'text-[var(--type-primary)]' : 'text-white',
+                )}
+              >
                 {trackTitle}
               </p>
-              <p className="truncate text-xs font-medium text-white/55">{trackArtist}</p>
+              <p
+                className={cn(
+                  'truncate text-xs font-medium',
+                  isNeoTheme ? 'text-[var(--type-secondary)]' : 'text-white/55',
+                )}
+              >
+                {trackArtist}
+              </p>
             </div>
-            <div
-              className="relative h-1 overflow-hidden rounded-full bg-white/10 pointer-events-auto"
-              data-mini-no-drag
-            >
+            <div className="pointer-events-auto relative h-6 overflow-visible" data-mini-no-drag>
               <div
-                className="h-full rounded-full transition-[width] duration-[var(--motion-standard)]"
+                className={cn(
+                  'absolute inset-x-0 top-1/2 h-1 -translate-y-1/2',
+                  isNeoTheme ? 'bg-[var(--neo-muted)]' : 'rounded-full bg-white/10',
+                )}
+              />
+              <div
+                className={cn(
+                  'absolute left-0 top-1/2 h-1 -translate-y-1/2 transition-[width] duration-[var(--motion-standard)]',
+                  !isNeoTheme && 'rounded-full',
+                )}
                 style={{
                   width: `${progress * 100}%`,
-                  background:
-                    'linear-gradient(90deg, var(--mini-accent) 0%, color-mix(in srgb, var(--mini-accent) 55%, white 45%) 100%)',
+                  background: isNeoTheme
+                    ? 'var(--accent)'
+                    : 'linear-gradient(90deg, var(--mini-accent) 0%, color-mix(in srgb, var(--mini-accent) 55%, white 45%) 100%)',
                 }}
               />
               <input
@@ -275,11 +348,16 @@ export const DesktopMiniWindowSurface = ({
                   e.stopPropagation();
                   void finishSeek();
                 }}
-                className="absolute inset-0 h-full w-full cursor-pointer touch-none opacity-0"
+                className="absolute inset-0 h-full min-h-6 w-full cursor-pointer touch-none opacity-0"
                 aria-label="Seek"
               />
             </div>
-            <div className="pointer-events-none flex items-center justify-between text-xs font-medium tabular-nums text-white/45">
+            <div
+              className={cn(
+                'pointer-events-none flex items-center justify-between text-xs font-medium tabular-nums',
+                isNeoTheme ? 'text-[var(--type-secondary)]' : 'text-white/45',
+              )}
+            >
               <span>{formatTime(displayPositionSecs)}</span>
               <span>-{formatTime(remaining)}</span>
             </div>
@@ -292,21 +370,14 @@ export const DesktopMiniWindowSurface = ({
               }}
               disabled={!snapshot.hasPrevious}
               className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-full p-0',
-                !snapshot.hasPrevious && 'text-white/28',
+                'flex h-7 w-7 items-center justify-center p-0',
+                isNeoTheme
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-panel)] shadow-[2px_2px_0_0_#000]'
+                  : 'rounded-full',
+                !snapshot.hasPrevious && isNeoTheme && 'opacity-50',
+                !snapshot.hasPrevious && !isNeoTheme && 'text-white/28',
               )}
-              style={
-                {
-                  '--adl-liquid-bg': snapshot.hasPrevious
-                    ? 'rgba(255,255,255,0.10)'
-                    : 'rgba(255,255,255,0.05)',
-                  '--adl-liquid-bg-hover': 'rgba(255,255,255,0.18)',
-                  '--adl-liquid-border': 'rgba(255,255,255,0.10)',
-                  '--adl-liquid-text': snapshot.hasPrevious
-                    ? 'rgba(255,255,255,0.88)'
-                    : 'rgba(255,255,255,0.28)',
-                } as CSSProperties
-              }
+              style={getControlStyle(snapshot.hasPrevious)}
               aria-label="Previous"
             >
               <SkipBack className="h-3 w-3" />
@@ -318,21 +389,27 @@ export const DesktopMiniWindowSurface = ({
               }}
               disabled={!hasTrack}
               variant="primary"
-              accentColor="var(--mini-accent)"
-              accentForeground="#060606"
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-full p-0 text-black',
+                'flex h-9 w-9 items-center justify-center p-0',
+                isNeoTheme
+                  ? 'rounded-none border-[3px] border-black bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[3px_3px_0_0_#000]'
+                  : 'rounded-full text-black',
                 !hasTrack && 'opacity-45',
               )}
+              accentColor={isNeoTheme ? 'var(--accent)' : 'var(--mini-accent)'}
+              accentForeground={isNeoTheme ? 'var(--accent-foreground)' : '#060606'}
               style={
                 hasTrack
                   ? ({
-                      '--adl-liquid-bg':
-                        'linear-gradient(180deg, color-mix(in srgb, var(--mini-accent) 72%, white 28%) 0%, var(--mini-accent) 100%)',
-                      '--adl-liquid-border':
-                        'color-mix(in srgb, var(--mini-accent) 54%, rgba(255,255,255,0.34) 46%)',
-                      '--adl-liquid-shadow':
-                        '0 0 18px color-mix(in srgb, var(--mini-glow) 65%, transparent 35%)',
+                      '--adl-liquid-bg': isNeoTheme
+                        ? 'var(--accent)'
+                        : 'linear-gradient(180deg, color-mix(in srgb, var(--mini-accent) 72%, white 28%) 0%, var(--mini-accent) 100%)',
+                      '--adl-liquid-border': isNeoTheme
+                        ? 'var(--neo-ink)'
+                        : 'color-mix(in srgb, var(--mini-accent) 54%, rgba(255,255,255,0.34) 46%)',
+                      '--adl-liquid-shadow': isNeoTheme
+                        ? 'var(--neo-shadow-sm)'
+                        : '0 0 18px color-mix(in srgb, var(--mini-glow) 65%, transparent 35%)',
                     } as CSSProperties)
                   : undefined
               }
@@ -351,21 +428,14 @@ export const DesktopMiniWindowSurface = ({
               }}
               disabled={!snapshot.hasNext}
               className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-full p-0',
-                !snapshot.hasNext && 'text-white/28',
+                'flex h-7 w-7 items-center justify-center p-0',
+                isNeoTheme
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-panel)] shadow-[2px_2px_0_0_#000]'
+                  : 'rounded-full',
+                !snapshot.hasNext && isNeoTheme && 'opacity-50',
+                !snapshot.hasNext && !isNeoTheme && 'text-white/28',
               )}
-              style={
-                {
-                  '--adl-liquid-bg': snapshot.hasNext
-                    ? 'rgba(255,255,255,0.10)'
-                    : 'rgba(255,255,255,0.05)',
-                  '--adl-liquid-bg-hover': 'rgba(255,255,255,0.18)',
-                  '--adl-liquid-border': 'rgba(255,255,255,0.10)',
-                  '--adl-liquid-text': snapshot.hasNext
-                    ? 'rgba(255,255,255,0.88)'
-                    : 'rgba(255,255,255,0.28)',
-                } as CSSProperties
-              }
+              style={getControlStyle(snapshot.hasNext)}
               aria-label="Next"
             >
               <SkipForward className="h-3 w-3" />
@@ -373,15 +443,13 @@ export const DesktopMiniWindowSurface = ({
 
             <Button
               onClick={minimizeMiniWindow}
-              className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-full p-0"
-              style={
-                {
-                  '--adl-liquid-bg': 'rgba(255,255,255,0.06)',
-                  '--adl-liquid-bg-hover': 'rgba(255,255,255,0.12)',
-                  '--adl-liquid-border': 'rgba(255,255,255,0.10)',
-                  '--adl-liquid-text': 'rgba(255,255,255,0.86)',
-                } as CSSProperties
-              }
+              className={cn(
+                'ml-0.5 flex h-6 w-6 items-center justify-center p-0',
+                isNeoTheme
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-panel)] shadow-[2px_2px_0_0_#000]'
+                  : 'rounded-full',
+              )}
+              style={getControlStyle(true)}
               aria-label="Minimize to dock"
               title="Minimize to dock (restore from Dock or taskbar)"
             >
@@ -392,15 +460,13 @@ export const DesktopMiniWindowSurface = ({
               onClick={() => {
                 void sendAction('show-main');
               }}
-              className="flex h-6 w-6 items-center justify-center rounded-full p-0"
-              style={
-                {
-                  '--adl-liquid-bg': 'rgba(255,255,255,0.06)',
-                  '--adl-liquid-bg-hover': 'rgba(255,255,255,0.12)',
-                  '--adl-liquid-border': 'rgba(255,255,255,0.10)',
-                  '--adl-liquid-text': 'rgba(255,255,255,0.86)',
-                } as CSSProperties
-              }
+              className={cn(
+                'flex h-6 w-6 items-center justify-center p-0',
+                isNeoTheme
+                  ? 'rounded-none border-2 border-black bg-[var(--neo-panel)] shadow-[2px_2px_0_0_#000]'
+                  : 'rounded-full',
+              )}
+              style={getControlStyle(true)}
               aria-label="Show main window"
               title="Show main window"
             >

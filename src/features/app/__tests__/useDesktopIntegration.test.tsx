@@ -533,6 +533,7 @@ describe('useDesktopIntegration', () => {
   });
 
   it('responds to desktop snapshot requests with a main-window snapshot', async () => {
+    useSettingsStore.setState({ theme: 'neobrutalism' });
     render(<Harness />);
 
     await waitFor(() => {
@@ -552,6 +553,7 @@ describe('useDesktopIntegration', () => {
         track: expect.objectContaining({ id: 'track-1' }),
         isPlaying: false,
         position: 10,
+        theme: 'neobrutalism',
       }),
     );
   });
