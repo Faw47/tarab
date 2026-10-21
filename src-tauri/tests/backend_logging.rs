@@ -51,7 +51,7 @@ fn runtime_diagnostics_use_the_configured_logger() {
         ),
         (
             "database/migrations.rs",
-            "Database migration found duplicate playlist memberships; preserving one per pair",
+            "Duplicate playlist memberships were collapsed during migration",
         ),
     ];
     let cache_fallbacks = direct_stderr
@@ -66,7 +66,7 @@ fn runtime_diagnostics_use_the_configured_logger() {
         .filter(|(path, _, line)| {
             path.as_str() == "database/migrations.rs"
                 && line.contains(
-                    "Database migration found duplicate playlist memberships; preserving one per pair",
+                    "Duplicate playlist memberships were collapsed during migration",
                 )
         })
         .count();
