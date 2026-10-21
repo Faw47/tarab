@@ -1,3 +1,34 @@
+import { clsx } from 'clsx';
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  ChevronDown,
+  ChevronRight,
+  Edit3,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Headphones,
+  ListPlus,
+  Mic2,
+  MoreHorizontal,
+  Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Sliders,
+  User,
+} from 'lucide-react';
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useCoverArt } from '../../hooks/useCoverArt';
+import { useEffectiveReducedEffects } from '../../hooks/useEffectiveReducedEffects';
+import { lazyWithRetry } from '../../lib/lazy-with-retry';
+import { useRenderLog } from '../../lib/performance';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { reportError } from '../../lib/report-error';

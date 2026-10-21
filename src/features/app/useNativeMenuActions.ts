@@ -1,4 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { toast } from 'sonner';
+import type { NavView } from '../../components/navigation';
+import { useTauriEvent } from '../../hooks/useTauriEvent';
+import { isSameOrSubPath, normalizePath } from '../../lib/path-utils';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import { selectLibraryFolder } from '../../lib/tauri-commands';

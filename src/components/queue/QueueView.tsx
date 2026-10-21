@@ -1,3 +1,37 @@
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { clsx } from 'clsx';
+import {
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  GripVertical,
+  ListMusic,
+  Music2,
+  Pause,
+  Play,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+import { useShallow } from 'zustand/react/shallow';
+import { formatTime } from '../../lib/format-time';
+import { useRenderLog } from '../../lib/performance';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { resolveActiveQueueIndex, usePlayerStore } from '../../store/player-store';

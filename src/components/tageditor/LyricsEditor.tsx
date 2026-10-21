@@ -1,3 +1,21 @@
+import { clsx } from 'clsx';
+import {
+  AlertCircle,
+  Check,
+  Edit2,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  Repeat1,
+  RotateCcw,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { formatTime } from '../../lib/format-time';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { rangeProgressStyle } from '../../lib/range-progress-style';
 import { usePlayerStore } from '../../store/player-store';

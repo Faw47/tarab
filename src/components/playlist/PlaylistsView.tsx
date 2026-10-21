@@ -1,3 +1,29 @@
+import {
+  ChevronDown,
+  ChevronUp,
+  ListMusic,
+  Pencil,
+  Pin,
+  PinOff,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  useCreatePlaylistMutation,
+  useDeletePlaylistMutation,
+  usePinPlaylistMutation,
+  useRelinkPlaylistTrackMutation,
+  useRemoveMissingTracksMutation,
+  useRemoveTracksMutation,
+  useReorderPlaylistTracksMutation,
+  useSyncPlaylistMutation,
+  useUpdatePlaylistMutation,
+} from '../../features/playlists/mutations';
+import { usePlaylistDetailQuery, usePlaylistsQuery } from '../../features/playlists/queries';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { refreshTracksByFilePaths } from '../../lib/track-refresh';

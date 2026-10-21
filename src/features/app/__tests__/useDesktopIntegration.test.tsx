@@ -60,7 +60,7 @@ const {
     pauseCurrentPlaybackMock: vi.fn(async () => undefined),
     resumeCurrentPlaybackMock: vi.fn(async () => undefined),
     toggleCurrentPlaybackMock: vi.fn(async () => undefined),
-    playAdjacentTrackMock: vi.fn(async () => undefined),
+    playAdjacentTrackMock: vi.fn(async (_direction: 'next' | 'previous', _options?: unknown) => undefined),
     seekToPositionMock: vi.fn(async () => undefined),
   };
 });

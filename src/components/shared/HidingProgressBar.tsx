@@ -1,3 +1,5 @@
+import { clsx } from 'clsx';
+import { memo, useCallback, useRef, useState } from 'react';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';

@@ -1,4 +1,8 @@
 import clsx from 'clsx';
+import { Pause, Play } from 'lucide-react';
+import type React from 'react';
+import { memo, useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { usePlayerStore } from '../../store/player-store';

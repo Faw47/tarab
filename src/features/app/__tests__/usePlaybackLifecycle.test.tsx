@@ -42,7 +42,7 @@ const {
     crossfadeToTrackMock: vi.fn(async () => 2),
     dbUpdatePlayStatsMock: vi.fn(async () => undefined),
     preloadNextTrackMock: vi.fn(async () => undefined),
-    playAdjacentTrackMock: vi.fn(async (): Promise<unknown> => undefined),
+    playAdjacentTrackMock: vi.fn(async (_direction: 'next' | 'previous', _options?: unknown): Promise<unknown> => undefined),
     reportErrorMock: vi.fn(),
     logErrorMock: vi.fn(),
   };

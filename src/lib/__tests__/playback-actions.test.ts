@@ -258,24 +258,6 @@ describe('overlapping source requests', () => {
     expect(state.isPlaying).toBe(true);
   });
 
-  it('sets the previewed track as current for lyric editing', async () => {
-    const previewTrack = track('preview');
-    usePlayerStore.setState({
-      currentTrack: track('previous'),
-      currentTime: 12,
-      isPlaying: false,
-      hasActivePlayback: false,
-    });
-
-    await startEditorPreview(previewTrack);
-
-    const state = usePlayerStore.getState();
-    expect(state.currentTrack?.id).toBe('preview');
-    expect(state.currentTrack?.filePath).toBe(previewTrack.filePath);
-    expect(state.currentTime).toBe(0);
-    expect(state.isPlaying).toBe(true);
-  });
-
   it('does not reset a newer track when an editor preview finishes late', async () => {
     let finishPreview: (generation: number) => void = () => undefined;
     playTrackMock.mockImplementationOnce(

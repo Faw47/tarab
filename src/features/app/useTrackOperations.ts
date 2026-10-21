@@ -1,4 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { type Dispatch, type SetStateAction, useCallback } from 'react';
+import type { ConfirmDialogProps } from '../../components/ui/ConfirmDialog';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import {

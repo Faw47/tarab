@@ -1,3 +1,6 @@
+import { emitTo } from '@tauri-apps/api/event';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import {

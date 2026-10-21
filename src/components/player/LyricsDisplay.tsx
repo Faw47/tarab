@@ -1,3 +1,9 @@
+import { clsx } from 'clsx';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useSmoothTime } from '../../hooks/useSmoothTime';
+import { getCurrentLineIndex, getDisplayLines } from '../../lib/lyrics-parser';
+import { useRenderLog } from '../../lib/performance';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { getCoverArtPalette } from '../../lib/tauri-commands';

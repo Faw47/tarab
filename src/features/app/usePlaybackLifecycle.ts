@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef } from 'react';
+import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { PlaybackCoordinator } from '../../lib/playback-actions';
 import { logError, reportError } from '../../lib/report-error';
 import { dbUpdatePlayStats } from '../../lib/tauri-commands';
@@ -133,7 +135,7 @@ async function advanceQueueAutomatically(
     autoAdvanceRef.current = { generation: getActivePlaybackGeneration(), skipped };
   } catch (error) {
     autoAdvanceRef.current = null;
-    // PlaybackCoordinator.next marks one intervention itself; any other means the user acted.
+    // playAdjacentTrack marks one intervention itself; any other means the user acted.
     const userActed = getPlaybackInterventionEpoch() !== epoch + 1;
     const state = usePlayerStore.getState();
     if (!userActed && canAutoSkip(skipped, state.queue.length)) {
