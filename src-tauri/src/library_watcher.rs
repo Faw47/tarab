@@ -187,10 +187,7 @@ fn start_watcher<R: Runtime>(
         match watcher.watch(path, RecursiveMode::Recursive) {
             Ok(()) => watched += 1,
             Err(error) => {
-                eprintln!(
-                    "library watcher could not watch {}: {}",
-                    root.root_id, error
-                );
+                log::warn!("Library watcher could not watch a configured library root");
                 first_error.get_or_insert_with(|| error.to_string());
             }
         }
@@ -218,7 +215,7 @@ fn start_watcher<R: Runtime>(
                         debouncer.record(path, change, now);
                     }
                 }
-                Ok(Err(e)) => eprintln!("library watcher error: {:?}", e),
+                Ok(Err(_error)) => log::warn!("Library watcher reported an event error"),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }

@@ -79,7 +79,7 @@ pub fn request_quit<R: Runtime>(app: &AppHandle<R>) {
         std::thread::sleep(QUIT_SAVE_TIMEOUT);
         let timed_out = state.0.lock().approve_timeout(request);
         if timed_out {
-            eprintln!("Session save timed out while quitting; using the last persisted session");
+            log::warn!("Session save timed out while quitting; using the last persisted session");
             app.exit(0);
         }
     });

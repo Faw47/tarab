@@ -79,8 +79,8 @@ fn read_session(app: &AppHandle) -> Result<Option<PlaybackSession>, String> {
 
     match serde_json::from_str::<PlaybackSession>(&contents) {
         Ok(session) => Ok(Some(session)),
-        Err(err) => {
-            eprintln!("Failed to parse playback session: {}", err);
+        Err(_err) => {
+            log::warn!("Failed to parse playback session; continuing without restoring it");
             Ok(None)
         }
     }

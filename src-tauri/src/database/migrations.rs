@@ -403,10 +403,8 @@ impl Database {
             |row| row.get(0),
         )?;
         if duplicate_memberships > 0 {
-            eprintln!(
-                "migrate_v4: detected {} duplicate playlist membership rows; preserving one per (playlist_id, track_id)",
-                duplicate_memberships
-            );
+            // `create_database()` runs this migration before Tauri installs its logger.
+            eprintln!("Duplicate playlist memberships were collapsed during migration");
         }
 
         conn.execute_batch(

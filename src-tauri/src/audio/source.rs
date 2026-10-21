@@ -140,10 +140,7 @@ fn prepare_source_with_seek(
             Err(seek_err) => {
                 // Unseekable streams (for example some MP3s): read packet headers from the start
                 // up to the target instead of restarting the track at 0:00.
-                eprintln!(
-                    "Seek to {} failed for {} ({}); skipping packets from the start",
-                    actual_start, file_path, seek_err
-                );
+                log::warn!("Seek to {actual_start:.2}s failed; skipping packets from the start");
                 let reopened = open_decoder_for_file(file_path)?;
                 format = reopened.0;
                 decoder = reopened.1;
@@ -361,10 +358,7 @@ impl SymphoniaSource {
         let mut attempts = 0;
         loop {
             if attempts >= MAX_REFILL_ATTEMPTS {
-                eprintln!(
-                    "Decoder refill exceeded {} attempts for {}",
-                    MAX_REFILL_ATTEMPTS, self.file_path
-                );
+                log::warn!("Decoder refill exceeded {MAX_REFILL_ATTEMPTS} attempts");
                 return None;
             }
 
@@ -376,8 +370,8 @@ impl SymphoniaSource {
                     match crate::parse_guard::guard(&self.file_path, || self.format.next_packet()) {
                         Ok(Ok(packet)) => packet,
                         Ok(Err(_)) => return None,
-                        Err(error) => {
-                            eprintln!("{}", error);
+                        Err(_error) => {
+                            log::error!("Audio packet decoding aborted after a parser failure");
                             return None;
                         }
                     }
@@ -390,8 +384,8 @@ impl SymphoniaSource {
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
                     Ok(result) => result,
-                    Err(error) => {
-                        eprintln!("{}", error);
+                    Err(_error) => {
+                        log::error!("Audio packet decoding aborted after a parser failure");
                         return None;
                     }
                 };
@@ -412,10 +406,7 @@ impl SymphoniaSource {
                         continue;
                     }
                     attempts += 1;
-                    eprintln!(
-                        "Decoded packet yielded no samples for {}; retrying",
-                        self.file_path
-                    );
+                    log::warn!("Decoded packet yielded no samples; retrying");
                 }
                 Err(symphonia::core::errors::Error::DecodeError(_)) => {
                     attempts += 1;

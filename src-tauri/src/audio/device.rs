@@ -22,8 +22,8 @@ pub fn enumerate_output_devices() -> Result<Vec<AudioOutputDeviceInfo>, String> 
     for device in devices {
         let name = match device.name() {
             Ok(name) => name,
-            Err(error) => {
-                eprintln!("Skipping audio device because its name is unavailable: {error}");
+            Err(_error) => {
+                log::warn!("Skipping audio device because its name is unavailable");
                 continue;
             }
         };
@@ -57,7 +57,7 @@ pub(super) fn open_output_stream(
                     });
                 }
             }
-            eprintln!("Audio device \"{name}\" was not found. Tarab will use the system default.");
+            log::warn!("Requested audio device was not found; using the system default");
             OutputStream::try_default()
                 .map_err(|error| format!("Failed to open default audio output: {error}"))
         }

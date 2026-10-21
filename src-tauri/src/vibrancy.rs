@@ -15,8 +15,8 @@ pub fn apply_platform_vibrancy<R: Runtime>(window: &WebviewWindow<R>) {
         let build = get_windows_build_number();
         if build >= 22000 {
             // Windows 11: use Mica
-            if let Err(e) = apply_mica(window, Some(true)) {
-                eprintln!("[vibrancy] Mica failed: {e}. Falling back to acrylic.");
+            if apply_mica(window, Some(true)).is_err() {
+                log::warn!("Mica effect failed; falling back to acrylic");
                 let _ = apply_acrylic(window, Some((0, 0, 0, 80)));
             }
         } else {
