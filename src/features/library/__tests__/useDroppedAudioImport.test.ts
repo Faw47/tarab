@@ -11,7 +11,21 @@ vi.mock('../../../lib/tauri-commands', () => ({
   syncLyricsIndex: vi.fn(),
 }));
 
-import { mergeDroppedLibraryFolders } from '../useDroppedAudioImport';
+import {
+  isSupportedDroppedAudioPath,
+  mergeDroppedLibraryFolders,
+} from '../useDroppedAudioImport';
+
+describe('isSupportedDroppedAudioPath', () => {
+  it('accepts decoder-supported formats and rejects unsupported extensions', () => {
+    for (const extension of ['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'aiff', 'opus']) {
+      expect(isSupportedDroppedAudioPath(`/music/track.${extension}`)).toBe(true);
+    }
+    for (const extension of ['alac', 'wma']) {
+      expect(isSupportedDroppedAudioPath(`/music/track.${extension}`)).toBe(false);
+    }
+  });
+});
 
 describe('mergeDroppedLibraryFolders', () => {
   it('adds dropped folders that are not already watched', () => {
