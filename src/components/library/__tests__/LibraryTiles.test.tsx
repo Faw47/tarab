@@ -133,3 +133,38 @@ describe('overlay buttons in neobrutalism', () => {
     expect(proxy).toHaveClass('ghost', 'bg-transparent');
   });
 });
+
+describe('library count copy (LD-11)', () => {
+  it('labels neo album and artist counts as tracks', () => {
+    const onOpen = vi.fn();
+    const onPlay = vi.fn();
+    render(
+      <AlbumTile
+        album={{ track, count: 3 }}
+        index={0}
+        searchQuery=""
+        onOpen={onOpen}
+        onPlay={onPlay}
+        isFeatured={false}
+        isNeo
+      />,
+    );
+
+    expect(screen.getByText('3 TRACKS')).toBeInTheDocument();
+  });
+
+  it('uses the singular track label for one item in a neo artist card', () => {
+    render(
+      <ArtistTile
+        artist={{ artist: 'Artist', tracks: [track], count: 1 }}
+        index={0}
+        searchQuery=""
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+        isNeo
+      />,
+    );
+
+    expect(screen.getByText('1 TRACK')).toBeInTheDocument();
+  });
+});
