@@ -88,8 +88,8 @@ describe('app autostart lifecycle', () => {
     mount();
     await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(1));
     act(() => useSettingsStore.getState().setAutostartEnabled(true));
-    await act(async () => finish(false));
     await waitFor(() => expect(enable).toHaveBeenCalledTimes(1));
+    await act(async () => finish(false));
     expect(useSettingsStore.getState().autostartEnabled).toBe(true);
   });
 
@@ -106,8 +106,8 @@ describe('app autostart lifecycle', () => {
     act(() => window.dispatchEvent(new Event('focus')));
     await waitFor(() => expect(isEnabled).toHaveBeenCalledTimes(2));
     act(() => useSettingsStore.getState().setAutostartEnabled(false));
-    await act(async () => finish(true));
     await waitFor(() => expect(disable).toHaveBeenCalledTimes(1));
+    await act(async () => finish(true));
     expect(useSettingsStore.getState().autostartEnabled).toBe(false);
   });
 });

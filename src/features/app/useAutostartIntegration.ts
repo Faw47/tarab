@@ -60,7 +60,7 @@ export function useAutostartIntegration() {
     const refresh = () => {
       if (!started) return;
       const revision = intentRevision;
-      enqueue(() => readOs(revision));
+      void readOs(revision);
     };
 
     const start = () => {
@@ -76,7 +76,7 @@ export function useAutostartIntegration() {
       });
 
       const revision = intentRevision;
-      enqueue(() => readOs(revision));
+      void readOs(revision);
     };
 
     const stopHydration = useSettingsStore.persist.onFinishHydration(start);
