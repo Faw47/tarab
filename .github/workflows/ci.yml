@@ -34,6 +34,9 @@ jobs:
       - name: Verify frontend
         run: pnpm verify
 
+      - name: Verify release configuration
+        run: pnpm verify:release-config
+
       - name: Build Storybook
         run: pnpm build:storybook
 
