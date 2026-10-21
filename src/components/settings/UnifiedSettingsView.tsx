@@ -8,6 +8,7 @@ import {
   DesktopIntegrationForm,
   PlaybackSettingsForm,
 } from '../../features/settings/components/SettingsForms';
+import { formatCountLabel } from '../../lib/format-count';
 import { useRenderLog } from '../../lib/performance';
 import { reportError } from '../../lib/report-error';
 import {
@@ -232,9 +233,9 @@ export const UnifiedSettingsView = memo(
               </div>
               {page === 'library' ? (
                 <div className="flex flex-wrap gap-2 text-xs text-text-muted">
-                  <span>{trackCount.toLocaleString()} tracks</span>
-                  <span>{albumsCount.toLocaleString()} albums</span>
-                  <span>{libraryFolders.length} sources</span>
+                  <span>{formatCountLabel(trackCount, 'track')}</span>
+                  <span>{formatCountLabel(albumsCount, 'album')}</span>
+                  <span>{formatCountLabel(libraryFolders.length, 'source')}</span>
                 </div>
               ) : null}
             </div>
@@ -265,11 +266,12 @@ export const UnifiedSettingsView = memo(
                       label={grant.displayName}
                       description={
                         grant.status === 'available'
-                          ? `${
-                              libraryHealth?.cachedSources
-                                .find((source) => source.grantId === grant.id)
-                                ?.indexedTrackCount.toLocaleString() ?? '0'
-                            } indexed tracks. Source access is active.`
+                          ? `${formatCountLabel(
+                              libraryHealth?.cachedSources.find(
+                                (source) => source.grantId === grant.id,
+                              )?.indexedTrackCount ?? 0,
+                              'indexed track',
+                            )}. Source access is active.`
                           : `Source access is missing. Indexed metadata and cached artwork remain available. ${grant.path}`
                       }
                       meta={
@@ -339,14 +341,17 @@ export const UnifiedSettingsView = memo(
                     const folderStatus = folderStatuses[folder];
                     const status = folderStatus?.status ?? 'success';
                     const trackTotal = getTrackCountForFolder(folder);
+                    const lastScanned = folderStatus?.lastScanned;
+                    const scanLabel = lastScanned
+                      ? `Last scanned ${formatScanTime(lastScanned)}`
+                      : formatScanTime();
                     return (
                       <SettingsRow
                         key={folder}
                         label={<span className="block truncate">{folder}</span>}
                         description={
                           <span className="block truncate">
-                            {trackTotal.toLocaleString()} indexed tracks · Last scanned{' '}
-                            {formatScanTime(folderStatus?.lastScanned)}
+                            {formatCountLabel(trackTotal, 'indexed track')} · {scanLabel}
                           </span>
                         }
                         meta={
