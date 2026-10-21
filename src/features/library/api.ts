@@ -121,6 +121,16 @@ export async function fetchLibraryStats() {
 export const sortOrderFor = (sortBy: SortBy): 'asc' | 'desc' =>
   sortBy === 'dateAdded' ? 'desc' : 'asc';
 
+export function cursorAfterTrack(track: Track, sortBy: SortBy): DbTrackPageCursor {
+  const value = {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    dateAdded: track.dateAdded,
+  }[sortBy];
+  return { id: track.id, value };
+}
+
 export async function fetchLibraryTracksPage(params: {
   cursor?: DbTrackPageCursor | null;
   limit: number;
