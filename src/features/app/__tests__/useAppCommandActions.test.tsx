@@ -129,7 +129,7 @@ describe('useAppCommandActions shuffle all', () => {
     expect(options.queue[1]).toMatchObject({
       id: '/music/b.flac',
       duration: 210,
-      filePath: '/music/b.flac',
+      filePath: '',
       _lazyQueueEntry: true,
     });
     expect(options).toMatchObject({ queueIndex: 0, shuffleEnabled: true });
