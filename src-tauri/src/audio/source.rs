@@ -631,12 +631,8 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             }
 
             finished = false;
-            let (samples, reached_end) = match read_prefetch_chunk(
-                &mut source,
-                &commands,
-                &active_generation,
-                generation,
-            ) {
+            let (samples, reached_end) =
+                match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
                 PrefetchChunkRead::Ready {
                     samples,
                     reached_end,
@@ -695,12 +691,8 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             continue;
         }
 
-        let (samples, reached_end) = match read_prefetch_chunk(
-            &mut source,
-            &commands,
-            &active_generation,
-            generation,
-        ) {
+        let (samples, reached_end) =
+            match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
             PrefetchChunkRead::Ready {
                 samples,
                 reached_end,
@@ -1330,11 +1322,8 @@ mod tests {
             seek_started: Some(seek_started_tx),
             seek_release: Some(seek_release_rx),
         };
-        let buffered = BufferedSymphoniaSource::new(
-            source,
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("start prefetch");
+        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
+            .expect("start prefetch");
         let (seek_result_tx, seek_result_rx) = mpsc::channel();
         let seek_thread = std::thread::spawn(move || {
             let mut buffered = buffered;
@@ -1345,10 +1334,7 @@ mod tests {
         seek_started_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("producer should receive the seek");
-        let returned_before_worker_release = matches!(
-            seek_result_rx.try_recv(),
-            Ok(true)
-        );
+        let returned_before_worker_release = matches!(seek_result_rx.try_recv(), Ok(true));
         let _ = seek_release_tx.send(());
         let seek_succeeded = seek_result_rx
             .recv_timeout(Duration::from_secs(1))
