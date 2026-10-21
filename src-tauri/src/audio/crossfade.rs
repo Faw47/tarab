@@ -151,7 +151,10 @@ mod tests {
         active.set_paused(false, resumed_at);
 
         assert!(!active.outgoing_sink.is_paused());
-        assert_eq!(crossfade_progress_at(&active, resumed_at + Duration::from_millis(500)), 0.75);
+        assert_eq!(
+            crossfade_progress_at(&active, resumed_at + Duration::from_millis(500)),
+            0.75
+        );
     }
 
     #[test]
