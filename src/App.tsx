@@ -388,6 +388,7 @@ const App = () => {
   const {
     handleShuffleAll,
     handleTogglePlayback: handleTogglePlaybackFromPalette,
+    handlePlaySearchResult: handlePlaySearchResultFromPalette,
     handleNextTrack: handleNextTrackFromPalette,
     handlePreviousTrack: handlePreviousTrackFromPalette,
     handleRescan: handleRescanFromPalette,
@@ -567,6 +568,8 @@ const App = () => {
             onNavigate={handleNavigate}
             onShuffleAll={handleShuffleAll}
             onTogglePlayback={handleTogglePlaybackFromPalette}
+            onPlaySearchResult={handlePlaySearchResultFromPalette}
+            onOpenLibrarySearch={handleDeepLinkSearch}
             onNextTrack={handleNextTrackFromPalette}
             onPreviousTrack={handlePreviousTrackFromPalette}
             onRescanLibrary={handleRescanFromPalette}
