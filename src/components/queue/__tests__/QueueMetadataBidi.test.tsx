@@ -1,10 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { fetchLibraryTrackById } from '../../../features/library/api';
 import { usePlayerStore } from '../../../store/player-store';
 import { useSettingsStore } from '../../../store/settings-store';
 import type { Track } from '../../../types';
 import { QueueView } from '../QueueView';
 
+vi.mock('../../../features/library/api', () => ({ fetchLibraryTrackById: vi.fn() }));
 vi.mock('../../shared/CoverArtImage', () => ({ CoverArtImage: () => null }));
 vi.mock('../../../lib/playback-actions', () => ({
   startPlayback: vi.fn(),
@@ -36,5 +38,40 @@ describe.each(['liquid-glass', 'neobrutalism'] as const)('queue bidi metadata (%
       expect(label.closest('[dir="auto"]')).not.toBeNull();
     expect(artists.some((label) => label.tagName === 'BDI')).toBe(true);
     expect(albums.every((label) => label.tagName === 'BDI')).toBe(true);
+  });
+
+  it('hydrates restored lazy history metadata in each theme', async () => {
+    const historyEntry: Track = {
+      ...track,
+      id: 'history-path',
+      filePath: '',
+      title: '',
+      artist: '',
+      album: '',
+      _lazyQueueEntry: true,
+      _queueId: 'history-entry',
+    };
+    const activeTrack = { ...track, id: 'active', title: 'Active track' };
+    const hydratedTrack: Track = {
+      ...track,
+      id: 'history-path',
+      title: 'Loaded history title',
+      artist: 'Loaded history artist',
+      album: 'Loaded history album',
+      _queueId: 'history-entry',
+    };
+    vi.mocked(fetchLibraryTrackById).mockResolvedValue(hydratedTrack);
+    useSettingsStore.setState({ theme });
+    usePlayerStore.setState({
+      queue: [historyEntry, activeTrack],
+      queueIndex: 1,
+      currentTrack: activeTrack,
+      isPlaying: false,
+    });
+
+    render(<QueueView />);
+
+    expect(await screen.findByText('Loaded history title')).toBeInTheDocument();
+    expect(fetchLibraryTrackById).toHaveBeenCalledWith('history-path');
   });
 });

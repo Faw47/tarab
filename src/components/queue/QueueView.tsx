@@ -27,9 +27,14 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
+import {
+  getPlaybackInterventionEpoch,
+  notePlaybackIntervention,
+} from '../../features/app/playback-generation';
+import { fetchLibraryTrackById } from '../../features/library/api';
 import { formatTime } from '../../lib/format-time';
 import { useRenderLog } from '../../lib/performance';
 import { startPlayback, toggleCurrentPlayback } from '../../lib/playback-actions';
@@ -52,6 +57,31 @@ interface QueueViewProps {
 const UPCOMING_ROW_HEIGHT = 72;
 const UPCOMING_VIRTUALIZE_THRESHOLD = 100;
 const HISTORY_PREVIEW_COUNT = 12;
+
+function useHydrateQueueTrack(track: Track): void {
+  useEffect(() => {
+    if (!track._lazyQueueEntry) return;
+
+    let cancelled = false;
+    void fetchLibraryTrackById(track.id)
+      .then((hydrated) => {
+        if (cancelled || !hydrated) return;
+        usePlayerStore.getState().hydrateQueueTrack({
+          ...hydrated,
+          _queueId: track._queueId,
+        });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          reportError('Failed to load queue track details', { source: 'queue-view', error });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [track.id, track._lazyQueueEntry, track._queueId]);
+}
 
 const summaryLabel = (queueLength: number, activeIndex: number) => {
   const upcomingCount =
@@ -129,7 +159,7 @@ export const QueueView = memo(
         )
       : false;
     const nowPlayingTrack =
-      currentTrack && !currentIsQueued
+      currentTrack && (!currentIsQueued || queue[activeIndex]?._lazyQueueEntry)
         ? currentTrack
         : activeIndex >= 0
           ? queue[activeIndex]
@@ -164,19 +194,32 @@ export const QueueView = memo(
     const { upcomingCount, playedCount } = summaryLabel(queue.length, activeIndex);
     const playedRatio = queue.length > 0 ? Math.min(1, playedCount / queue.length) : 0;
 
-    const handlePlayTrack = useCallback(
-      async (track: Track, absoluteIndex: number) => {
-        try {
-          await startPlayback(track, {
-            queue,
-            queueIndex: absoluteIndex >= 0 ? absoluteIndex : 0,
-          });
-        } catch (error) {
-          reportError('Failed to play selected queue track', { source: 'queue-view', error });
+    const handlePlayTrack = useCallback(async (track: Track, absoluteIndex: number) => {
+      notePlaybackIntervention();
+      const intervention = getPlaybackInterventionEpoch();
+      try {
+        const hydrated = track._lazyQueueEntry ? await fetchLibraryTrackById(track.id) : track;
+        if (getPlaybackInterventionEpoch() !== intervention) return;
+        if (!hydrated) throw new Error('Selected queue track no longer exists');
+
+        const selectedTrack = { ...hydrated, _queueId: track._queueId };
+        if (track._lazyQueueEntry) {
+          usePlayerStore.getState().hydrateQueueTrack(selectedTrack);
         }
-      },
-      [queue],
-    );
+        const latestQueue = usePlayerStore.getState().queue;
+        const selectedIndex = track._queueId
+          ? latestQueue.findIndex((entry) => entry._queueId === track._queueId)
+          : absoluteIndex;
+        if (track._queueId && selectedIndex < 0) return;
+
+        await startPlayback(selectedTrack, {
+          queue: latestQueue,
+          queueIndex: selectedIndex >= 0 ? selectedIndex : 0,
+        });
+      } catch (error) {
+        reportError('Failed to play selected queue track', { source: 'queue-view', error });
+      }
+    }, []);
 
     const handleToggleCurrent = useCallback(async () => {
       if (!nowPlayingTrack) return;
@@ -446,7 +489,7 @@ export const QueueView = memo(
                   {historyVisible.map((track, historyIndex) => {
                     const absoluteIndex = activeIndex - 1 - historyIndex;
                     return (
-                      <HistoryRow
+                      <HydratedHistoryRow
                         key={track._queueId || `${track.id}-${absoluteIndex}`}
                         track={track}
                         isNeobrutalism
@@ -682,7 +725,7 @@ export const QueueView = memo(
                     {historyVisible.map((track, historyIndex) => {
                       const absoluteIndex = activeIndex - 1 - historyIndex;
                       return (
-                        <HistoryRow
+                        <HydratedHistoryRow
                           key={track._queueId || `${track.id}-${absoluteIndex}`}
                           track={track}
                           onReplay={() => {
@@ -921,6 +964,7 @@ interface SortableUpcomingRowProps {
 
 const SortableUpcomingRow = memo(
   ({ track, position, onPlay, onRemove, isNeobrutalism = false }: SortableUpcomingRowProps) => {
+    useHydrateQueueTrack(track);
     const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
       id: track._queueId || track.id,
     });
@@ -1072,5 +1116,11 @@ const HistoryRow = memo(
   ),
 );
 HistoryRow.displayName = 'HistoryRow';
+
+const HydratedHistoryRow = memo((props: HistoryRowProps) => {
+  useHydrateQueueTrack(props.track);
+  return <HistoryRow {...props} />;
+});
+HydratedHistoryRow.displayName = 'HydratedHistoryRow';
 
 QueueView.displayName = 'QueueView';

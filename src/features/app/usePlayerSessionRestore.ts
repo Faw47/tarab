@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { NavView } from '../../components/navigation';
 import {
+  dbGetQueueTrackReferences,
   dbGetTracksByAlbumArtist,
   dbGetTracksByIds,
   setAudioBooster,
@@ -9,6 +10,7 @@ import {
 } from '../../lib/tauri-commands';
 import { usePlayerStore } from '../../store/player-store';
 import type { Track } from '../../types';
+import { createLazyQueueTrack } from '../library/loadTracksForShuffle';
 import type { AlbumDetailsState } from './app-state-types';
 import { loadPlayerStateFromStore, markPlayerStateHydrated } from './player-state-store';
 
@@ -81,16 +83,22 @@ export function usePlayerSessionRestore({
 
       const player = usePlayerStore.getState();
       const queueIds = Array.isArray(session.queueIds) ? session.queueIds : [];
-      const allNeededIds = new Set<string>(queueIds);
-      if (session.currentTrackId) allNeededIds.add(session.currentTrackId);
+      const references = await dbGetQueueTrackReferences(queueIds);
+      if (cancelled) return;
 
       const trackLookup = new Map<string, Track>();
-      if (allNeededIds.size > 0) {
+      references.forEach((reference) => {
+        trackLookup.set(reference.id, createLazyQueueTrack(reference));
+      });
+
+      let restoredCurrentTrack: Track | undefined;
+      if (session.currentTrackId) {
         // A failed lookup must propagate: it triggers the retry, and if the retry also fails the
         // store stays unhydrated so an empty queue cannot overwrite the saved session.
-        const fetched = await dbGetTracksByIds(Array.from(allNeededIds));
+        const fetched = await dbGetTracksByIds([session.currentTrackId]);
         if (cancelled) return;
-        fetched.forEach((track) => trackLookup.set(track.id, toTrack(track)));
+        const current = fetched[0];
+        if (current) restoredCurrentTrack = toTrack(current);
       }
 
       let restoredQueue: Track[] = [];
@@ -112,9 +120,9 @@ export function usePlayerSessionRestore({
         }
       }
 
-      let resolvedTrack = session.currentTrackId
-        ? trackLookup.get(session.currentTrackId)
-        : undefined;
+      let resolvedTrack =
+        restoredCurrentTrack ??
+        (session.currentTrackId ? trackLookup.get(session.currentTrackId) : undefined);
       if (!resolvedTrack && restoredIndex >= 0) {
         // The saved current track no longer resolves: use the same entry the queue index points at.
         resolvedTrack = restoredQueue[restoredIndex];

@@ -1,109 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Track } from '../../../types';
-import { fetchLibraryTracksPage } from '../api';
-import { loadTracksForShuffle, SHUFFLE_PAGE_SIZE, shuffleTracks } from '../loadTracksForShuffle';
+import { describe, expect, it } from 'vitest';
+import { createLazyQueueTrack } from '../loadTracksForShuffle';
 
-vi.mock('../api', () => ({
-  cursorAfterTrack: (track: Pick<Track, 'id' | 'dateAdded'>) => ({
-    id: track.id,
-    value: track.dateAdded,
-  }),
-  fetchLibraryTracksPage: vi.fn(),
-}));
-
-const mockedFetchPage = vi.mocked(fetchLibraryTracksPage);
-
-const makeTrack = (id: string): Track => ({
-  id,
-  title: `Track ${id}`,
-  artist: 'Artist',
-  album: 'Album',
-  year: null,
-  duration: 180,
-  filePath: id,
-  hasCoverArt: false,
-  coverArtHash: null,
-  dateAdded: 1,
-});
-
-describe('loadTracksForShuffle', () => {
-  beforeEach(() => {
-    mockedFetchPage.mockReset();
-  });
-
-  it('uses already-loaded tracks when they cover the library', async () => {
-    const loadedTracks = [makeTrack('a'), makeTrack('b')];
-
-    await expect(loadTracksForShuffle({ loadedTracks, totalTracks: 2 })).resolves.toBe(
-      loadedTracks,
-    );
-    expect(mockedFetchPage).not.toHaveBeenCalled();
-  });
-
-  it('fetches multiple pages when the loaded tracks are incomplete', async () => {
-    const firstPage = Array.from({ length: SHUFFLE_PAGE_SIZE }, (_, index) =>
-      makeTrack(`track-${index}`),
-    );
-    const secondPage = [makeTrack('last')];
-    mockedFetchPage.mockResolvedValueOnce(firstPage).mockResolvedValueOnce(secondPage);
-
-    const tracks = await loadTracksForShuffle({
-      loadedTracks: [makeTrack('seed')],
-      totalTracks: 1001,
+describe('createLazyQueueTrack', () => {
+  it('keeps only the playback ID and duration until metadata is needed', () => {
+    const track = createLazyQueueTrack({
+      id: '/music/song.mp3',
+      duration: 201.5,
     });
 
-    expect(tracks).toHaveLength(1001);
-    expect(tracks[0].id).toBe('track-0');
-    expect(tracks.at(-1)?.id).toBe('last');
-    expect(mockedFetchPage).toHaveBeenNthCalledWith(1, {
-      cursor: null,
-      limit: SHUFFLE_PAGE_SIZE,
-      sortBy: 'dateAdded',
-      sortOrder: 'desc',
+    expect(track).toEqual({
+      id: '/music/song.mp3',
+      _lazyQueueEntry: true,
+      title: '',
+      artist: '',
+      album: '',
+      year: null,
+      duration: 201.5,
+      filePath: '',
+      hasCoverArt: false,
+      coverArtHash: null,
+      dateAdded: 0,
     });
-    expect(mockedFetchPage).toHaveBeenNthCalledWith(2, {
-      cursor: { id: 'track-999', value: 1 },
-      limit: SHUFFLE_PAGE_SIZE,
-      sortBy: 'dateAdded',
-      sortOrder: 'desc',
-    });
-  });
-
-  it('stops when a short page is returned', async () => {
-    mockedFetchPage.mockResolvedValueOnce([makeTrack('a')]);
-
-    const tracks = await loadTracksForShuffle({ loadedTracks: [], totalTracks: 10_000 });
-
-    expect(tracks.map((track) => track.id)).toEqual(['a']);
-    expect(mockedFetchPage).toHaveBeenCalledTimes(1);
-  });
-
-  it('dedupes duplicate track IDs while preserving first fetched order', async () => {
-    mockedFetchPage.mockResolvedValueOnce([makeTrack('a'), makeTrack('a'), makeTrack('b')]);
-
-    const tracks = await loadTracksForShuffle({ loadedTracks: [], totalTracks: 3 });
-
-    expect(tracks.map((track) => track.id)).toEqual(['a', 'b']);
-  });
-
-  it('falls back to loaded tracks when no fetched page has tracks', async () => {
-    const loadedTracks = [makeTrack('seed')];
-    mockedFetchPage.mockResolvedValueOnce([]);
-
-    await expect(loadTracksForShuffle({ loadedTracks, totalTracks: 2 })).resolves.toBe(
-      loadedTracks,
-    );
-  });
-});
-
-describe('shuffleTracks', () => {
-  it('returns the same members without mutating the input', () => {
-    const input = ['a', 'b', 'c'];
-    const output = shuffleTracks(input);
-
-    expect(output).toHaveLength(input.length);
-    expect(output).toEqual(expect.arrayContaining(input));
-    expect(input).toEqual(['a', 'b', 'c']);
-    expect(output).not.toBe(input);
+    expect(track.playCount).toBeUndefined();
+    expect(track.fileSize).toBeUndefined();
   });
 });

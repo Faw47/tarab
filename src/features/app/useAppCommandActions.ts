@@ -5,13 +5,14 @@ import {
   toggleCurrentPlayback,
 } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
-import { getSmartShuffleQueue, revealInFileManager } from '../../lib/tauri-commands';
+import { dbGetShuffleAllQueue, revealInFileManager } from '../../lib/tauri-commands';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
-import { loadTracksForShuffle, shuffleTracks } from '../library/loadTracksForShuffle';
+import { fetchLibraryTrackById } from '../library/api';
+import { createLazyQueueTrack } from '../library/loadTracksForShuffle';
+import { getPlaybackInterventionEpoch, notePlaybackIntervention } from './playback-generation';
 
 interface UseAppCommandActionsOptions {
-  libraryTracks: Track[];
   totalTracks: number;
   isScanning: boolean;
   rescanAll: () => Promise<unknown>;
@@ -20,7 +21,6 @@ interface UseAppCommandActionsOptions {
 }
 
 export function useAppCommandActions({
-  libraryTracks,
   totalTracks,
   isScanning,
   rescanAll,
@@ -28,46 +28,37 @@ export function useAppCommandActions({
   openTagEditor,
 }: UseAppCommandActionsOptions) {
   const handleShuffleAll = useCallback(async () => {
-    if (libraryTracks.length === 0) return;
+    if (totalTracks <= 0) return;
 
-    let allTracks = libraryTracks;
+    notePlaybackIntervention();
+    const intervention = getPlaybackInterventionEpoch();
     try {
-      allTracks = await loadTracksForShuffle({ loadedTracks: libraryTracks, totalTracks });
-    } catch (error) {
-      reportError('Failed to load tracks for shuffle', {
-        source: 'app-command-actions',
-        error,
-      });
-    }
+      const references = await dbGetShuffleAllQueue(
+        useSettingsStore.getState().smartShuffleEnabled,
+      );
+      if (getPlaybackInterventionEpoch() !== intervention) return;
+      const firstReference = references[0];
+      if (!firstReference) return;
 
-    let shuffled: Track[];
-    if (useSettingsStore.getState().smartShuffleEnabled) {
-      try {
-        const order = await getSmartShuffleQueue(allTracks.map((track) => track.id));
-        const byId = new Map(allTracks.map((track) => [track.id, track] as const));
-        shuffled = order
-          .map((id) => byId.get(id))
-          .filter((track): track is Track => Boolean(track));
-        if (shuffled.length !== allTracks.length) shuffled = shuffleTracks(allTracks);
-      } catch {
-        shuffled = shuffleTracks(allTracks);
+      const firstTrack = await fetchLibraryTrackById(firstReference.id);
+      if (getPlaybackInterventionEpoch() !== intervention) return;
+      if (!firstTrack) {
+        throw new Error('The first shuffled library track could not be loaded');
       }
-    } else {
-      shuffled = shuffleTracks(allTracks);
-    }
 
-    const first = shuffled[0];
-    if (!first) return;
-    try {
-      await startPlayback(first, {
-        queue: shuffled,
+      const queue = references.map((reference, index) =>
+        index === 0 ? firstTrack : createLazyQueueTrack(reference),
+      );
+      await startPlayback(firstTrack, {
+        queue,
         queueIndex: 0,
         shuffleEnabled: true,
       });
     } catch (error) {
+      if (getPlaybackInterventionEpoch() !== intervention) return;
       reportError('Failed to shuffle all tracks', { source: 'app-command-actions', error });
     }
-  }, [libraryTracks, totalTracks]);
+  }, [totalTracks]);
 
   const handleTogglePlayback = useCallback(async () => {
     await toggleCurrentPlayback();

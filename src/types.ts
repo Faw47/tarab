@@ -2,6 +2,7 @@
 export interface Track {
   id: string;
   _queueId?: string; // Unique ID when track is in the queue to handle duplicates
+  _lazyQueueEntry?: true; // Metadata is fetched when this entry is played or displayed
   title: string;
   artist: string;
   albumArtist?: string | null;
