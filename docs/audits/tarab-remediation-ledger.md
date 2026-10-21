@@ -56,7 +56,7 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | NATIVE_VALIDATION_REQUIRED | 31 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 58 |
+| PENDING | 59 |
 | **Total** | **160** |
 
 ## Findings
