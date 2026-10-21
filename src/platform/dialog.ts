@@ -45,7 +45,7 @@ export const dialog = {
         filters: [
           {
             name: 'Audio',
-            extensions: ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus'],
+            extensions: ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'aac'],
           },
         ],
       });

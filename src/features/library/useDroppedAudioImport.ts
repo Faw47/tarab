@@ -78,7 +78,7 @@ export function useDroppedAudioImport({
   const [showDropOverlay, setShowDropOverlay] = useState(false);
 
   useEffect(() => {
-    const audioExt = new Set(['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'aiff', 'alac']);
+    const audioExt = new Set(['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac']);
     const normalizeDir = (p: string) => {
       const norm = p.replace(/\\/g, '/');
       const idx = norm.lastIndexOf('/');
