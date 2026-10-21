@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { setVolumeRamp, watchLibraryPaths } from '../tauri-commands';
+import { dbGetTracksPaginated, setVolumeRamp, watchLibraryPaths } from '../tauri-commands';
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(async () => undefined),
@@ -19,6 +19,18 @@ vi.mock('../performance', () => ({
 describe('tauri command wrappers', () => {
   beforeEach(() => {
     invokeMock.mockClear();
+  });
+
+  it('sends a keyset cursor with camelCase database arguments', async () => {
+    const cursor = { id: '/music/next.flac', value: 'Next' };
+    await dbGetTracksPaginated(cursor, 200, 'title', 'asc');
+
+    expect(invokeMock).toHaveBeenCalledWith('db_get_tracks_paginated', {
+      cursor,
+      limit: 200,
+      sortBy: 'title',
+      sortOrder: 'asc',
+    });
   });
 
   it('uses Tauri camelCase argument names for set_volume_ramp', async () => {
