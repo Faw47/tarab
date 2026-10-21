@@ -731,16 +731,11 @@ impl AudioManager {
                                 let had_queued_gapless_source =
                                     pending_gapless_path_thread.lock().take().is_some();
                                 let target_position = position_secs.max(0.0);
-                                let (
-                                    generation,
-                                    active_path,
-                                    was_paused,
-                                    duration,
-                                    target_volume,
-                                ) = snapshot_playback_for_seek(
-                                    &state_clone,
-                                    &mut pending_gapless_cancels,
-                                );
+                                let (generation, active_path, was_paused, duration, target_volume) =
+                                    snapshot_playback_for_seek(
+                                        &state_clone,
+                                        &mut pending_gapless_cancels,
+                                    );
                                 let had_sink = current_sink.is_some();
 
                                 if active_path.is_empty() {
@@ -1132,8 +1127,7 @@ impl AudioManager {
                                         );
                                     });
 
-                                    pending_gapless_cancels
-                                        .push((path.clone(), handoff_cancelled));
+                                    pending_gapless_cancels.push((path.clone(), handoff_cancelled));
                                     sink.append(handoff);
                                     *pending_gapless_path_thread.lock() = Some(path);
                                 }
@@ -1184,8 +1178,7 @@ impl AudioManager {
                                 if pending.as_deref() == Some(next_path.as_str()) {
                                     *pending = None;
                                 }
-                                pending_gapless_cancels
-                                    .retain(|(path, _)| path != &next_path);
+                                pending_gapless_cancels.retain(|(path, _)| path != &next_path);
                             }
                             command @ (AudioCommand::SetOutputDevice(_)
                             | AudioCommand::RecoverOutput) => {
@@ -1918,8 +1911,7 @@ mod bounded_seek_tests {
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
 
-        let (generation, path, _, duration, _) =
-            snapshot_playback_for_seek(&state, &mut pending);
+        let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
         let committed = commit_gapless_handoff(
             &state,
             &cancelled,
