@@ -799,9 +799,7 @@ export interface DbShuffleQueueTrack {
   duration: number;
 }
 
-export const dbGetQueueTrackReferences = async (
-  ids: string[],
-): Promise<DbShuffleQueueTrack[]> => {
+export const dbGetQueueTrackReferences = async (ids: string[]): Promise<DbShuffleQueueTrack[]> => {
   return invoke('db_get_queue_track_references', { ids });
 };
 
