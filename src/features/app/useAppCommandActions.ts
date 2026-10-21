@@ -1,5 +1,9 @@
 import { useCallback } from 'react';
 import {
+  getPlaybackInterventionEpoch,
+  notePlaybackIntervention,
+} from './playback-generation';
+import {
   playAdjacentTrack,
   startPlayback,
   toggleCurrentPlayback,
@@ -29,14 +33,18 @@ export function useAppCommandActions({
   const handleShuffleAll = useCallback(async () => {
     if (totalTracks <= 0) return;
 
+    notePlaybackIntervention();
+    const intervention = getPlaybackInterventionEpoch();
     try {
       const references = await dbGetShuffleAllQueue(
         useSettingsStore.getState().smartShuffleEnabled,
       );
+      if (getPlaybackInterventionEpoch() !== intervention) return;
       const firstReference = references[0];
       if (!firstReference) return;
 
       const firstTrack = await fetchLibraryTrackById(firstReference.id);
+      if (getPlaybackInterventionEpoch() !== intervention) return;
       if (!firstTrack) {
         throw new Error('The first shuffled library track could not be loaded');
       }
@@ -50,6 +58,7 @@ export function useAppCommandActions({
         shuffleEnabled: true,
       });
     } catch (error) {
+      if (getPlaybackInterventionEpoch() !== intervention) return;
       reportError('Failed to shuffle all tracks', { source: 'app-command-actions', error });
     }
   }, [totalTracks]);
