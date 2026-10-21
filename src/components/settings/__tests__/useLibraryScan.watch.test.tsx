@@ -3,7 +3,11 @@ import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSettingsStore } from '../../../store/settings-store';
-import { collapseWatchScanTargets, resolveWatchScanTarget } from '../library-watch-targets';
+import {
+  collapseWatchScanTargets,
+  resolveWatchEventScanTarget,
+  resolveWatchScanTarget,
+} from '../library-watch-targets';
 import { useLibraryScan } from '../useLibraryScan';
 
 const { listeners, scanLibraryMock, reconcileMock } = vi.hoisted(() => ({
@@ -70,6 +74,20 @@ describe('library watch scan targets', () => {
     expect(resolveWatchScanTarget('/elsewhere/song.mp3', ['/music'])).toBeNull();
   });
 
+  it('maps root-identified watcher events into the configured root', () => {
+    const event = {
+      rootId: '/var/music',
+      relativePath: 'Artist/Album/01.flac',
+    };
+    expect(resolveWatchEventScanTarget(event, ['/var/music'])).toEqual({
+      root: '/var/music',
+      target: '/var/music/Artist/Album',
+    });
+    expect(resolveWatchEventScanTarget(event, ['/other/music'])).toBeNull();
+    expect(resolveWatchEventScanTarget({ ...event, relativePath: '../outside/song.flac' }, ['/var/music']))
+      .toBeNull();
+  });
+
   it('collapses nested targets and falls back to the root when too many folders changed', () => {
     expect(collapseWatchScanTargets('/music', ['/music/A', '/music/A/Disc 1', '/music/B'])).toEqual(
       ['/music/A', '/music/B'],
@@ -107,7 +125,9 @@ describe('useLibraryScan watcher', () => {
     });
 
     await act(async () => {
-      listeners.get('library-files-changed')?.({ payload: '/music/Artist/Album/01.flac' });
+      listeners.get('library-files-changed')?.({
+        payload: { rootId: '/music', relativePath: 'Artist/Album/01.flac' },
+      });
       await vi.advanceTimersByTimeAsync(1500);
     });
 
@@ -147,7 +167,9 @@ describe('useLibraryScan watcher', () => {
     });
 
     await act(async () => {
-      listeners.get('library-file-removed')?.({ payload: '/music/Gone/01.flac' });
+      listeners.get('library-file-removed')?.({
+        payload: { rootId: '/music', relativePath: 'Gone/01.flac' },
+      });
       await vi.advanceTimersByTimeAsync(5000);
     });
 
@@ -166,7 +188,9 @@ describe('useLibraryScan watcher', () => {
     });
 
     await act(async () => {
-      listeners.get('library-files-changed')?.({ payload: '/music/song.mp3' });
+      listeners.get('library-files-changed')?.({
+        payload: { rootId: '/music', relativePath: 'song.mp3' },
+      });
       await vi.advanceTimersByTimeAsync(1500);
     });
 

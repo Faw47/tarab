@@ -19,7 +19,11 @@ import { notifications } from '../../platform/notifications';
 import { useLibraryStore } from '../../store/library-store';
 import { useSettingsStore } from '../../store/settings-store';
 import type { Track } from '../../types';
-import { collapseWatchScanTargets, resolveWatchScanTarget } from './library-watch-targets';
+import {
+  collapseWatchScanTargets,
+  resolveWatchEventScanTarget,
+  type LibraryWatchEventPayload,
+} from './library-watch-targets';
 
 /* ─── CONSTANTS ─────────────────────────────────────────────────────────── */
 
@@ -546,16 +550,16 @@ export function useLibraryScan(): UseLibraryScanResult {
   );
 
   const handleWatchEvent = useCallback(
-    (changedPath: string) => {
+    (event: LibraryWatchEventPayload) => {
       if (!autoWatchRef.current) return;
-      const resolved = resolveWatchScanTarget(changedPath, libraryFolders);
+      const resolved = resolveWatchEventScanTarget(event, libraryFolders);
       if (!resolved) return;
       scheduleWatchedFolderScan(resolved.root, resolved.target);
     },
     [libraryFolders, scheduleWatchedFolderScan],
   );
 
-  useTauriEvent<string>(
+  useTauriEvent<LibraryWatchEventPayload>(
     'library-files-changed',
     (event) => handleWatchEvent(event.payload),
     [handleWatchEvent],
@@ -566,7 +570,7 @@ export function useLibraryScan(): UseLibraryScanResult {
       }),
   );
 
-  useTauriEvent<string>(
+  useTauriEvent<LibraryWatchEventPayload>(
     'library-file-removed',
     (event) => handleWatchEvent(event.payload),
     [handleWatchEvent],
