@@ -40,8 +40,12 @@ describe('DesktopMiniWindowSurface FE-38', () => {
 
   it('provides a 24 px minimum seek target', () => {
     render(<DesktopMiniWindowSurface />);
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    const target = slider.parentElement;
 
-    expect(screen.getByRole('slider', { name: 'Seek' })).toHaveClass('min-h-6');
+    expect(slider).toHaveClass('min-h-6');
+    expect(target).toHaveClass('h-6');
+    expect(target?.firstElementChild).toHaveClass('h-1');
   });
 
   it('reflects the selected app theme in the mini window surface', () => {
