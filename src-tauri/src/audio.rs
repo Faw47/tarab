@@ -41,7 +41,9 @@ use events::{
     emit_playback_error, emit_playback_transition, PlaybackNearEndEvent, PlaybackPositionEvent,
     PlaybackTransition,
 };
-use source::{play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart};
+use source::{
+    play_with_source, prepare_source, GaplessHandoffSource, PlaybackStart, SeekCoordinator,
+};
 pub use state::PlaybackState;
 use state::{normalize_speed, playback_identity};
 
@@ -271,16 +273,25 @@ fn seek_sink_with_timeout(
     sink: &Arc<Sink>,
     position: Duration,
     worker_active: &Arc<AtomicBool>,
+    seek_coordinator: &SeekCoordinator,
 ) -> Option<Result<(), String>> {
     if sink.empty() {
         return Some(Err("Playback source ended before the seek".to_string()));
     }
 
     let sink_for_worker = Arc::clone(sink);
+    let coordinator_for_worker = seek_coordinator.clone();
     let result = run_bounded_seek_attempt(worker_active, IN_PLACE_SEEK_TIMEOUT, move || {
+        let previous_request_id = coordinator_for_worker.current_request_id();
         sink_for_worker
             .try_seek(position)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        let request_id = coordinator_for_worker.current_request_id();
+        if request_id == previous_request_id {
+            Ok(())
+        } else {
+            coordinator_for_worker.wait_for(request_id, IN_PLACE_SEEK_TIMEOUT)
+        }
     });
 
     match result {
@@ -408,6 +419,7 @@ impl AudioManager {
         let pending_gapless_path = Arc::new(Mutex::new(None::<String>));
         let pending_gapless_path_thread = Arc::clone(&pending_gapless_path);
         let audio_is_running = Arc::clone(&is_running);
+        let seek_coordinator = SeekCoordinator::new();
         // The mixer's gapless handoff and the output watch post commands back to this loop.
         let loop_sender = sender.clone();
         thread::spawn(move || {
@@ -493,6 +505,7 @@ impl AudioManager {
                                     requested_start,
                                     &state_clone,
                                     &emitted_for_play,
+                                    &seek_coordinator,
                                 ) {
                                     Ok((source, duration, actual_start)) => {
                                         let gapless_cancellation_tokens =
@@ -627,6 +640,7 @@ impl AudioManager {
                                     requested_start,
                                     &state_clone,
                                     &emitted_for_crossfade,
+                                    &seek_coordinator,
                                 ) {
                                     Ok((source, duration, actual_start)) => {
                                         let initial_volume = if should_fallback_to_play {
@@ -800,6 +814,7 @@ impl AudioManager {
                                             sink,
                                             seek_position,
                                             &seek_worker_active,
+                                            &seek_coordinator,
                                         ) {
                                             Some(Ok(())) => {
                                                 {
@@ -842,6 +857,7 @@ impl AudioManager {
                                     normalized_position,
                                     &state_clone,
                                     &emitted_for_seek,
+                                    &seek_coordinator,
                                 ) {
                                     Ok((source, updated_duration, actual_start)) => {
                                         if let Some(sink) = play_with_source(
@@ -1072,8 +1088,13 @@ impl AudioManager {
                                     }
 
                                     let emitted_for_next = Arc::new(AtomicU64::new(0));
-                                    let prep =
-                                        prepare_source(&path, 0.0, &state_clone, &emitted_for_next);
+                                    let prep = prepare_source(
+                                        &path,
+                                        0.0,
+                                        &state_clone,
+                                        &emitted_for_next,
+                                        &seek_coordinator,
+                                    );
                                     let Ok((source2, duration2, actual_start2)) = prep else {
                                         eprintln!("Gapless preload failed to decode: {}", path);
                                         continue;
@@ -1091,38 +1112,43 @@ impl AudioManager {
                                     let next_clone = path.clone();
                                     let cnt_next = Arc::clone(&emitted_for_next);
 
-                                    let handoff = GaplessHandoffSource::new(source2, move || {
-                                        let committed = commit_gapless_handoff(
-                                            &state_emit,
-                                            &handoff_cancelled_for_callback,
-                                            &active_slot,
-                                            Arc::clone(&cnt_next),
-                                            &next_clone,
-                                            next_generation,
-                                            duration2,
-                                            actual_start2,
-                                            sr2,
-                                            ch2,
-                                        );
-                                        if !committed {
-                                            return;
-                                        }
-                                        let ended = PlaybackEndedPayload {
-                                            path: Some(out_clone),
-                                            generation: outgoing_generation,
-                                            seamless: true,
-                                            next_generation: Some(next_generation),
-                                            next_path: Some(next_clone.clone()),
-                                        };
-                                        // The audio thread emits after the commands already queued.
-                                        let _ = handoff_sender.send(
-                                            AudioCommand::GaplessHandoffStarted {
-                                                ended,
+                                    let real_content_started = source2.real_content_started();
+                                    let handoff = GaplessHandoffSource::new_after_real_content(
+                                        source2,
+                                        real_content_started,
+                                        move || {
+                                            let committed = commit_gapless_handoff(
+                                                &state_emit,
+                                                &handoff_cancelled_for_callback,
+                                                &active_slot,
+                                                Arc::clone(&cnt_next),
+                                                &next_clone,
                                                 next_generation,
-                                                next_path: next_clone,
-                                            },
-                                        );
-                                    });
+                                                duration2,
+                                                actual_start2,
+                                                sr2,
+                                                ch2,
+                                            );
+                                            if !committed {
+                                                return;
+                                            }
+                                            let ended = PlaybackEndedPayload {
+                                                path: Some(out_clone),
+                                                generation: outgoing_generation,
+                                                seamless: true,
+                                                next_generation: Some(next_generation),
+                                                next_path: Some(next_clone.clone()),
+                                            };
+                                            // The audio thread emits after the commands already queued.
+                                            let _ = handoff_sender.send(
+                                                AudioCommand::GaplessHandoffStarted {
+                                                    ended,
+                                                    next_generation,
+                                                    next_path: next_clone,
+                                                },
+                                            );
+                                        },
+                                    );
 
                                     pending_gapless_cancels.push((path.clone(), handoff_cancelled));
                                     sink.append(handoff);
@@ -1213,6 +1239,7 @@ impl AudioManager {
                                                         position,
                                                         &state_clone,
                                                         &emitted_for_replacement,
+                                                        &seek_coordinator,
                                                     ) {
                                                         Ok(prepared) => prepared,
                                                         Err(error) => {
@@ -1889,7 +1916,12 @@ mod bounded_seek_tests {
         let sink = Arc::new(sink);
         let worker_active = Arc::new(AtomicBool::new(false));
 
-        let result = seek_sink_with_timeout(&sink, Duration::from_secs(1), &worker_active);
+        let result = seek_sink_with_timeout(
+            &sink,
+            Duration::from_secs(1),
+            &worker_active,
+            &SeekCoordinator::new(),
+        );
 
         assert!(matches!(result, Some(Err(_))));
         assert!(!worker_active.load(Ordering::Acquire));

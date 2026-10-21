@@ -74,7 +74,8 @@ pub(super) fn prepare_source(
     requested_start: f64,
     state: &Arc<Mutex<PlaybackState>>,
     emitted_samples: &Arc<AtomicU64>,
-) -> Result<(PitchPreservingSource<SymphoniaSource>, f64, f64), String> {
+    seek_coordinator: &SeekCoordinator,
+) -> Result<(PitchPreservingSource<BufferedSymphoniaSource>, f64, f64), String> {
     let (source, duration, actual_start) = crate::parse_guard::guard(file_path, || {
         prepare_source_with_seek(file_path, requested_start, seek_decoder)
     })??;
@@ -82,8 +83,19 @@ pub(super) fn prepare_source(
         let state = state.lock();
         (state.speed_control.clone(), state.booster.clone())
     };
-    let source =
-        PitchPreservingSource::new(source, speed_control, booster, emitted_samples.clone())?;
+    let underrun_signal = Arc::new(AtomicBool::new(false));
+    let buffered_source = BufferedSymphoniaSource::new(
+        source,
+        Arc::clone(&underrun_signal),
+        seek_coordinator.clone(),
+    )?;
+    let mut source = PitchPreservingSource::new(
+        buffered_source,
+        speed_control,
+        booster,
+        emitted_samples.clone(),
+    )?;
+    source.set_underrun_signal(underrun_signal);
     Ok((source, duration, actual_start))
 }
 
@@ -277,9 +289,10 @@ where
 pub(super) struct SymphoniaSource {
     decoder: Box<dyn SymphoniaDecoder>,
     format: Box<dyn FormatReader>,
+    track_id: u32,
     file_path: String,
     buffer: Vec<f32>,
-    // Reused for every packet so decoding does not allocate on the mixer thread.
+    // Reused for every packet so decoding does not allocate on the producer thread.
     scratch: Option<SampleBuffer<f32>>,
     /// Packet read while seeking that must be decoded before the next one from the reader.
     pending_packet: Option<Packet>,
@@ -288,6 +301,22 @@ pub(super) struct SymphoniaSource {
     buf_pos: usize,
     channels: u16,
     sample_rate: u32,
+    foreign_batch_yielded: Arc<AtomicBool>,
+}
+
+fn packet_for_track(packet: Packet, selected_track_id: u32) -> Option<Packet> {
+    (packet.track_id() == selected_track_id).then_some(packet)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefillResult {
+    SamplesReady,
+    ForeignPacketBatchEnded,
+}
+
+fn foreign_packet_budget_exhausted(foreign_packets: &mut usize) -> bool {
+    *foreign_packets = (*foreign_packets).saturating_add(1);
+    *foreign_packets >= MAX_REFILL_ATTEMPTS
 }
 
 impl SymphoniaSource {
@@ -298,10 +327,12 @@ impl SymphoniaSource {
     ) -> Option<Self> {
         let channels = decoder.codec_params().channels?.count() as u16;
         let sample_rate = decoder.codec_params().sample_rate?;
+        let track_id = format.default_track()?.id;
 
         Some(Self {
             decoder,
             format,
+            track_id,
             file_path,
             buffer: Vec::new(),
             scratch: None,
@@ -310,11 +341,13 @@ impl SymphoniaSource {
             buf_pos: 0,
             channels,
             sample_rate,
+            foreign_batch_yielded: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    fn refill(&mut self) -> Option<()> {
+    fn refill(&mut self) -> Option<RefillResult> {
         let mut attempts = 0;
+        let mut foreign_packets = 0;
         loop {
             if attempts >= MAX_REFILL_ATTEMPTS {
                 eprintln!(
@@ -326,8 +359,7 @@ impl SymphoniaSource {
 
             let packet = match self.pending_packet.take() {
                 Some(packet) => packet,
-                // This runs on the audio device's callback thread, where a panic cannot unwind;
-                // a parser panic ends the track instead.
+                // Packet reads run on the producer thread; a parser panic ends the track instead.
                 None => {
                     match crate::parse_guard::guard(&self.file_path, || self.format.next_packet()) {
                         Ok(Ok(packet)) => packet,
@@ -340,6 +372,14 @@ impl SymphoniaSource {
                 }
             };
 
+            let Some(packet) = packet_for_track(packet, self.track_id) else {
+                if foreign_packet_budget_exhausted(&mut foreign_packets) {
+                    // None from Iterator::next permanently ends the source. Return a silent
+                    // sample instead so packet scanning can continue on the next producer read.
+                    return Some(RefillResult::ForeignPacketBatchEnded);
+                }
+                continue;
+            };
             let decoded =
                 match crate::parse_guard::guard(&self.file_path, || self.decoder.decode(&packet)) {
                     Ok(result) => result,
@@ -359,7 +399,7 @@ impl SymphoniaSource {
                         self.skip_samples -= skipped;
                         self.buf_pos = skipped;
                         if self.buf_pos < self.buffer.len() {
-                            return Some(());
+                            return Some(RefillResult::SamplesReady);
                         }
                         // The whole packet precedes the seek target; decode the next one.
                         continue;
@@ -419,6 +459,524 @@ impl SymphoniaSource {
         self.skip_samples = usize::try_from(skip_frames)
             .unwrap_or(usize::MAX)
             .saturating_mul(usize::from(self.channels));
+        self.foreign_batch_yielded.store(false, Ordering::Release);
+        Ok(())
+    }
+}
+
+const PREFETCH_CHUNK_SAMPLES: usize = 4_096;
+const PREFETCH_QUEUE_CHUNKS: usize = 64;
+const PREFETCH_STARTUP_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+const PREFETCH_COMMAND_POLL: std::time::Duration = std::time::Duration::from_millis(2);
+
+#[derive(Clone)]
+pub(super) struct SeekCoordinator {
+    inner: Arc<SeekCoordinatorInner>,
+}
+struct SeekCoordinatorInner {
+    next_request_id: AtomicU64,
+    completion_sender: std::sync::mpsc::Sender<SeekCompletion>,
+    completion_receiver: parking_lot::Mutex<std::sync::mpsc::Receiver<SeekCompletion>>,
+}
+struct SeekCompletion {
+    request_id: u64,
+    result: Result<(), String>,
+}
+impl SeekCoordinator {
+    pub(super) fn new() -> Self {
+        let (completion_sender, completion_receiver) = std::sync::mpsc::channel();
+        Self {
+            inner: Arc::new(SeekCoordinatorInner {
+                next_request_id: AtomicU64::new(0),
+                completion_sender,
+                completion_receiver: parking_lot::Mutex::new(completion_receiver),
+            }),
+        }
+    }
+    pub(super) fn current_request_id(&self) -> u64 {
+        self.inner.next_request_id.load(Ordering::Acquire)
+    }
+    fn begin_request(&self) -> u64 {
+        self.inner.next_request_id.fetch_add(1, Ordering::AcqRel) + 1
+    }
+    fn complete(&self, request_id: u64, result: Result<(), String>) {
+        let _ = self
+            .inner
+            .completion_sender
+            .send(SeekCompletion { request_id, result });
+    }
+    pub(super) fn wait_for(
+        &self,
+        request_id: u64,
+        timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + timeout;
+        let receiver = self.inner.completion_receiver.lock();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err("decoder seek timed out".to_string());
+            }
+            match receiver.recv_timeout(remaining) {
+                Ok(completion) if completion.request_id == request_id => return completion.result,
+                Ok(_) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err("decoder seek timed out".to_string());
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("decoder seek completion channel closed".to_string());
+                }
+            }
+        }
+    }
+}
+
+enum PrefetchCommand {
+    Seek {
+        generation: u64,
+        request_id: u64,
+        position: std::time::Duration,
+    },
+}
+
+enum PrefetchMessage {
+    Samples { generation: u64, samples: Vec<f32> },
+    End { generation: u64 },
+}
+
+enum PrefetchSend {
+    Sent,
+    Superseded,
+    Command(PrefetchCommand),
+    Closed,
+}
+
+trait PrefetchableSource: Source<Item = f32> + Send + 'static {
+    fn seek_for_prefetch(&mut self, position: std::time::Duration) -> Result<(), String>;
+    fn take_foreign_batch_marker(&self) -> bool;
+}
+
+impl PrefetchableSource for SymphoniaSource {
+    fn seek_for_prefetch(&mut self, position: std::time::Duration) -> Result<(), String> {
+        self.seek_to(position.as_secs_f64())
+    }
+
+    fn take_foreign_batch_marker(&self) -> bool {
+        self.foreign_batch_yielded.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// Fills a bounded chunk off the device callback. Synthetic samples only mark the end of a
+/// foreign-packet batch; they are omitted while the producer continues scanning.
+enum PrefetchChunkRead {
+    Ready {
+        samples: Vec<f32>,
+        reached_end: bool,
+    },
+    Command(PrefetchCommand),
+    GenerationChanged,
+    Closed,
+}
+
+fn read_prefetch_chunk<S: PrefetchableSource>(
+    source: &mut S,
+    commands: &std::sync::mpsc::Receiver<PrefetchCommand>,
+    active_generation: &AtomicU64,
+    generation: u64,
+) -> PrefetchChunkRead {
+    let mut samples = Vec::with_capacity(PREFETCH_CHUNK_SAMPLES);
+    while samples.len() < PREFETCH_CHUNK_SAMPLES {
+        match source.next() {
+            Some(sample) if source.take_foreign_batch_marker() => {
+                let _ = sample;
+                if active_generation.load(Ordering::Acquire) != generation {
+                    return PrefetchChunkRead::GenerationChanged;
+                }
+                match commands.try_recv() {
+                    Ok(command) => return PrefetchChunkRead::Command(command),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        return PrefetchChunkRead::Closed;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+            }
+            Some(sample) => samples.push(sample),
+            None => {
+                return PrefetchChunkRead::Ready {
+                    samples,
+                    reached_end: true,
+                };
+            }
+        }
+    }
+    PrefetchChunkRead::Ready {
+        samples,
+        reached_end: false,
+    }
+}
+
+fn send_prefetch_message(
+    sender: &std::sync::mpsc::SyncSender<PrefetchMessage>,
+    commands: &std::sync::mpsc::Receiver<PrefetchCommand>,
+    generation: &AtomicU64,
+    expected_generation: u64,
+    mut message: PrefetchMessage,
+) -> PrefetchSend {
+    loop {
+        if generation.load(Ordering::Acquire) != expected_generation {
+            return PrefetchSend::Superseded;
+        }
+        match sender.try_send(message) {
+            Ok(()) => return PrefetchSend::Sent,
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return PrefetchSend::Closed,
+            Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                message = returned;
+                match commands.recv_timeout(PREFETCH_COMMAND_POLL) {
+                    Ok(command) => return PrefetchSend::Command(command),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        return PrefetchSend::Closed;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_prefetch_worker<S: PrefetchableSource>(
+    mut source: S,
+    commands: std::sync::mpsc::Receiver<PrefetchCommand>,
+    output: std::sync::mpsc::SyncSender<PrefetchMessage>,
+    active_generation: Arc<AtomicU64>,
+    seek_coordinator: SeekCoordinator,
+) {
+    let mut generation = 0;
+    let mut finished = false;
+    let mut pending_command = None;
+
+    loop {
+        let command = if pending_command.is_some() {
+            pending_command.take()
+        } else if active_generation.load(Ordering::Acquire) != generation || finished {
+            match commands.recv() {
+                Ok(command) => Some(command),
+                Err(_) => return,
+            }
+        } else {
+            match commands.try_recv() {
+                Ok(command) => Some(command),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            }
+        };
+
+        if let Some(PrefetchCommand::Seek {
+            generation: seek_generation,
+            request_id,
+            position,
+        }) = command
+        {
+            if seek_generation != active_generation.load(Ordering::Acquire) {
+                seek_coordinator
+                    .complete(request_id, Err("decoder seek was superseded".to_string()));
+                continue;
+            }
+            generation = seek_generation;
+            let seek_result = source.seek_for_prefetch(position);
+            if active_generation.load(Ordering::Acquire) != generation {
+                seek_coordinator
+                    .complete(request_id, Err("decoder seek was superseded".to_string()));
+                continue;
+            }
+            if let Err(error) = seek_result {
+                eprintln!("Decoder seek failed during prefetch: {error}");
+                seek_coordinator.complete(request_id, Err(error));
+                // Do not send End: a failed seek is an error, not normal track exhaustion. The
+                // playback controller receives the error and rebuilds the decoder off the callback.
+                finished = true;
+                continue;
+            }
+            seek_coordinator.complete(request_id, Ok(()));
+
+            finished = false;
+            let (samples, reached_end) =
+                match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
+                    PrefetchChunkRead::Ready {
+                        samples,
+                        reached_end,
+                    } => (samples, reached_end),
+                    PrefetchChunkRead::Command(command) => {
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchChunkRead::GenerationChanged => continue,
+                    PrefetchChunkRead::Closed => return,
+                };
+
+            if !samples.is_empty() {
+                match send_prefetch_message(
+                    &output,
+                    &commands,
+                    &active_generation,
+                    generation,
+                    PrefetchMessage::Samples {
+                        generation,
+                        samples,
+                    },
+                ) {
+                    PrefetchSend::Sent => {}
+                    PrefetchSend::Superseded => continue,
+                    PrefetchSend::Command(command) => {
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchSend::Closed => return,
+                }
+            }
+
+            if reached_end {
+                match send_prefetch_message(
+                    &output,
+                    &commands,
+                    &active_generation,
+                    generation,
+                    PrefetchMessage::End { generation },
+                ) {
+                    PrefetchSend::Sent => {}
+                    PrefetchSend::Superseded => continue,
+                    PrefetchSend::Command(command) => {
+                        pending_command = Some(command);
+                        continue;
+                    }
+                    PrefetchSend::Closed => return,
+                }
+            }
+            finished = reached_end;
+            continue;
+        }
+
+        if finished {
+            continue;
+        }
+
+        let (samples, reached_end) =
+            match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
+                PrefetchChunkRead::Ready {
+                    samples,
+                    reached_end,
+                } => (samples, reached_end),
+                PrefetchChunkRead::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchChunkRead::GenerationChanged => continue,
+                PrefetchChunkRead::Closed => return,
+            };
+        if !samples.is_empty() {
+            match send_prefetch_message(
+                &output,
+                &commands,
+                &active_generation,
+                generation,
+                PrefetchMessage::Samples {
+                    generation,
+                    samples,
+                },
+            ) {
+                PrefetchSend::Sent => {}
+                PrefetchSend::Superseded => continue,
+                PrefetchSend::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchSend::Closed => return,
+            }
+        }
+
+        if reached_end {
+            match send_prefetch_message(
+                &output,
+                &commands,
+                &active_generation,
+                generation,
+                PrefetchMessage::End { generation },
+            ) {
+                PrefetchSend::Sent => {}
+                PrefetchSend::Superseded => continue,
+                PrefetchSend::Command(command) => {
+                    pending_command = Some(command);
+                    continue;
+                }
+                PrefetchSend::Closed => return,
+            }
+        }
+        finished = reached_end;
+    }
+}
+
+/// A bounded decoded-sample queue keeps packet reads and decoder work away from Rodio's output
+/// callback. The callback only copies already-decoded samples or marks a brief buffer underrun.
+pub(super) struct BufferedSymphoniaSource {
+    commands: std::sync::mpsc::Sender<PrefetchCommand>,
+    output: std::sync::mpsc::Receiver<PrefetchMessage>,
+    generation: Arc<AtomicU64>,
+    seek_coordinator: SeekCoordinator,
+    underrun_signal: Arc<AtomicBool>,
+    pending: Vec<f32>,
+    pending_pos: usize,
+    channels: u16,
+    sample_rate: u32,
+    ended: bool,
+}
+
+impl BufferedSymphoniaSource {
+    fn new<S: PrefetchableSource>(
+        source: S,
+        underrun_signal: Arc<AtomicBool>,
+        seek_coordinator: SeekCoordinator,
+    ) -> Result<Self, String> {
+        let channels = source.channels();
+        let sample_rate = source.sample_rate();
+        let generation = Arc::new(AtomicU64::new(0));
+        let worker_generation = Arc::clone(&generation);
+        let worker_seek_coordinator = seek_coordinator.clone();
+        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+        let (output_sender, output_receiver) = std::sync::mpsc::sync_channel(PREFETCH_QUEUE_CHUNKS);
+
+        std::thread::Builder::new()
+            .name("tarab-decoder-prefetch".to_string())
+            .spawn(move || {
+                run_prefetch_worker(
+                    source,
+                    command_receiver,
+                    output_sender,
+                    worker_generation,
+                    worker_seek_coordinator,
+                );
+            })
+            .map_err(|error| format!("failed to start decoder prefetch: {error}"))?;
+
+        let (pending, ended) = match output_receiver.recv_timeout(PREFETCH_STARTUP_WAIT) {
+            Ok(PrefetchMessage::Samples {
+                generation: 0,
+                samples,
+            }) => (samples, false),
+            Ok(PrefetchMessage::End { generation: 0 }) => (Vec::new(), true),
+            Ok(_) => (Vec::new(), false),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (Vec::new(), false),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => (Vec::new(), true),
+        };
+
+        Ok(Self {
+            commands: command_sender,
+            output: output_receiver,
+            generation,
+            seek_coordinator,
+            underrun_signal,
+            pending,
+            pending_pos: 0,
+            channels,
+            sample_rate,
+            ended,
+        })
+    }
+
+    fn receive_next_chunk(&mut self) -> bool {
+        let generation = self.generation.load(Ordering::Acquire);
+        loop {
+            match self.output.try_recv() {
+                Ok(PrefetchMessage::Samples {
+                    generation: message_generation,
+                    samples,
+                }) if message_generation == generation => {
+                    if samples.is_empty() {
+                        continue;
+                    }
+                    self.pending = samples;
+                    self.pending_pos = 0;
+                    return true;
+                }
+                Ok(PrefetchMessage::End {
+                    generation: message_generation,
+                }) if message_generation == generation => {
+                    self.ended = true;
+                    return false;
+                }
+                // Discard only one stale chunk per call. A seek can leave a bounded queue
+                // of old samples behind; draining it all here would make one callback do that work.
+                Ok(_) => return false,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ended = true;
+                    return false;
+                }
+            }
+        }
+    }
+}
+
+impl Iterator for BufferedSymphoniaSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pending_pos >= self.pending.len() {
+            if self.ended {
+                return None;
+            }
+            if !self.receive_next_chunk() {
+                if self.ended {
+                    return None;
+                }
+                self.underrun_signal.store(true, Ordering::Release);
+                return Some(0.0);
+            }
+        }
+
+        let sample = self.pending[self.pending_pos];
+        self.pending_pos += 1;
+        Some(sample)
+    }
+}
+
+impl Source for BufferedSymphoniaSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    fn try_seek(&mut self, position: std::time::Duration) -> Result<(), rodio::source::SeekError> {
+        let generation = self
+            .generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        let request_id = self.seek_coordinator.begin_request();
+        self.pending.clear();
+        self.pending_pos = 0;
+        self.ended = false;
+        self.underrun_signal.store(false, Ordering::Release);
+
+        // Rodio may call Source::try_seek from its output callback. Only enqueue decoder work here;
+        // the bounded playback seek worker waits for completion outside that callback.
+        self.commands
+            .send(PrefetchCommand::Seek {
+                generation,
+                request_id,
+                position,
+            })
+            .map_err(|error| {
+                rodio::source::SeekError::Other(Box::new(std::io::Error::other(error.to_string())))
+            })?;
         Ok(())
     }
 }
@@ -457,11 +1015,18 @@ impl Iterator for SymphoniaSource {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.buf_pos >= self.buffer.len() {
-            self.refill()?;
+            match self.refill()? {
+                RefillResult::SamplesReady => {}
+                RefillResult::ForeignPacketBatchEnded => {
+                    self.foreign_batch_yielded.store(true, Ordering::Release);
+                    return Some(0.0);
+                }
+            }
         }
 
         let sample = *self.buffer.get(self.buf_pos)?;
         self.buf_pos += 1;
+        self.foreign_batch_yielded.store(false, Ordering::Release);
         Some(sample)
     }
 }
@@ -492,14 +1057,20 @@ impl Source for SymphoniaSource {
 /// Runs a one-shot callback on the first audio sample of the appended segment (gapless handoff).
 pub(super) struct GaplessHandoffSource<S> {
     inner: S,
+    real_content_started: Arc<AtomicBool>,
     on_first_sample: Option<Box<dyn FnOnce() + Send>>,
     started: bool,
 }
 
 impl<S> GaplessHandoffSource<S> {
-    pub(super) fn new(inner: S, on_first_sample: impl FnOnce() + Send + 'static) -> Self {
+    pub(super) fn new_after_real_content(
+        inner: S,
+        real_content_started: Arc<AtomicBool>,
+        on_first_sample: impl FnOnce() + Send + 'static,
+    ) -> Self {
         Self {
             inner,
+            real_content_started,
             on_first_sample: Some(Box::new(on_first_sample)),
             started: false,
         }
@@ -511,7 +1082,7 @@ impl<S: Iterator<Item = f32>> Iterator for GaplessHandoffSource<S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next()?;
-        if !self.started {
+        if !self.started && self.real_content_started.load(Ordering::Acquire) {
             self.started = true;
             if let Some(cb) = self.on_first_sample.take() {
                 cb();
@@ -621,15 +1192,418 @@ mod tests {
         path
     }
 
+    struct CountingDecoder {
+        inner: Box<dyn SymphoniaDecoder>,
+        decode_calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SymphoniaDecoder for CountingDecoder {
+        fn try_new(
+            _params: &symphonia::core::codecs::CodecParameters,
+            _options: &DecoderOptions,
+        ) -> symphonia::core::errors::Result<Self>
+        where
+            Self: Sized,
+        {
+            unreachable!("CountingDecoder wraps an existing decoder")
+        }
+
+        fn supported_codecs() -> &'static [symphonia::core::codecs::CodecDescriptor]
+        where
+            Self: Sized,
+        {
+            &[]
+        }
+
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+
+        fn codec_params(&self) -> &symphonia::core::codecs::CodecParameters {
+            self.inner.codec_params()
+        }
+
+        fn decode(
+            &mut self,
+            packet: &Packet,
+        ) -> symphonia::core::errors::Result<symphonia::core::audio::AudioBufferRef<'_>> {
+            self.decode_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.decode(packet)
+        }
+
+        fn finalize(&mut self) -> symphonia::core::codecs::FinalizeResult {
+            self.inner.finalize()
+        }
+
+        fn last_decoded(&self) -> symphonia::core::audio::AudioBufferRef<'_> {
+            self.inner.last_decoded()
+        }
+    }
+
+    struct PrefetchProbeSource {
+        foreign_batches: usize,
+        samples_left: usize,
+        fail_seek: bool,
+        synthetic_sample: Arc<AtomicBool>,
+        last_read_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
+        drop_signal: Arc<AtomicBool>,
+        seek_started: Option<mpsc::Sender<()>>,
+        seek_release: Option<mpsc::Receiver<()>>,
+    }
+
+    impl Iterator for PrefetchProbeSource {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Ok(mut thread) = self.last_read_thread.lock() {
+                *thread = Some(std::thread::current().id());
+            }
+            if self.foreign_batches > 0 {
+                self.foreign_batches -= 1;
+                self.synthetic_sample.store(true, Ordering::Release);
+                return Some(0.0);
+            }
+            if self.samples_left == 0 {
+                return None;
+            }
+            self.samples_left -= 1;
+            Some(0.25)
+        }
+    }
+
+    impl Source for PrefetchProbeSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> u16 {
+            2
+        }
+
+        fn sample_rate(&self) -> u32 {
+            44_100
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+
+        fn try_seek(&mut self, _position: Duration) -> Result<(), SeekError> {
+            Ok(())
+        }
+    }
+
+    impl Drop for PrefetchProbeSource {
+        fn drop(&mut self) {
+            self.drop_signal.store(true, Ordering::Release);
+        }
+    }
+
+    impl PrefetchableSource for PrefetchProbeSource {
+        fn seek_for_prefetch(&mut self, _position: Duration) -> Result<(), String> {
+            if self.fail_seek {
+                return Err("probe rejected decoder seek".to_string());
+            }
+            if let Some(started) = self.seek_started.take() {
+                let _ = started.send(());
+            }
+            if let Some(release) = self.seek_release.take() {
+                let _ = release.recv();
+            }
+            Ok(())
+        }
+
+        fn take_foreign_batch_marker(&self) -> bool {
+            self.synthetic_sample.swap(false, Ordering::AcqRel)
+        }
+    }
+
+    #[test]
+    fn callback_pulls_prefilled_audio_after_foreign_packet_batches() {
+        let read_thread = Arc::new(std::sync::Mutex::new(None));
+        let source = PrefetchProbeSource {
+            foreign_batches: 8,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: false,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::clone(&read_thread),
+            drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: None,
+            seek_release: None,
+        };
+        let underrun = Arc::new(AtomicBool::new(false));
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), SeekCoordinator::new())
+                .expect("start prefetch");
+
+        let producer_thread = read_thread
+            .lock()
+            .expect("read thread lock")
+            .expect("producer decoded before playback started");
+        assert_ne!(producer_thread, std::thread::current().id());
+
+        // One modeled 512-frame stereo callback only drains the prefilled queue.
+        let output: Vec<_> = (0..1_024)
+            .map(|_| buffered.next().expect("prefilled sample"))
+            .collect();
+        assert!(output
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < f32::EPSILON));
+        assert_eq!(
+            *read_thread.lock().expect("read thread lock"),
+            Some(producer_thread),
+            "callback pulls must not call into the decoder source"
+        );
+        assert!(!underrun.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn buffered_source_seek_discards_prefetched_samples_and_restarts_at_target() {
+        let path = write_temp_wav("buffered-seek", 8_000);
+        let (source, _, _) =
+            prepare_source_with_seek(path.to_str().expect("utf-8 path"), 0.0, seek_decoder)
+                .expect("prepare decoder source");
+        let underrun = Arc::new(AtomicBool::new(false));
+        let seek_coordinator = SeekCoordinator::new();
+        let mut buffered =
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), seek_coordinator.clone())
+                .expect("start prefetch");
+
+        let _: Vec<_> = buffered.by_ref().take(32).collect();
+        buffered
+            .try_seek(Duration::from_millis(500))
+            .expect("worker should accept the seek");
+        seek_coordinator
+            .wait_for(
+                seek_coordinator.current_request_id(),
+                Duration::from_secs(1),
+            )
+            .expect("decoder worker should seek the target");
+
+        let expected = 4_000.0 * 4.0 / 32_768.0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let first_sample = loop {
+            if let Some(sample) = buffered.next() {
+                if (sample - expected).abs() < 0.002 {
+                    break sample;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "prefetch worker did not publish the seek target"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert!(
+            (first_sample - expected).abs() < 0.002,
+            "seek returned {first_sample}, expected about {expected}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
+    fn source_seek_returns_before_decoder_worker_finishes() {
+        let (seek_started_tx, seek_started_rx) = mpsc::channel();
+        let (seek_release_tx, seek_release_rx) = mpsc::channel();
+        let source = PrefetchProbeSource {
+            foreign_batches: 0,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: false,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: Some(seek_started_tx),
+            seek_release: Some(seek_release_rx),
+        };
+        let seek_coordinator = SeekCoordinator::new();
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            seek_coordinator.clone(),
+        )
+        .expect("start prefetch");
+        let (seek_result_tx, seek_result_rx) = mpsc::channel();
+        let caller_coordinator = seek_coordinator.clone();
+        let seek_thread = std::thread::spawn(move || {
+            let mut buffered = buffered;
+            let result = buffered.try_seek(Duration::from_secs(1)).is_ok();
+            let request_id = caller_coordinator.current_request_id();
+            let _ = seek_result_tx.send((result, request_id));
+        });
+
+        seek_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("producer should receive the seek");
+        let before_release = seek_result_rx.recv_timeout(Duration::from_millis(100));
+        // Always release the producer before asserting, so a responsiveness failure cannot strand
+        // the test thread.
+        seek_release_tx.send(()).expect("release blocked producer");
+        let returned_before_release = before_release.is_ok();
+        let (seek_succeeded, request_id) = before_release
+            .or_else(|_| seek_result_rx.recv_timeout(Duration::from_secs(1)))
+            .expect("seek call should return");
+        seek_thread.join().expect("seek caller thread");
+        seek_coordinator
+            .wait_for(request_id, Duration::from_secs(1))
+            .expect("decoder worker should finish the seek");
+
+        assert!(
+            returned_before_release,
+            "Source::try_seek must not wait for decoding"
+        );
+        assert!(seek_succeeded);
+    }
+    #[test]
+    fn failed_prefetch_seek_is_reported_without_marking_the_track_ended() {
+        let source = PrefetchProbeSource {
+            foreign_batches: 0,
+            samples_left: PREFETCH_CHUNK_SAMPLES * 2,
+            fail_seek: true,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::new(AtomicBool::new(false)),
+            seek_started: None,
+            seek_release: None,
+        };
+        let seek_coordinator = SeekCoordinator::new();
+        let mut buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            seek_coordinator.clone(),
+        )
+        .expect("start prefetch");
+
+        assert!(buffered.try_seek(Duration::from_secs(1)).is_ok());
+        let result = seek_coordinator.wait_for(
+            seek_coordinator.current_request_id(),
+            Duration::from_secs(1),
+        );
+
+        assert!(
+            result.is_err_and(|error| error.contains("probe rejected decoder seek")),
+            "the decoder's seek error must reach the playback controller"
+        );
+        assert_eq!(
+            buffered.next(),
+            Some(0.0),
+            "a failed seek must not be reported as normal end-of-track"
+        );
+    }
+    #[test]
+    fn prefetch_worker_exits_when_output_drops_during_foreign_packet_scan() {
+        let source_dropped = Arc::new(AtomicBool::new(false));
+        let source = PrefetchProbeSource {
+            foreign_batches: usize::MAX,
+            samples_left: 0,
+            fail_seek: false,
+            synthetic_sample: Arc::new(AtomicBool::new(false)),
+            last_read_thread: Arc::new(std::sync::Mutex::new(None)),
+            drop_signal: Arc::clone(&source_dropped),
+            seek_started: None,
+            seek_release: None,
+        };
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            SeekCoordinator::new(),
+        )
+        .expect("start prefetch");
+        drop(buffered);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !source_dropped.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            source_dropped.load(Ordering::Acquire),
+            "producer should exit after its command and output channels disconnect"
+        );
+    }
+
+    #[test]
+    fn refill_yields_after_a_bounded_foreign_packet_batch_without_ending_track() {
+        let mut foreign_packets = 0;
+        for _ in 0..MAX_REFILL_ATTEMPTS - 1 {
+            assert!(!foreign_packet_budget_exhausted(&mut foreign_packets));
+        }
+        assert!(foreign_packet_budget_exhausted(&mut foreign_packets));
+
+        // A later selected-track packet remains eligible in the next bounded refill batch.
+        let mut next_batch_foreign_packets = 0;
+        assert!(!foreign_packet_budget_exhausted(
+            &mut next_batch_foreign_packets
+        ));
+        let selected = Packet::new_from_slice(1, 0, 0, &[0_u8]);
+        assert!(packet_for_track(selected, 1).is_some());
+    }
+
+    #[test]
+    fn gapless_handoff_waits_for_real_content_after_a_silent_mixer_yield() {
+        let content_started = Arc::new(AtomicBool::new(false));
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_count_for_handoff = Arc::clone(&callback_count);
+        let mut handoff = GaplessHandoffSource::new_after_real_content(
+            std::iter::repeat_n(0.0, 2),
+            Arc::clone(&content_started),
+            move || {
+                callback_count_for_handoff.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+
+        assert_eq!(handoff.next(), Some(0.0));
+        assert_eq!(callback_count.load(Ordering::Relaxed), 0);
+        content_started.store(true, Ordering::Release);
+        assert_eq!(handoff.next(), Some(0.0));
+        assert_eq!(callback_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn refill_skips_seek_buffered_foreign_track_packets_before_decoding() {
+        let path = write_temp_wav("foreign-track", 8);
+        let (mut source, _, _) =
+            prepare_source_with_seek(path.to_str().expect("utf-8 path"), 0.0, seek_decoder)
+                .expect("prepare raw decoder source");
+
+        // Exhaust the reader so refill can only see the packet retained from seek.
+        let _: Vec<f32> = source.by_ref().collect();
+        let params = source.decoder.codec_params().clone();
+        let decode_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        source.decoder = Box::new(CountingDecoder {
+            inner: symphonia::default::get_codecs()
+                .make(&params, &DecoderOptions::default())
+                .expect("create counting decoder inner"),
+            decode_calls: decode_calls.clone(),
+        });
+        source.pending_packet = Some(Packet::new_from_slice(
+            source.track_id.wrapping_add(1),
+            0,
+            0,
+            &[0_u8],
+        ));
+
+        assert!(source.refill().is_none());
+        assert_eq!(
+            decode_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign packets retained by seek must never reach the decoder"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn boosted_samples_are_soft_limited_without_hard_clipping() {
         let path = write_temp_wav("soft-clip", 8000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         state.lock().booster.set(2.0);
         let counter = Arc::new(AtomicU64::new(0));
-        let (source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
-                .expect("prepare source");
+        let (source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &SeekCoordinator::new(),
+        )
+        .expect("prepare source");
         let samples: Vec<f32> = source.collect();
         let _ = std::fs::remove_file(&path);
 
@@ -709,29 +1683,55 @@ mod tests {
         let path = write_temp_wav("gapless-seek", 8000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
-        let (source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
-                .expect("prepare source");
+        let seek_coordinator = SeekCoordinator::new();
+        let (source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &seek_coordinator,
+        )
+        .expect("prepare source");
         let handoff_count = Arc::new(AtomicUsize::new(0));
         let handoff_count_for_callback = Arc::clone(&handoff_count);
-        let mut source = GaplessHandoffSource::new(source, move || {
-            handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
-        });
+        let mut source = GaplessHandoffSource::new_after_real_content(
+            source,
+            Arc::new(AtomicBool::new(true)),
+            move || {
+                handoff_count_for_callback.fetch_add(1, Ordering::Relaxed);
+            },
+        );
 
         let _ = source.next().expect("first sample starts handoff");
         source
             .try_seek(Duration::from_secs_f64(0.5123))
             .expect("seek through gapless wrapper");
-        let sample = source.next().expect("sample after seek");
+        seek_coordinator
+            .wait_for(
+                seek_coordinator.current_request_id(),
+                Duration::from_secs(1),
+            )
+            .expect("decoder worker should seek the wrapped source");
+        let mut sample = source.next().expect("sample after seek");
+        let progress_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while counter.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < progress_deadline
+        {
+            sample = source
+                .next()
+                .expect("source should remain open after seeking");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let _ = std::fs::remove_file(&path);
 
-        // WSOLA changes individual window samples; the raw decoder seek test above checks the
-        // exact target frame, while this verifies the wrapped source resumes after seeking.
+        // WSOLA can return a brief underrun while the decoder refills after seek. The raw decoder
+        // test checks the exact target frame; this verifies the wrapped source resumes progress.
         assert!(sample.is_finite());
-        assert!(counter.load(Ordering::Relaxed) > 0);
+        assert!(
+            counter.load(Ordering::Relaxed) > 0,
+            "wrapped playback should resume progress after the seek"
+        );
         assert_eq!(handoff_count.load(Ordering::Relaxed), 1);
     }
-
     #[test]
     fn a_failed_seek_skips_packets_instead_of_restarting_at_zero() {
         // Regression for PB-08: an unseekable stream restarted the track at 0:00.
@@ -809,9 +1809,14 @@ mod tests {
         let path = write_temp_wav("lock", 2000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
-        let (mut source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
-                .expect("prepare source");
+        let (mut source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &SeekCoordinator::new(),
+        )
+        .expect("prepare source");
 
         let guard = state.lock();
         let (done_tx, done_rx) = mpsc::channel();
