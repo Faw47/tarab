@@ -75,15 +75,17 @@ fn artwork_palette_crossfade_and_preload_accept_the_active_transient_file() {
 
 #[test]
 fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() {
-    let crossfade =
-        audio_command_arm("AudioCommand::CrossfadeTo {\n                                file_path,");
+    let crossfade = audio_command_arm(
+        "AudioCommand::CrossfadeTo {\n                                file_path,",
+    );
     assert!(
         crossfade.contains("retain_transient_file_for_queue_entry"),
         "a successfully started crossfade must retain only its incoming track grant"
     );
 
-    let gapless =
-        audio_command_arm("AudioCommand::GaplessHandoffStarted {\n                                ended,");
+    let gapless = audio_command_arm(
+        "AudioCommand::GaplessHandoffStarted {\n                                ended,",
+    );
     assert!(
         gapless.contains("if is_still_current")
             && gapless.contains("retain_transient_file_for_queue_entry"),
