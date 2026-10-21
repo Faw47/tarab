@@ -306,6 +306,7 @@ pub fn run() {
         database::db_get_tracks_by_artist,
         database::db_get_album_aggregates,
         database::db_get_artist_aggregates,
+        database::db_get_shuffle_all_queue,
         database::db_get_tracks_paginated,
         database::db_search_tracks,
         database::db_get_existing_paths,
