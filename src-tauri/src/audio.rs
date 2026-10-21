@@ -1389,7 +1389,7 @@ impl AudioManager {
                                                     source,
                                                     &state_clone,
                                                     PlaybackStart {
-                                                        file_path: active_path,
+                                                        file_path: &active_path,
                                                         duration,
                                                         start_secs: actual_start,
                                                         generation,
