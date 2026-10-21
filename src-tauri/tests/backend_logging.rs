@@ -73,7 +73,7 @@ fn migration_warnings_are_queued_before_logger_initialization() {
 
 #[test]
 fn startup_failures_preserve_early_diagnostics_in_the_fallback_log() {
-    let startup_failure = include_str!("../src/startup_failure.rs");
+    let startup_failure = include_str!("../src/startup_failure.rs").replace("\r\n", "\n");
     assert!(
         startup_failure.contains("queue_early_diagnostic(")
             && startup_failure.contains("Failed to prepare Tarab data directory before startup"),
