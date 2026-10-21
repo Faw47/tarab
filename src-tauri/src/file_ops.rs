@@ -2333,6 +2333,55 @@ mod tests {
     }
 
     #[test]
+    fn stop_clears_an_older_active_grant_but_preserves_a_later_pending_play() {
+        let outside = temp_dir("stop-before-later-failed-play");
+        let active = outside.join("active.mp3");
+        let pending = outside.join("pending.mp3");
+        fs::write(&active, b"audio").expect("write active track");
+        fs::write(&pending, b"audio").expect("write pending track");
+
+        let state = create_library_roots_state();
+        authorize_transient_file(&state, &active).expect("authorize active track");
+        {
+            let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 10, &active));
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut roots, &active, 10
+            ));
+        }
+
+        authorize_transient_file(&state, &pending).expect("authorize later Play");
+        {
+            let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 12, &pending));
+
+            // Stop generation 11 is ahead of Play generation 12 in the audio queue, but the
+            // later Play request was marked before the audio thread received the Stop.
+            clear_transient_file_grants_at_generation(&mut roots, 11);
+            assert!(playback_generation_is_current(&roots, 12));
+        }
+        assert!(
+            ensure_path_allowed_by_state(&pending, &state.read(), "test").is_ok(),
+            "processing Stop must preserve a newer pending Play Once grant"
+        );
+
+        {
+            let mut roots = state.write();
+            assert!(settle_failed_playback_generation(&mut roots, 12));
+            assert!(discard_transient_file_for_failed_playback(
+                &mut roots, &pending, None, 12
+            ));
+        }
+        assert!(
+            ensure_path_allowed_by_state(&active, &state.read(), "test").is_err(),
+            "a failed Play after Stop must not leave the old one-file source authorized"
+        );
+        assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
+
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
     fn stale_playback_transitions_cannot_restore_transient_grants() {
         let outside = temp_dir("stale-transient-outside");
         let first = outside.join("first.mp3");
