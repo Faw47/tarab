@@ -67,7 +67,7 @@ describe('useAppCommandActions shuffle all', () => {
     let resolveQueue: (references: Array<{ id: string; duration: number }>) => void = () =>
       undefined;
     getShuffleAllQueueMock.mockReturnValueOnce(
-      new Promise((resolve) => {
+      new Promise<Array<{ id: string; duration: number }>>((resolve) => {
         resolveQueue = resolve;
       }),
     );
