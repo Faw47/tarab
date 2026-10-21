@@ -20,10 +20,16 @@ impl InstanceLock {
 }
 
 pub fn acquire_instance_lock() -> InstanceLock {
-    let Ok(dir) = crate::database::get_app_data_dir() else {
+    let Ok(dir) = crate::database::app_data_dir_for_instance_lock() else {
         return InstanceLock::Primary(None);
     };
-    acquire_lock_file(&dir.join("instance.lock"))
+    let instance = acquire_lock_file(&dir.join("instance.lock"));
+    if instance.is_primary() {
+        if let Err(error) = crate::database::get_app_data_dir() {
+            eprintln!("Failed to prepare Tarab data directory before startup: {error}");
+        }
+    }
+    instance
 }
 
 fn acquire_lock_file(path: &Path) -> InstanceLock {
@@ -46,7 +52,7 @@ fn acquire_lock_file(path: &Path) -> InstanceLock {
 /// Renames the database and its WAL/SHM side files to `*.unusable-<stamp>`, keeping them for
 /// recovery, and returns the new database file name. Side files move first and every rename is
 /// rolled back on failure: a WAL left next to a new, empty database would be replayed into it.
-fn move_database_aside(database: &Path, stamp: u64) -> Result<PathBuf, String> {
+pub(crate) fn move_database_aside(database: &Path, stamp: u64) -> Result<PathBuf, String> {
     let file_name = database
         .file_name()
         .ok_or_else(|| "The database path has no file name".to_string())?

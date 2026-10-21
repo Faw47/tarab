@@ -587,12 +587,9 @@ pub struct LibraryStats {
 
 fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
     let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
-    if app_dir.exists() {
-        return Ok(app_dir);
-    }
-
     let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
-    if legacy_dir.exists() {
+
+    if !app_dir.exists() && legacy_dir.exists() {
         std::fs::rename(&legacy_dir, &app_dir).map_err(|error| {
             format!(
                 "Failed to migrate legacy Tarab data from {} to {}: {}",
@@ -601,17 +598,322 @@ fn prepare_app_directory(base_dir: &Path) -> Result<PathBuf, String> {
                 error
             )
         })?;
-    } else {
-        std::fs::create_dir_all(&app_dir).map_err(|error| {
-            format!(
-                "Failed to create Tarab data directory {}: {}",
-                app_dir.display(),
-                error
-            )
-        })?;
+        return Ok(app_dir);
+    }
+
+    std::fs::create_dir_all(&app_dir).map_err(|error| {
+        format!(
+            "Failed to create Tarab data directory {}: {}",
+            app_dir.display(),
+            error
+        )
+    })?;
+
+    if legacy_dir.exists() {
+        let current_db = app_dir.join("library.db");
+        let legacy_db = legacy_dir.join("library.db");
+        let current_has_user_data = if current_db.is_file() {
+            database_has_user_data(&current_db)
+        } else {
+            None
+        };
+        let legacy_has_user_data = if legacy_db.is_file() {
+            database_has_user_data(&legacy_db)
+        } else {
+            None
+        };
+
+        // Preserve an established library. A library can contain user data even when it has no
+        // tracks, such as a manually created empty playlist.
+        if current_has_user_data == Some(true) {
+            return Ok(app_dir);
+        }
+
+        // Replace an empty or unusable early-startup database only when the legacy database has a
+        // recognizable Tarab schema. Keep an unrecognized legacy database as a recovery artifact
+        // while still migrating its other files.
+        if current_db.is_file() && legacy_has_user_data.is_some() {
+            move_database_to_recovery_backup(&current_db)?;
+        }
+        if legacy_db.is_file() && legacy_has_user_data.is_none() {
+            move_database_to_recovery_backup(&legacy_db)?;
+        }
+
+        merge_legacy_directory(&legacy_dir, &app_dir)?;
     }
 
     Ok(app_dir)
+}
+
+fn database_has_user_data(path: &Path) -> Option<bool> {
+    let connection =
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let table_names = {
+        let mut statement = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name",
+            )
+            .ok()?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()?
+            .collect::<SqliteResult<Vec<_>>>()
+            .ok()?;
+        rows
+    };
+
+    let recognized_schema = table_names
+        .iter()
+        .any(|name| matches!(name.as_str(), "schema_version" | "tracks" | "playlists"));
+    if !recognized_schema {
+        return None;
+    }
+
+    for table_name in table_names {
+        if matches!(
+            table_name.as_str(),
+            "schema_version" | "cache_metadata" | "tracks_fts" | "lyrics_fts"
+        ) || table_name.starts_with("tracks_fts_")
+            || table_name.starts_with("lyrics_fts_")
+        {
+            continue;
+        }
+
+        let escaped_name = table_name.replace('"', "\"\"");
+        let query = format!("SELECT EXISTS(SELECT 1 FROM \"{}\" LIMIT 1)", escaped_name);
+        let has_rows = connection
+            .query_row(&query, [], |row| row.get::<_, bool>(0))
+            .ok()?;
+        if has_rows {
+            return Some(true);
+        }
+    }
+
+    Some(false)
+}
+
+fn move_database_to_recovery_backup(path: &Path) -> Result<PathBuf, String> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| "The database path has no file name".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let base_stamp = u64::try_from(now_millis_i64_or_default()).unwrap_or_default();
+
+    for offset in 0..1_000_u64 {
+        let stamp = base_stamp.saturating_add(offset);
+        let backup_name = format!("{file_name}.unusable-{stamp}");
+        let backup = path.with_file_name(&backup_name);
+        if !backup.exists()
+            && !path.with_file_name(format!("{backup_name}-wal")).exists()
+            && !path.with_file_name(format!("{backup_name}-shm")).exists()
+        {
+            return crate::startup_failure::move_database_aside(path, stamp);
+        }
+    }
+
+    Err(format!(
+        "Could not find an available recovery backup name for {}",
+        path.display()
+    ))
+}
+
+fn validate_legacy_merge(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    let entries = std::fs::read_dir(source_dir)
+        .map_err(|error| {
+            format!(
+                "Failed to read legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|error| {
+            format!(
+                "Failed to enumerate legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?;
+
+    for entry in entries {
+        let source = entry.path();
+        let destination = destination_dir.join(entry.file_name());
+        let source_type = std::fs::symlink_metadata(&source)
+            .map_err(|error| format!("Failed to inspect {}: {}", source.display(), error))?
+            .file_type();
+        let destination_type = match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => Some(metadata.file_type()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration destination {}: {}",
+                    destination.display(),
+                    error
+                ));
+            }
+        };
+
+        if source_type.is_dir() {
+            match destination_type {
+                Some(file_type) if file_type.is_dir() => {
+                    validate_legacy_merge(&source, &destination)?;
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "Cannot migrate {} because {} already exists and is not a directory",
+                        source.display(),
+                        destination.display()
+                    ));
+                }
+                None => {}
+            }
+        } else if destination_type.is_some() {
+            return Err(format!(
+                "Cannot migrate {} because {} already exists",
+                source.display(),
+                destination.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_legacy_directory(source_dir: &Path, destination_dir: &Path) -> Result<(), String> {
+    // Check the whole merge tree before moving anything. This prevents a later collision from
+    // leaving SQLite's main database and its WAL/SHM sidecars in different directories.
+    validate_legacy_merge(source_dir, destination_dir)?;
+
+    let mut entries = std::fs::read_dir(source_dir)
+        .map_err(|error| {
+            format!(
+                "Failed to read legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|error| {
+            format!(
+                "Failed to enumerate legacy Tarab data directory {}: {}",
+                source_dir.display(),
+                error
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut database_artifacts = Vec::new();
+    for entry in entries {
+        let source = entry.path();
+        let name = entry.file_name();
+        let destination = destination_dir.join(&name);
+        let source_type = std::fs::symlink_metadata(&source)
+            .map_err(|error| format!("Failed to inspect {}: {}", source.display(), error))?
+            .file_type();
+
+        if !source_type.is_dir()
+            && matches!(
+                name.to_str(),
+                Some("library.db" | "library.db-wal" | "library.db-shm")
+            )
+        {
+            database_artifacts.push((source, destination));
+            continue;
+        }
+
+        let destination_type = match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => Some(metadata.file_type()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration destination {}: {}",
+                    destination.display(),
+                    error
+                ));
+            }
+        };
+
+        if source_type.is_dir() {
+            match destination_type {
+                Some(file_type) if file_type.is_dir() => {
+                    merge_legacy_directory(&source, &destination)?;
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "Cannot migrate {} because {} already exists and is not a directory",
+                        source.display(),
+                        destination.display()
+                    ));
+                }
+                None => {
+                    std::fs::rename(&source, &destination).map_err(|error| {
+                        format!(
+                            "Failed to migrate legacy Tarab data from {} to {}: {}",
+                            source.display(),
+                            destination.display(),
+                            error
+                        )
+                    })?;
+                }
+            }
+        } else {
+            std::fs::rename(&source, &destination).map_err(|error| {
+                format!(
+                    "Failed to migrate legacy Tarab data from {} to {}: {}",
+                    source.display(),
+                    destination.display(),
+                    error
+                )
+            })?;
+        }
+    }
+
+    // Move sidecars before the main database. If any rename fails, put already-moved artifacts
+    // back so callers never see a database split across the old and new directories.
+    database_artifacts
+        .sort_by_key(|(source, _)| source.file_name().is_some_and(|name| name == "library.db"));
+    let mut moved_artifacts: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (source, destination) in database_artifacts {
+        if let Err(error) = std::fs::rename(&source, &destination) {
+            let move_error = format!(
+                "Failed to migrate legacy Tarab data from {} to {}: {}",
+                source.display(),
+                destination.display(),
+                error
+            );
+            let mut rollback_errors = Vec::new();
+            for (original, moved) in moved_artifacts.into_iter().rev() {
+                if let Err(rollback_error) = std::fs::rename(&moved, &original) {
+                    rollback_errors.push(format!(
+                        "failed to restore {} to {}: {}",
+                        moved.display(),
+                        original.display(),
+                        rollback_error
+                    ));
+                }
+            }
+            if rollback_errors.is_empty() {
+                return Err(move_error);
+            }
+            return Err(format!(
+                "{}; SQLite sidecar rollback also failed: {}",
+                move_error,
+                rollback_errors.join("; ")
+            ));
+        }
+        moved_artifacts.push((source, destination));
+    }
+
+    std::fs::remove_dir(source_dir).map_err(|error| {
+        format!(
+            "Failed to remove migrated legacy Tarab data directory {}: {}",
+            source_dir.display(),
+            error
+        )
+    })
 }
 
 pub(crate) fn get_database_path() -> Result<PathBuf, String> {
@@ -622,6 +924,19 @@ pub(crate) fn get_database_path() -> Result<PathBuf, String> {
 pub fn get_app_data_dir() -> Result<PathBuf, String> {
     let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     prepare_app_directory(&base_dir)
+}
+
+pub(crate) fn app_data_dir_for_instance_lock() -> Result<PathBuf, String> {
+    let base_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+    std::fs::create_dir_all(&app_dir).map_err(|error| {
+        format!(
+            "Failed to create Tarab data directory {}: {}",
+            app_dir.display(),
+            error
+        )
+    })?;
+    Ok(app_dir)
 }
 
 pub fn get_cache_dir() -> PathBuf {
@@ -1008,6 +1323,281 @@ mod tests {
         assert_eq!(migrated, base_dir.join(APP_STORAGE_DIRECTORY));
         assert!(migrated.join("library.db").exists());
         assert!(!legacy_dir.exists());
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_database_migrates_when_app_directory_already_exists() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-existing-app-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let logs_dir = app_dir.join("logs");
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
+        std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy-migrated")])
+            .expect("seed legacy track");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("migrate legacy database");
+        let migrated_db =
+            Database::new(migrated.join("library.db")).expect("open migrated database");
+        let tracks = migrated_db.get_all_tracks().expect("read migrated tracks");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "legacy-migrated");
+        assert_eq!(
+            std::fs::read(logs_dir.join("plugin.log")).expect("read plugin log"),
+            b"log"
+        );
+        assert!(!legacy_dir.exists());
+
+        drop(migrated_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_database_replaces_an_empty_database_created_by_early_startup() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-empty-current-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let logs_dir = app_dir.join("logs");
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
+        std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
+
+        // Model an earlier launch that created and initialized the new database before
+        // discovering the legacy database.
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create empty current database");
+        assert!(current_db
+            .get_all_tracks()
+            .expect("read empty database")
+            .is_empty());
+        drop(current_db);
+
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy-recovered")])
+            .expect("seed legacy track");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("recover legacy database");
+        let recovered_db =
+            Database::new(migrated.join("library.db")).expect("open recovered database");
+        let tracks = recovered_db
+            .get_all_tracks()
+            .expect("read recovered tracks");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "legacy-recovered");
+        assert!(!legacy_dir.exists());
+        assert_eq!(
+            std::fs::read(logs_dir.join("plugin.log")).expect("read preserved plugin log"),
+            b"log"
+        );
+        assert!(std::fs::read_dir(&app_dir)
+            .expect("read app directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.db.unusable-")));
+
+        drop(recovered_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_empty_playlist_is_preserved_when_current_database_is_empty() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-empty-playlist-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create empty current database");
+        drop(current_db);
+
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .create_playlist(&DbPlaylist {
+                id: "legacy-empty-playlist".to_string(),
+                name: "Empty playlist".to_string(),
+                playlist_type: "manual".to_string(),
+                folder_path: None,
+                smart_rules: None,
+                created_at: 1,
+                updated_at: 1,
+                is_pinned: false,
+                pinned_at: None,
+                last_synced_at: None,
+                sync_error: None,
+            })
+            .expect("seed empty legacy playlist");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("recover legacy playlist");
+        let recovered_db =
+            Database::new(migrated.join("library.db")).expect("open recovered database");
+        let playlists = recovered_db
+            .get_all_playlists()
+            .expect("read recovered playlists");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].id, "legacy-empty-playlist");
+        assert!(!legacy_dir.exists());
+        assert!(std::fs::read_dir(&app_dir)
+            .expect("read app directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.db.unusable-")));
+
+        drop(recovered_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn existing_database_is_authoritative_over_legacy_database() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-authoritative-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create current database");
+        current_db
+            .upsert_tracks_batch(&[sample_track("current")])
+            .expect("seed current track");
+        drop(current_db);
+
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy")])
+            .expect("seed legacy track");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("keep current database");
+
+        assert_eq!(migrated, app_dir);
+        let current_db = Database::new(migrated.join("library.db")).expect("read current database");
+        let current_tracks = current_db.get_all_tracks().expect("read current tracks");
+        assert_eq!(current_tracks.len(), 1);
+        assert_eq!(current_tracks[0].id, "current");
+        assert!(legacy_dir.exists());
+        let legacy_db = Database::new(legacy_dir.join("library.db")).expect("read legacy database");
+        let legacy_tracks = legacy_db.get_all_tracks().expect("read legacy tracks");
+        assert_eq!(legacy_tracks.len(), 1);
+        assert_eq!(legacy_tracks[0].id, "legacy");
+
+        drop(current_db);
+        drop(legacy_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_merge_conflict_keeps_database_and_sidecars_together() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-wal-conflict-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"current").expect("seed current settings");
+        std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
+
+        for (name, contents) in [
+            ("library.db", &b"database"[..]),
+            ("library.db-wal", &b"wal"[..]),
+            ("library.db-shm", &b"shm"[..]),
+        ] {
+            std::fs::write(legacy_dir.join(name), contents).expect("seed SQLite artifact");
+        }
+
+        let result = merge_legacy_directory(&legacy_dir, &app_dir);
+
+        assert!(result.is_err());
+        for (name, contents) in [
+            ("library.db", b"database".as_slice()),
+            ("library.db-wal", b"wal".as_slice()),
+            ("library.db-shm", b"shm".as_slice()),
+        ] {
+            assert_eq!(
+                std::fs::read(legacy_dir.join(name)).expect("read legacy SQLite artifact"),
+                contents
+            );
+            assert!(!app_dir.join(name).exists());
+        }
+
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn legacy_migration_preserves_conflicting_files_and_reports_error() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-conflict-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&app_dir).expect("create app directory");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        std::fs::write(app_dir.join("settings.json"), b"current").expect("seed current settings");
+        std::fs::write(legacy_dir.join("settings.json"), b"legacy").expect("seed legacy settings");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("conflict-legacy")])
+            .expect("seed legacy track");
+        drop(legacy_db);
+
+        let result = prepare_app_directory(&base_dir);
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(app_dir.join("settings.json")).expect("read current settings"),
+            b"current"
+        );
+        assert_eq!(
+            std::fs::read(legacy_dir.join("settings.json")).expect("read legacy settings"),
+            b"legacy"
+        );
+        let preserved_db =
+            Database::new(legacy_dir.join("library.db")).expect("open preserved legacy database");
+        let tracks = preserved_db
+            .get_all_tracks()
+            .expect("read preserved legacy tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "conflict-legacy");
+        drop(preserved_db);
 
         let _ = std::fs::remove_dir_all(base_dir);
     }
