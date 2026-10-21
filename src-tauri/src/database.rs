@@ -1,5 +1,7 @@
 use parking_lot::Mutex;
-use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension, Result as SqliteResult};
+use rusqlite::{
+    params, params_from_iter, Connection, OpenFlags, OptionalExtension, Result as SqliteResult,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
