@@ -53,13 +53,6 @@ const UPCOMING_ROW_HEIGHT = 72;
 const UPCOMING_VIRTUALIZE_THRESHOLD = 100;
 const HISTORY_PREVIEW_COUNT = 12;
 
-const summaryLabel = (queueLength: number, activeIndex: number) => {
-  const upcomingCount =
-    activeIndex >= 0 ? Math.max(0, queueLength - (activeIndex + 1)) : queueLength;
-  const playedCount = activeIndex > 0 ? activeIndex : 0;
-  return { upcomingCount, playedCount };
-};
-
 export const QueueView = memo(
   ({
     isLibraryLoading = false,
@@ -161,7 +154,8 @@ export const QueueView = memo(
       [upcomingTracks],
     );
 
-    const { upcomingCount, playedCount } = summaryLabel(queue.length, activeIndex);
+    const upcomingCount = upcomingTracks.length;
+    const playedCount = playedTracks.length;
     const playedRatio = queue.length > 0 ? Math.min(1, playedCount / queue.length) : 0;
 
     const handlePlayTrack = useCallback(
@@ -444,7 +438,7 @@ export const QueueView = memo(
                 </div>
                 <div className="space-y-2 pt-1">
                   {historyVisible.map((track, historyIndex) => {
-                    const absoluteIndex = activeIndex - 1 - historyIndex;
+                    const absoluteIndex = playedTracks.length - 1 - historyIndex;
                     return (
                       <HistoryRow
                         key={track._queueId || `${track.id}-${absoluteIndex}`}
@@ -680,7 +674,7 @@ export const QueueView = memo(
 
                   <div className="space-y-1.5">
                     {historyVisible.map((track, historyIndex) => {
-                      const absoluteIndex = activeIndex - 1 - historyIndex;
+                      const absoluteIndex = playedTracks.length - 1 - historyIndex;
                       return (
                         <HistoryRow
                           key={track._queueId || `${track.id}-${absoluteIndex}`}

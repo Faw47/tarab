@@ -1,4 +1,4 @@
-import { useAsyncCleanup } from '../../hooks/useAsyncCleanup';
+import { useEffect, useRef } from 'react';
 import { startPlayback } from '../../lib/playback-actions';
 import { reportError } from '../../lib/report-error';
 import { dbGetTrackByPublicId } from '../../lib/tauri-commands';
@@ -40,53 +40,88 @@ interface UseDeepLinkBridgeOptions {
  * Routes deep links to application actions.
  */
 export function useDeepLinkBridge({ onSearch }: UseDeepLinkBridgeOptions) {
-  useAsyncCleanup(
-    async () => {
-      const handleLink = (url: string) => {
-        try {
-          logger.info(DOMAIN, 'Handling deep link', { url });
-          const intent = parseDeepLink(url);
-          if (!intent) {
-            logger.warn(DOMAIN, 'Ignoring unsupported deep link');
-            return;
-          }
-          if (intent.kind === 'search') {
-            onSearch(intent.query);
-            return;
-          }
-          void dbGetTrackByPublicId(intent.publicId)
-            .then((track) => {
-              if (!track) {
-                reportError('The linked track is not in this library', { source: 'deep-link' });
-                return;
-              }
-              return startPlayback(mapDbTrackToTrack(track));
-            })
-            .catch((error) => {
+  const onSearchRef = useRef(onSearch);
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    let readingStartup = true;
+    const startupEvents = new Set<string>();
+
+    const handleLink = (url: string) => {
+      if (disposed) return;
+      try {
+        logger.info(DOMAIN, 'Handling deep link', { url });
+        const intent = parseDeepLink(url);
+        if (!intent) {
+          logger.warn(DOMAIN, 'Ignoring unsupported deep link');
+          return;
+        }
+        if (intent.kind === 'search') {
+          onSearchRef.current(intent.query);
+          return;
+        }
+        void dbGetTrackByPublicId(intent.publicId)
+          .then((track) => {
+            if (disposed) return;
+            if (!track) {
+              reportError('The linked track is not in this library', { source: 'deep-link' });
+              return;
+            }
+            return startPlayback(mapDbTrackToTrack(track));
+          })
+          .catch((error) => {
+            if (!disposed) {
               reportError('Failed to open the linked track', { source: 'deep-link', error });
-            });
-        } catch (err) {
-          logger.error(DOMAIN, 'Ignoring malformed deep link', err);
-        }
-      };
-      const initial = await deepLinks.getInitial();
-      const startupMirrors = new Map<string, number>();
-      for (const url of new Set(initial)) {
-        handleLink(url);
-        // The native listener can replay a launch URL already returned by getInitial().
-        startupMirrors.set(url, Date.now() + 1000);
+            }
+          });
+      } catch (err) {
+        logger.error(DOMAIN, 'Ignoring malformed deep link', err);
       }
-      return deepLinks.listen((url) => {
-        const mirrorDeadline = startupMirrors.get(url);
-        if (mirrorDeadline !== undefined) {
-          startupMirrors.delete(url);
-          if (Date.now() < mirrorDeadline) return;
+    };
+
+    const readStartup = async () => {
+      try {
+        const initial = await deepLinks.getInitial();
+        if (disposed) return;
+        for (const url of new Set(initial)) {
+          if (!startupEvents.has(url)) handleLink(url);
         }
-        // A later click, even a rapid repeat, is a new user request.
+      } catch (error) {
+        if (!disposed) logger.error(DOMAIN, 'Failed to read startup deep links', error);
+      } finally {
+        readingStartup = false;
+        startupEvents.clear();
+      }
+    };
+
+    // Finish registration before reading the snapshot. Events received in the meantime
+    // are real intents; suppress only their copies in the startup snapshot.
+    void deepLinks
+      .listen((url) => {
+        if (disposed) return;
+        if (readingStartup) startupEvents.add(url);
         handleLink(url);
+      })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        unsubscribe = cleanup;
+        void readStartup();
+      })
+      .catch((error) => {
+        if (!disposed) logger.error(DOMAIN, 'Failed to setup deep link listener', error);
       });
-    },
-    [onSearch],
-    (err) => logger.error(DOMAIN, 'Failed to setup deep link listener', err),
-  );
+
+    return () => {
+      disposed = true;
+      startupEvents.clear();
+      unsubscribe?.();
+    };
+  }, []);
 }
