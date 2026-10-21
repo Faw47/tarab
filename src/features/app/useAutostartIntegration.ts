@@ -10,11 +10,16 @@ export function useAutostartIntegration() {
     let started = false;
     let syncingFromOs = false;
     let intentRevision = 0;
+    let appliedIntentRevision = 0;
     let unsubscribe = () => {};
     let pending = Promise.resolve();
 
     const updateFromOs = (enabled: boolean, expectedRevision: number) => {
-      if (cancelled || intentRevision !== expectedRevision) return;
+      if (
+        cancelled ||
+        intentRevision !== expectedRevision ||
+        appliedIntentRevision !== expectedRevision
+      ) return;
       syncingFromOs = true;
       try {
         if (useSettingsStore.getState().autostartEnabled !== enabled) {
@@ -47,8 +52,10 @@ export function useAutostartIntegration() {
         try {
           if (enabled) await enable();
           else await disable();
+          if (revision === intentRevision) appliedIntentRevision = revision;
         } catch (error) {
           // A newer user choice wins over a slow result from either the OS read or this write.
+          if (revision === intentRevision) appliedIntentRevision = revision;
           await readOs(revision);
           if (!cancelled && revision === intentRevision) {
             reportError('Failed to sync open at login', { source: 'app-autostart', error });
