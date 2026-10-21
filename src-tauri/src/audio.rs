@@ -1117,8 +1117,7 @@ impl AudioManager {
                             AudioCommand::Stop { generation } => {
                                 let mut roots = roots_for_audio.write();
                                 clear_transient_file_grants_through_generation(
-                                    &mut roots,
-                                    generation,
+                                    &mut roots, generation,
                                 );
                                 let mut state = state_clone.lock();
                                 if !reset_playback_state_for_stop(&mut state, generation) {
