@@ -241,7 +241,8 @@ pub(super) fn play_with_source(
     source: SymphoniaSource,
     state: &Arc<Mutex<PlaybackState>>,
     start: PlaybackStart<'_>,
-) -> Option<Sink> {
+    cancelled_handoffs: &[Arc<AtomicBool>],
+) -> Option<Arc<Sink>> {
     let sink = Sink::try_new(stream_handle).ok()?;
     let channels = source.channels();
     let sample_rate = source.sample_rate();
@@ -261,6 +262,9 @@ pub(super) fn play_with_source(
 
     {
         let mut s = state.lock();
+        for cancelled in cancelled_handoffs {
+            cancelled.store(true, Ordering::Release);
+        }
         s.current_file = Some(start.file_path.to_string());
         s.generation = start.generation;
         s.duration = start.duration;
