@@ -512,7 +512,9 @@ pub fn run() {
                             if let Err(_error) =
                                 launch_intents::queue_file_path(_app_handle, intents.inner(), &path)
                             {
-                                log::warn!("Ignored macOS file-open request that could not be resolved");
+                                log::warn!(
+                                    "Ignored macOS file-open request that could not be resolved"
+                                );
                             }
                         }
                     }

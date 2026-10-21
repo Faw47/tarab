@@ -466,10 +466,12 @@ impl AudioManager {
                                     true,
                                 );
                                 *pending_gapless_path_thread.lock() = None;
-                                if let Err(_error) = ensure_output_stream(&mut stream_bundle, || {
-                                    open_output_stream(preferred_device.as_deref())
-                                        .or_else(|_| open_output_stream(None))
-                                }) {
+                                if let Err(_error) =
+                                    ensure_output_stream(&mut stream_bundle, || {
+                                        open_output_stream(preferred_device.as_deref())
+                                            .or_else(|_| open_output_stream(None))
+                                    })
+                                {
                                     log::warn!("Audio output is not available");
                                 }
                                 let Some((_, stream_handle)) = stream_bundle.as_ref() else {
@@ -576,10 +578,12 @@ impl AudioManager {
                                     true,
                                 );
                                 *pending_gapless_path_thread.lock() = None;
-                                if let Err(_error) = ensure_output_stream(&mut stream_bundle, || {
-                                    open_output_stream(preferred_device.as_deref())
-                                        .or_else(|_| open_output_stream(None))
-                                }) {
+                                if let Err(_error) =
+                                    ensure_output_stream(&mut stream_bundle, || {
+                                        open_output_stream(preferred_device.as_deref())
+                                            .or_else(|_| open_output_stream(None))
+                                    })
+                                {
                                     log::warn!("Audio output is not available");
                                 }
                                 let Some((_, stream_handle)) = stream_bundle.as_ref() else {
@@ -772,10 +776,12 @@ impl AudioManager {
                                 }
 
                                 let had_output_stream = stream_bundle.is_some();
-                                if let Err(_error) = ensure_output_stream(&mut stream_bundle, || {
-                                    open_output_stream(preferred_device.as_deref())
-                                        .or_else(|_| open_output_stream(None))
-                                }) {
+                                if let Err(_error) =
+                                    ensure_output_stream(&mut stream_bundle, || {
+                                        open_output_stream(preferred_device.as_deref())
+                                            .or_else(|_| open_output_stream(None))
+                                    })
+                                {
                                     log::warn!("Audio output is not available");
                                 }
                                 let Some((_, stream_handle)) = stream_bundle.as_ref() else {
@@ -818,7 +824,9 @@ impl AudioManager {
                                                 continue;
                                             }
                                             Some(Err(_error)) => {
-                                                log::warn!("In-place seek failed; rebuilding decoder");
+                                                log::warn!(
+                                                    "In-place seek failed; rebuilding decoder"
+                                                );
                                             }
                                             None => {
                                                 log::warn!("In-place seek timed out or another seek is still pending; rebuilding decoder");
@@ -1070,7 +1078,9 @@ impl AudioManager {
                                     let prep =
                                         prepare_source(&path, 0.0, &state_clone, &emitted_for_next);
                                     let Ok((source2, duration2, actual_start2)) = prep else {
-                                        log::warn!("Gapless preload failed to decode the next track");
+                                        log::warn!(
+                                            "Gapless preload failed to decode the next track"
+                                        );
                                         continue;
                                     };
 

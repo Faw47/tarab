@@ -187,7 +187,7 @@ fn start_watcher<R: Runtime>(
         match watcher.watch(path, RecursiveMode::Recursive) {
             Ok(()) => watched += 1,
             Err(error) => {
-                log::warn!("Library watcher could not watch configured root {}", root.root_id);
+                log::warn!("Library watcher could not watch a configured library root");
                 first_error.get_or_insert_with(|| error.to_string());
             }
         }
