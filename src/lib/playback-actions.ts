@@ -86,8 +86,15 @@ export const resumeCurrentPlayback = async (): Promise<void> => {
   if (!currentTrack) return;
 
   if (!state.hasActivePlayback) {
+    let playableTrack = currentTrack;
+    if (currentTrack._lazyQueueEntry) {
+      notePlaybackIntervention();
+      const intervention = getPlaybackInterventionEpoch();
+      playableTrack = await hydrateQueueTrackMetadata(currentTrack);
+      if (getPlaybackInterventionEpoch() !== intervention) return;
+    }
     const resumePos = state.getResumePositionForTrack(currentTrack.id);
-    await startPlayback(currentTrack, { startPos: resumePos ?? undefined });
+    await startPlayback(playableTrack, { startPos: resumePos ?? undefined });
     return;
   }
 
