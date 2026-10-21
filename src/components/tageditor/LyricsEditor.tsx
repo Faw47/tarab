@@ -334,7 +334,7 @@ export const LyricsEditor = memo(
         console.error('Failed to toggle playback:', e);
         showError('Failed to control playback');
       }
-    }, [trackPath, isCurrentTrack, isPlaying, hasActivePlayback, showError]);
+    }, [track, trackPath, isCurrentTrack, isPlaying, hasActivePlayback, showError]);
 
     // Keep ref current so the keyboard handler always calls the latest version
     useEffect(() => {
