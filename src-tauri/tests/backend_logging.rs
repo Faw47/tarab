@@ -44,16 +44,10 @@ fn runtime_diagnostics_use_the_configured_logger() {
         })
         .collect();
 
-    let bootstrap_diagnostics = [
-        (
-            "database.rs",
-            "Could not prepare preferred app directory; using fallback",
-        ),
-        (
-            "database/migrations.rs",
-            "Duplicate playlist memberships were collapsed during migration",
-        ),
-    ];
+    let bootstrap_diagnostics = [(
+        "database/migrations.rs",
+        "Duplicate playlist memberships were collapsed during migration",
+    )];
     let cache_fallbacks = direct_stderr
         .iter()
         .filter(|(path, _, line)| {
@@ -79,8 +73,13 @@ fn runtime_diagnostics_use_the_configured_logger() {
         .collect();
 
     assert_eq!(
-        cache_fallbacks, 1,
-        "the pre-logger cache fallback should retain one generic bootstrap diagnostic"
+        cache_fallbacks, 0,
+        "runtime cache fallback diagnostics must not write to stderr"
+    );
+    assert!(
+        include_str!("../src/database.rs")
+            .contains("log::warn!(\"Could not prepare preferred app directory; using fallback\")"),
+        "cache fallback diagnostics should use the configured logger"
     );
     assert_eq!(
         migration_warnings, 1,
