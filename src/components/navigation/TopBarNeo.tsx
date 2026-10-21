@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   Home,
+  Keyboard,
   Library,
   ListMusic,
   Loader2,
@@ -459,6 +460,12 @@ export const TopBarNeo = memo(function TopBarNeo({
             label={commandPaletteLabel}
             icon={<TerminalSquare className="h-4 w-4" strokeWidth={3} />}
             onClick={() => window.dispatchEvent(new Event('tarab:open-command-palette'))}
+          />
+
+          <NeoSecondaryAction
+            label="Keyboard shortcuts"
+            icon={<Keyboard className="h-4 w-4" strokeWidth={3} />}
+            onClick={() => window.dispatchEvent(new Event('tarab:open-keyboard-shortcuts'))}
           />
 
           {navMode === 'topNav' && (
