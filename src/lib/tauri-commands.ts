@@ -388,6 +388,7 @@ export interface BatchTrackMetadata {
   artist: string;
   album_artist?: string | null;
   album: string;
+  genre: string | null;
   year: number | null;
   track_number: number | null;
   disc_number: number | null;
