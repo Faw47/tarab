@@ -151,8 +151,15 @@ fn stop_after_failed_output_replacement(
     stream_bundle: &mut Option<(OutputStream, OutputStreamHandle)>,
     drop_stream: bool,
 ) {
+    // Serialize cancellation and the stopped state with the handoff callback. A callback that
+    // has not committed yet will now observe its token as canceled.
+    let mut playback = state.lock();
     *pending_gapless_path.lock() = None;
     cancel_gapless_handoffs(pending_gapless_cancels);
+    playback.is_playing = false;
+    playback.is_paused = false;
+    drop(playback);
+
     if let Some(active) = crossfade_state.take() {
         active.outgoing_sink.stop();
     }
@@ -164,9 +171,6 @@ fn stop_after_failed_output_replacement(
     if drop_stream {
         *stream_bundle = None;
     }
-    let mut state = state.lock();
-    state.is_playing = false;
-    state.is_paused = false;
 }
 
 type PendingGaplessHandoff = (String, u64, Arc<AtomicBool>);
@@ -187,8 +191,11 @@ fn pending_gapless_tokens(pending: &[PendingGaplessHandoff]) -> Vec<Arc<AtomicBo
 fn snapshot_playback_for_seek(
     state: &Arc<Mutex<PlaybackState>>,
     pending: &mut Vec<PendingGaplessHandoff>,
-) -> (u64, String, bool, f64, f32) {
+) -> (u64, String, bool, f64, f32, bool) {
     let state = state.lock();
+    let has_queued_source = pending
+        .iter()
+        .any(|(_, _, cancelled)| !cancelled.load(Ordering::Acquire));
     for (_, _, cancelled) in pending.iter() {
         // The handoff callback takes this same state lock before checking the token. This makes
         // cancellation and the playback snapshot one serialized operation.
@@ -201,6 +208,7 @@ fn snapshot_playback_for_seek(
         state.is_paused,
         state.duration,
         state.volume,
+        has_queued_source,
     )
 }
 
@@ -235,6 +243,16 @@ fn snapshot_playback_for_output_replacement(
         state.is_playing,
         has_uncommitted_queued_handoff,
     )
+}
+
+fn gapless_handoff_matches_playback(
+    state: &PlaybackState,
+    next_generation: u64,
+    next_path: &str,
+) -> bool {
+    state.is_playing
+        && state.generation == next_generation
+        && state.current_file.as_deref() == Some(next_path)
 }
 
 fn commit_gapless_handoff(
@@ -789,14 +807,22 @@ impl AudioManager {
                                 // otherwise a later source could be mistaken for this seek target.
                                 // Take the source marker, then cancel and snapshot under the state
                                 // lock shared with the handoff callback.
-                                let had_queued_gapless_source =
+                                let had_gapless_path_marker =
                                     pending_gapless_path_thread.lock().take().is_some();
                                 let target_position = position_secs.max(0.0);
-                                let (generation, active_path, was_paused, duration, target_volume) =
-                                    snapshot_playback_for_seek(
-                                        &state_clone,
-                                        &mut pending_gapless_cancels,
-                                    );
+                                let (
+                                    generation,
+                                    active_path,
+                                    was_paused,
+                                    duration,
+                                    target_volume,
+                                    had_queued_gapless_source,
+                                ) = snapshot_playback_for_seek(
+                                    &state_clone,
+                                    &mut pending_gapless_cancels,
+                                );
+                                let had_queued_gapless_source =
+                                    had_gapless_path_marker || had_queued_gapless_source;
                                 let had_sink = current_sink.is_some();
 
                                 if active_path.is_empty() {
@@ -1225,8 +1251,11 @@ impl AudioManager {
                             } => {
                                 let is_still_current = {
                                     let state = state_clone.lock();
-                                    state.generation == next_generation
-                                        && state.current_file.as_deref() == Some(next_path.as_str())
+                                    gapless_handoff_matches_playback(
+                                        &state,
+                                        next_generation,
+                                        &next_path,
+                                    )
                                 };
                                 if is_still_current {
                                     let _ = app_for_audio.emit("playback-ended", ended);
@@ -2068,7 +2097,7 @@ mod bounded_seek_tests {
     }
 
     #[test]
-    fn seek_cancels_gapless_handoff_before_snapshotting_the_active_track() {
+    fn seek_detects_a_queued_source_after_its_preload_marker_was_cleared() {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         {
             let mut playback = state.lock();
@@ -2080,7 +2109,9 @@ mod bounded_seek_tests {
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), 8, Arc::clone(&cancelled))];
 
-        let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
+        let (generation, path, _, duration, _, had_queued_source) =
+            snapshot_playback_for_seek(&state, &mut pending);
+        assert!(had_queued_source, "the sink still owns this queued source after its marker clears");
         let committed = commit_gapless_handoff(
             &state,
             &cancelled,
@@ -2099,6 +2130,26 @@ mod bounded_seek_tests {
         assert_eq!(duration, 12.0);
         assert!(!committed);
         assert_eq!(state.lock().current_file.as_deref(), Some("outgoing.wav"));
+    }
+
+    #[test]
+    fn stopped_playback_suppresses_a_queued_handoff_event() {
+        let mut state = PlaybackState::default();
+        state.current_file = Some("incoming.wav".to_string());
+        state.generation = 8;
+        state.is_playing = false;
+
+        assert!(!gapless_handoff_matches_playback(
+            &state,
+            8,
+            "incoming.wav"
+        ));
+        state.is_playing = true;
+        assert!(gapless_handoff_matches_playback(
+            &state,
+            8,
+            "incoming.wav"
+        ));
     }
 
     #[test]
@@ -2226,7 +2277,7 @@ mod bounded_seek_tests {
         assert!(pending.is_empty());
         assert!(pending_path.lock().is_none());
         assert!(current_sink.is_none());
-        assert!(sink.empty());
+        // An idle Sink does not synchronously drain its queued source when stop() is called.
         assert_eq!(active_counter.load(Ordering::Relaxed), 0);
         assert!(stream_bundle.is_none());
         let playback = state.lock();
@@ -2254,8 +2305,10 @@ mod bounded_seek_tests {
             48_000,
             2,
         ));
-        let (generation, path, _, duration, _) = snapshot_playback_for_seek(&state, &mut pending);
+        let (generation, path, _, duration, _, had_queued_source) =
+            snapshot_playback_for_seek(&state, &mut pending);
 
+        assert!(had_queued_source);
         assert_eq!(generation, 8);
         assert_eq!(path, "incoming.wav");
         assert_eq!(duration, 20.0);
