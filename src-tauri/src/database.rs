@@ -1246,9 +1246,7 @@ mod tests {
         let migrated = prepare_app_directory(&base_dir).expect("migrate legacy database");
         let migrated_db =
             Database::new(migrated.join("library.db")).expect("open migrated database");
-        let tracks = migrated_db
-            .get_all_tracks()
-            .expect("read migrated tracks");
+        let tracks = migrated_db.get_all_tracks().expect("read migrated tracks");
 
         assert_eq!(migrated, app_dir);
         assert_eq!(tracks.len(), 1);
