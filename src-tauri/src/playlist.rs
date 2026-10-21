@@ -437,7 +437,7 @@ fn track_matches_rule(track: &DbTrack, rule: &SmartPlaylistRule, now_ms: i64) ->
                     .genre
                     .as_ref()
                     .is_some_and(|value| value.to_lowercase().contains(&needle))
-        },
+        }
         SmartPlaylistRule::ByYear {
             start_year,
             end_year,
