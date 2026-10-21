@@ -49,14 +49,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 
 | Disposition | Count |
 |---|---|
-| FIXED_VERIFIED | 65 |
+| FIXED_VERIFIED | 67 |
 | ALREADY_RESOLVED | 1 |
 | FALSE_POSITIVE | 0 |
 | DUPLICATE | 1 |
-| NATIVE_VALIDATION_REQUIRED | 30 |
+| NATIVE_VALIDATION_REQUIRED | 31 |
 | DECISION_REQUIRED | 1 |
 | BLOCKED | 0 |
-| PENDING | 62 |
+| PENDING | 58 |
 | **Total** | **160** |
 
 ## Findings
@@ -154,14 +154,14 @@ audit's Section 4.0 and are tracked under the surviving ID.
 | PB-17 | P3 | Playlist mutation IDs never protect an actual retry | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | PB-31 | P3 | Media-session and mini-window sync resend full artwork every two seconds and jump the mini progress bar | DUPLICATE | - | Merged into AR-05 by the audit; see AR-05. The mini progress bar still jumps every 2 s (no interpolation), not addressed. | - | - |
 | PB-27 | P3 | LRC parser edge cases | FIXED_VERIFIED | G1 four enhanced-gap regressions RED to GREEN / G2 frontend PASS / G3 PASS | Offset/fraction/plain-gap fixes reconciled; enhanced empty and word-only markers now retained through offsets, repeated tags, normalization and current-line resolution. Independent regression comparison clean. Native lyric appearance/audio are separate, unclaimed checks. | 727485a, dde89c2, 496fd54 + lyrics continuation | #11, #22; lyrics continuation |
-| PB-33 | P3 | Folder reconcile prefix match is case-insensitive | PENDING | - | Audit confidence POSSIBLE. | - | - |
+| PB-33 | P3 | Folder reconcile prefix match is case-insensitive | NATIVE_VALIDATION_REQUIRED | PASS / PASS / PASS | G1: test-only run 39558141565 reproduced case-insensitive deletion on Linux and macOS. G2: all five jobs passed at head 9574916420c734d0052566b69407dac05d7286de (run 39579601128). G3: independent review found no remaining code blocker at that head. Native filesystem acceptance remains open for case-distinct folders and deletion/reconciliation. | 9574916 | #46 |
 | PB-19 | P3 | Watch events use canonical paths but are matched against folders as configured | PENDING | - | Audit confidence POSSIBLE. | - | - |
 | AR-21 | P3 | Schema and index issues | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | LD-15 | P3 | Paginated queries order by non-unique columns without a tiebreaker | FIXED_VERIFIED | G1 pass / G2 pass / G3 approve | Paginated ORDER BY adds id as a tiebreaker. Rust test paginated_tracks_sort_case_insensitively_with_a_stable_tiebreaker proves no repeated or skipped rows across page boundaries. | d6d91ba | #3 |
 | AR-22 | P3 | Deep-link track resolution hashes every row | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-34 | P3 | Shuffle-all and aggregates pull whole-library payloads into JavaScript | PENDING | - | Audit confidence CONFIRMED. | - | - |
-| AR-35 | P3 | Smart-shuffle de-clustering is roughly quadratic in the worst case | PENDING | - | Audit confidence LIKELY. | - | - |
-| LD-07 | P3 | Genre is editable in the tag editor but absent from the library schema | PENDING | - | Audit confidence CONFIRMED. | - | - |
+| AR-35 | P3 | Smart-shuffle de-clustering is roughly quadratic in the worst case | FIXED_VERIFIED | PASS / PASS / PASS | G1: 50,000-track test-only run 39569343478 exceeded its 8-second budget on Ubuntu (39.681s), Windows (33.021s), and macOS (72.953s). G2: all five jobs passed at head e6575abdab4eaaec0af8b0330f1686bd9baa8966 (run 39570619194). G3: independent review found no code blocker. This is a deterministic ordering/performance change with no native-device gate. | e6575ab | #52 |
+| LD-07 | P3 | Genre is editable in the tag editor but absent from the library schema | FIXED_VERIFIED | PASS / PASS / PASS | G1: test-only run 39570832003 reproduced schema migration, genre persistence, tag extraction, matching, scan reconciliation, and metadata-refresh regressions. G2: all five jobs passed at head f695efb5b6fb752d1a0f6ee4d70d33d96a9a3a70 (run 39574496255). G3: independent review found no remaining blocker. Existing rows migrate with null genre; rescan the library to populate it from tags. | f695efb | #53 |
 | QA-04 | P3 | Legacy `music-player` data may not migrate on Linux | PENDING | - | Audit confidence LIKELY. | - | - |
 | LD-19 | P3 | Backend diagnostics go to stderr instead of the configured log plugin | PENDING | - | Audit confidence CONFIRMED. | - | - |
 | AR-26 | P3 | macOS builds two app menus; label updates go to the replaced one | NATIVE_VALIDATION_REQUIRED | G1 n/a (platform) / G2 pass (macOS via CI) / G3 approve | macOS installs only the macos_menu bar, which returns its playback items so Play/Pause labels and enabled state update the installed menu. Needs a check on macOS. | 1036599 | #6 |
