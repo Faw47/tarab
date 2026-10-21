@@ -947,6 +947,27 @@ mod tests {
     }
 
     #[test]
+    fn public_track_id_lookup_uses_an_index() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let mut statement = conn
+            .prepare("EXPLAIN QUERY PLAN SELECT id FROM tracks WHERE public_id = ?1")
+            .expect("prepare public ID lookup plan");
+        let details = statement
+            .query_map(["c".repeat(64)], |row| row.get::<_, String>(3))
+            .expect("query public ID lookup plan")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect public ID lookup plan");
+
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("idx_tracks_public_id")),
+            "public ID lookup should use its index: {details:?}"
+        );
+    }
+
+    #[test]
     fn track_order_and_technical_metadata_survive_database_reload() {
         let db = test_db();
         let mut track = sample_track("metadata");
