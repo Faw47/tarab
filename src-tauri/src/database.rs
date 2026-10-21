@@ -1144,6 +1144,58 @@ mod tests {
     }
 
     #[test]
+    fn legacy_database_replaces_an_empty_database_created_by_early_startup() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "tarab-storage-migration-empty-current-{}",
+            now_millis_i64_or_default()
+        ));
+        let app_dir = base_dir.join(APP_STORAGE_DIRECTORY);
+        let logs_dir = app_dir.join("logs");
+        let legacy_dir = base_dir.join(LEGACY_STORAGE_DIRECTORY);
+        std::fs::create_dir_all(&logs_dir).expect("create preexisting app logs");
+        std::fs::write(logs_dir.join("plugin.log"), b"log").expect("seed plugin log");
+
+        // Model an earlier launch that created and initialized the new database before
+        // discovering the legacy database.
+        let current_db =
+            Database::new(app_dir.join("library.db")).expect("create empty current database");
+        assert!(current_db.get_all_tracks().expect("read empty database").is_empty());
+        drop(current_db);
+
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy directory");
+        let legacy_db =
+            Database::new(legacy_dir.join("library.db")).expect("create legacy database");
+        legacy_db
+            .upsert_tracks_batch(&[sample_track("legacy-recovered")])
+            .expect("seed legacy track");
+        drop(legacy_db);
+
+        let migrated = prepare_app_directory(&base_dir).expect("recover legacy database");
+        let recovered_db =
+            Database::new(migrated.join("library.db")).expect("open recovered database");
+        let tracks = recovered_db.get_all_tracks().expect("read recovered tracks");
+
+        assert_eq!(migrated, app_dir);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "legacy-recovered");
+        assert!(!legacy_dir.exists());
+        assert_eq!(
+            std::fs::read(logs_dir.join("plugin.log")).expect("read preserved plugin log"),
+            b"log"
+        );
+        assert!(std::fs::read_dir(&app_dir)
+            .expect("read app directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.db.unusable-")));
+
+        drop(recovered_db);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
     fn existing_database_is_authoritative_over_legacy_database() {
         let base_dir = std::env::temp_dir().join(format!(
             "tarab-storage-migration-authoritative-{}",
