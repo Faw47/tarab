@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlaybackCoordinator } from '../../../lib/playback-actions';
 import { getLyricsForTrack, writeLyricsForTrack, writeTags } from '../../../lib/tauri-commands';
+import { usePlayerStore } from '../../../store/player-store';
 import type { Track } from '../../../types';
 import { lyricsEquivalent } from '../LyricsEditor';
 import { TagEditorModal } from '../TagEditorModal';
@@ -8,6 +10,18 @@ import { TagEditorModal } from '../TagEditorModal';
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => null),
   convertFileSrc: (path: string) => path,
+}));
+const { previewFileMock } = vi.hoisted(() => ({
+  previewFileMock: vi.fn(async (_track: unknown) => undefined),
+}));
+
+vi.mock('../../../lib/playback-actions', () => ({
+  PlaybackCoordinator: {
+    previewFile: previewFileMock,
+    seek: vi.fn(async (_position: number) => undefined),
+    pause: vi.fn(async () => undefined),
+    resume: vi.fn(async () => undefined),
+  },
 }));
 vi.mock('../../../hooks/useCoverArt', () => ({ useCoverArt: () => null }));
 vi.mock('../../../lib/tauri-commands', () => ({
@@ -51,7 +65,10 @@ async function renderEditor() {
 }
 
 describe('TagEditorModal unsaved changes (FE-25)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePlayerStore.setState({ currentTrack: null, isPlaying: false, hasActivePlayback: false });
+  });
 
   it('closes on Escape straight away when nothing changed', async () => {
     const { onClose, title } = await renderEditor();
@@ -151,6 +168,15 @@ describe('TagEditorModal unsaved changes (FE-25)', () => {
   });
 });
 
+describe('LyricsEditor preview ownership (LD-04)', () => {
+  it('passes the selected Track to PlaybackCoordinator from the lyrics editor', async () => {
+    renderLyricsTab();
+    fireEvent.click(await screen.findByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(previewFileMock).toHaveBeenCalledExactlyOnceWith(track));
+    expect(PlaybackCoordinator.previewFile).toBe(previewFileMock);
+  });
+});
+
 describe('lyricsEquivalent', () => {
   it('ignores LRC formatting but not text changes', () => {
     expect(lyricsEquivalent('[00:01.50] A\r\n', '[00:01.500]A')).toBe(true);
@@ -164,6 +190,7 @@ describe('LRC text view direction (FE-22 review)', () => {
     const { LyricsEditor } = await import('../LyricsEditor');
     render(
       <LyricsEditor
+        track={track}
         trackPath="/music/a.flac"
         lyricsContent="[00:12.00] يا حبيبي"
         onChange={vi.fn()}
