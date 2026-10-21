@@ -614,12 +614,8 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             }
             generation = seek_generation;
             finished = false;
-            let (samples, reached_end) = match read_prefetch_chunk(
-                &mut source,
-                &commands,
-                &active_generation,
-                generation,
-            ) {
+            let (samples, reached_end) =
+                match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
                 PrefetchChunkRead::Ready {
                     samples,
                     reached_end,
@@ -701,12 +697,8 @@ fn run_prefetch_worker<S: PrefetchableSource>(
             continue;
         }
 
-        let (samples, reached_end) = match read_prefetch_chunk(
-            &mut source,
-            &commands,
-            &active_generation,
-            generation,
-        ) {
+        let (samples, reached_end) =
+            match read_prefetch_chunk(&mut source, &commands, &active_generation, generation) {
             PrefetchChunkRead::Ready {
                 samples,
                 reached_end,
@@ -1321,11 +1313,8 @@ mod tests {
             last_read_thread: Arc::new(std::sync::Mutex::new(None)),
             drop_signal: Arc::clone(&source_dropped),
         };
-        let buffered = BufferedSymphoniaSource::new(
-            source,
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("start prefetch");
+        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
+            .expect("start prefetch");
         drop(buffered);
 
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
