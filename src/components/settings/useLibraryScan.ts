@@ -259,6 +259,7 @@ async function persistFolderTracks(
       artist: t.artist,
       albumArtist: t.albumArtist ?? null,
       album: t.album,
+      genre: t.genre ?? null,
       year: t.year,
       trackNumber: t.trackNumber ?? null,
       discNumber: t.discNumber ?? null,
