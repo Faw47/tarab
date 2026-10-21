@@ -170,7 +170,9 @@ describe('usePlaybackLifecycle', () => {
     expect(handler).toBeTruthy();
     await handler?.({ payload: nearEnd() });
 
-    expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-2.mp3', 4);
+    });
     expect(usePlayerStore.getState().currentTrack?.id).toBe('track-1');
 
     await listeners.get('playback-transition')?.({
@@ -275,6 +277,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalled();
+    });
     await listeners.get('playback-ended')?.({
       payload: { path: '/music/track-1.mp3', seamless: false },
     });
@@ -293,6 +298,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
+    await waitFor(() => {
+      expect(crossfadeToTrackMock).toHaveBeenCalledWith('/music/track-1.mp3', 4);
+    });
     await listeners.get('playback-transition')?.({
       payload: {
         generation: 2,
@@ -510,7 +518,9 @@ describe('usePlaybackLifecycle', () => {
     });
 
     await listeners.get('playback-near-end')?.({ payload: nearEnd() });
-    expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    await waitFor(() => {
+      expect(preloadNextTrackMock).toHaveBeenCalledWith('/music/track-2.mp3');
+    });
     expect(crossfadeToTrackMock).not.toHaveBeenCalled();
   });
 
