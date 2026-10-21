@@ -63,9 +63,7 @@ impl WaveformGenerator {
             cancel_requests: RwLock::new(HashSet::new()),
             active_requests: RwLock::new(HashSet::new()),
             lifecycle: RwLock::new(()),
-            generation: (0..GENERATION_LOCK_STRIPES)
-                .map(|_| Mutex::new(()))
-                .collect(),
+            generation: (0..GENERATION_LOCK_STRIPES).map(|_| Mutex::new(())).collect(),
             disk_maintenance: Mutex::new(()),
         }
     }
@@ -405,6 +403,8 @@ pub fn create_waveform_generator() -> SharedWaveformGenerator {
     let generator = Arc::new(WaveformGenerator::new());
     let maintenance = generator.clone();
     std::thread::spawn(move || {
+        // Keep startup eviction from racing a just-generated cache entry.
+        let _lifecycle = maintenance.lifecycle.write();
         if let Err(error) = maintenance.enforce_disk_limit() {
             eprintln!("Waveform cache maintenance failed: {}", error);
         }
@@ -662,12 +662,7 @@ mod tests {
             }));
         }
         for request in requests {
-            assert!(request
-                .join()
-                .unwrap()
-                .peaks
-                .iter()
-                .all(|peak| *peak == 1.0));
+            assert!(request.join().unwrap().peaks.iter().all(|peak| *peak == 1.0));
         }
         assert_eq!(generator.get_stats().disk_count, 1);
         assert_eq!(generator.get_stats().memory_count, 1);
