@@ -193,7 +193,7 @@ describe('usePlaybackLifecycle', () => {
     const active = { ...queue[0], _queueId: 'queue-track-1' };
     const lazy = {
       ...queue[1],
-      filePath: 'track-2',
+      filePath: '',
       _queueId: 'queue-track-2',
       _lazyQueueEntry: true as const,
     };
@@ -238,7 +238,7 @@ describe('usePlaybackLifecycle', () => {
     const active = { ...queue[0], _queueId: 'queue-track-1' };
     const lazy = {
       ...queue[1],
-      filePath: 'track-2',
+      filePath: '',
       _queueId: 'queue-track-2',
       _lazyQueueEntry: true as const,
     };
