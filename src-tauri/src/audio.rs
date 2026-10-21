@@ -19,7 +19,7 @@ use symphonia::default::get_probe;
 use tauri::{AppHandle, Emitter};
 
 use crate::file_ops::{
-    clear_transient_file_grants_at_generation, discard_transient_file_for_failed_playback,
+    clear_transient_file_grants_through_generation, discard_transient_file_for_failed_playback,
     ensure_path_allowed_by_state, mark_playback_generation, playback_generation_is_current,
     replace_preloaded_queue_entry, retain_transient_file_for_queue_entry_at_generation,
     settle_failed_playback_generation, LibraryRootsState, SharedLibraryRoots,
@@ -289,6 +289,21 @@ fn commit_gapless_handoff(
     state.warned_near_end = false;
     true
 }
+fn reset_playback_state_for_stop(state: &mut PlaybackState, generation: u64) -> bool {
+    if state.generation > generation {
+        return false;
+    }
+    state.is_playing = false;
+    state.start_position = 0.0;
+    state.duration = 0.0;
+    state.position_sample_rate = 0;
+    state.position_channels = 0;
+    state.current_file = None;
+    state.is_paused = false;
+    state.warned_near_end = false;
+    true
+}
+
 fn reset_active_counter(slot: &Arc<Mutex<Arc<AtomicU64>>>) {
     let counter = slot.lock().clone();
     counter.store(0, Ordering::Relaxed);
@@ -1100,10 +1115,13 @@ impl AudioManager {
                                 }
                             }
                             AudioCommand::Stop { generation } => {
-                                if !clear_transient_file_grants_at_generation(
-                                    &mut roots_for_audio.write(),
+                                let mut roots = roots_for_audio.write();
+                                clear_transient_file_grants_through_generation(
+                                    &mut roots,
                                     generation,
-                                ) {
+                                );
+                                let mut state = state_clone.lock();
+                                if !reset_playback_state_for_stop(&mut state, generation) {
                                     continue;
                                 }
                                 cancel_gapless_handoffs(&mut pending_gapless_cancels);
@@ -1115,15 +1133,6 @@ impl AudioManager {
                                     active.outgoing_sink.stop();
                                 }
                                 volume_ramp = None;
-                                let mut state = state_clone.lock();
-                                state.is_playing = false;
-                                state.start_position = 0.0;
-                                state.duration = 0.0;
-                                state.position_sample_rate = 0;
-                                state.position_channels = 0;
-                                state.current_file = None;
-                                state.is_paused = false;
-                                state.warned_near_end = false;
                                 reset_active_counter(&active_emitted_for_audio);
                             }
                             AudioCommand::SetVolume(volume) => {
@@ -1850,7 +1859,7 @@ pub fn stop_playback(
 ) -> Result<(), String> {
     let mut roots = roots_state.inner().write();
     let generation = state.stop()?;
-    clear_transient_file_grants_at_generation(&mut roots, generation);
+    clear_transient_file_grants_through_generation(&mut roots, generation);
     Ok(())
 }
 
@@ -1990,6 +1999,46 @@ mod tests {
 
         let _ = fs::remove_dir_all(allowed_root);
         let _ = fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn stop_resets_a_playing_source_from_an_earlier_generation() {
+        let mut state = PlaybackState {
+            generation: 10,
+            current_file: Some("active.mp3".to_string()),
+            duration: 32.0,
+            start_position: 3.5,
+            position_sample_rate: 44_100,
+            position_channels: 2,
+            is_playing: true,
+            is_paused: true,
+            warned_near_end: true,
+            ..PlaybackState::default()
+        };
+
+        assert!(reset_playback_state_for_stop(&mut state, 11));
+        assert!(!state.is_playing);
+        assert!(!state.is_paused);
+        assert_eq!(state.current_file, None);
+        assert_eq!(state.duration, 0.0);
+        assert_eq!(state.start_position, 0.0);
+        assert_eq!(state.position_sample_rate, 0);
+        assert_eq!(state.position_channels, 0);
+        assert!(!state.warned_near_end);
+    }
+
+    #[test]
+    fn stop_does_not_reset_a_source_from_a_later_generation() {
+        let mut state = PlaybackState {
+            generation: 12,
+            current_file: Some("later.mp3".to_string()),
+            is_playing: true,
+            ..PlaybackState::default()
+        };
+
+        assert!(!reset_playback_state_for_stop(&mut state, 11));
+        assert!(state.is_playing);
+        assert_eq!(state.current_file.as_deref(), Some("later.mp3"));
     }
 
     #[test]

@@ -932,21 +932,53 @@ pub(crate) fn discard_transient_file_for_failed_playback(
     state.transient_files.len() != previous_len
 }
 
-pub(crate) fn clear_transient_file_grants_at_generation(
+pub(crate) fn clear_transient_file_grants_through_generation(
     state: &mut LibraryRootsState,
     generation: u64,
 ) -> bool {
-    if generation < state.transient_playback_generation {
-        return false;
+    let is_latest_generation = generation >= state.transient_playback_generation;
+    state.transient_playback_generation = state.transient_playback_generation.max(generation);
+
+    if state
+        .active_playback_generation
+        .map_or(true, |active_generation| active_generation <= generation)
+    {
+        state.active_playback_generation = None;
+        state.active_transient_file = None;
     }
-    state.transient_playback_generation = generation;
-    state.active_playback_generation = None;
-    state.pending_playback_generation = None;
-    state.active_transient_file = None;
-    state.pending_transient_file_grants.clear();
-    state.preloaded_queue_entry = None;
-    state.transient_files.clear();
-    true
+    if state
+        .pending_playback_generation
+        .is_some_and(|pending_generation| pending_generation <= generation)
+    {
+        state.pending_playback_generation = None;
+    }
+    state
+        .pending_transient_file_grants
+        .retain(|request_generation, _| *request_generation > generation);
+    if state
+        .preloaded_queue_entry
+        .as_ref()
+        .is_some_and(|(preloaded_generation, _)| *preloaded_generation <= generation)
+    {
+        state.preloaded_queue_entry = None;
+    }
+
+    let active_file = state.active_transient_file.clone();
+    let pending_files: Vec<PathBuf> = state
+        .pending_transient_file_grants
+        .values()
+        .cloned()
+        .collect();
+    let preloaded_file = state
+        .preloaded_queue_entry
+        .as_ref()
+        .map(|(_, path)| path.clone());
+    state.transient_files.retain(|path| {
+        active_file.as_ref() == Some(path)
+            || pending_files.iter().any(|pending| pending == path)
+            || preloaded_file.as_ref() == Some(path)
+    });
+    is_latest_generation
 }
 
 #[tauri::command]
@@ -2143,7 +2175,7 @@ mod tests {
 
         {
             let mut state = state.write();
-            clear_transient_file_grants_at_generation(&mut state, 4);
+            clear_transient_file_grants_through_generation(&mut state, 4);
         }
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_err());
 
@@ -2357,7 +2389,7 @@ mod tests {
 
             // Stop generation 11 is ahead of Play generation 12 in the audio queue, but the
             // later Play request was marked before the audio thread received the Stop.
-            clear_transient_file_grants_at_generation(&mut roots, 11);
+            clear_transient_file_grants_through_generation(&mut roots, 11);
             assert!(playback_generation_is_current(&roots, 12));
         }
         assert!(
@@ -2399,7 +2431,7 @@ mod tests {
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &first, 10
             ));
-            assert!(clear_transient_file_grants_at_generation(&mut roots, 12));
+            assert!(clear_transient_file_grants_through_generation(&mut roots, 12));
             assert!(!retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &first, 11
             ));
@@ -2422,7 +2454,7 @@ mod tests {
 
         {
             let mut roots = state.write();
-            assert!(clear_transient_file_grants_at_generation(&mut roots, 14));
+            assert!(clear_transient_file_grants_through_generation(&mut roots, 14));
             assert!(!retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &next, 13
             ));

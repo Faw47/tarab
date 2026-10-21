@@ -63,7 +63,7 @@ fn play_once_access_lasts_with_the_active_queue_entry() {
 
     let stop_command = command_body(AUDIO, "pub fn stop_playback(");
     assert!(
-        stop_command.contains("clear_transient_file_grants_at_generation"),
+        stop_command.contains("clear_transient_file_grants_through_generation"),
         "stopping playback must release one-file access"
     );
 }
@@ -146,8 +146,9 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
     let gapless = audio_command_arm("AudioCommand::GaplessHandoffStarted");
     let stop_arm = audio_command_arm("AudioCommand::Stop");
     assert!(
-        stop_arm.contains("clear_transient_file_grants_at_generation"),
-        "the serialized Stop handler must clear grants using its source generation"
+        stop_arm.contains("clear_transient_file_grants_through_generation")
+            && stop_arm.contains("reset_playback_state_for_stop"),
+        "the serialized Stop handler must revoke grants through its generation and stop the installed source"
     );
     assert!(
         gapless.contains("if is_still_current")
