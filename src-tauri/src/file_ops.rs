@@ -78,6 +78,7 @@ pub struct LibraryRootsState {
     transient_files: Vec<PathBuf>,
     active_transient_file: Option<PathBuf>,
     pending_transient_file_grants: HashMap<u64, PathBuf>,
+    preloaded_queue_entry: Option<(u64, PathBuf)>,
     active_playback_generation: Option<u64>,
     pending_playback_generation: Option<u64>,
     /// Highest source-changing request observed; generations never move backwards.
@@ -758,8 +759,42 @@ fn prune_superseded_transient_file_grants(
     });
 
     let active_file = state.active_transient_file.clone();
+    let preloaded_file = state
+        .preloaded_queue_entry
+        .as_ref()
+        .map(|(_, path)| path.as_path());
     state.transient_files.retain(|path| {
-        active_file.as_ref() == Some(path) || current_candidate == Some(path.as_path())
+        active_file.as_ref() == Some(path)
+            || current_candidate == Some(path.as_path())
+            || preloaded_file == Some(path.as_path())
+    });
+}
+
+pub(crate) fn replace_preloaded_queue_entry(
+    state: &mut LibraryRootsState,
+    generation: Option<u64>,
+    path: Option<&Path>,
+) {
+    let next = match (generation, path) {
+        (Some(generation), Some(path)) => {
+            let canonical = canonicalize_existing_path(path).unwrap_or_else(|_| path.to_path_buf());
+            Some((generation, canonical))
+        }
+        (None, None) => None,
+        _ => None,
+    };
+    state.preloaded_queue_entry = next;
+
+    let active_file = state.active_transient_file.clone();
+    let pending_files: Vec<PathBuf> = state.pending_transient_file_grants.values().cloned().collect();
+    let preloaded_file = state
+        .preloaded_queue_entry
+        .as_ref()
+        .map(|(_, path)| path.clone());
+    state.transient_files.retain(|path| {
+        active_file.as_ref() == Some(path)
+            || pending_files.iter().any(|pending| pending == path)
+            || preloaded_file.as_ref() == Some(path)
     });
 }
 
@@ -787,13 +822,31 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     path: &Path,
     generation: u64,
 ) -> bool {
+    let canonical = canonicalize_existing_path(path).ok();
+    let matches_preloaded_entry = canonical.as_ref().is_some_and(|canonical| {
+        state
+            .preloaded_queue_entry
+            .as_ref()
+            .is_some_and(|(preloaded_generation, preloaded_path)| {
+                *preloaded_generation == generation && preloaded_path == canonical
+            })
+    });
     let is_pending_request = state.pending_playback_generation == Some(generation)
         && state.transient_playback_generation == generation;
     let is_active_source = state.pending_playback_generation.is_none()
         && state.active_playback_generation == Some(generation);
     let is_gapless_successor = state.pending_playback_generation.is_none()
-        && generation > state.transient_playback_generation;
+        && state
+            .active_playback_generation
+            .is_some_and(|active_generation| generation > active_generation)
+        && matches_preloaded_entry;
     if !(is_pending_request || is_active_source || is_gapless_successor) {
+        return false;
+    }
+
+    if canonical.is_some()
+        && ensure_path_allowed_by_state(path, state, "commit playback queue entry").is_err()
+    {
         return false;
     }
 
@@ -802,21 +855,28 @@ pub(crate) fn retain_transient_file_for_queue_entry_at_generation(
     state.pending_playback_generation = None;
     state.pending_transient_file_grants.clear();
 
-    let Ok(canonical) = canonicalize_existing_path(path) else {
-        state.transient_files.clear();
-        state.active_transient_file = None;
-        return true;
-    };
+    if is_pending_request || is_gapless_successor {
+        state.preloaded_queue_entry = None;
+    }
 
-    if state.transient_files.contains(&canonical) {
-        state
-            .transient_files
-            .retain(|candidate| candidate == &canonical);
-        state.active_transient_file = Some(canonical);
+    if let Some(canonical) = canonical {
+        if state.transient_files.contains(&canonical) {
+            state.active_transient_file = Some(canonical.clone());
+        } else {
+            state.active_transient_file = None;
+        }
     } else {
-        state.transient_files.clear();
         state.active_transient_file = None;
     }
+
+    let active_file = state.active_transient_file.clone();
+    let preloaded_file = state
+        .preloaded_queue_entry
+        .as_ref()
+        .map(|(_, path)| path.clone());
+    state.transient_files.retain(|candidate| {
+        active_file.as_ref() == Some(candidate) || preloaded_file.as_ref() == Some(candidate)
+    });
     true
 }
 
@@ -841,7 +901,11 @@ pub(crate) fn discard_transient_file_for_failed_playback(
         .pending_transient_file_grants
         .values()
         .any(|candidate| candidate == &canonical);
-    if active_file || pending_owner {
+    let preloaded_owner = state
+        .preloaded_queue_entry
+        .as_ref()
+        .is_some_and(|(_, candidate)| candidate == &canonical);
+    if active_file || pending_owner || preloaded_owner {
         return false;
     }
 
@@ -864,6 +928,7 @@ pub(crate) fn clear_transient_file_grants_at_generation(
     state.pending_playback_generation = None;
     state.active_transient_file = None;
     state.pending_transient_file_grants.clear();
+    state.preloaded_queue_entry = None;
     state.transient_files.clear();
     true
 }
@@ -2029,6 +2094,7 @@ mod tests {
         // A is active, so its authorization remains while B's pending grant is dropped.
         {
             let mut state = state.write();
+            assert!(mark_playback_generation(&mut state, 1, &active));
             retain_transient_file_for_queue_entry_at_generation(&mut state, &active, 1);
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_ok());
@@ -2037,7 +2103,12 @@ mod tests {
         // A handoff to a persistent library entry revokes the old transient grant.
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry_at_generation(&mut state, &persistent, 2);
+            assert!(mark_playback_generation(&mut state, 2, &persistent));
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut state,
+                &persistent,
+                2,
+            ));
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
         assert!(ensure_path_allowed_by_state(&persistent, &state.read(), "test").is_ok());
@@ -2046,7 +2117,12 @@ mod tests {
         authorize_transient_file(&state, &pending).expect("authorize next transient track");
         {
             let mut state = state.write();
-            retain_transient_file_for_queue_entry_at_generation(&mut state, &pending, 3);
+            assert!(mark_playback_generation(&mut state, 3, &pending));
+            assert!(retain_transient_file_for_queue_entry_at_generation(
+                &mut state,
+                &pending,
+                3,
+            ));
         }
         assert!(ensure_path_allowed_by_state(&active, &state.read(), "test").is_err());
         assert!(ensure_path_allowed_by_state(&pending, &state.read(), "test").is_ok());
@@ -2062,6 +2138,38 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_preloaded_queue_entry_revokes_the_old_transient_grant() {
+        let outside = temp_dir("replace-preloaded-grant");
+        let first = outside.join("first.mp3");
+        let second = outside.join("second.mp3");
+        fs::write(&first, b"audio").expect("write first track");
+        fs::write(&second, b"audio").expect("write second track");
+
+        let state = create_library_roots_state();
+        authorize_transient_file(&state, &first).expect("authorize first preload");
+        {
+            let mut roots = state.write();
+            replace_preloaded_queue_entry(&mut roots, Some(8), Some(&first));
+        }
+        assert!(ensure_path_allowed_by_state(&first, &state.read(), "test").is_ok());
+
+        authorize_transient_file(&state, &second).expect("authorize second preload");
+        {
+            let mut roots = state.write();
+            replace_preloaded_queue_entry(&mut roots, Some(9), Some(&second));
+        }
+        assert!(ensure_path_allowed_by_state(&first, &state.read(), "test").is_err());
+        assert!(ensure_path_allowed_by_state(&second, &state.read(), "test").is_ok());
+
+        {
+            let mut roots = state.write();
+            replace_preloaded_queue_entry(&mut roots, None, None);
+        }
+        assert!(ensure_path_allowed_by_state(&second, &state.read(), "test").is_err());
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
     fn failed_play_request_discards_only_its_pending_transient_grant() {
         let outside = temp_dir("failed-transient-play");
         let active = outside.join("active.mp3");
@@ -2073,6 +2181,7 @@ mod tests {
         authorize_transient_file(&state, &active).expect("authorize active track");
         {
             let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 10, &active));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &active, 10
             ));
@@ -2123,10 +2232,9 @@ mod tests {
         authorize_transient_file(&state, &abandoned).expect("authorize pending track");
         {
             let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 10, &active));
             assert!(retain_transient_file_for_queue_entry_at_generation(
-                &mut roots,
-                &active,
-                10,
+                &mut roots, &active, 10
             ));
             assert!(mark_playback_generation(&mut roots, 11, &abandoned));
         }
@@ -2167,6 +2275,7 @@ mod tests {
 
         {
             let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 10, &first));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &first, 10
             ));
@@ -2180,6 +2289,7 @@ mod tests {
         authorize_transient_file(&state, &next).expect("authorize next after stop");
         {
             let mut roots = state.write();
+            assert!(mark_playback_generation(&mut roots, 13, &next));
             assert!(retain_transient_file_for_queue_entry_at_generation(
                 &mut roots, &next, 13
             ));

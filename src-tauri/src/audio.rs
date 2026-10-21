@@ -21,7 +21,8 @@ use tauri::{AppHandle, Emitter};
 use crate::file_ops::{
     clear_transient_file_grants_at_generation, discard_transient_file_for_failed_playback,
     ensure_path_allowed_by_state, mark_playback_generation, playback_generation_is_current,
-    retain_transient_file_for_queue_entry_at_generation, settle_failed_playback_generation,
+    replace_preloaded_queue_entry, retain_transient_file_for_queue_entry_at_generation,
+    settle_failed_playback_generation,
     LibraryRootsState, SharedLibraryRoots,
 };
 
@@ -1940,11 +1941,17 @@ pub fn preload_next_track(
     state: tauri::State<'_, SharedAudioManager>,
     roots_state: tauri::State<'_, SharedLibraryRoots>,
 ) -> Result<Option<u64>, String> {
-    let roots = roots_state.inner().read();
+    let mut roots = roots_state.inner().write();
     if let Some(path) = file_path.as_deref() {
         ensure_audio_file_allowed(path, &roots, "preload audio file")?;
     }
-    state.preload_next(file_path)
+    let generation = state.preload_next(file_path.clone())?;
+    replace_preloaded_queue_entry(
+        &mut roots,
+        generation,
+        file_path.as_deref().map(Path::new),
+    );
+    Ok(generation)
 }
 
 #[cfg(test)]
@@ -2097,6 +2104,11 @@ mod bounded_seek_tests {
             playback.duration = 12.0;
         }
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            7,
+            Path::new("outgoing.wav"),
+        ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots.write(),
             Path::new("outgoing.wav"),
@@ -2138,6 +2150,11 @@ mod bounded_seek_tests {
             ..PlaybackState::default()
         }));
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            7,
+            Path::new("outgoing.wav"),
+        ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots.write(),
             Path::new("outgoing.wav"),
@@ -2170,28 +2187,66 @@ mod bounded_seek_tests {
     }
 
     #[test]
-    fn a_failed_newer_request_leaves_the_active_source_available_for_gapless() {
+    fn a_failed_newer_request_leaves_the_preloaded_successor_available_for_gapless() {
+        let directory = temp_dir("failed-request-gapless");
+        let outgoing = directory.join("outgoing.wav");
+        let incoming = directory.join("incoming.wav");
+        let failed = directory.join("failed.wav");
+        for path in [&outgoing, &incoming, &failed] {
+            fs::write(path, b"audio").expect("write test track");
+        }
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
-        assert!(retain_transient_file_for_queue_entry_at_generation(
-            &mut roots.write(),
-            Path::new("outgoing.wav"),
-            7,
-        ));
+        crate::file_ops::authorize_transient_file(&roots, &outgoing)
+            .expect("authorize outgoing transient track");
+        crate::file_ops::authorize_transient_file(&roots, &incoming)
+            .expect("authorize preloaded transient track");
+        crate::file_ops::authorize_transient_file(&roots, &failed)
+            .expect("authorize failed transient request");
+        let outgoing = outgoing.to_string_lossy().into_owned();
+        let incoming = incoming.to_string_lossy().into_owned();
+        let failed = failed.to_string_lossy().into_owned();
         assert!(mark_playback_generation(
             &mut roots.write(),
-            8,
-            Path::new("failed.wav"),
+            7,
+            Path::new(&outgoing),
+        ));
+        assert!(retain_transient_file_for_queue_entry_at_generation(
+            &mut roots.write(),
+            Path::new(&outgoing),
+            7,
+        ));
+        replace_preloaded_queue_entry(
+            &mut roots.write(),
+            Some(8),
+            Some(Path::new(&incoming)),
+        );
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            9,
+            Path::new(&failed),
         ));
 
         let state = Arc::new(Mutex::new(PlaybackState {
             generation: 7,
-            current_file: Some("outgoing.wav".to_string()),
+            current_file: Some(outgoing.clone()),
             duration: 12.0,
             is_playing: true,
             ..PlaybackState::default()
         }));
-        assert!(settle_failed_playback_generation(&mut roots.write(), 8));
+        assert!(settle_failed_playback_generation(&mut roots.write(), 9));
+        assert!(discard_transient_file_for_failed_playback(
+            &mut roots.write(),
+            Path::new(&failed),
+            Some(Path::new(&outgoing)),
+            9,
+        ));
         assert!(playback_generation_is_current(&roots.read(), 7));
+        assert!(ensure_path_allowed_by_state(
+            Path::new(&incoming),
+            &roots.read(),
+            "test preloaded successor",
+        )
+        .is_ok());
 
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
@@ -2201,22 +2256,41 @@ mod bounded_seek_tests {
             &cancelled,
             &emitted,
             Arc::new(AtomicU64::new(0)),
-            "outgoing.wav",
+            &outgoing,
             7,
-            "incoming.wav",
-            9,
+            &incoming,
+            8,
             20.0,
             0.0,
             48_000,
             2,
         ));
-        assert_eq!(state.lock().generation, 9);
-        assert_eq!(state.lock().current_file.as_deref(), Some("incoming.wav"));
+        assert_eq!(state.lock().generation, 8);
+        assert_eq!(state.lock().current_file.as_deref(), Some(incoming.as_str()));
+        assert_eq!(roots.read().transient_playback_generation, 9);
+        assert!(ensure_path_allowed_by_state(
+            Path::new(&incoming),
+            &roots.read(),
+            "test active successor",
+        )
+        .is_ok());
+        assert!(ensure_path_allowed_by_state(
+            Path::new(&failed),
+            &roots.read(),
+            "test failed request",
+        )
+        .is_err());
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
     fn a_stale_prepared_source_cannot_commit_after_a_newer_play_request() {
         let mut roots = LibraryRootsState::default();
+        assert!(mark_playback_generation(
+            &mut roots,
+            10,
+            Path::new("active.wav"),
+        ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots,
             Path::new("active.wav"),
@@ -2259,6 +2333,11 @@ mod bounded_seek_tests {
     #[test]
     fn a_gapless_handoff_cannot_commit_after_a_newer_source_request() {
         let roots = Arc::new(parking_lot::RwLock::new(LibraryRootsState::default()));
+        assert!(mark_playback_generation(
+            &mut roots.write(),
+            7,
+            Path::new("outgoing.wav"),
+        ));
         assert!(retain_transient_file_for_queue_entry_at_generation(
             &mut roots.write(),
             Path::new("outgoing.wav"),

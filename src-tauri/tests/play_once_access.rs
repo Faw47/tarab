@@ -154,7 +154,6 @@ fn crossfade_and_gapless_handoffs_move_transient_access_with_the_active_track() 
     );
 }
 
-
 #[test]
 fn failed_newer_playback_request_restores_the_active_generation() {
     assert!(
@@ -199,5 +198,26 @@ fn superseded_requests_drop_transient_grants_by_generation() {
     assert!(
         FILE_OPS.contains("prune_superseded_transient_file_grants"),
         "a newer request must retire older pending grants even if the newer request fails"
+    );
+}
+
+
+#[test]
+fn failed_play_keeps_the_exact_preloaded_gapless_entry_available() {
+    assert!(
+        FILE_OPS.contains("preloaded_queue_entry: Option<(u64, PathBuf)>"),
+        "the queued successor must keep its generation and path while a newer request is pending"
+    );
+    assert!(
+        FILE_OPS.contains("*preloaded_generation == generation"),
+        "a handoff must match the exact entry that was preloaded"
+    );
+    assert!(
+        FILE_OPS.contains("generation > active_generation"),
+        "a queued successor must be compared with the installed track, not a failed request's high-water mark"
+    );
+    assert!(
+        AUDIO.contains("replace_preloaded_queue_entry"),
+        "preload and clear commands must update transient file ownership"
     );
 }
