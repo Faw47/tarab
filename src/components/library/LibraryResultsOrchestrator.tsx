@@ -743,6 +743,7 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     return (
       <VirtualizedGrid
         items={tracks}
+        ariaLabel="Library tracks"
         minColumnWidth={isNeo ? 150 : 160}
         rowHeight={isNeo ? 250 : 245}
         className={cn(isNeo ? 'px-1 pt-4 pb-8' : 'pb-8')}
@@ -824,6 +825,7 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
               </div>
               <VirtualizedGrid
                 items={archiveAlbums}
+                ariaLabel="Library albums"
                 minColumnWidth={180}
                 rowHeight={245}
                 className="library-v2-albums-archive-grid"
@@ -853,6 +855,7 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     return (
       <VirtualizedGrid
         items={albums}
+        ariaLabel="Library albums"
         minColumnWidth={165}
         rowHeight={270}
         className="px-1 pt-6 pb-12"
@@ -885,6 +888,7 @@ export const LibraryResultsOrchestrator = memo(function LibraryResultsOrchestrat
     return (
       <VirtualizedGrid
         items={artists}
+        ariaLabel="Library artists"
         minColumnWidth={isNeo ? 165 : 155}
         rowHeight={isNeo ? 270 : 245}
         className={cn(isNeo ? 'px-1 pt-6 pb-12' : 'pb-10')}
