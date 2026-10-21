@@ -7,6 +7,33 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct BoosterGain(Arc<AtomicU32>);
 
+/// Playback tempo shared with active and preloaded sources without locking on the mixer thread.
+#[derive(Clone)]
+pub struct SpeedControl(Arc<AtomicU32>);
+
+impl SpeedControl {
+    pub fn new(speed: f32) -> Self {
+        Self(Arc::new(AtomicU32::new(speed.to_bits())))
+    }
+
+    pub fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    pub fn set(&self, speed: f32) {
+        self.0.store(speed.to_bits(), Ordering::Relaxed);
+    }
+}
+
+/// Keep speed values finite and inside the range supported by the playback controls.
+pub fn normalize_speed(speed: f32) -> f32 {
+    if speed.is_finite() {
+        speed.clamp(0.5, 2.0)
+    } else {
+        1.0
+    }
+}
+
 impl BoosterGain {
     pub fn new(level: f32) -> Self {
         Self(Arc::new(AtomicU32::new(level.to_bits())))
@@ -29,6 +56,7 @@ pub struct PlaybackState {
     pub position_sample_rate: u32,
     pub position_channels: u16,
     pub speed: f32,
+    pub speed_control: SpeedControl,
     pub volume: f32,
     pub crossfade_secs: f32,
     pub booster: BoosterGain,
@@ -47,6 +75,7 @@ impl Default for PlaybackState {
             position_sample_rate: 0,
             position_channels: 0,
             speed: 1.0,
+            speed_control: SpeedControl::new(1.0),
             volume: 0.8,
             crossfade_secs: 0.0,
             booster: BoosterGain::new(1.0),

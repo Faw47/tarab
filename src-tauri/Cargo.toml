@@ -29,6 +29,7 @@ window-vibrancy = "0.5"
 # Audio playback
 cpal = "0.15.3"
 rodio = { version = "0.19", features = ["symphonia-all"] }
+wsola = "0.2"
 symphonia = { version = "0.5", features = ["aac", "flac", "mp3", "vorbis", "wav", "isomp4"] }
 
 # Metadata extraction
