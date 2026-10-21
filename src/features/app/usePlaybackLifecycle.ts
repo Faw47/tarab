@@ -3,6 +3,7 @@ import { useTauriEvent } from '../../hooks/useTauriEvent';
 import { fetchLibraryTrackById } from '../library/api';
 import {
   crossfadeToSource,
+  hydrateQueueTrackMetadata,
   playAdjacentTrack,
   preloadGaplessSource,
 } from '../../lib/playback-actions';
@@ -106,6 +107,44 @@ interface AutoAdvance {
 const canAutoSkip = (skipped: number, queueLength: number): boolean =>
   skipped < Math.min(MAX_AUTO_SKIPS, Math.max(0, queueLength - 1));
 
+const sameQueueEntry = (left: Track, right: Track): boolean =>
+  left._queueId
+    ? left._queueId === right._queueId
+    : !right._queueId && left.id === right.id;
+
+const findQueueEntryIndex = (queue: Track[], track: Track): number =>
+  queue.findIndex((entry) => sameQueueEntry(entry, track));
+
+async function prepareNearEndQueueTrack(
+  track: Track,
+  outgoingTrack: Track | null,
+  generation: number,
+  intervention: number,
+): Promise<{ track: Track; index: number } | null> {
+  const hydrated = await hydrateQueueTrackMetadata(track);
+  if (
+    getPlaybackInterventionEpoch() !== intervention ||
+    !isCurrentPlaybackGeneration({ generation })
+  ) {
+    return null;
+  }
+
+  const state = usePlayerStore.getState();
+  if (
+    outgoingTrack &&
+    (!state.currentTrack || !sameQueueEntry(state.currentTrack, outgoingTrack))
+  ) {
+    return null;
+  }
+
+  const index = findQueueEntryIndex(state.queue, track);
+  if (index < 0) return null;
+  return {
+    track: { ...hydrated, _queueId: state.queue[index]._queueId },
+    index,
+  };
+}
+
 const stopQueuePlayback = (): void => {
   const state = usePlayerStore.getState();
   state.setIsPlaying(false);
@@ -170,9 +209,12 @@ export function usePlaybackLifecycle() {
     outgoingPath: string;
     incomingPath: string;
     incomingIndex: number;
+    incomingQueueId: string | null;
+    incomingTrack: Track;
   } | null>(null);
   const halfPlayRecordedForTrackIdRef = useRef<string | null>(null);
   const preloadedGaplessRef = useRef<PreloadedGaplessEntry | null>(null);
+  const preparingGaplessRef = useRef<string | null>(null);
   const autoAdvanceRef = useRef<AutoAdvance | null>(null);
 
   // A crossfade the renderer requested is pending until the backend reports it started. User
@@ -273,16 +315,33 @@ export function usePlaybackLifecycle() {
       if (!isCurrentPlaybackGeneration(event.payload)) return;
       void (async () => {
         const { crossfadeSeconds, gapless } = useSettingsStore.getState();
-        const { stopAfterCurrent } = usePlayerStore.getState();
+        const playerState = usePlayerStore.getState();
+        const { stopAfterCurrent, currentTrack: outgoingTrack } = playerState;
 
         if (crossfadeSeconds <= 0) {
           if (gapless && !stopAfterCurrent && !isCrossfadingRef.current) {
-            const playerState = usePlayerStore.getState();
             const next = playerState.previewNext();
-            if (next) {
-              const entry: PreloadedGaplessEntry = { track: next.track, index: next.index };
+            if (!next) return;
+
+            const preparationKey = next.track._queueId ?? next.track.id;
+            if (preparingGaplessRef.current === preparationKey) return;
+            preparingGaplessRef.current = preparationKey;
+            const intervention = getPlaybackInterventionEpoch();
+            try {
+              const prepared = await prepareNearEndQueueTrack(
+                next.track,
+                outgoingTrack,
+                event.payload.generation,
+                intervention,
+              );
+              if (!prepared) return;
+
+              const entry: PreloadedGaplessEntry = {
+                track: prepared.track,
+                index: prepared.index,
+              };
               preloadedGaplessRef.current = entry;
-              void preloadGaplessSource(next.track.filePath).catch((error) => {
+              void preloadGaplessSource(prepared.track.filePath).catch((error) => {
                 if (preloadedGaplessRef.current === entry) {
                   preloadedGaplessRef.current = null;
                 }
@@ -291,6 +350,15 @@ export function usePlaybackLifecycle() {
                   error,
                 });
               });
+            } catch (error) {
+              logError('Failed to hydrate next track for gapless playback', {
+                source: 'app',
+                error,
+              });
+            } finally {
+              if (preparingGaplessRef.current === preparationKey) {
+                preparingGaplessRef.current = null;
+              }
             }
           }
           return;
@@ -298,28 +366,39 @@ export function usePlaybackLifecycle() {
 
         if (stopAfterCurrent || isCrossfadingRef.current) return;
 
-        const playerState = usePlayerStore.getState();
         const next = playerState.previewNext();
-        const outgoingTrack = playerState.currentTrack;
         if (!next || !outgoingTrack) return;
 
         isCrossfadingRef.current = true;
-        pendingCrossfadeRef.current = {
-          epoch: getPlaybackInterventionEpoch(),
-          generation: null,
-          outgoingPath: outgoingTrack.filePath,
-          incomingPath: next.track.filePath,
-          incomingIndex: next.index,
-        };
-
+        const intervention = getPlaybackInterventionEpoch();
         try {
-          const generation = await crossfadeToSource(next.track.filePath, crossfadeSeconds);
+          const prepared = await prepareNearEndQueueTrack(
+            next.track,
+            outgoingTrack,
+            event.payload.generation,
+            intervention,
+          );
+          if (!prepared) return;
+
+          pendingCrossfadeRef.current = {
+            epoch: intervention,
+            generation: null,
+            outgoingPath: outgoingTrack.filePath,
+            incomingPath: prepared.track.filePath,
+            incomingIndex: prepared.index,
+            incomingQueueId: prepared.track._queueId ?? null,
+            incomingTrack: prepared.track,
+          };
+          const generation = await crossfadeToSource(
+            prepared.track.filePath,
+            crossfadeSeconds,
+          );
           if (pendingCrossfadeRef.current) {
             pendingCrossfadeRef.current.generation = generation;
           }
-        } catch (err) {
+        } catch (error) {
           pendingCrossfadeRef.current = null;
-          reportError('Crossfade transition failed', { source: 'app', error: err });
+          reportError('Crossfade transition failed', { source: 'app', error });
         } finally {
           isCrossfadingRef.current = false;
         }
@@ -344,10 +423,16 @@ export function usePlaybackLifecycle() {
         // The backend owns the crossfade from here; later events carry its generation.
         pendingCrossfadeRef.current = null;
         const player = usePlayerStore.getState();
-        const incoming = player.queue[pending.incomingIndex];
+        const incomingIndex = pending.incomingQueueId
+          ? player.queue.findIndex((track) => track._queueId === pending.incomingQueueId)
+          : findQueueEntryIndex(player.queue, pending.incomingTrack);
+        const incoming =
+          incomingIndex >= 0
+            ? player.activateTrackAtIndex(incomingIndex)
+            : pending.incomingTrack;
         if (!incoming) return;
         setActivePlaybackGeneration(payload.generation);
-        player.activateTrackAtIndex(pending.incomingIndex);
+        if (incomingIndex < 0) player.setCurrentTrack(incoming);
         player.setDuration(incoming.duration);
         player.setCurrentTime(0);
         player.setIsPlaying(true);
