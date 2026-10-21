@@ -463,7 +463,7 @@ impl Database {
             })
             .collect();
         ranked.sort_unstable_by(|left, right| left.2.total_cmp(&right.2));
-        let mut ordered: Vec<(String, String)> = ranked
+        let ordered: Vec<(String, String)> = ranked
             .into_iter()
             .map(|(id, artist, _)| (id, artist))
             .collect();
