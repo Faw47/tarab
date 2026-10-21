@@ -2109,11 +2109,7 @@ mod bounded_seek_tests {
             Path::new("outgoing.wav"),
             7,
         ));
-        replace_preloaded_queue_entry(
-            &mut roots.write(),
-            Some(8),
-            Some(Path::new("incoming.wav")),
-        );
+        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new("incoming.wav")));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
@@ -2160,11 +2156,7 @@ mod bounded_seek_tests {
             Path::new("outgoing.wav"),
             7,
         ));
-        replace_preloaded_queue_entry(
-            &mut roots.write(),
-            Some(8),
-            Some(Path::new("incoming.wav")),
-        );
+        replace_preloaded_queue_entry(&mut roots.write(), Some(8), Some(Path::new("incoming.wav")));
         let cancelled = Arc::new(AtomicBool::new(false));
         let emitted = Arc::new(Mutex::new(Arc::new(AtomicU64::new(0))));
         let mut pending = vec![("incoming.wav".to_string(), Arc::clone(&cancelled))];
