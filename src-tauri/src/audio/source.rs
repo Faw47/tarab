@@ -1335,7 +1335,7 @@ mod tests {
         };
         let underrun = Arc::new(AtomicBool::new(false));
         let mut buffered =
-            BufferedSymphoniaSource::new(source, Arc::clone(&underrun)).expect("start prefetch");
+            BufferedSymphoniaSource::new(source, Arc::clone(&underrun), SeekCoordinator::new()).expect("start prefetch");
 
         let producer_thread = read_thread
             .lock()
@@ -1365,13 +1365,21 @@ mod tests {
             prepare_source_with_seek(path.to_str().expect("utf-8 path"), 0.0, seek_decoder)
                 .expect("prepare decoder source");
         let underrun = Arc::new(AtomicBool::new(false));
-        let mut buffered =
-            BufferedSymphoniaSource::new(source, Arc::clone(&underrun)).expect("start prefetch");
+        let seek_coordinator = SeekCoordinator::new();
+        let mut buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::clone(&underrun),
+            seek_coordinator.clone(),
+        )
+        .expect("start prefetch");
 
         let _: Vec<_> = buffered.by_ref().take(32).collect();
         buffered
             .try_seek(Duration::from_millis(500))
-            .expect("worker should seek the decoder");
+            .expect("worker should accept the seek");
+        seek_coordinator
+            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1))
+            .expect("decoder worker should seek the target");
 
         let expected = 4_000.0 * 4.0 / 32_768.0;
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
@@ -1393,9 +1401,8 @@ mod tests {
         );
         let _ = std::fs::remove_file(path);
     }
-
     #[test]
-    fn source_seek_waits_for_decoder_seek_acknowledgement() {
+    fn source_seek_returns_before_decoder_worker_finishes() {
         let (seek_started_tx, seek_started_rx) = mpsc::channel();
         let (seek_release_tx, seek_release_rx) = mpsc::channel();
         let source = PrefetchProbeSource {
@@ -1408,29 +1415,41 @@ mod tests {
             seek_started: Some(seek_started_tx),
             seek_release: Some(seek_release_rx),
         };
-        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
-            .expect("start prefetch");
+        let seek_coordinator = SeekCoordinator::new();
+        let buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            seek_coordinator.clone(),
+        )
+        .expect("start prefetch");
         let (seek_result_tx, seek_result_rx) = mpsc::channel();
+        let caller_coordinator = seek_coordinator.clone();
         let seek_thread = std::thread::spawn(move || {
             let mut buffered = buffered;
             let result = buffered.try_seek(Duration::from_secs(1)).is_ok();
-            let _ = seek_result_tx.send(result);
+            let request_id = caller_coordinator.current_request_id();
+            let _ = seek_result_tx.send((result, request_id));
         });
 
         seek_started_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("producer should receive the seek");
-        // Releasing on this path (and disconnecting the sender on panic) ensures the producer
-        // cannot remain stranded if the bounded result wait fails.
+        let before_release = seek_result_rx.recv_timeout(Duration::from_millis(100));
+        // Always release the producer before asserting, so a responsiveness failure cannot strand
+        // the test thread.
         seek_release_tx.send(()).expect("release blocked producer");
-        let seek_succeeded = seek_result_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("seek call should return after the worker responds");
+        let returned_before_release = before_release.is_ok();
+        let (seek_succeeded, request_id) = before_release
+            .or_else(|_| seek_result_rx.recv_timeout(Duration::from_secs(1)))
+            .expect("seek call should return");
         seek_thread.join().expect("seek caller thread");
+        seek_coordinator
+            .wait_for(request_id, Duration::from_secs(1))
+            .expect("decoder worker should finish the seek");
 
+        assert!(returned_before_release, "Source::try_seek must not wait for decoding");
         assert!(seek_succeeded);
     }
-
     #[test]
     fn failed_prefetch_seek_is_reported_without_marking_the_track_ended() {
         let source = PrefetchProbeSource {
@@ -1443,14 +1462,21 @@ mod tests {
             seek_started: None,
             seek_release: None,
         };
-        let mut buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
-            .expect("start prefetch");
+        let seek_coordinator = SeekCoordinator::new();
+        let mut buffered = BufferedSymphoniaSource::new(
+            source,
+            Arc::new(AtomicBool::new(false)),
+            seek_coordinator.clone(),
+        )
+        .expect("start prefetch");
 
-        let result = buffered.try_seek(Duration::from_secs(1));
+        assert!(buffered.try_seek(Duration::from_secs(1)).is_ok());
+        let result = seek_coordinator
+            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1));
 
         assert!(
-            result.is_err(),
-            "the decoder's seek error must reach Rodio so playback can rebuild the source"
+            result.is_err_and(|error| error.contains("probe rejected decoder seek")),
+            "the decoder's seek error must reach the playback controller"
         );
         assert_eq!(
             buffered.next(),
@@ -1458,7 +1484,6 @@ mod tests {
             "a failed seek must not be reported as normal end-of-track"
         );
     }
-
     #[test]
     fn prefetch_worker_exits_when_output_drops_during_foreign_packet_scan() {
         let source_dropped = Arc::new(AtomicBool::new(false));
@@ -1472,7 +1497,7 @@ mod tests {
             seek_started: None,
             seek_release: None,
         };
-        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)))
+        let buffered = BufferedSymphoniaSource::new(source, Arc::new(AtomicBool::new(false)), SeekCoordinator::new())
             .expect("start prefetch");
         drop(buffered);
 
@@ -1563,7 +1588,7 @@ mod tests {
         state.lock().booster.set(2.0);
         let counter = Arc::new(AtomicU64::new(0));
         let (source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter, &SeekCoordinator::new())
                 .expect("prepare source");
         let samples: Vec<f32> = source.collect();
         let _ = std::fs::remove_file(&path);
@@ -1644,9 +1669,15 @@ mod tests {
         let path = write_temp_wav("gapless-seek", 8000);
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
-        let (source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
-                .expect("prepare source");
+        let seek_coordinator = SeekCoordinator::new();
+        let (source, _, _) = prepare_source(
+            path.to_str().expect("utf-8 path"),
+            0.0,
+            &state,
+            &counter,
+            &seek_coordinator,
+        )
+        .expect("prepare source");
         let handoff_count = Arc::new(AtomicUsize::new(0));
         let handoff_count_for_callback = Arc::clone(&handoff_count);
         let mut source = GaplessHandoffSource::new_after_real_content(
@@ -1661,6 +1692,9 @@ mod tests {
         source
             .try_seek(Duration::from_secs_f64(0.5123))
             .expect("seek through gapless wrapper");
+        seek_coordinator
+            .wait_for(seek_coordinator.current_request_id(), Duration::from_secs(1))
+            .expect("decoder worker should seek the wrapped source");
         let sample = source.next().expect("sample after seek");
         let _ = std::fs::remove_file(&path);
 
@@ -1670,7 +1704,6 @@ mod tests {
         assert!(counter.load(Ordering::Relaxed) > 0);
         assert_eq!(handoff_count.load(Ordering::Relaxed), 1);
     }
-
     #[test]
     fn a_failed_seek_skips_packets_instead_of_restarting_at_zero() {
         // Regression for PB-08: an unseekable stream restarted the track at 0:00.
@@ -1749,7 +1782,7 @@ mod tests {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let counter = Arc::new(AtomicU64::new(0));
         let (mut source, _, _) =
-            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter)
+            prepare_source(path.to_str().expect("utf-8 path"), 0.0, &state, &counter, &SeekCoordinator::new())
                 .expect("prepare source");
 
         let guard = state.lock();
