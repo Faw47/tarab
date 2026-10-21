@@ -663,17 +663,31 @@ export interface DbTrack {
   fileSize?: number | null;
 }
 
+export type DbTrackAggregateRepresentative = Pick<
+  DbTrack,
+  | 'id'
+  | 'title'
+  | 'artist'
+  | 'album'
+  | 'year'
+  | 'duration'
+  | 'filePath'
+  | 'hasCoverArt'
+  | 'coverArtHash'
+  | 'blurhash'
+>;
+
 export interface DbAlbumAggregate {
   album: string;
   artist: string;
   trackCount: number;
-  representative: DbTrack;
+  representative: DbTrackAggregateRepresentative;
 }
 
 export interface DbArtistAggregate {
   artist: string;
   trackCount: number;
-  representative: DbTrack;
+  representative: DbTrackAggregateRepresentative;
 }
 
 export interface ScanReconcileError {
