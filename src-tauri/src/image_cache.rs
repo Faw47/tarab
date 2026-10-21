@@ -710,6 +710,51 @@ mod tests {
         assert!(!cache.has_valid_thumbnail(&hash, "large"));
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn reading_a_thumbnail_refreshes_its_access_time() {
+        let root = temp_dir("lru-access-time");
+        let cache = test_cache(root.join("covers"));
+        let image = DynamicImage::new_rgb8(8, 8);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, ImageFormat::Png)
+            .expect("encode image");
+        let hash = cache
+            .generate_thumbnails(&encoded.into_inner())
+            .expect("generate thumbnails");
+        let path = cache.get_thumbnail_path(&hash, "small");
+
+        let future = SystemTime::now() + std::time::Duration::from_secs(3600);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open thumbnail")
+            .set_times(fs::FileTimes::new().set_accessed(future))
+            .expect("set future access time");
+        let before = fs::metadata(&path)
+            .expect("thumbnail metadata")
+            .accessed()
+            .expect("access time");
+        assert!(before > SystemTime::now() + std::time::Duration::from_secs(30));
+
+        cache
+            .get_thumbnail_bytes(&hash, "small")
+            .expect("read thumbnail")
+            .expect("thumbnail exists");
+
+        let after = fs::metadata(&path)
+            .expect("thumbnail metadata after read")
+            .accessed()
+            .expect("access time after read");
+        assert!(
+            after < before,
+            "a cache hit should refresh the synthetic future access time"
+        );
+        assert!(after <= SystemTime::now() + std::time::Duration::from_secs(30));
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 // ========== Tauri Commands ==========
