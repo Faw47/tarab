@@ -11,11 +11,67 @@ fn early_diagnostics() -> &'static Mutex<Vec<(log::Level, String)>> {
     EARLY_DIAGNOSTICS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn replace_path_variant(message: &str, path: &str) -> String {
+    if path.is_empty() {
+        return message.to_string();
+    }
+
+    let lowered_message = message.to_ascii_lowercase();
+    let lowered_path = path.to_ascii_lowercase();
+    let mut redacted = String::with_capacity(message.len());
+    let mut cursor = 0;
+
+    while let Some(offset) = lowered_message[cursor..].find(&lowered_path) {
+        let start = cursor + offset;
+        let end = start + lowered_path.len();
+        redacted.push_str(&message[cursor..start]);
+        redacted.push('~');
+        cursor = end;
+    }
+
+    redacted.push_str(&message[cursor..]);
+    redacted
+}
+
+fn redact_path_for_home(message: &str, home: &Path) -> String {
+    let home = home.to_string_lossy();
+    if home.is_empty() {
+        return message.to_string();
+    }
+
+    let mut variants = vec![
+        home.to_string(),
+        home.replace('\\', "/"),
+        home.replace('/', "\\"),
+    ];
+    variants.sort_by_key(|variant| std::cmp::Reverse(variant.len()));
+    variants.dedup();
+
+    variants.iter().fold(message.to_string(), |redacted, path| {
+        replace_path_variant(&redacted, path)
+    })
+}
+
+fn redact_home_directory_prefixes(message: &str) -> String {
+    let Some(home) = dirs::home_dir() else {
+        return message.to_string();
+    };
+
+    let mut redacted = redact_path_for_home(message, &home);
+    if let Ok(canonical_home) = fs::canonicalize(&home) {
+        if canonical_home != home {
+            redacted = redact_path_for_home(&redacted, &canonical_home);
+        }
+    }
+    redacted
+}
+
 pub(crate) fn queue_early_diagnostic(level: log::Level, message: impl Into<String>) {
+    let message = redact_home_directory_prefixes(&message.into());
     early_diagnostics()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push((level, message.into()));
+        .push((level, message));
 }
 
 fn take_early_diagnostics() -> Vec<(log::Level, String)> {
@@ -28,6 +84,7 @@ fn take_early_diagnostics() -> Vec<(log::Level, String)> {
 
 pub(crate) fn flush_early_diagnostics() {
     for (level, message) in take_early_diagnostics() {
+        let message = redact_home_directory_prefixes(&message);
         log::log!(level, "{message}");
     }
 }
@@ -39,7 +96,7 @@ fn startup_diagnostics_text(
     early.push(primary);
     early
         .into_iter()
-        .map(|(level, message)| format!("{level:?}: {message}"))
+        .map(|(level, message)| format!("{level:?}: {}", redact_home_directory_prefixes(&message)))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -141,6 +198,7 @@ fn write_error_log(message: &str) -> Option<PathBuf> {
     let log = crate::database::get_app_data_dir()
         .ok()?
         .join("startup-error.log");
+    let message = redact_home_directory_prefixes(message);
     fs::write(&log, format!("{message}\n")).ok()?;
     Some(log)
 }
@@ -169,6 +227,7 @@ fn log_note(message: &str) -> String {
 
 /// Shows why the Tauri application could not be built.
 pub fn report_build_failure(error: &str) {
+    let error = redact_home_directory_prefixes(error);
     log::error!("error while building Tauri application: {error}");
     let details = startup_diagnostics_text(
         take_early_diagnostics(),
@@ -188,10 +247,11 @@ pub fn report_build_failure(error: &str) {
 /// Shows that the library database could not be opened (before Tauri starts) and offers to move
 /// it aside (renamed, not deleted) and start again with an empty library.
 pub fn report_database_failure(database_error: &str, instance: InstanceLock) {
+    let database_error = redact_home_directory_prefixes(database_error);
     log::error!("{database_error}");
     let details = startup_diagnostics_text(
         take_early_diagnostics(),
-        (log::Level::Error, database_error.to_string()),
+        (log::Level::Error, database_error.clone()),
     );
     let log_note = log_note(&details);
 
@@ -307,5 +367,103 @@ mod tests {
             b"wal"
         );
         let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn startup_failure_diagnostics_redact_home_directory_prefixes() {
+        let home = dirs::home_dir().expect("home directory");
+        let private_path = home.join("Tarab Private").join("library.db");
+        let message = format!("Could not access {}", private_path.display());
+        let details = startup_diagnostics_text(
+            vec![(log::Level::Error, message.clone())],
+            (log::Level::Error, message),
+        );
+
+        let home_display = home.to_string_lossy();
+        assert!(
+            !details.contains(home_display.as_ref()),
+            "startup diagnostics retained the home directory: {details}"
+        );
+        let suffix = private_path
+            .strip_prefix(&home)
+            .expect("private path is under home")
+            .display();
+        assert!(
+            details.contains(&format!("~{}{suffix}", std::path::MAIN_SEPARATOR)),
+            "startup diagnostics should use a home-relative path: {details}"
+        );
+    }
+
+    #[test]
+    fn home_path_redaction_handles_separator_and_case_variants() {
+        let home = Path::new("C:/Users/Private");
+        let diagnostic = r"Could not access c:\users\private\Tarab\library.db";
+
+        assert_eq!(
+            redact_path_for_home(diagnostic, home),
+            r"Could not access ~\Tarab\library.db"
+        );
+    }
+
+    #[test]
+    fn early_diagnostic_is_redacted_and_delivered_once_when_logger_starts() {
+        struct CapturingLogger(Mutex<Vec<String>>);
+
+        impl log::Log for CapturingLogger {
+            fn enabled(&self, _metadata: &log::Metadata<'_>) -> bool {
+                true
+            }
+
+            fn log(&self, record: &log::Record<'_>) {
+                self.0.lock().expect("captured diagnostics").push(format!(
+                    "{}: {}",
+                    record.level(),
+                    record.args()
+                ));
+            }
+
+            fn flush(&self) {}
+        }
+
+        static LOGGER: CapturingLogger = CapturingLogger(Mutex::new(Vec::new()));
+        let home = dirs::home_dir().expect("home directory");
+        let private_path = home.join("Tarab Private").join("library.db");
+
+        queue_early_diagnostic(
+            log::Level::Error,
+            format!("Could not access {}", private_path.display()),
+        );
+        let queued = take_early_diagnostics();
+
+        assert_eq!(queued.len(), 1);
+        assert!(
+            !queued[0].1.contains(home.to_string_lossy().as_ref()),
+            "queued diagnostic retained the home directory: {}",
+            queued[0].1
+        );
+
+        queue_early_diagnostic(log::Level::Warn, "Cache fallback before logger startup");
+        queue_early_diagnostic(log::Level::Error, queued[0].1.clone());
+        log::set_logger(&LOGGER).expect("install capture logger after queueing");
+        let previous_level = log::max_level();
+        log::set_max_level(log::LevelFilter::Trace);
+        flush_early_diagnostics();
+        flush_early_diagnostics();
+        log::set_max_level(previous_level);
+
+        let captured = LOGGER.0.lock().expect("captured diagnostics");
+        assert_eq!(
+            captured
+                .iter()
+                .filter(|message| message.as_str() == "WARN: Cache fallback before logger startup")
+                .count(),
+            1,
+            "the cache fallback warning must be delivered exactly once"
+        );
+        let private_messages: Vec<_> = captured
+            .iter()
+            .filter(|message| message.contains("Tarab Private"))
+            .collect();
+        assert_eq!(private_messages.len(), 1);
+        assert!(!private_messages[0].contains(home.to_string_lossy().as_ref()));
     }
 }

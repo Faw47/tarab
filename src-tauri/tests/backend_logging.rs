@@ -102,11 +102,12 @@ fn successful_startup_flushes_early_diagnostics_after_logger_setup() {
 }
 
 #[test]
-fn runtime_cache_fallback_uses_the_configured_logger() {
+fn cache_fallback_is_queued_until_the_logger_is_installed() {
     assert!(
         include_str!("../src/database.rs")
-            .contains("log::warn!(\"Could not prepare preferred app directory; using fallback\")"),
-        "cache fallback diagnostics should use the configured logger"
+            .replace("\r\n", "\n")
+            .contains("queue_early_diagnostic(\n            log::Level::Warn,"),
+        "the cache is created before Tauri installs the logger, so its fallback warning must be queued"
     );
 }
 

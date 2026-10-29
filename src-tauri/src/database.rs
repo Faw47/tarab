@@ -979,7 +979,11 @@ pub(crate) fn app_data_dir_for_instance_lock() -> Result<PathBuf, String> {
 pub fn get_cache_dir() -> PathBuf {
     let base_dir = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
     prepare_app_directory(&base_dir).unwrap_or_else(|_error| {
-        log::warn!("Could not prepare preferred app directory; using fallback");
+        // The image cache is constructed before Tauri installs its log plugin.
+        crate::startup_failure::queue_early_diagnostic(
+            log::Level::Warn,
+            "Could not prepare preferred app directory; using fallback",
+        );
         base_dir.join(APP_STORAGE_DIRECTORY)
     })
 }

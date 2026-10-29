@@ -262,6 +262,7 @@ Playback recovery:
 - Keep playback failures visible until the listener chooses a recovery action or dismisses them.
 - Offer Retry, Skip, Reveal in Finder, and Remove from Queue, in the full player and in the main window's message stack (`PlaybackRecoveryBanner`), so recovery never requires opening the full player.
 - Title failures in plain words; backend stage names stay in the log.
+- Startup failure details redact home-directory prefixes as `~`, including persisted diagnostics.
 - A track the queue reached on its own that fails to decode is skipped with one toast naming it.
 - Do not present a decode failure as normal track completion.
 
