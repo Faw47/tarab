@@ -95,6 +95,11 @@ Release rule: main-window code may call these as needed; mini-player code should
 
 ## Privacy and outbound network policy
 
+- Migration, early data-directory and cache-fallback diagnostics are queued before the log
+  plugin starts, then flushed once after successful app construction. Both startup-failure
+  paths include the queue in `startup-error.log`. Home-directory prefixes are redacted before
+  queueing, logging or writing startup diagnostics. Verify native log delivery during startup
+  failures on each supported desktop platform; unit tests do not establish that acceptance.
 - Tarab has no analytics, crash-reporting, or error-telemetry client.
 - The production CSP allows only same-origin connections.
 - Online LRCLIB access is off by default. Upgrades from pre-1.0 settings reset this setting to off so that the user must opt in.

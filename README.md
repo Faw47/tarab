@@ -336,6 +336,9 @@ Local data includes:
 * artwork cache
 * application logs
 
+Startup warnings wait for the logger to start. If startup fails, they are included in
+the startup error log. Startup diagnostics replace your home-directory prefix with `~`.
+
 Offline playback and library management make no network requests.
 
 Optional LRCLIB lookup sends the track title, artist, album and duration to LRCLIB after you enable it. The native backend checks the saved opt-in before every request. Missing or invalid settings block online lookup; local sidecar lyrics remain available. Request errors omit the URL carrying those metadata fields.
